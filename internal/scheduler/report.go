@@ -34,26 +34,42 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	if entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention {
 		return fmt.Errorf("scheduler: agent status report for %s: the run is %s", run, entry.status)
 	}
+	persist := false
 	switch report.State {
 	case agentstatus.Waiting:
+		if entry.reported != "" {
+			// The turn that reported a terminal outcome has ended, so the
+			// agent's last message is in the transcript. Finish off this
+			// path: the hook is waiting on the answer.
+			s.startReportedFinishLocked(entry)
+			return nil
+		}
 		// parkedAt is when the agent said it was waiting, and
 		// postParkActivity the terminal activity seen since. A harness that
 		// reports only the end of a turn is released by activity, and these
 		// two are what separate the next turn from the frames the finished
 		// one is still painting (see unparks).
 		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+		reason := report.Reason
+		if entry.blockedReason != "" {
+			reason = entry.blockedReason
+		}
+		showsBlocked := entry.blockedReason != "" && !entry.blockedShown
 		// needs-attention -> needs-attention is legal and is the point: a
 		// run parked by a stall, or waiting for a different thing, gets the
 		// reason the agent is actually waiting for. Saying again what the
 		// run already says is not news, though - Claude Code reports one
 		// wait twice, as the turn ends and again once it has been idle for
 		// a minute - so that costs nothing.
-		if entry.status == domain.RunNeedsAttention && entry.agentReport == report {
+		if entry.status == domain.RunNeedsAttention && entry.agentReport == report && !showsBlocked {
 			return nil
 		}
 		if err := s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
-			domain.RunNeedsAttention, report.Reason, ""); err != nil {
+			domain.RunNeedsAttention, reason, ""); err != nil {
 			return err
+		}
+		if showsBlocked {
+			entry.blockedShown, persist = true, true
 		}
 	case agentstatus.Working:
 		// The report is the agent's own proof that it is alive, and the
@@ -63,6 +79,12 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 		// the run card twice.
 		entry.lastWorking = time.Now().UTC()
 		entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+		// A blocked reason survives the working report that follows its
+		// own tool call; only resuming after the park that showed it ends it.
+		if entry.blockedShown {
+			entry.blockedReason, entry.blockedShown = "", false
+			persist = true
+		}
 		// Claude Code fires this on every tool call, so the common case has
 		// to be free: a run that is already running is left alone, with no
 		// store write and no event.
@@ -73,7 +95,7 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 			}
 		}
 	}
-	if entry.agentReport == report {
+	if entry.agentReport == report && !persist {
 		// Nothing new to remember. Claude Code fires a working report on
 		// every tool call, so this is the common case and has to stay free
 		// of a disk write.

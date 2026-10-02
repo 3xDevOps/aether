@@ -18,7 +18,7 @@ immediate cleanup.
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, or one its agent's report finished, retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
@@ -284,7 +284,7 @@ deleted by an older cleanup.
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
 to run. On the next boot the scheduler reconciles every non-terminal run and
-every retained closed TUI run against the runtime's actual containers:
+every retained TUI run against the runtime's actual containers:
 
 - **An active container survived** (the server died, the container did not):
   supervision reattaches to it, the PTY session is re-adopted, the diff watch
@@ -294,7 +294,9 @@ every retained closed TUI run against the runtime's actual containers:
   before the crash is re-issued. A run the agent had parked stays parked
   with its reason: the last report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
-  repaint - does not read as the turn resuming.
+  repaint - does not read as the turn resuming. A run its agent already
+  reported success or failure on still finishes: the next end of turn, or
+  two minutes after the restart, finishes it.
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run is not relaunchable.
@@ -303,9 +305,9 @@ every retained closed TUI run against the runtime's actual containers:
   in the narrow window before the sidecar exists, by the run ID the runtime
   persists as the container's creation key - and then the same wip-commit and
   interrupt applies.
-- **A retained closed TUI container survived**: its merged or abandoned row,
-  checkout, member account, and coordination surfaces remain owned by that
-  exact container. Boot reconciliation preserves them for an eligible
+- **A retained TUI container survived**: its row (merged or abandoned after a
+  Close, completed or failed after the agent's report), checkout, member
+  account, and coordination surfaces remain owned by that exact container. Boot reconciliation preserves them for an eligible
   relaunch.
 - **A retained container is gone or expired**: boot cleanup destroys any
   remaining runtime object, removes its retention metadata, and leaves the
@@ -313,7 +315,8 @@ every retained closed TUI run against the runtime's actual containers:
 
 Headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
-`failed` for an error, and destroys the container immediately. A `completed`
+`failed` for an error - or the outcome the agent reported, whatever the exit
+code - and destroys the container immediately. A `completed`
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
@@ -334,9 +337,27 @@ Saved missions and attempt reservations are not deleted.
 For `--mode tui`, container PID 1 supervises the harness. After any normal
 harness exit, PID 1 opens a login shell; when that shell exits, another login
 shell opens. The run and its container therefore remain `running` until an
-explicit Close, Kill, or Delete. A harness terminated by a signal or other
-non-normal error does not get a replacement shell; supervision records the
-failure and cleans up the container.
+explicit Close, Kill, or Delete, or until the agent reports its own outcome.
+A harness terminated by a signal or other non-normal error does not get a
+replacement shell; supervision records the failure and cleans up the
+container.
+
+An agent finishes its own run with a terminal report from inside the
+container:
+
+```sh
+aether-internal report --outcome success --summary 'Implemented and tested the change.'
+```
+
+When that turn ends - or two minutes later if the harness never reports the
+end of a turn - Aether does what Close does, with the agent's outcome:
+it pauses the container, commits (`aether:` for success, `wip:` for
+`--outcome failure`), publishes the branch, records `completed` or `failed`
+with the reason `agent reported success; retained container` or
+`agent reported failure; retained container`, and retains the container
+under the same `--run-container-ttl`. Close or Kill before that moment wins;
+Close after it re-labels the run as merged or abandoned. See
+[Report an outcome](coordination.md#report-an-outcome).
 
 Close is explicit and records one of the two outcomes:
 
@@ -357,20 +378,24 @@ survives inside its workspace's and its member's spend totals - the numbers
 [`aether cost` and `aether budget`](teams.md#budgets) report, and a workspace
 budget checks - so deleting a run over budget cannot reopen the cap.
 
-Relaunch is available only for an explicitly closed, retained TUI run whose
-retention deadline has not passed:
+Relaunch is available only for a retained TUI run - closed, or finished by its
+agent's report - whose retention deadline has not passed:
 
 ```sh
 aether relaunch <run>
 ```
 
 It resumes the same run row, container, checkout, member account, and
-coordination surfaces. It does not create a run, checkout, branch, or
-replacement container, and it performs no new launch or disk-floor admission.
+coordination surfaces, and frees the run's terminal report so the agent can
+report again. It does not create a run, checkout, branch, or replacement
+container, and it performs no new launch or disk-floor admission.
 An expired, unavailable, interrupted, killed, deleted, or headless run cannot
 be relaunched. The expiry sweep runs within at most one minute; boot
 reconciliation also sweeps expired or unavailable retained runs, so a failed
-relaunch never falls back to a new run.
+relaunch never falls back to a new run. When retention ends, a closed run's
+reason becomes `retained container expired` or `retained container
+unavailable`; a run its agent finished keeps `completed` or `failed` and its
+reason drops `; retained container`.
 
 ### Disk pressure
 
@@ -542,7 +567,9 @@ and the reason on the run says which.
 parks the run the moment its turn ends, or it asks for permission or an
 answer, with a reason that reads `waiting for your input`,
 `waiting for your permission` or `waiting for your answer`. There is no
-delay: the report arrives as the agent stops. A server restart does not
+delay: the report arrives as the agent stops. An agent that ran
+`aether-internal report --outcome blocked --summary '<summary>'` during the
+turn parks with `blocked: <summary>` instead, until it resumes. A server restart does not
 change that: the report is recovered with the run, so a run that was
 waiting for you is still waiting for you afterwards.
 

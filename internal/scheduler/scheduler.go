@@ -330,6 +330,18 @@ type supervised struct {
 	// listing the steerers with writing the file, and the list left on
 	// disk would be whichever finished last, not the fuller one.
 	coAuthorMu sync.Mutex
+	// reported is the outcome the agent's terminal coord.report armed this
+	// run to finish with (completed or failed), empty when unarmed, and
+	// reportedAt when it was armed (reportFinishDeadline counts from it).
+	// reportFinishing is set while finishReported owns the finish.
+	reported        domain.RunStatus
+	reportedAt      time.Time
+	reportFinishing bool
+	// blockedReason is the agent's latest blocked report as a status
+	// reason, and blockedShown whether a park has shown it yet; the first
+	// resume after that park clears both (see ReportBlocked).
+	blockedReason string
+	blockedShown  bool
 }
 
 type pendingRun struct {
@@ -548,6 +560,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.finishOverdueReports()
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)

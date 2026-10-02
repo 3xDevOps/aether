@@ -26,9 +26,9 @@ var ErrIdempotencyConflict = errors.New("store: idempotency key belongs to anoth
 // exceed the durable per-run peer cap.
 var ErrCoordPeerLimit = errors.New("store: coordination peer limit reached")
 
-// ErrCoordReportConflict means a run already reserved its one report slot
-// under a different idempotency key.
-var ErrCoordReportConflict = errors.New("store: run already has a coordination report")
+// ErrCoordReportConflict means a run already holds an active terminal
+// report (success or failure) under a different idempotency key.
+var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
 
 // ErrCoordReportIdempotencyConflict means a retry reused a report key with
 // different semantic inputs.
@@ -104,7 +104,9 @@ type RunMessage struct {
 // CoordReport is a durable outcome submitted by a run. A pending report is
 // a durable reservation made before evidence capture; only finalized rows are
 // externally accepted outcomes. EvidenceRefs are opaque, bounded references
-// and never server filesystem paths.
+// and never server filesystem paths. A run holds any number of blocked
+// reports and at most one terminal report whose SupersededAt is nil; a
+// relaunch supersedes it.
 type CoordReport struct {
 	ID                string
 	WorkspaceID       domain.WorkspaceID
@@ -119,6 +121,7 @@ type CoordReport struct {
 	CreatedAt         time.Time
 	FinalizedAt       *time.Time
 	PublishedAt       *time.Time
+	SupersededAt      *time.Time
 }
 
 // CoordReportPublication is the durable outbox row for a finalized report.
@@ -222,6 +225,13 @@ type MessageStore interface {
 	MarkCoordReportPublished(ctx context.Context, id, eventID string) error
 }
 
+// CoordTerminalReportStore frees a run's terminal report slot.
+type CoordTerminalReportStore interface {
+	SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error
+}
+
+var _ CoordTerminalReportStore = (*DB)(nil)
+
 // CoordAuditStore is the optional durable audit outbox seam. The SQLite DB
 // implements it; narrow compatibility stores may omit it and therefore do
 // not claim durable coordination-message projections.
@@ -234,7 +244,7 @@ type CoordAuditStore interface {
 var _ CoordAuditStore = (*DB)(nil)
 
 const runMessageCols = `id, workspace_id, from_run, to_run, body, kind, correlation_id, idempotency_key, delivery_token, created_at, delivered_at, acked_at`
-const coordReportCols = `id, workspace_id, run_id, outcome, summary, next_action, evidence_refs, input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at`
+const coordReportCols = `id, workspace_id, run_id, outcome, summary, next_action, evidence_refs, input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at, superseded_at`
 
 func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error {
 	_, err := d.AppendRunMessageWithPeer(ctx, m, maxUnacked, 0, false)
@@ -620,8 +630,8 @@ func scanRunMessage(row interface{ Scan(...any) error }) (*RunMessage, error) {
 
 // AppendCoordReport is retained for callers that already have a completed
 // evidence set. It uses the same durable reservation/finalization path as
-// coord.report, so even legacy callers cannot create a second report for a
-// run.
+// coord.report, so even legacy callers cannot create a second active terminal
+// report for a run.
 func (d *DB) AppendCoordReport(ctx context.Context, report *CoordReport) error {
 	if err := validateCoordReport(report); err != nil {
 		return err
@@ -680,9 +690,10 @@ func validateCoordReportRefs(refs []string) error {
 	return nil
 }
 
-// ReserveCoordReport durably claims a run's one report slot before any
-// evidence capture. A retry with the same key returns the persisted pending
-// or finalized row; another key receives ErrCoordReportConflict.
+// ReserveCoordReport durably records a report before any evidence capture.
+// A retry with the same key returns the persisted pending or finalized row.
+// A new key receives ErrCoordReportConflict while the run holds an active
+// terminal report, whatever the new outcome.
 func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
 		return false, err
@@ -715,10 +726,14 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 	res, err := tx.ExecContext(ctx, `INSERT INTO coord_reports (`+coordReportCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
-		ON CONFLICT (run_id) DO NOTHING`,
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM coord_reports
+			WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL)
+		ON CONFLICT DO NOTHING`,
 		id, report.WorkspaceID, report.RunID, report.Outcome, report.Summary,
-		report.NextAction, refs, inputRefsJSON, report.IdempotencyKey, CoordReportPending, createdAt)
+		report.NextAction, refs, inputRefsJSON, report.IdempotencyKey, CoordReportPending, createdAt,
+		report.RunID)
 	if err != nil {
 		return false, fmt.Errorf("store: reserve coord report: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -728,15 +743,13 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 	}
 	if inserted == 0 {
 		prior, qerr := scanCoordReport(tx.QueryRowContext(ctx,
-			`SELECT `+coordReportCols+` FROM coord_reports WHERE run_id = ?`, report.RunID))
+			`SELECT `+coordReportCols+` FROM coord_reports WHERE run_id = ? AND idempotency_key = ?`,
+			report.RunID, report.IdempotencyKey))
 		if errors.Is(qerr, sql.ErrNoRows) {
-			return false, fmt.Errorf("store: reserve coord report: duplicate reservation")
+			return false, fmt.Errorf("%w: run %s", ErrCoordReportConflict, report.RunID)
 		}
 		if qerr != nil {
 			return false, fmt.Errorf("store: reserve coord report: read existing: %w", qerr)
-		}
-		if prior.IdempotencyKey != report.IdempotencyKey {
-			return false, fmt.Errorf("%w: run %s", ErrCoordReportConflict, report.RunID)
 		}
 		if prior.Outcome != report.Outcome || prior.Summary != report.Summary ||
 			prior.NextAction != report.NextAction ||
@@ -752,11 +765,28 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 	report.ID = id
 	report.CreatedAt = ts
 	report.State = CoordReportPending
-	report.FinalizedAt, report.PublishedAt = nil, nil
+	report.FinalizedAt, report.PublishedAt, report.SupersededAt = nil, nil, nil
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("store: reserve coord report: commit: %w", err)
 	}
 	return true, nil
+}
+
+// SupersedeCoordTerminalReport retires the run's active terminal report, if
+// any, so the run can report again. The row stays as history and same-key
+// retries still replay it.
+func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error {
+	supersededAt, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("store: supersede coord report: %w", err)
+	}
+	if _, err := d.db.ExecContext(ctx,
+		`UPDATE coord_reports SET superseded_at = ?
+		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL`,
+		supersededAt, run); err != nil {
+		return fmt.Errorf("store: supersede coord report for run %s: %w", run, err)
+	}
+	return nil
 }
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
@@ -775,7 +805,7 @@ func CoordReportEventID(reportID string) string {
 	return "coord-report:" + reportID
 }
 
-// FinalizeCoordReport atomically turns a pending reservation into the one
+// FinalizeCoordReport atomically turns a pending reservation into an
 // externally accepted report. It returns true only for the transition that
 // won the finalization race.
 func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
@@ -1103,17 +1133,18 @@ func (d *DB) GetCoordReportByIdempotency(ctx context.Context, run domain.RunID, 
 
 func scanCoordReport(row interface{ Scan(...any) error }) (*CoordReport, error) {
 	var (
-		report      CoordReport
-		refs        string
-		inputRefs   string
-		state       string
-		createdAt   int64
-		finalizedAt *int64
-		publishedAt *int64
+		report       CoordReport
+		refs         string
+		inputRefs    string
+		state        string
+		createdAt    int64
+		finalizedAt  *int64
+		publishedAt  *int64
+		supersededAt *int64
 	)
 	if err := row.Scan(&report.ID, &report.WorkspaceID, &report.RunID, &report.Outcome,
 		&report.Summary, &report.NextAction, &refs, &inputRefs, &report.IdempotencyKey, &state,
-		&createdAt, &finalizedAt, &publishedAt); err != nil {
+		&createdAt, &finalizedAt, &publishedAt, &supersededAt); err != nil {
 		return nil, err
 	}
 	if refs == "" {
@@ -1138,6 +1169,7 @@ func scanCoordReport(row interface{ Scan(...any) error }) (*CoordReport, error) 
 	report.CreatedAt = decodeTime(createdAt)
 	report.FinalizedAt = decodeTimePtr(finalizedAt)
 	report.PublishedAt = decodeTimePtr(publishedAt)
+	report.SupersededAt = decodeTimePtr(supersededAt)
 	return &report, nil
 }
 

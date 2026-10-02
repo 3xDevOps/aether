@@ -533,9 +533,10 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	return r, nil
 }
 
-// CoordReport persists one bounded outcome per run. A report slot is reserved
-// before capture so a second key cannot race it, and capture failure leaves
-// the pending reservation retryable by that same key.
+// CoordReport persists one bounded outcome. A run holds any number of
+// blocked reports and one active terminal report; the report is reserved
+// before capture so a second terminal key cannot race it, and capture failure
+// leaves the pending reservation retryable by that same key.
 func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.CoordReportParams) (protocol.CoordReportResult, *protocol.Error) {
 	const method = protocol.MethodCoordReport
 	if s.cfg.Disabled {
@@ -625,7 +626,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
 		errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
-		message := fmt.Sprintf("%s: run %s already has a report under another idempotency key", method, run)
+		message := fmt.Sprintf("%s: run %s already reported success or failure under another idempotency key", method, run)
 		if errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
 			message = fmt.Sprintf("%s: idempotency_key %q was used with different report inputs", method, p.IdempotencyKey)
 		}
@@ -853,6 +854,9 @@ func (s *Service) publishReportEvidence(ctx context.Context, report *store.Coord
 	if err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
 		return fmt.Errorf("publish evidence packet: %w", err)
 	}
+	if err := s.applyRunOutcome(ctx, report); err != nil {
+		return err
+	}
 	eventID := store.CoordReportEventID(report.ID)
 	if err := s.cfg.Mail.MarkCoordReportPublished(ctx, report.ID, eventID); err != nil {
 		return fmt.Errorf("mark report published: %w", err)
@@ -862,6 +866,41 @@ func (s *Service) publishReportEvidence(ctx context.Context, report *store.Coord
 	s.mu.Lock()
 	delete(s.reportPackets, report.ID)
 	s.mu.Unlock()
+	return nil
+}
+
+// applyRunOutcome hands an ordinary run's report to the scheduler before the
+// publication is marked done, so the outbox retries a failed hand-off. A
+// mission worker or integrator keeps its mission lifecycle, and a report a
+// relaunch superseded no longer speaks for the run.
+func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
+	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
+		return nil
+	}
+	if s.cfg.Mission != nil {
+		assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrMissionStale) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("report outcome assignment: %w", err)
+		}
+		if assignment.MissionID != "" {
+			return nil
+		}
+	}
+	var err error
+	switch report.Outcome {
+	case store.CoordOutcomeSuccess:
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunCompleted)
+	case store.CoordOutcomeFailure:
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunFailed)
+	case store.CoordOutcomeBlocked:
+		err = s.cfg.Outcomes.ReportBlocked(ctx, report.RunID, reportReason(report.Summary))
+	}
+	if err != nil {
+		return fmt.Errorf("report outcome: %w", err)
+	}
 	return nil
 }
 

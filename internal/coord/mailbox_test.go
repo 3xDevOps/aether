@@ -796,11 +796,21 @@ func TestCoordReportValidationAndIdempotency(t *testing.T) {
 		t.Fatalf("durable report = %+v, want report %q with refs [ev_01 %q]", stored, first.ReportID, capture.id)
 	}
 
+	// Blocked does not use the terminal slot; the first success takes it,
+	// and then neither another terminal report nor a blocked one fits.
 	if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
-		Outcome: protocol.CoordOutcomeSuccess, Summary: "another key",
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "done after the blocker",
 		IdempotencyKey: "report-2",
-	}); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
-		t.Fatalf("different-key CoordReport = %v, want CodeConflict", rpcErr)
+	}); rpcErr != nil {
+		t.Fatalf("success after blocked CoordReport = %v, want accepted", rpcErr)
+	}
+	for _, outcome := range []string{protocol.CoordOutcomeFailure, protocol.CoordOutcomeBlocked} {
+		if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+			Outcome: outcome, Summary: "another key",
+			IdempotencyKey: "report-3-" + outcome,
+		}); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
+			t.Fatalf("%s CoordReport after success = %v, want CodeConflict", outcome, rpcErr)
+		}
 	}
 
 	for _, bad := range []protocol.CoordReportParams{
@@ -814,8 +824,8 @@ func TestCoordReportValidationAndIdempotency(t *testing.T) {
 			t.Errorf("invalid CoordReport %+v = %v, want CodeInvalidParams", bad, err)
 		}
 	}
-	if got := capture.calls.Load(); got != 1 {
-		t.Fatalf("invalid report requests triggered evidence capture: %d calls, want 1", got)
+	if got := capture.calls.Load(); got != 2 {
+		t.Fatalf("invalid or conflicting report requests triggered evidence capture: %d calls, want 2", got)
 	}
 }
 

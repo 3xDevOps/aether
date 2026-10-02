@@ -398,9 +398,11 @@ aether relaunch <run-id>
 
 The equivalent gateway call is `POST /api/v1/run.relaunch` with
 `{"run_id":"run_..."}` and a `RunResult` response. It is eligible only for a
-TUI run in the **Done** state (`merged` or `abandoned`) whose `run.close`
-operation retained its container (`reason` is `closed; retained container`)
-and whose `--run-container-ttl` deadline has not passed. Relaunch resumes the
+TUI run that retained its container and whose `--run-container-ttl` deadline
+has not passed: `merged` or `abandoned` after `run.close` (`reason` is
+`closed; retained container`), `completed` after the agent reported success
+(`agent reported success; retained container`), or `failed` after it reported
+failure (`agent reported failure; retained container`). Relaunch resumes the
 same run row in the same container and checkout; it does not create a new run
 or container and does not perform a new launch or disk-floor admission.
 

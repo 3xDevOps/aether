@@ -73,9 +73,8 @@ exactly that limitation and the text/DOM checks you did; do not claim visual
 verification from text alone. Preserve capture identity/revision, note any
 truncation and unsupported content, and do not automatically upload screenshots
 publicly. Verification and evidence collection must precede terminal stop,
-artifact deletion, or a terminal worker report: success/failure reporting may
-clean up all worker development resources. Do not report while a check still
-needs them. Read the inbox before the report and take no new work afterwards.
+artifact deletion, or a success/failure report, which may clean up all
+development resources. Do not report while a check still needs them. Read the inbox before the report and take no new work afterwards.
 `
 
 const retainCaptureSkill = `Retain only deliberately selected, reviewed captures:

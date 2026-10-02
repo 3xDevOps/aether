@@ -140,8 +140,9 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 }
 
 // finalize implements the pinned exit handling (§6.6): stop the watches,
-// commit results ("aether:" on clean exit, "wip:" otherwise), publish the
-// run branch, record the completed or final status, destroy the container.
+// commit results ("aether:" on clean exit or a reported success, "wip:"
+// otherwise), publish the run branch, record the completed or final status,
+// destroy the container.
 // The caller has already released entry.lifecycleMu; the finalizing flag
 // keeps other destructive lifecycle operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
@@ -152,10 +153,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 	s.mu.Lock()
 	killed, killActor := entry.killRequested, entry.killActor
+	// The agent's terminal report outranks its exit code. A run a human
+	// already closed keeps that close.
+	reported := entry.reported
+	if entry.status.Terminal() && entry.status != reported {
+		reported = ""
+	}
 	s.mu.Unlock()
 
 	msg := "wip: "
-	if code == 0 && !killed {
+	if !killed && (reported == domain.RunCompleted || (reported == "" && code == 0)) {
 		msg = "aether: "
 	}
 	committed, commitErr := s.commitAll(ctx, entry.runID, msg+taskLine(entry.task))
@@ -175,6 +182,8 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	switch {
 	case killed:
 		to, reason, actor = domain.RunAbandoned, "killed", killActor
+	case reported != "":
+		to, reason = reported, reportedClose(reported).reason
 	case code == 0:
 		to, reason = domain.RunCompleted, "agent exited; results committed"
 	default:
@@ -418,8 +427,8 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	var transitionErr error
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry && entry.retained {
-		if run.Status == domain.RunMerged || run.Status == domain.RunAbandoned {
-			transitionErr = s.transitionLocked(ctx, entry.runID, run.WorkspaceID, run.Status, run.Status, reason, "")
+		if released, ok := releasedReason(run.Status, run.Reason, reason); ok {
+			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, "")
 		}
 		entry.retained = false
 		entry.retainedUntil = nil
@@ -509,14 +518,26 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
-					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
+				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
+				if e.blockedReason != "" {
+					reason = e.blockedReason
+				}
+				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
+				if err == nil && e.blockedReason != "" && !e.blockedShown {
+					e.blockedShown = true
+					if serr := s.writeSidecar(e.sidecar()); serr != nil {
+						slog.Warn("scheduler: persist shown blocked reason", "run", e.runID, "error", serr)
+					}
+				}
 			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				e.agentReport = agentstatus.Report{}
 				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
+				if e.blockedShown {
+					e.blockedReason, e.blockedShown = "", false
+				}
 				if serr := s.writeSidecar(e.sidecar()); serr != nil {
 					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
 				}
@@ -719,8 +740,8 @@ func (s *Scheduler) sweepArchived(ctx context.Context) {
 }
 
 // sweepArchivedRun holds archiveMu across the re-read and the delete so a
-// restore cannot race it. A run whose reason is retainedCloseReason is
-// skipped: DeleteRun would take its lifecycleMu, which Relaunch takes
+// restore cannot race it. A run that still retains a relaunchable container
+// is skipped: DeleteRun would take its lifecycleMu, which Relaunch takes
 // before archiveMu.
 func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) error {
 	s.archiveMu.Lock()
@@ -734,7 +755,7 @@ func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutof
 		return fmt.Errorf("reread run: %w", err)
 	}
 	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() ||
-		fresh.Reason == retainedCloseReason {
+		retainedReason(fresh.Status, fresh.Reason) {
 		return nil
 	}
 

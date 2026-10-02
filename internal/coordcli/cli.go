@@ -261,8 +261,16 @@ are explicit identities for retry-safe starts and retries.
 `,
 	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
-Submit one durable outcome. Success/failure are terminal worker outcomes;
-blocked is a nonterminal observation, not a way to wait for a peer or human.
+Submit one durable outcome. Success and failure are terminal: a run has one
+terminal report, and after it any new report fails with a conflict until the
+run is relaunched. Blocked is nonterminal, may repeat, and is not a way to wait
+for a peer or human.
+Ordinary run: success or failure finishes the run when your turn ends. Aether
+commits your work, publishes the run branch, and moves the run out of Working
+to completed (success) or failed (failure). Blocked moves it to Needs you with
+the summary as the reason once your turn ends.
+Mission worker: success submits the attempt and stops the worker; failure ends
+it without a task result.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
@@ -431,7 +439,9 @@ Process the batch before acknowledging it: on the next inbox call pass
 new steering waits behind it. Acknowledge processed batches before waiting.
 Read the inbox once more before a terminal report:
   aether-internal report --help
-Success and failure are terminal worker outcomes: success submits the attempt
+`
+
+const missionOutcomes = `Success and failure are terminal worker outcomes: success submits the attempt
 and stops the worker; failure ends it without a task result. Report success
 only after finishing with required evidence, failure only if irrecoverable.
 Verify the changed behavior and collect required screenshots/evidence BEFORE
@@ -439,7 +449,21 @@ reporting: a terminal worker report can clean up its development resources.
 Blocked is a nonterminal durable observation, not a submission or a way to wait.
 Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
-For an uncertain mutation, retry identical inputs with the same idempotency
+`
+
+const ordinaryOutcomes = `Success or failure finishes this run once your turn ends: Aether commits your
+work, publishes the run branch, and moves the run out of Working to completed
+(success) or failed (failure). This run has one such report. Report success
+only after finishing with required evidence, failure only if irrecoverable.
+Verify the changed behavior and collect required screenshots/evidence BEFORE
+reporting: finishing cleans up the run's development resources.
+Blocked moves the run to Needs you with your summary as the reason once your
+turn ends. It may repeat and does not use up the terminal report; it is not a
+way to wait. Do not report while idle or waiting on a peer or human. After a
+terminal report, end your turn and take no new work.
+`
+
+const skillRetry = `For an uncertain mutation, retry identical inputs with the same idempotency
 key. Save the generated key printed to stderr if you omitted --idempotency-key.
 Use a new key only for a new operation; receipt means durable storage, not read.
 `
@@ -529,7 +553,11 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		return ExitFailure, fmt.Errorf("write development entrypoints: %w", err)
 	}
 	if hasSkillCapability(status, protocol.MethodCoordInbox) || status.Assignment != nil {
-		if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
+		outcomes := ordinaryOutcomes
+		if status.Assignment != nil {
+			outcomes = missionOutcomes
+		}
+		if _, err := io.WriteString(out, skillBootstrap+skillWorkflow+outcomes+skillRetry); err != nil {
 			return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
 		}
 	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox or mission commands are implied by a run socket.\n"); err != nil {

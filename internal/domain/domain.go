@@ -64,8 +64,10 @@ func (s WorkspaceSelector) Valid() bool {
 //	queued -> provisioning -> running <-> needs-attention -> completed -> (merged | abandoned)
 //
 // A run can also become failed or interrupted before it completes. Completed
-// has no runtime resources and is excluded from active-run operations, but
-// remains closable until a final disposition is chosen.
+// is excluded from active-run operations but remains closable until a final
+// disposition is chosen. A TUI run finished by its agent's terminal report
+// is completed or failed while it still holds its paused container for
+// relaunch, like a merged or abandoned TUI run a human closed.
 type RunStatus string
 
 const (
@@ -88,8 +90,8 @@ var AllRunStatuses = []RunStatus{
 	RunMerged, RunAbandoned, RunFailed, RunInterrupted,
 }
 
-// Terminal reports whether the run has finished execution and therefore has
-// no live runtime resources.
+// Terminal reports whether the run has finished execution. A terminal TUI
+// run may still hold a paused, retained container for relaunch.
 func (s RunStatus) Terminal() bool {
 	switch s {
 	case RunCompleted, RunMerged, RunAbandoned, RunFailed, RunInterrupted:

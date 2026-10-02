@@ -173,6 +173,9 @@ type sidecar struct {
 	Reporter         harness.Reporter  `json:"reporter,omitempty"`
 	AgentState       agentstatus.State `json:"agent_state,omitempty"`
 	AgentReason      string            `json:"agent_reason,omitempty"`
+	ReportedOutcome  domain.RunStatus  `json:"reported_outcome,omitempty"`
+	BlockedReason    string            `json:"blocked_reason,omitempty"`
+	BlockedShown     bool              `json:"blocked_shown,omitempty"`
 	ExitObserved     bool              `json:"exit_observed"`
 	ExitCode         int               `json:"exit_code"`
 	EvidenceIdentity string            `json:"evidence_identity,omitempty"`
@@ -200,6 +203,9 @@ func (e *supervised) sidecar() sidecar {
 		Reporter:         e.reporter,
 		AgentState:       e.agentReport.State,
 		AgentReason:      e.agentReport.Reason,
+		ReportedOutcome:  e.reported,
+		BlockedReason:    e.blockedReason,
+		BlockedShown:     e.blockedShown,
 		ExitObserved:     e.exitObserved,
 		ExitCode:         e.exitCode,
 		EvidenceIdentity: e.evidenceIdentity,

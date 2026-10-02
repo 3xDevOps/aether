@@ -35,7 +35,8 @@ func retainedTransitionError() error {
 }
 
 // Relaunch reopens the exact retained TUI run and container. It never creates
-// a run row, checkout, branch, or replacement container.
+// a run row, checkout, branch, or replacement container. The run's terminal
+// report is superseded, so the reopened agent can report again.
 func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	old, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
@@ -48,9 +49,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	if old.Mode != domain.LaunchTUI ||
-		(old.Status != domain.RunMerged && old.Status != domain.RunAbandoned) ||
-		old.Reason != retainedCloseReason {
+	if old.Mode != domain.LaunchTUI || !retainedReason(old.Status, old.Reason) {
 		return nil, retainedTransitionError()
 	}
 
@@ -111,9 +110,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, ferr
 	}
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending &&
-		fresh.Mode == domain.LaunchTUI &&
-		(fresh.Status == domain.RunMerged || fresh.Status == domain.RunAbandoned) &&
-		fresh.Reason == retainedCloseReason && deadline != nil && time.Now().UTC().Before(*deadline)
+		fresh.Mode == domain.LaunchTUI && retainedReason(fresh.Status, fresh.Reason) &&
+		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
 	if !valid {
@@ -148,13 +146,17 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.archiveMu.Unlock()
 		return nil, err
 	}
-	if latest.Mode != domain.LaunchTUI ||
-		(latest.Status != domain.RunMerged && latest.Status != domain.RunAbandoned) ||
-		latest.Reason != retainedCloseReason {
+	if latest.Mode != domain.LaunchTUI || !retainedReason(latest.Status, latest.Reason) {
 		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}
 	fresh = latest
+	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
+		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
+			s.archiveMu.Unlock()
+			return nil, fmt.Errorf("scheduler: relaunch: %w", supersedeErr)
+		}
+	}
 
 	// StartedAt is persisted on the run row before the container is thawed.
 	// The sidecar carries the same launch generation so a crash at either
@@ -320,6 +322,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	entry.retainedUntil = nil
 	entry.paused = false
 	entry.destroyPending = false
+	entry.reported = ""
+	entry.blockedReason, entry.blockedShown = "", false
 	s.publish(ctx, events.Event{
 		WorkspaceID: fresh.WorkspaceID,
 		RunID:       run,
@@ -594,7 +598,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 			mode = r.Mode
 		}
 		retained := sc.Retained || sc.RetainedUntil != nil
-		if mode != domain.LaunchTUI || !retained || r.Reason != retainedCloseReason {
+		if mode != domain.LaunchTUI || !retained || !retainedReason(r.Status, r.Reason) {
 			// Invalid terminal markers are not relaunchable, but their
 			// container may still be live. Keep durable ownership while
 			// the first cleanup Destroy is uncertain, then let the normal
@@ -671,8 +675,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 				slog.Warn("scheduler: reload retained run after probe", "run", run, "error", ferr)
 				continue
 			}
-			if fresh.Mode != domain.LaunchTUI ||
-				!fresh.Status.Terminal() || fresh.Reason != retainedCloseReason {
+			if fresh.Mode != domain.LaunchTUI || !retainedReason(fresh.Status, fresh.Reason) {
 				s.mu.Unlock()
 				continue
 			}
@@ -759,9 +762,13 @@ func (s *Scheduler) cleanupTerminalCreationKeyContainers(ctx context.Context) {
 }
 
 func (s *Scheduler) markRetainedReason(ctx context.Context, r *domain.Run, reason string) {
+	released, ok := releasedReason(r.Status, r.Reason, reason)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.transitionLocked(ctx, r.ID, r.WorkspaceID, r.Status, r.Status, reason, ""); err != nil {
+	if err := s.relabelLocked(ctx, r.ID, r.WorkspaceID, r.Status, released, ""); err != nil {
 		slog.Warn("scheduler: update retained close reason", "run", r.ID, "error", err)
 	}
 }
@@ -887,9 +894,9 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		return err
 	}
 	if fresh.Status.Terminal() {
-		if entry.retained && fresh.Reason == retainedCloseReason {
-			if err := s.transitionLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, fresh.Status,
-				retainedExpiredReason, ""); err != nil {
+		if entry.retained && retainedReason(fresh.Status, fresh.Reason) {
+			released, _ := releasedReason(fresh.Status, fresh.Reason, retainedExpiredReason)
+			if err := s.relabelLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, released, ""); err != nil {
 				s.mu.Unlock()
 				return err
 			}
@@ -1441,9 +1448,13 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	// The sidecar does not carry when the report parked the run, and it
 	// does not need to: nothing has been observed on the terminal since the
 	// restart, so the park effectively begins again here.
-	var parked time.Time
+	var parked, reportedAt time.Time
 	if sc.agentReport().State == agentstatus.Waiting {
 		parked = time.Now().UTC()
+	}
+	// The finish deadline restarts with the server, like the park above.
+	if sc.ReportedOutcome != "" {
+		reportedAt = time.Now().UTC()
 	}
 	mode := sc.Mode
 	if mode == "" {
@@ -1468,6 +1479,10 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		reporter:         sc.Reporter,
 		agentReport:      sc.agentReport(),
 		parkedAt:         parked,
+		reported:         sc.ReportedOutcome,
+		reportedAt:       reportedAt,
+		blockedReason:    sc.BlockedReason,
+		blockedShown:     sc.BlockedShown,
 		launchMode:       mode,
 		status:           r.Status,
 		startedAt:        started,

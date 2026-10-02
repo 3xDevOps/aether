@@ -164,8 +164,8 @@ was actually observed at capture time; absent fields mean **unknown**, not a
 clean checkout or the packet's later retained revision.
 
 These captures remain transient run-owned files until explicit deletion or
-cleanup of that run's coordination mount. A retained, explicitly closed TUI
-run keeps its mount and captures until expiry or deletion. The live browser's
+cleanup of that run's coordination mount. A retained TUI run
+keeps its mount and captures until expiry or deletion. The live browser's
 frame stream is not automatically archived. Browser diagnostics are bounded
 observations, not a full traffic recording: the companion retains up to 100
 console warning/error entries and 100 failed/error-response request entries

@@ -1019,10 +1019,36 @@ summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 
-A worker's **success or failure** report is one-shot and terminal. Success
-submits the attempt and the server then stops that worker. Failure fails the
-attempt without treating it as a task result. **Blocked is nonterminal**: it is
-a durable observation and does not stop the worker or submit the task.
+**Success and failure are terminal**: a run holds one terminal report. After
+it, a report under any new idempotency key, `blocked` included, fails with
+`CodeConflict` (`-32003`); the same key and inputs replay the original
+report. Relaunching the run (`aether relaunch <run>`) supersedes the terminal
+report, so the reopened agent can report again. **Blocked is nonterminal**: a
+run may file any number of blocked reports, before or after one another.
+
+What a report does depends on the run:
+
+- **Ordinary run** (no mission assignment). Success or failure finishes the
+  run once the agent's turn ends: Aether commits the work (`aether:` for
+  success, `wip:` for failure), publishes the run branch, and records
+  `completed` or `failed`, which moves the run out of **Working**. If the
+  turn has not ended two minutes after the report (a harness without a
+  status reporter never says it has), the next `--poll-interval` check
+  finishes the run anyway; if the agent process exits first, the exit
+  finishes it with the reported status, whatever its exit code. A TUI run keeps its paused
+  container for relaunch, exactly like a closed run, with the reason
+  `agent reported success; retained container` or
+  `agent reported failure; retained container`; a headless run, or a TUI run
+  with a negative `--run-container-ttl`, records `agent reported success` or
+  `agent reported failure`. A Close or Kill that lands first wins, and Close
+  still re-labels a finished run as merged or abandoned. Blocked moves the run
+  to **Needs you** with the reason `blocked: <summary>` the next time it parks
+  (the end of the turn, or a stall), until the agent resumes.
+- **Mission worker.** Success submits the attempt and the server then stops
+  that worker. Failure fails the attempt without treating it as a task
+  result. Blocked does not stop the worker or submit the task.
+- **Mission integrator.** The report is recorded; it does not end the run.
+
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
@@ -1081,6 +1107,14 @@ running `/opt/aether/aether-server report <harness>` over the same run socket.
 It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
+
+The two meet on an ordinary run. After a success or failure `coord.report`,
+the next `waiting` hook is the end of the turn that reported, so it finishes
+the run instead of parking it. After a blocked `coord.report`, the next
+`waiting` hook parks the run with the `blocked: <summary>` reason instead of
+`waiting for your input`; the first `working` hook after that park clears it.
+The scheduler applies a report as part of its durable publication, so a
+server restart or a temporarily unreachable run is retried, not lost.
 
 Coordination also does not provide a universal inbound terminal hook. When a
 human steers a run, Aether delivers the request through the harness's

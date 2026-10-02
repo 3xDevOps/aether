@@ -22,6 +22,15 @@ type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
 }
 
+// OutcomeSink receives an ordinary run's published coord.report. A success
+// or failure asks the scheduler to finish the run; a blocked summary becomes
+// its needs-attention reason. A run that is already terminal or gone is not
+// an error; any error leaves the publication pending for retry.
+type OutcomeSink interface {
+	FinishReported(ctx context.Context, run domain.RunID, outcome domain.RunStatus) error
+	ReportBlocked(ctx context.Context, run domain.RunID, summary string) error
+}
+
 // Report answers run.report for run: the agent behind this socket says it
 // is working, or that it needs its member and why.
 func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunReportParams) (protocol.RunReportResult, *protocol.Error) {

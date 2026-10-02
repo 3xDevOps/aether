@@ -112,7 +112,9 @@ described under [managed loading](#managed-native-loading).
 
 - **TUI.** Container PID 1 supervises the harness and opens a login shell after
   any normal harness exit. Exiting that shell opens another, so the run and
-  container remain `running` until an explicit Close, Kill, or Delete.
+  container remain `running` until an explicit Close, Kill, or Delete, or until
+  the agent's own success or failure report finishes the run (see
+  [Report an outcome](coordination.md#report-an-outcome)).
 - **Headless.** The harness is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
@@ -131,8 +133,8 @@ default is `168h` (7 days); `0` uses that default. A negative value
 disables retention and cleans up immediately. Kill and Delete remain immediate
 cleanup operations.
 
-Relaunch is available only for an explicitly closed, retained TUI run while
-its retention deadline has not passed:
+Relaunch is available only for a retained TUI run - closed, or finished by its
+agent's report - while its retention deadline has not passed:
 
 ```sh
 aether relaunch <run>
