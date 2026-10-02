@@ -364,6 +364,8 @@ func (s *Service) withSubmissionEvidence(ctx context.Context, mission *domain.Mi
 	if s.cfg.Evidence == nil || mission == nil || task == nil || task.Revision == nil || submission == nil {
 		return fmt.Errorf("%w: retained evidence is unavailable", store.ErrMissionNotReady)
 	}
+	// WithSubmissionSources validates transcript bytes only for this first,
+	// primary ID; the distinct input IDs below authorize packet presence only.
 	ids := []string{submission.Ref.EvidenceRef}
 	for _, fact := range submission.Evidence {
 		if fact.Kind == "input" && fact.Ref != "" && !containsString(ids, fact.Ref) {

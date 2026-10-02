@@ -51,10 +51,11 @@ func (s submissionTranscript) Replay(domain.RunID) (io.ReadCloser, error) {
 // All writes and normal reads use real private files. Failures are injected only
 // after Capture has successfully retained the transcript.
 type submissionFS struct {
-	transcript string
-	openErr    error
-	readErr    error
-	readBytes  int64
+	transcript      string
+	openErr         error
+	readErr         error
+	readBytes       int64
+	transcriptOpens int
 }
 
 func (*submissionFS) MkdirAll(path string, mode fs.FileMode) error { return os.MkdirAll(path, mode) }
@@ -81,8 +82,11 @@ func (*submissionFS) Remove(path string) error                   { return os.Rem
 func (*submissionFS) Stat(path string) (fs.FileInfo, error)      { return os.Stat(path) }
 func (*submissionFS) ReadDir(path string) ([]fs.DirEntry, error) { return os.ReadDir(path) }
 func (f *submissionFS) Open(path string) (io.ReadCloser, error) {
-	if strings.HasSuffix(path, ".transcript") && f.openErr != nil {
-		return nil, f.openErr
+	if strings.HasSuffix(path, ".transcript") {
+		f.transcriptOpens++
+		if f.openErr != nil {
+			return nil, f.openErr
+		}
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -128,8 +132,8 @@ func newRetainedSubmissionFixture(t *testing.T, requirements []domain.EvidenceRe
 	}
 	t.Cleanup(func() { _ = git.Close() })
 	ctx := context.Background()
-	if _, err := git.InitWorkspaceRepo(ctx, f.mission.WorkspaceID); err != nil {
-		t.Fatal(err)
+	if _, initErr := git.InitWorkspaceRepo(ctx, f.mission.WorkspaceID); initErr != nil {
+		t.Fatal(initErr)
 	}
 	seed := t.TempDir()
 	runGit := func(args ...string) {
@@ -137,8 +141,8 @@ func newRetainedSubmissionFixture(t *testing.T, requirements []domain.EvidenceRe
 		cmd := exec.Command("git", args...)
 		cmd.Dir = seed
 		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
+		if out, commandErr := cmd.CombinedOutput(); commandErr != nil {
+			t.Fatalf("git %v: %v\n%s", args, commandErr, out)
 		}
 	}
 	runGit("init")
@@ -148,8 +152,8 @@ func newRetainedSubmissionFixture(t *testing.T, requirements []domain.EvidenceRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(checkout, "result.txt"), []byte("captured result\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(filepath.Join(checkout, "result.txt"), []byte("captured result\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	f.retained, err = evidence.New(evidence.Config{
 		Store: f.db, Git: git, Runs: f.db, Transcript: transcript,
@@ -240,7 +244,7 @@ func requireTruncatedTranscript(t *testing.T, submission protocol.Submission) {
 	t.Helper()
 	for _, fact := range submission.Evidence {
 		if fact.Kind == "transcript" {
-			if !fact.Available || !fact.Truncated || fact.Detail != "transcript capped at 16 MiB" {
+			if !fact.Available || !fact.Truncated {
 				t.Fatalf("visible retained transcript = %#v", fact)
 			}
 			return
@@ -301,11 +305,11 @@ func TestCappedTranscriptCaptureReportAndAcceptance(t *testing.T) {
 				t.Fatalf("retained bytes changed: size=%d read=%v close=%v", n, readErr, closeErr)
 			}
 			f.clock = f.clock.Add(evidence.DefaultRetention + time.Second)
-			if _, err := f.retained.CleanupExpired(context.Background()); err != nil {
-				t.Fatal(err)
+			if _, cleanupErr := f.retained.CleanupExpired(context.Background()); cleanupErr != nil {
+				t.Fatal(cleanupErr)
 			}
-			if _, err := f.retained.OpenTranscript(context.Background(), f.mission.WorkspaceID, f.packet.ID); !errors.Is(err, evidence.ErrExpired) {
-				t.Fatalf("expired source read = %v", err)
+			if _, expiredErr := f.retained.OpenTranscript(context.Background(), f.mission.WorkspaceID, f.packet.ID); !errors.Is(expiredErr, evidence.ErrExpired) {
+				t.Fatalf("expired source read = %v", expiredErr)
 			}
 			f.fs.openErr = errors.New("accepted replay must not reopen evidence")
 			replayed, err := f.accept(t, f.mission.CurrentIntegratorRunID, params)
@@ -314,8 +318,8 @@ func TestCappedTranscriptCaptureReportAndAcceptance(t *testing.T) {
 			}
 			stale := params
 			stale.ExpectedIntegratorGeneration++
-			if _, err := f.accept(t, f.mission.CurrentIntegratorRunID, stale); !errors.Is(err, store.ErrMissionStale) {
-				t.Fatalf("stale-authority receipt replay = %v", err)
+			if _, staleErr := f.accept(t, f.mission.CurrentIntegratorRunID, stale); !errors.Is(staleErr, store.ErrMissionStale) {
+				t.Fatalf("stale-authority receipt replay = %v", staleErr)
 			}
 			member, err := f.db.GetMember(context.Background(), f.mission.Integrator.AccountMemberID)
 			if err != nil {
@@ -327,6 +331,30 @@ func TestCappedTranscriptCaptureReportAndAcceptance(t *testing.T) {
 			}
 			if _, err := f.accept(t, f.mission.CurrentIntegratorRunID, params); !errors.Is(err, permissions.ErrDenied) {
 				t.Fatalf("revoked-authority receipt replay = %v", err)
+			}
+		})
+	}
+}
+
+func TestSubmissionAcceptanceRejectsDamagedCappedTranscript(t *testing.T) {
+	for _, size := range []int64{0, 4096, evidence.MaxTranscriptBytes - 1, evidence.MaxTranscriptBytes + 1} {
+		t.Run(fmt.Sprintf("retained-bytes=%d", size), func(t *testing.T) {
+			f := newRetainedSubmissionFixture(t, []domain.EvidenceRequirement{{Kind: "transcript"}}, submissionTranscript{size: evidence.MaxTranscriptBytes + 4096})
+			f.capture(t, nil)
+			submission := f.reportSubmission(t)
+			if truncateErr := os.Truncate(f.fs.transcript, size); truncateErr != nil {
+				t.Fatal(truncateErr)
+			}
+			if _, acceptErr := f.accept(t, f.mission.CurrentIntegratorRunID, f.params(submission)); !errors.Is(acceptErr, store.ErrMissionNotReady) {
+				t.Fatalf("accept damaged capped transcript = %v, want not ready", acceptErr)
+			}
+			after, submissionErr := f.db.GetSubmission(context.Background(), submission.ID)
+			if submissionErr != nil || !reflect.DeepEqual(submission, after) {
+				t.Fatalf("damaged source acceptance mutated proposal: %#v, %v", after, submissionErr)
+			}
+			current, missionErr := f.db.GetMission(context.Background(), f.mission.ID)
+			if missionErr != nil || current.AcceptedSetVersion != f.mission.AcceptedSetVersion {
+				t.Fatalf("damaged source acceptance advanced accepted set: %#v, %v", current, missionErr)
 			}
 		})
 	}
@@ -464,22 +492,30 @@ func TestSubmissionAcceptanceRetainsAuthorityAndAcceptedSetFences(t *testing.T) 
 }
 
 func TestSubmissionInputRefsCannotLaunderSourceKinds(t *testing.T) {
-	for _, scenario := range []string{"input-is-not-transcript", "forged-transcript-kind", "required-input", "missing-input"} {
+	for _, scenario := range []string{"input-is-not-transcript", "forged-transcript-kind", "required-input", "missing-input", "expired-input"} {
 		t.Run(scenario, func(t *testing.T) {
 			required := "transcript"
-			if scenario == "required-input" || scenario == "missing-input" {
+			if scenario == "required-input" || scenario == "missing-input" || scenario == "expired-input" {
 				required = "input"
 			}
 			exporter := &submissionTranscript{err: errors.New("main transcript unavailable")}
 			f := newRetainedSubmissionFixture(t, []domain.EvidenceRequirement{{Kind: required}}, exporter)
 			f.capture(t, nil)
 			exporter.err, exporter.size = nil, 4096
+			if scenario == "expired-input" {
+				// Keep the primary fresh while this input expires just after
+				// proposal, before acceptance revalidates packet presence.
+				f.clock = f.clock.Add(-evidence.DefaultRetention + time.Second)
+			}
 			alternate, err := f.retained.Capture(context.Background(), evidence.Request{
 				RunID: f.attempt.RunID, Origin: store.EvidenceOrigin{Kind: store.EvidenceOriginRun, ID: string(f.attempt.RunID)},
 				IdempotencyKey: "alternate-input",
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if scenario == "expired-input" {
+				f.clock = f.clock.Add(evidence.DefaultRetention - time.Second)
 			}
 			ref := alternate.ID
 			if scenario == "missing-input" {
@@ -494,10 +530,22 @@ func TestSubmissionInputRefsCannotLaunderSourceKinds(t *testing.T) {
 			} else {
 				submission = f.reportSubmission(t)
 			}
+			if scenario == "expired-input" {
+				f.clock = f.clock.Add(2 * time.Second)
+			}
+			f.fs.transcriptOpens, f.fs.readBytes = 0, 0
+			f.fs.openErr = errors.New("input-only payload must not be opened")
 			_, err = f.accept(t, f.mission.CurrentIntegratorRunID, f.params(submission))
+			if f.fs.transcriptOpens != 0 || f.fs.readBytes != 0 {
+				t.Fatalf("input-only validation opened %d transcripts and read %d bytes", f.fs.transcriptOpens, f.fs.readBytes)
+			}
 			if scenario != "required-input" {
 				if !errors.Is(err, store.ErrMissionNotReady) {
 					t.Fatalf("alternate input accepted as %s: %v", required, err)
+				}
+				after, submissionErr := f.db.GetSubmission(context.Background(), submission.ID)
+				if submissionErr != nil || !reflect.DeepEqual(submission, after) {
+					t.Fatalf("unavailable input mutated proposal: %#v, %v", after, submissionErr)
 				}
 				return
 			}

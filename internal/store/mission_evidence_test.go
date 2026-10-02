@@ -27,8 +27,8 @@ func TestAcceptSubmissionEvidenceRefreshIsAtomicAndIdentityBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := &domain.Run{ID: attempt.RunID, WorkspaceID: workspace.ID, MemberID: member.ID, Task: "bounded transcript", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
-	if err := db.CreateRunWithID(ctx, run); err != nil {
-		t.Fatal(err)
+	if createErr := db.CreateRunWithID(ctx, run); createErr != nil {
+		t.Fatal(createErr)
 	}
 	ref := domain.SubmissionRef{WorkspaceID: workspace.ID, RunID: run.ID, EvidenceRef: "historical-packet", RetainedRevision: "retained-revision"}
 	oldFacts := []domain.SubmissionEvidence{{Kind: "retained_packet", Ref: ref.EvidenceRef, Available: true}, {Kind: "transcript", Ref: ref.EvidenceRef, Available: false, Detail: "old observation"}}
@@ -73,16 +73,16 @@ func TestAcceptSubmissionEvidenceRefreshIsAtomicAndIdentityBound(t *testing.T) {
 				set++
 				want = ErrMissionStale
 			}
-			if _, err := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, generation, set, "", "refresh", validated); !errors.Is(err, want) {
-				t.Fatalf("acceptance = %v, want %v", err, want)
+			if _, acceptErr := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, generation, set, "", "refresh", validated); !errors.Is(acceptErr, want) {
+				t.Fatalf("acceptance = %v, want %v", acceptErr, want)
 			}
-			after, err := db.GetSubmission(ctx, submission.ID)
-			if err != nil || !reflect.DeepEqual(submission, after) {
-				t.Fatalf("failed acceptance partially refreshed proposal: %#v, %v", after, err)
+			after, submissionErr := db.GetSubmission(ctx, submission.ID)
+			if submissionErr != nil || !reflect.DeepEqual(submission, after) {
+				t.Fatalf("failed acceptance partially refreshed proposal: %#v, %v", after, submissionErr)
 			}
-			current, err := db.GetMission(ctx, mission.ID)
-			if err != nil || current.AcceptedSetVersion != mission.AcceptedSetVersion {
-				t.Fatalf("failed acceptance advanced accepted set: %#v, %v", current, err)
+			current, missionErr := db.GetMission(ctx, mission.ID)
+			if missionErr != nil || current.AcceptedSetVersion != mission.AcceptedSetVersion {
+				t.Fatalf("failed acceptance advanced accepted set: %#v, %v", current, missionErr)
 			}
 		})
 	}

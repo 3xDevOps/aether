@@ -3,6 +3,7 @@ package evidence
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +63,49 @@ func TestSubmissionSourcesHoldRetentionLocksThroughAcceptance(t *testing.T) {
 	}
 }
 
+func TestSubmissionSourcesValidateRepeatedPrimaryTranscript(t *testing.T) {
+	ctx := context.Background()
+	svc, st, _ := newEvidenceTestService(t, &evidenceTestTranscript{data: []byte("retained primary")}, time.Now)
+	packet, captureErr := svc.Capture(ctx, Request{RunID: "run-1", IdempotencyKey: "submission-primary-duplicate"})
+	if captureErr != nil {
+		t.Fatal(captureErr)
+	}
+	stored, lookupErr := st.GetEvidencePacket(ctx, packet.ID)
+	if lookupErr != nil {
+		t.Fatal(lookupErr)
+	}
+	path, pathErr := svc.artifactPath(packetCaptureKey(stored))
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if removeErr := os.Remove(path); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	sourceErr := svc.WithSubmissionSources(ctx, "workspace-1", []string{packet.ID, packet.ID}, func(packets []protocol.EvidencePacket) error {
+		if len(packets) != 2 {
+			return errors.New("duplicate primary lookup lost entries")
+		}
+		for _, current := range packets {
+			found := false
+			for _, fact := range current.Sources {
+				if fact.Name == "transcript" {
+					found = true
+					if fact.Available {
+						return errors.New("duplicate primary bypassed missing transcript validation")
+					}
+				}
+			}
+			if !found {
+				return errors.New("missing transcript fact")
+			}
+		}
+		return nil
+	})
+	if sourceErr != nil {
+		t.Fatal(sourceErr)
+	}
+}
+
 type submissionLookupProbe struct {
 	Store
 	first chan struct{}
@@ -82,6 +126,10 @@ func TestSubmissionSourcesRereadAfterConcurrentExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	primary, captureErr := svc.Capture(ctx, Request{RunID: "run-1", IdempotencyKey: "submission-primary"})
+	if captureErr != nil {
+		t.Fatal(captureErr)
+	}
 	probe := &submissionLookupProbe{Store: st, first: make(chan struct{})}
 	svc.store = probe
 	lock := svc.runLock("run-1")
@@ -91,11 +139,11 @@ func TestSubmissionSourcesRereadAfterConcurrentExpiry(t *testing.T) {
 	defer unlock()
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.WithSubmissionSources(ctx, "workspace-1", []string{packet.ID}, func(packets []protocol.EvidencePacket) error {
-			if len(packets) != 1 || packets[0].Availability != protocol.EvidenceExpired || packets[0].RetainedRevision != "" {
+		done <- svc.WithSubmissionSources(ctx, "workspace-1", []string{primary.ID, packet.ID}, func(packets []protocol.EvidencePacket) error {
+			if len(packets) != 2 || packets[0].Availability != protocol.EvidenceAvailable || packets[1].Availability != protocol.EvidenceExpired || packets[1].RetainedRevision != "" {
 				return errors.New("pre-expiry metadata escaped locked reread")
 			}
-			for _, fact := range packets[0].Sources {
+			for _, fact := range packets[1].Sources {
 				if fact.Available {
 					return errors.New("expired source was reclassified available")
 				}
