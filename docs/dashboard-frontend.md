@@ -944,14 +944,17 @@ Eligible runs are `isArchivable`, not already archived, and killable by the
 caller. The
 dialog states what it will archive and, by count, what stays and why -
 still `completed` and awaiting Close, or not this caller's to kill. On
-confirm, `runClearDone()` issues every archive at once with
-`Promise.allSettled` - the server serializes them behind the mutex in
-`SetArchived` (`internal/scheduler/archive.go`), so the client has no reason
-to - and treats a `CodeNotFound` refusal
-as success (the run is already gone) by removing it locally instead of
-retrying. Once every call has settled it reports one toast: "Archived N
-runs", or "Archived N, M failed: " plus the message of the first failure in
-Done order (newest first), regardless of which call settled first.
+confirm, `runClearDone()` archives the eligible runs newest first, at most
+six calls in flight at a time, starting the next as each one settles. The
+server serializes the writes behind the mutex in `SetArchived`
+(`internal/scheduler/archive.go`), so the client need not wait on each call;
+the cap keeps a full Done column from holding one gateway request per run
+while they queue there. A failure does not stop the rest. A `CodeNotFound`
+refusal counts as success (the run is already gone) and removes the run
+locally instead of retrying. Once every call has settled it reports one
+toast: "Archived N runs", or "Archived N, M failed: " plus the message of
+the first failure in Done order (newest first), regardless of which call
+settled first.
 
 ### Reason and paused on the wire
 

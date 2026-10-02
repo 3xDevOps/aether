@@ -874,7 +874,53 @@ describe('Clear done', () => {
     expect(api.runArchive).not.toHaveBeenCalledWith(stillOpen.id, true)
   })
 
-  it('issues every archive at once, newest first', async () => {
+  it('keeps at most six archives in flight and starts the next as one settles', async () => {
+    const runs = Array.from({ length: 8 }, (_, i) =>
+      run({
+        id: `run_pool_${i}`,
+        status: 'merged',
+        finished_at: `2026-08-14T10:${String(50 - i).padStart(2, '0')}:00Z`,
+      }),
+    )
+    seedAs(alice, runs)
+    render(<Board />)
+
+    const calls: string[] = []
+    const settle = new Map<string, { resolve: () => void; reject: (err: unknown) => void }>()
+    vi.mocked(api.runArchive).mockImplementation((id: string) => {
+      calls.push(id)
+      return new Promise((resolve, reject) => {
+        settle.set(id, {
+          resolve: () => resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })),
+          reject,
+        })
+      })
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 8' }),
+    )
+
+    const ids = runs.map((r) => r.id)
+    await waitFor(() => expect(calls).toEqual(ids.slice(0, 6)))
+
+    // A failure frees its slot like a success does, and the run after the
+    // cap fails too: the toast still names the earlier one in Done order.
+    settle.get(ids[3])?.reject(new ApiError(500, 'fourth failed', -32001))
+    await waitFor(() => expect(calls).toEqual(ids.slice(0, 7)))
+    settle.get(ids[6])?.reject(new ApiError(500, 'seventh failed', -32001))
+    await waitFor(() => expect(calls).toEqual(ids))
+    expect(toast.error).not.toHaveBeenCalled()
+
+    for (const id of ids) settle.get(id)?.resolve()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Archived 6, 2 failed: fourth failed'),
+    )
+    expect(api.runArchive).toHaveBeenCalledTimes(8)
+  })
+
+  it('issues archives without waiting on each other, newest first', async () => {
     const first = run({
       id: 'run_seq_first',
       status: 'failed',

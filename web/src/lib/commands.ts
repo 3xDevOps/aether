@@ -172,36 +172,52 @@ export function clearDonePlan(
 // outcome Clear done was trying to reach anyway.
 const codeRunNotFound = -32000
 
+// A full Done column must not open one gateway request per run: the server
+// serializes the writes, but only after every request holds a connection.
+const clearDoneConcurrency = 6
+
 /**
- * Archives every eligible run at once; the server serializes the writes
- * itself. Each call's own `run.archived` event moves the run in every
- * connected dashboard, this one included, so the count below comes from the
- * settled calls, not from re-applying what the RPC returned.
+ * Archives every eligible run, `clearDoneConcurrency` calls at a time. Each
+ * call's own `run.archived` event moves the run in every connected
+ * dashboard, this one included, so the count below comes from the settled
+ * calls, not from re-applying what the RPC returned.
  */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
 ): Promise<void> {
-  const results = await Promise.allSettled(
-    eligible.map((run) => deps.api.runArchive(run.id, true)),
+  const failures = new Map<RunRecord, unknown>()
+  let next = 0
+  const worker = async () => {
+    while (next < eligible.length) {
+      const run = eligible[next++]
+      try {
+        await deps.api.runArchive(run.id, true)
+      } catch (err) {
+        failures.set(run, err)
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(clearDoneConcurrency, eligible.length) }, worker),
   )
   let archived = 0
   let failed = 0
   let firstError: string | undefined
-  results.forEach((result, i) => {
-    if (result.status === 'fulfilled') {
+  for (const run of eligible) {
+    if (!failures.has(run)) {
       archived++
-      return
+      continue
     }
-    const err: unknown = result.reason
+    const err = failures.get(run)
     if (err instanceof ApiError && err.code === codeRunNotFound) {
-      deps.removeRun(eligible[i].id)
+      deps.removeRun(run.id)
       archived++
-      return
+      continue
     }
     failed++
     firstError ??= message(err)
-  })
+  }
   if (failed > 0) {
     toast.error(`Archived ${archived}, ${failed} failed: ${firstError}`)
   } else {
