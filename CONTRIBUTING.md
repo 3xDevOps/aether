@@ -61,7 +61,10 @@ with `export data version 4 is greater than maximum supported version 2`
 before linting anything.
 
 `make lint-workflows` uses pinned actionlint v1.7.12, matching CI's workflow
-lint gate without adding a tool dependency to `go.mod`. `make test-scripts`
+lint gate without adding a tool dependency to `go.mod`. It requires
+ShellCheck on `PATH`: on Linux, run `sudo apt-get install shellcheck`.
+GitHub's Ubuntu runners already provide it; the prerequisite ensures
+embedded shell commands are checked locally too. `make test-scripts`
 includes `sh scripts/release-ci-check-test.sh`: it checks exact-commit main
 CI authorization and fail-closed rejection using API fixtures, without
 publishing a release or contacting GitHub.

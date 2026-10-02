@@ -166,7 +166,9 @@ jobs:
       # The `unit` jobs never save the Go cache, so this is what puts their
       # race-built test binaries into the one this job saves.
       - name: Compile the sharded unit tests
-        run: go test -race -run '^$' $UNIT_SHARDED
+        run: |
+          read -r -a packages <<< "$UNIT_SHARDED"
+          go test -race -run '^$' "${packages[@]}"
       - name: Shell script tests
         run: make test-scripts
       - name: Native hook lifecycle tests
@@ -715,13 +717,15 @@ jobs:
         shell: bash
         run: |
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
+          mapfile -t packages <<< "$pkgs"
           go build ./cmd/aether
-          go vet ./cmd/aether $pkgs
+          go vet ./cmd/aether "${packages[@]}"
       - name: Client unit tests
         shell: bash
         run: |
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
-          go test ./cmd/aether $pkgs
+          mapfile -t packages <<< "$pkgs"
+          go test ./cmd/aether "${packages[@]}"
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:

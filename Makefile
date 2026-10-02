@@ -216,6 +216,10 @@ lint:
 		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1 run
 
 lint-workflows:
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "make lint-workflows: shellcheck not found - install ShellCheck (https://www.shellcheck.net/) and add it to PATH to check workflow shell scripts" >&2; \
+		exit 1; \
+	}
 	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
 # Advisory: the two Moby CVEs reachable through the Docker SDK have no fixed

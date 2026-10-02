@@ -155,8 +155,11 @@ never receive a false positive on another machine.
 
 ## Workflow and release-build gates
 
-`make lint-workflows` runs pinned actionlint v1.7.12; CI invokes it in the
-`lint` job. `make test-scripts` includes
+`make lint-workflows` runs pinned actionlint v1.7.12 and requires ShellCheck
+on `PATH` so embedded shell commands are checked locally as well as in CI.
+On Linux, install it with `sudo apt-get install shellcheck`; GitHub's Ubuntu
+runners already provide it. CI invokes this target in the `lint` job.
+`make test-scripts` includes
 `sh scripts/release-ci-check-test.sh`, which exercises the real release
 checker's run selection and rejection behavior with only the GitHub API
 boundary replaced. The checker requires the latest matching run/current
