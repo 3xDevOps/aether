@@ -196,11 +196,11 @@ or answered the request. Retries use the
 same message identity, so they do not create a second request.
 
 Questions appear in the Run Room where they apply. **Answer** posts a
-correlated reply. The server includes each run's unanswered-question count in
-the normal run snapshot, so a fresh dashboard places that run in **Idle**
-before anyone opens its room. The card names the run owner and points to the
-Run Room as the action. Questions and queued steers do not create a second
-action inbox.
+correlated reply. The run snapshot includes its unanswered-question count,
+so **Needs input** appears before anyone opens the room. The request does
+not change the execution group: a working run stays in **Working**. The
+card identifies the run owner and links to the Run Room. Questions and queued
+steers do not create a separate action inbox.
 
 Room image attachments use the terminal upload rules: each message may include
 up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than 8 MiB.

@@ -414,7 +414,9 @@ Each actual change publishes a durable `run.input` event with payload
 `{"pending_inputs":[...]}`; closing the last request publishes
 `{"pending_inputs":[]}`. This is a complete replacement snapshot, independent
 of `run.status`, and uses the existing event envelope and replay sequence on
-`/ws/events`. No event is emitted for an unchanged set. Clients must preserve
+`/ws/events`. An unchanged set emits no event unless a previous publication
+failed: retrying the report or recovering the live run publishes the current
+set, including an empty set after the last close. Clients must preserve
 events received after a snapshot request began when merging that response,
 so an older `run.get`/`run.list` response cannot resurrect closed input.
 

@@ -305,6 +305,9 @@ type supervised struct {
 	agentReport agentstatus.Report
 	// pendingInputs is an immutable, sorted set for this execution lifetime.
 	pendingInputs []domain.RunInputRequest
+	// inputPublishPending keeps the current snapshot owed to the event log,
+	// including an empty set after the last request closes.
+	inputPublishPending bool
 	// lastWorking is when the agent last said it was working. A report is
 	// the only trace its hook leaves - it writes nothing to the terminal
 	// and touches no files - so the stall detector counts it as the

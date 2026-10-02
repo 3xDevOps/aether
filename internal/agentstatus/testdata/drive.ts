@@ -20,7 +20,7 @@ const pi = {
   on(event: string, handler: (event?: unknown, ctx?: Context) => void) {
     ;(handlers[event] ||= []).push(handler)
   },
-  ...(scenario === 'omp-background' ? { pi: {
+  ...(scenario === 'omp-background' || scenario === 'heartbeat-omp' ? { pi: {
     MAIN_AGENT_ID: 'main', AgentRegistry: { global: () => ({ get: () => ({ session: main }) }) },
   } } : {}),
 }
@@ -48,6 +48,43 @@ function fire(event: string, payload?: unknown, ctx: Context = idle): void {
 // past agent_end and then went quiet, with no agent_settled to say so.
 let checks = 0
 const busyThenIdle = { isIdle: () => ++checks > 2 }
+
+// Capture each callback boundary separately so the scheduler regression can
+// advance its activity timestamps without sleeping or inventing reports.
+if (scenario === 'heartbeat-pi' || scenario === 'heartbeat-omp') {
+  const checkpoints: Array<{ phase: string; reports: unknown[] }> = []
+  let consumed = 0
+  async function checkpoint(phase: string): Promise<void> {
+    await globalThis['__aetherStatusReports'].posts
+    const lines = readFileSync(process.argv[3], 'utf8').trim().split('\n')
+    checkpoints.push({ phase, reports: lines.slice(consumed).map(line => JSON.parse(line)) })
+    consumed = lines.length
+  }
+  fire('session_start')
+  fire('agent_start')
+  await checkpoint('start')
+  for (let i = 0; i < 4; i++) {
+    fire(scenario === 'heartbeat-pi' ? 'tool_call' : 'tool_execution_start',
+      { toolName: 'bash', toolCallId: `silent-${i}` })
+    await checkpoint('work')
+  }
+  if (scenario === 'heartbeat-omp') {
+    fire('agent_end', {}, idle)
+    terminal?.({ type: 'agent_end', isTerminal: true })
+    await checkpoint('background')
+    background.resolve()
+    await background.promise
+  } else {
+    fire('agent_end', { willContinue: true }, busy)
+    await checkpoint('continuation')
+    fire('agent_settled')
+  }
+  await checkpoint('idle')
+  fire('message_end')
+  await checkpoint('late-message')
+  console.log(JSON.stringify(checkpoints))
+  process.exit(0)
+}
 
 switch (scenario) {
   case 'turn':

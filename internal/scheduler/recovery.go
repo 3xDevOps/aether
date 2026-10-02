@@ -200,6 +200,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	s.mu.Lock()
 	entry.agentReport = agentstatus.Report{}
 	entry.pendingInputs = nil
+	entry.inputPublishPending = false
 	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 	s.mu.Unlock()
 	resumed := false
@@ -1308,6 +1309,8 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 	s.syncRunUserReservationsLocked()
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: persist recovered run owner", "run", r.ID, "error", werr)
+	} else if perr := s.publishPendingInputLocked(ctx, entry); perr != nil {
+		slog.Warn("scheduler: recover run input publication", "run", r.ID, "error", perr)
 	}
 	s.mu.Unlock()
 	return entry, true
@@ -1467,11 +1470,13 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		started = *r.StartedAt
 	}
 	var pendingInputs []domain.RunInputRequest
+	var inputPublishPending bool
 	if !r.Status.Terminal() && !sc.ExitObserved && !sc.DestroyPending &&
 		r.StartedAt != nil && sc.InputStartedAt != nil && sc.InputStartedAt.Equal(*r.StartedAt) {
 		updates := []domain.RunInputUpdate{{Operation: "replace", Requests: sc.PendingInputs}}
 		if err := domain.ValidateRunInputUpdates(updates); err == nil {
 			pendingInputs, _ = reduceRunInputs(nil, updates)
+			inputPublishPending = sc.InputPublishPending
 		} else {
 			slog.Warn("scheduler: discard invalid input sidecar", "run", r.ID, "error", err)
 		}
@@ -1504,29 +1509,30 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// agent repaints at once - and without the report that repaint
 		// would read as work resuming and hand the run back to an agent
 		// that is still waiting for their member.
-		reporter:         sc.Reporter,
-		agentReport:      sc.agentReport(),
-		pendingInputs:    pendingInputs,
-		parkedAt:         parked,
-		launchMode:       mode,
-		missionAssigned:  sc.MissionAssigned,
-		status:           r.Status,
-		startedAt:        started,
-		paused:           sc.Paused,
-		killRequested:    sc.KillRequested,
-		retained:         sc.Retained,
-		retainedUntil:    sc.RetainedUntil,
-		destroyPending:   sc.DestroyPending,
-		evidencePending:  sc.EvidencePending,
-		runUser:          sc.RunUser,
-		home:             sc.Home,
-		exitObserved:     sc.ExitObserved,
-		exitCode:         sc.ExitCode,
-		evidenceIdentity: sc.EvidenceIdentity,
-		bridgeDigest:     sc.BridgeDigest,
-		bridgePath:       sc.BridgePath,
-		coordDir:         sc.CoordDir,
-		gitAuthorEmail:   sc.GitAuthorEmail,
-		done:             make(chan struct{}),
+		reporter:            sc.Reporter,
+		agentReport:         sc.agentReport(),
+		pendingInputs:       pendingInputs,
+		inputPublishPending: inputPublishPending,
+		parkedAt:            parked,
+		launchMode:          mode,
+		missionAssigned:     sc.MissionAssigned,
+		status:              r.Status,
+		startedAt:           started,
+		paused:              sc.Paused,
+		killRequested:       sc.KillRequested,
+		retained:            sc.Retained,
+		retainedUntil:       sc.RetainedUntil,
+		destroyPending:      sc.DestroyPending,
+		evidencePending:     sc.EvidencePending,
+		runUser:             sc.RunUser,
+		home:                sc.Home,
+		exitObserved:        sc.ExitObserved,
+		exitCode:            sc.ExitCode,
+		evidenceIdentity:    sc.EvidenceIdentity,
+		bridgeDigest:        sc.BridgeDigest,
+		bridgePath:          sc.BridgePath,
+		coordDir:            sc.CoordDir,
+		gitAuthorEmail:      sc.GitAuthorEmail,
+		done:                make(chan struct{}),
 	}
 }

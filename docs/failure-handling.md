@@ -626,6 +626,12 @@ before the scheduler is called. Reports keep the existing bounded reason
 sanitization and separate lifecycle request budget. A persistence failure
 returns `Internal` with the underlying cause rather than acknowledging an
 input change that was not saved.
+If saving succeeds but `run.input` publication fails, the report still returns
+an error. The sidecar retains the publication obligation, including a last-close
+empty set. A subsequent report or live-run recovery publishes the current set,
+not stale deltas; successful duplicate reports remain no-write/no-event. A crash
+after publication but before its acknowledgement is saved can replay the same
+replacement snapshot.
 
 The pending set survives server restart only for the same still-live run
 lifetime, with no observed exit. Disconnecting, pausing, going idle, or

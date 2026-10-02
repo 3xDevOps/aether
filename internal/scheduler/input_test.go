@@ -1,10 +1,13 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,6 +203,204 @@ func TestInputReportReturnsDurableEventFailure(t *testing.T) {
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil || !slices.Equal(sc.PendingInputs, []domain.RunInputRequest{request}) {
 		t.Fatalf("durable pending set = %+v, error %v", sc.PendingInputs, err)
+	}
+}
+
+type failingInputBus struct {
+	events.Bus
+	fail atomic.Bool
+	err  error
+}
+
+func (b *failingInputBus) Publish(ctx context.Context, event events.Event) (events.Event, error) {
+	if _, ok := event.Payload.(events.RunInputPayload); ok && b.fail.Swap(false) {
+		return events.Event{}, b.err
+	}
+	return b.Bus.Publish(ctx, event)
+}
+
+func newInputPublicationEnv(t *testing.T) (*testEnv, *events.SQLiteLog, *failingInputBus) {
+	t.Helper()
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	bus, err := events.NewInProc(t.Context(), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	failing := &failingInputBus{Bus: bus, err: errors.New("input publication unavailable")}
+	e := newReportingEnv(t, func(cfg *Config) { cfg.Bus = failing })
+	e.bus = bus
+	return e, log, failing
+}
+
+func TestInputPublicationRecoveryUsesCurrentLifetimeSet(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"open", "close", "superseded", "completed", "relaunched"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			e, log, failing := newInputPublicationEnv(t)
+			run, _ := e.launchReporting(t)
+			request := domain.RunInputRequest{SessionID: "session", Kind: "question", ID: "request"}
+			report := agentstatus.Report{InputUpdates: []domain.RunInputUpdate{inputUpdate("open", request)}}
+			want := []domain.RunInputRequest{request}
+			if scenario == "close" {
+				if err := e.sched.ReportAgentState(t.Context(), run.ID, report); err != nil {
+					t.Fatal(err)
+				}
+				report.InputUpdates = []domain.RunInputUpdate{inputUpdate("close", request)}
+				want = []domain.RunInputRequest{}
+			}
+			failing.fail.Store(true)
+			if err := e.sched.ReportAgentState(t.Context(), run.ID, report); !errors.Is(err, failing.err) {
+				t.Fatalf("publication failure = %v, want %v", err, failing.err)
+			}
+			old, sidecarErr := e.sched.readSidecar(run.ID)
+			if sidecarErr != nil {
+				t.Fatal(sidecarErr)
+			}
+			switch scenario {
+			case "superseded":
+				replacement := domain.RunInputRequest{SessionID: "other-session", Kind: "permission", ID: "new"}
+				report.InputUpdates = []domain.RunInputUpdate{{Operation: "replace", Requests: []domain.RunInputRequest{replacement}}}
+				failing.fail.Store(true)
+				if err := e.sched.ReportAgentState(t.Context(), run.ID, report); !errors.Is(err, failing.err) {
+					t.Fatalf("replacement publication failure = %v", err)
+				}
+				want = []domain.RunInputRequest{replacement}
+			case "completed", "relaunched":
+				if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+					t.Fatal(err)
+				}
+				want = []domain.RunInputRequest{}
+				if err := e.sched.ReportAgentState(t.Context(), run.ID, report); err == nil {
+					t.Fatal("terminal run accepted stale report")
+				}
+				if scenario == "relaunched" {
+					if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// A crash can leave the old set and publication obligation on
+				// disk. The terminal row or new StartedAt must fence both.
+				if err := e.sched.writeSidecar(old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cursor, cursorErr := log.LastSeq(t.Context())
+			if cursorErr != nil {
+				t.Fatal(cursorErr)
+			}
+			if err := e.sched.Close(); err != nil {
+				t.Fatal(err)
+			}
+			recovered := e.newScheduler(t, e.rt, newFakePTY())
+			if err := recovered.recoverRuns(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			assertPendingInputs(t, recovered, run.ID, want)
+			stored, err := log.Read(t.Context(), events.Filter{Run: run.ID, Types: []events.Type{events.TypeRunInput}}, cursor, 0, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "completed" || scenario == "relaunched" {
+				if len(stored) != 0 {
+					t.Fatalf("ended lifetime replayed stale input: %+v", stored)
+				}
+				return
+			}
+			if len(stored) != 1 {
+				t.Fatalf("recovery did not repair durable input delivery: %+v", stored)
+			}
+			payload := stored[0].Payload.(events.RunInputPayload)
+			if payload.PendingInputs == nil || !slices.Equal(payload.PendingInputs, want) {
+				t.Fatalf("recovered event = %+v, want explicit current set %+v", payload.PendingInputs, want)
+			}
+			sc, err := recovered.readSidecar(run.ID)
+			if err != nil || !slices.Equal(sc.PendingInputs, want) {
+				t.Fatalf("recovered durable pending set = %+v, error %v", sc.PendingInputs, err)
+			}
+		})
+	}
+}
+
+func TestInputReportRetryRepairsDurableEvent(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{"open", "close"} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			e, log, failing := newInputPublicationEnv(t)
+			run, _ := e.launchReporting(t)
+			request := domain.RunInputRequest{SessionID: "session", Kind: "question", ID: "request"}
+			want := []domain.RunInputRequest{request}
+			if operation == "close" {
+				if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{
+					InputUpdates: []domain.RunInputUpdate{inputUpdate("open", request)},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				want = []domain.RunInputRequest{}
+			}
+			cursor, err := log.LastSeq(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			sub := e.subscribe(t)
+			report := agentstatus.Report{InputUpdates: []domain.RunInputUpdate{inputUpdate(operation, request)}}
+			failing.fail.Store(true)
+			if reportErr := e.sched.ReportAgentState(t.Context(), run.ID, report); !errors.Is(reportErr, failing.err) {
+				t.Fatalf("publication failure = %v, want %v", reportErr, failing.err)
+			}
+			sc, err := e.sched.readSidecar(run.ID)
+			if err != nil || !slices.Equal(sc.PendingInputs, want) {
+				t.Fatalf("durable pending set = %+v, error %v, want %+v", sc.PendingInputs, err, want)
+			}
+			assertPendingInputs(t, e.sched, run.ID, want)
+			filter := events.Filter{Run: run.ID, Types: []events.Type{events.TypeRunInput}}
+			stored, err := log.Read(t.Context(), filter, cursor, 0, 10)
+			if err != nil || len(stored) != 0 {
+				t.Fatalf("failed publication reached log: %+v, error %v", stored, err)
+			}
+			if reportErr := e.sched.ReportAgentState(t.Context(), run.ID, report); reportErr != nil {
+				t.Fatal(reportErr)
+			}
+			stored, err = log.Read(t.Context(), filter, cursor, 0, 10)
+			if err != nil || len(stored) != 1 {
+				t.Fatalf("successful identical retry did not repair durable input delivery: %+v, error %v", stored, err)
+			}
+			payload := stored[0].Payload.(events.RunInputPayload)
+			if payload.PendingInputs == nil || !slices.Equal(payload.PendingInputs, want) {
+				t.Fatalf("repaired event = %+v, want explicit list %+v", payload.PendingInputs, want)
+			}
+			waitInputEvent(t, sub, run.ID, want)
+			assertPendingInputs(t, e.sched, run.ID, want)
+
+			// After successful delivery, a duplicate needs neither another
+			// sidecar write nor another durable event.
+			path := e.sched.sidecarPath(run.ID)
+			backup := path + ".saved"
+			if renameErr := os.Rename(path, backup); renameErr != nil {
+				t.Fatal(renameErr)
+			}
+			if mkdirErr := os.Mkdir(path, 0o700); mkdirErr != nil {
+				t.Fatal(mkdirErr)
+			}
+			defer func() {
+				_ = os.Remove(path)
+				_ = os.Rename(backup, path)
+			}()
+			if reportErr := e.sched.ReportAgentState(t.Context(), run.ID, report); reportErr != nil {
+				t.Fatalf("successful duplicate wrote sidecar: %v", reportErr)
+			}
+			duplicates, err := log.Read(t.Context(), filter, stored[0].Seq, 0, 10)
+			if err != nil || len(duplicates) != 0 {
+				t.Fatalf("successful duplicate appended input events: %+v, error %v", duplicates, err)
+			}
+			expectNoInputEvent(t, sub, run.ID)
+		})
 	}
 }
 

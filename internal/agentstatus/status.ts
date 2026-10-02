@@ -9,7 +9,7 @@ const IDLE_RECHECK_MAX_MS = 250
 type InputRequest = { id: string; session_id: string; kind: string }
 const shared: {
   posts: Promise<void>; warned: boolean; pending: Map<string, InputRequest>;
-  busy: Set<string>; state?: string; last?: string; dispose?: () => void;
+  busy: Set<string>; state?: string; dispose?: () => void;
 } = globalThis[CHAIN] || (globalThis[CHAIN] = {
   posts: Promise.resolve(), warned: false, pending: new Map(), busy: new Set(),
 })
@@ -43,8 +43,7 @@ function report(): void {
     ...(shared.state === 'waiting' ? { reason: 'agent idle' } : {}),
     input_updates: [{ operation: 'replace', requests: [...shared.pending.values()] }],
   })
-  if (body === shared.last) return
-  shared.last = body
+  // Identical Working reports are heartbeats even without terminal/file output.
   shared.posts = shared.posts.then(() => spawnReport(body)).catch(warnOnce)
 }
 

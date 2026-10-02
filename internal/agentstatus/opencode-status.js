@@ -10,7 +10,6 @@ export const AetherStatus = async ({ client, serverUrl, directory }) => {
   let queue = Promise.resolve()
   let events = Promise.resolve()
   let warned = false
-  let last
   let executionKnown = false
 
   const warn = async (error) => {
@@ -29,8 +28,7 @@ export const AetherStatus = async ({ client, serverUrl, directory }) => {
       ...(executionKnown && !working ? { reason: "agent idle" } : {}),
       input_updates: [{ operation: "replace", requests: [...pending.values()] }],
     })
-    if (body === last) return
-    last = body
+    // Repeated Working reports refresh liveness even without output or input changes.
     queue = queue.then(() => new Promise(resolve => {
       const child = spawn(reporter, ["report", "opencode", "--json", body], { stdio: ["ignore", "ignore", "pipe"] })
       child.stderr.setEncoding("utf8")

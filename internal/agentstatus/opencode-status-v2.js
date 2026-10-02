@@ -17,7 +17,6 @@ export default {
     let queue = Promise.resolve()
     let child
     let warned = false
-    let last
     let executionKnown = false
     const warn = error => {
       if (warned || lifetime.signal.aborted) return
@@ -39,8 +38,7 @@ export default {
         ...(executionKnown && !working ? { reason: 'agent idle' } : {}),
         input_updates: [{ operation: 'replace', requests: [...pending.values()] }],
       })
-      if (body === last) return
-      last = body
+      // Concurrent execution starts still refresh liveness when this body is unchanged.
       const args = ['report', 'opencode', '--json', body]
       queue = queue.then(() => {
         if (lifetime.signal.aborted) return

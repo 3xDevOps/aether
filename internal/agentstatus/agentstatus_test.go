@@ -140,6 +140,12 @@ func runExtension(t *testing.T, scenario string) ([]Report, string) {
 		if err := json.Unmarshal([]byte(line), &report); err != nil {
 			t.Fatalf("decode native report: %v (%s)", err, line)
 		}
+		// These assertions cover execution/request transitions, not callback
+		// counts. Identical Working reports are liveness heartbeats, exercised
+		// through the production stall detector by the scheduler regression.
+		if len(reports) != 0 && reflect.DeepEqual(reports[len(reports)-1], report) {
+			continue
+		}
 		reports = append(reports, report)
 	}
 	return reports, string(out)

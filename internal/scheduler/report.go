@@ -51,8 +51,9 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 		next := oldSidecar
 		next.AgentState, next.AgentReason = execution.State, execution.Reason
 		next.PendingInputs = pending
+		next.InputPublishPending = entry.inputPublishPending || inputsChanged
 		next.InputStartedAt = nil
-		if len(pending) != 0 {
+		if len(pending) != 0 || next.InputPublishPending {
 			started := entry.startedAt
 			next.InputStartedAt = &started
 		}
@@ -92,16 +93,34 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	entry.agentReport = execution
 	if inputsChanged {
 		entry.pendingInputs = pending
-		// The sidecar remains authoritative if the durable event log fails.
-		// Return the failure rather than claiming successful delivery.
-		if _, err := s.cfg.Bus.Publish(ctx, events.Event{
-			WorkspaceID: entry.workspaceID,
-			RunID:       run,
-			Payload:     events.RunInputPayload{PendingInputs: inputList(pending)},
-		}); err != nil {
-			return fmt.Errorf("scheduler: publish run input: %w", err)
-		}
+		entry.inputPublishPending = true
 	}
+	return s.publishPendingInputLocked(ctx, entry)
+}
+
+// publishPendingInputLocked repairs only an outstanding publication, never an
+// ordinary duplicate report. The sidecar is the outbox for the current set;
+// later reports supersede it rather than replaying stale deltas.
+func (s *Scheduler) publishPendingInputLocked(ctx context.Context, entry *supervised) error {
+	if !entry.inputPublishPending {
+		return nil
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: entry.workspaceID,
+		RunID:       entry.runID,
+		Payload:     events.RunInputPayload{PendingInputs: inputList(entry.pendingInputs)},
+	}); err != nil {
+		return fmt.Errorf("scheduler: publish run input: %w", err)
+	}
+	next := entry.sidecar()
+	next.InputPublishPending = false
+	if len(next.PendingInputs) == 0 {
+		next.InputStartedAt = nil
+	}
+	if err := s.writeSidecar(next); err != nil {
+		return fmt.Errorf("scheduler: acknowledge run input publication: %w", err)
+	}
+	entry.inputPublishPending = false
 	return nil
 }
 

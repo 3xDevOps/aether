@@ -621,6 +621,12 @@ use the existing terminal or native approval/question surface.
 | OMP 18.3.1 | Uses its public main-session terminal event and `waitForIdle()` so owned background work can drain before Idle; automatic continuation is not settlement. | Named ask tools retain `toolCallId`. `tool_approval_requested/resolved` retain `sessionId` and `toolCallId`, including rejection. The pinned native TUI API has **no generic `ui_prompt_start/end` equivalent**. |
 | Codex legacy notify | `agent-turn-complete` reports Idle only. | No correlated input evidence in this integration. No app-server migration or inference from the final message. |
 
+Pi, OMP, and OpenCode forward native Working reports even when the request
+snapshot is unchanged. Pi/OMP tool callbacks, V1 busy status callbacks, and
+V2 concurrent execution starts refresh liveness without inventing input or
+status transitions. Actual settlement still reports Idle; silence without
+further activity can still trigger the stall detector.
+
 OpenCode keeps execution and requests independent: a native busy session
 stays Working while its tool awaits input, and a background session can
 remain Working after the requesting session becomes idle. Closing a request
