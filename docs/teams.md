@@ -333,8 +333,8 @@ the command.
 ## Workspaces
 
 A workspace is the whole shared scope. It is a repository plus workspace
-settings; a run and its shells use the selected agent account's saved image, or
-the server's standard image when that account has not saved one. See
+settings; a run and its shells use the launching member's saved image, or the
+server's standard image when that member has not saved one. See
 [environments.md](environments.md) for image selection and saving. Everything
 the team shares hangs off the workspace: runs, the event feed, the approval
 inbox, presence, templates, schedules, costs, and the budget. One workspace
@@ -604,7 +604,8 @@ run owner and notification routing without waiting for the recipient to accept.
 The timeline and Run Room record the handoff actor, outgoing owner, and incoming
 owner. A system entry points to the handoff evidence packet, or says that
 evidence is unavailable when preservation did not succeed. The transfer does
-not switch the selected agent account or its cost attribution.
+not switch the selected agent account or its cost attribution, and the run's
+container keeps the home it was created with: the previous owner's.
 
 Aether captures an evidence packet automatically when a run is handed off and
 when it finishes. The finish capture happens before automatic checkout or
@@ -775,7 +776,9 @@ to install the agent and complete the vendor login. The member's server-side
 home is mounted into every container that person receives, so all their runs
 share the same login and installed files. See [harnesses.md](harnesses.md).
 
-A member may explicitly let another collaborator launch against that account:
+A member's **agent account** is their vendor login for each agent CLI, the
+subscription a run spends. A member may explicitly let another collaborator
+launch runs on that account:
 
 ```sh
 # Account owner
@@ -791,16 +794,65 @@ aether account revoke <member-id>
 
 The dashboard exposes the same existing account-sharing controls on **Members**
 and an **Account** picker in the launch dialog. The run is owned by the
-authenticated launcher, whose identity is used for the timeline and Git author.
-The selected account supplies its saved environment, complete home and
-credentials, configuration roots, custom harness definitions, vendor quota, and
-cost attribution.
+authenticated launcher and runs in the launcher's environment: their saved
+image, home, git identity, GitHub login, installed agents, and configuration.
+The selected account supplies only the agent's login file, read-write, plus
+vendor quota and cost attribution. `omp` is the exception: it shares the
+owner's whole `~/.omp/agent` directory. [security.md](security.md#account-sharing)
+lists exactly what is shared and what a recipient's run can still do with the
+login.
+
+Before launching on a shared account, the recipient:
+
+- Installs the agent in their own environment: `aether agent add <name>`,
+  then installs it in `aether terminal`. The vendor login is not needed for
+  an agent they only borrow. The owner's executables never run in the
+  recipient's container.
+- Connects their own GitHub with `aether github connect`
+  ([environment-home.md](environment-home.md#connect-github)); the run pushes
+  and opens pull requests as the recipient.
+
+For a member-defined agent, both members need a definition of that name: the
+recipient's supplies the command, the owner's names the login paths. Without
+the owner's, the launch is refused:
+
+```
+scheduler: harness "<name>" is your own definition, and the shared account <member-id> has none of that name to say which login paths it shares; its owner adds one with: aether agent add <name>
+```
+
+A launch on a shared account whose owner has no login for that agent fails
+with a reason like:
+
+```
+provisioning: scheduler: Grace is not logged in to claude: none of ~/.claude/.credentials.json exists in their home; Grace logs in from their own environment terminal (aether terminal)
+```
+
+After sharing, the owner runs `aether terminal stop` and reopens the
+terminal, so a Claude Code login refreshed there reaches recipients' runs
+([security.md](security.md#account-sharing) explains why).
+
+Runs on a shared account, and the sharing owner's own runs and terminal, need
+Docker Engine 26.0 or newer (API 1.45) on the server. On an older engine
+Aether refuses them: `runtime: docker engine API "1.44" cannot mount a path
+beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
+
+The login file is mounted over the same path in the recipient's home, so an
+empty file can remain there after the run ends; the recipient logging in to
+that agent replaces it. If the recipient logs in to that agent, or deletes that
+file, from another of their own containers while a shared run is live, the
+kernel detaches the mount and that run continues on the recipient's own
+login. With a non-root image, a shared run takes ownership of the owner's
+login path for the run's uid and reserves both homes, so an owner and a
+recipient whose images use different non-root uids cannot run on that login
+at the same time; the second launch is refused with an error ending
+`concurrent containers for the same member must share one uid:gid mapping`.
 
 Sharing is directional. It does not let the recipient open the owner's
-environment terminal, and admins get no implicit account access. It does let a
-root process in the recipient's run read or change every file and credential in
-the shared home. Revocation blocks new launches and relaunches but does not
-stop existing runs; stop them first if access must end immediately.
+environment terminal, and admins get no implicit account access. Revocation
+blocks new launches and relaunches but does not stop existing runs; stop them
+first if access must end immediately. A run started on a shared account
+before the server upgrade that narrowed shares to the login file still mounts
+the owner's whole home until it ends, and cannot be relaunched.
 
 The dashboard's bottom-left status bar reads the selected account's
 subscription quota through the read-only `account.usage` RPC. An empty
@@ -938,13 +990,14 @@ Record these roles separately:
 - **Run owner:** the member responsible for the run's workflow and
   notifications.
 - **Account owner:** the member whose selected account supplies the run's
-  image, home, configuration, and native credentials.
+  agent login and vendor quota. The image, home, and configuration are the
+  run owner's.
 
 The actor is not rewritten as the authorizing human, run owner, or account
 owner merely because the operation was performed on somebody's behalf. A
 mission's finite concurrency and total-attempt limits bound Aether admission;
-they do not narrow what the selected whole-home credentials can do inside the
-container.
+they do not narrow what the run owner's home credentials and the selected
+agent login can do inside the container.
 
 Release B rechecks the current member role, account-sharing authority,
 mission assignment, and control/assignment generation at each consequential
@@ -1058,7 +1111,7 @@ uploaded and server-scanned, so do not assume all secret content stays local.
 Directory-wide count and byte budgets do not truncate imports; bounded batches
 carry the full eligible selection and report progress or an explicit failure.
 The import writes the authenticated member's persistent home immediately,
-including for active runs using that account. An agent may need to reload its
+including for that member's active runs. An agent may need to reload its
 configuration.
 
 The **Files** view browses and edits that own-member configuration beside
@@ -1077,8 +1130,9 @@ preserved. Local executable mode and symlinks cannot be represented by the
 browser. Imports preserve empty and arbitrary binary regular files up to
 64 MiB each, without a directory-wide file-count or aggregate-size ceiling.
 The server rejects unsafe paths, symlink components, hardlinks, and nonregular
-files. A shared account uses the same read-write home rather than
-an isolated per-run copy. A snapshot pin records launch provenance, not an
+files. Every run a member launches, on their own or a shared account, uses
+that member's read-write home rather than an isolated per-run copy; an account
+share never exposes it. A snapshot pin records launch provenance, not an
 isolated writable home or a promise that home edits wait for later runs.
 Editing does not rebuild the installed-agent image.
 

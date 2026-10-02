@@ -587,7 +587,7 @@ cleaned up. Use a new key for a new retention request.
 `aether-internal skill git` teaches native `git`/`gh`; there is no second agent
 Git engine or Git RPC. The topic is offered with a live development execution
 capability, not as proof that `gh`, credentials or push permission are present.
-Check the actual account environment and inspect `git status --short`,
+Check the actual run environment and inspect `git status --short`,
 `git diff`, `git diff --cached`, `git branch --show-current`, `git remote -v`,
 and `gh auth status` before relying on them. Stage exact intended paths, verify
 the behavior/staged diff, and preserve existing author/signing configuration
@@ -747,8 +747,10 @@ account, harness, and `tui` mode among the execution choices;
 `mission.replace-integrator` accepts any listed account and harness in `tui`,
 so a swarm whose choices are all headless can still get an interactive
 integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
-launch in tui mode: <cause>`, a harness the integrator's account cannot start
-in `tui`, such as one whose definition that account no longer has. Workers may
+launch in tui mode: <cause>`, a harness the integrator's run owner cannot
+start in `tui` on that account, such as one whose definition the run owner no
+longer has, or a member-defined harness the shared account's owner has no
+definition of. Workers may
 still run headless. If the integrator's
 harness has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.

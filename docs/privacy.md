@@ -138,9 +138,8 @@ the backing account, not merely permission to view a run. Deliberately retained
 evidence copies instead use the existing evidence **View** permission and
 expiry; review what you retain for that audience. Human members and the run
 agent have distinct
-per-surface control identities; taking over a shared app surface is not a
-promise that the selected account's other processes or credentials are
-isolated from that run.
+per-surface control identities; taking over a shared app surface does not
+isolate that run's other processes or credentials from it.
 
 The companion has no member-home or source-checkout mount. Its browser
 context/profile is transient companion state, outside source control.

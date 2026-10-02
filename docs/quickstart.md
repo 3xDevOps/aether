@@ -348,9 +348,9 @@ The explicit `origin` is the checkout's push destination; it is **not** derived
 from `source_url`. Set it to `""` to leave the workspace without an external
 push destination. GitHub SSH origins are normalized to HTTPS just as with
 `workspace.origin`. Mirror deploy keys only read source: they neither grant
-push permission nor configure run-account GitHub authentication. Publishing
-uses the selected run account's native Git/`gh` credentials, independently of
-the mirror and of local repository linking.
+push permission nor configure a run's GitHub authentication. Publishing uses
+the native Git/`gh` credentials in the run owner's home, also on a shared
+agent account, independently of the mirror and of local repository linking.
 
 ### Optional: configure source control
 
@@ -685,7 +685,8 @@ Native status is read when this view opens and after explicit actions; GitHub
 discovery and feedback refresh are explicit. No background PR watcher, automatic
 merge, force push, branch switch or automatic mutation retry is performed.
 GitHub discovery, creation and feedback need a working native `gh`, network
-access, and the selected account's permissions on the explicit upstream/fork.
+access, and the run's GitHub login's permissions on the explicit upstream/fork:
+the run owner's `gh` login, also on a shared agent account.
 Review and merge on GitHub according to your repository's policy.
 
 ### Optional: pull into a local clone

@@ -437,8 +437,8 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All runs using the member's account and the environment terminal mount one
-shared read-write persistent HOME, so accepted configuration imports and saves
+All runs the member launches and the environment terminal mount one shared
+read-write persistent HOME, so accepted configuration imports and saves
 are visible to active and future runs; a tool may need to reload. Browser
 imports and Files edits do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
@@ -1057,8 +1057,13 @@ it.
 
 The launch form asks for an account, a task, an agent and a mode. `account.list`
 puts the caller first, followed by accounts explicitly shared with them. A
-shared selection makes `agent.list` return that account's custom definitions
-and sends its ID as `account_member_id` on `run.launch`. The task is optional in
+shared selection sends its ID as `account_member_id` on `agent.list` and
+`run.launch`. `agent.list` still returns the caller's own agents and
+installations, since the run executes in the caller's environment, and marks
+each agent the account's owner has no login for with `login_missing`. The
+form lists those as disabled "(not logged in)" entries and says "<owner> is
+not logged in to <agent>"; the swarm grid disables their worker rows the same
+way. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
 with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a
@@ -1070,12 +1075,12 @@ no way back to that state once one is. Under it are the installed entries from
 `agent.list`, then `custom`, the escape hatch that `agent.list` never returns
 and that only launches where the deployment pinned a harness with
 `--harness-definitions`. `agent.list` reports installation from the
-selected account's persistent `~/.local/bin`; uninstalled shipped entries
+caller's persistent `~/.local/bin`; uninstalled shipped entries
 remain visible on the Agents page so setup can install them. The launch form
 also remembers the most recently used installed agent for each account and
 falls back to the first installed entry. With nothing installed nothing is
 preselected, so Launch stays disabled until the member picks one: "No agent is
-installed in this account." and a **Set up an agent** button sit beside the
+installed in your environment." and a **Set up an agent** button sit beside the
 field rather than replacing it, and the button opens the Agents view. A failed
 list request shows its error and no setup button - nothing here can fix a
 gateway that did not answer - and Launch stays disabled there too. **Refresh

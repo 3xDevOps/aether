@@ -383,7 +383,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                 </div>
                 <ul className="border-y border-border text-xs text-muted-foreground">
                   <li className="border-b border-border px-3 py-1.5">
-                    Saved environment, agent login, profile, and vendor quota are shared.
+                    Your agent logins and vendor quota are shared; your environment,
+                    files, and GitHub login are not. Their runs can use, refresh, or
+                    log out those logins.
                   </li>
                   <li className="px-3 py-1.5">
                     Their runs remain attributed to them; running agents are not stopped.
