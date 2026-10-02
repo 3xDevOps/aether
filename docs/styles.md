@@ -152,13 +152,16 @@ presentation state. Domain status enums remain unchanged.
 lists. The labeled run-status chip reserves the full width of all three dots
 before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. A live, acknowledged local controller gets two tapered teal
-highlights circulating around a quiet terminal border, not a pulsing control
-button. The border disappears during replay, history reading, disconnect or
-loss of control. Under
-`prefers-reduced-motion: reduce` the border stays static, while working dots and
-sidebar pulses stop moving; labels retain the state meaning. Loading spinners
-and delayed skeletons remain functional feedback.
+remain static. Live local control has a steady 2px teal inset outline around
+the terminal, alongside the toolbar's **(this tab)** controller marker and
+**Release** action. The pointer-transparent outline uses
+`--accent-soft-foreground` without changing layout; it appears only while this
+tab has live, acknowledged writable control, outside replay and history reading.
+It disappears on release, mirroring, disconnect or denied steering. It never
+orbits or animates and is identical under normal and reduced motion.
+Under `prefers-reduced-motion: reduce`,
+working dots and sidebar pulses stop moving; labels retain the state meaning.
+Loading spinners and delayed skeletons remain functional feedback.
 
 The desktop first-launch splash is a finite branded handoff, not a loading
 screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay

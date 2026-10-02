@@ -1702,10 +1702,13 @@ the terminal with the gateway's own error instead.
   grants write only when no controller exists; a second tab cannot become a
   second writer.
   A mirror uses the toolbar's controller/viewer names and **Take control**, not
-  a repeated read-only instruction. Live, acknowledged local control adds a
-  quiet teal border with two tapered highlights circulating around its edge.
-  Replay, history reading, disconnect, revocation or a non-steerable run removes
-  it. Reduced motion retains a static teal border without the traveling highlights.
+  a repeated read-only instruction. Live, acknowledged local control is shown by
+  the toolbar's **(this tab)** controller marker and **Release** action, plus a
+  steady 2px teal inset outline around the terminal while input is writable.
+  The pointer-transparent outline uses `--accent-soft-foreground`, never changes
+  layout or animates, and stays identical under reduced motion. It is absent
+  during replay or history reading, and on release, mirroring, disconnect or
+  denied steering.
   Starting runs keep their spinner; ended runs say **This run is not running**.
   Whether a member may steer is the server's answer:
   `-32001` downgrades the attach to a mirror and disables the toggle. An
@@ -2672,8 +2675,9 @@ about itself and appears wherever the member is an admin.
   dots bouncing in `--state-working` on board cards, run headers and run lists.
   Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
   The fixed dot box prevents a row shifting when a run starts or stops.
-- **Motion is optional.** The controlling terminal border, working dots and
-  sidebar pulse stop moving under `prefers-reduced-motion: reduce`. The original
+- **Motion is optional.** The controlling terminal's 2px teal outline is always
+  static. Working dots and the sidebar pulse stop moving under
+  `prefers-reduced-motion: reduce`. The original
   shooting-star scene appears only at desktop startup and is skipped under
   reduced motion. There is no reveal-flash animation. Spinner and skeleton
   feedback remains available.

@@ -146,9 +146,13 @@ acknowledged control; the same member controlling elsewhere is **(another sessio
 Narrow toolbars use key and eye icons for controller and viewers, retaining
 accessible role labels. Session markers stay in the controller's hover title
 and screen-reader text instead of wrapping onto another row.
-Two teal highlights travel around the terminal border while this tab has live
-input control. The border disappears during replay, history reading or disconnect;
-reduced motion replaces the traveling highlights with a static teal border.
+Live local ownership is shown by the toolbar's **(this tab)** controller marker
+and **Release** action. A clear, static 2px teal outline surrounds the terminal
+only while this tab has live input. It disappears during replay, while reading
+history, after disconnecting or releasing control, and whenever input access is
+lost; a read-only mirror never shows it. The outline does not move or animate,
+including when reduced motion is enabled. The toolbar's controller markers and
+**Take control** / **Release** actions remain unchanged.
 
 Presence refreshes on mount, every five seconds and after acknowledged control
 changes, independently of room history. A stalled refresh times out after 15
