@@ -1029,14 +1029,18 @@ update.
 | Agent | Update command |
 | --- | --- |
 | `claude` | `claude update` |
-| `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix "$HOME/.local" "@openai/codex@<version>"` |
-| `pi` | `pi update --self` |
+| `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix <stage> "@openai/codex@<version>"` |
+| `pi` | reads the latest version with `npm view @earendil-works/pi-coding-agent version`; when `pi --version` differs, runs `npm install -g --prefix <stage> --ignore-scripts "@earendil-works/pi-coding-agent@<version>"` |
 | `omp` | `omp update` |
 
-Codex does not use `codex update`: it installs into the image's global npm
-prefix, outside the member home, and reports success while the home copy stays
-old. A `codex` in `~/.local/bin` that npm did not install is not updated, and
-the update reports `codex in ~/.local/bin was not installed with npm, so
+For `codex` and `pi`, npm installs the new version into a stage directory
+beside the old one in `~/.local/lib`, and the package directory is then
+swapped in with two renames, so an agent starting meanwhile never sees a
+half-written install. Their own updaters are not used: `codex update`
+installs into the image's global npm prefix, outside the member home, and
+`pi update --self` replaces files in place. A `codex` or `pi` in
+`~/.local/bin` that npm did not install is not updated, and the update
+reports, for example, `codex in ~/.local/bin was not installed with npm, so
 Aether cannot update it`.
 
 Nothing else is touched: no agent configuration, plugins, extensions, or
@@ -1071,11 +1075,6 @@ could not update claude from 2.1.288 (Claude Code): the updater exited 1: <updat
 An updater still running after 10 minutes is stopped and reported as
 `the updater did not finish within 10m0s`. Killing the run or closing the
 dashboard does not stop an update.
-
-npm-based updates (`codex`, `pi`) replace files in place. An agent started
-while one runs, or a run already using that agent, can see a broken install
-until the update finishes. Running `npm install` for the agent yourself in
-the terminal has the same effect.
 
 A newer CLI may migrate its own state in the member home on first start, and
 Aether does not roll an update back. Relaunching a retained run reuses its

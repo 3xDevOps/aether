@@ -519,8 +519,8 @@ func TestUpdateScripts(t *testing.T) {
 	if want := []string{"claude", "codex", "omp", "pi"}; !slices.Equal(updated, want) {
 		t.Fatalf("profiles with an update script = %v, want %v", updated, want)
 	}
-	if pi, _ := Lookup("pi"); pi.UpdateScript != "pi update --self" {
-		t.Errorf("pi update script %q must update pi alone, never the member's packages", pi.UpdateScript)
+	if pi, _ := Lookup("pi"); strings.Contains(pi.UpdateScript, "update --self") {
+		t.Errorf("pi update script %q must not use pi's own updater, which replaces files in place", pi.UpdateScript)
 	}
 }
 
