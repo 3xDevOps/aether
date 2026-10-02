@@ -49,11 +49,12 @@ func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, prof
 	return user, nil
 }
 
-// reserveCredentialUser atomically reserves the non-root uid:gid for every
-// writable member home in homes. Containers that share a member home must use
-// one mapping, so no ownership pass can race a live container using another
-// mapping.
-func (s *Scheduler) reserveCredentialUser(homes []domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
+// reserveCredentialUser atomically reserves the non-root uid:gid for a
+// container that mounts home, and login's login paths when login is set. A
+// conflicting live reservation (see blocks) refuses it, so no ownership pass
+// can take a home or a shared login from a live container of its owner, or
+// flip a login between two recipients.
+func (s *Scheduler) reserveCredentialUser(home, login domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
@@ -64,18 +65,19 @@ func (s *Scheduler) reserveCredentialUser(homes []domain.MemberID, user string, 
 		return nil, nil
 	}
 	for other := range s.credentialUsers {
-		if other.user == user {
+		if !other.blocks(home, login, user) {
 			continue
 		}
-		for _, member := range homes {
-			if other.reserves(member) {
-				return nil, fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-					member, other.owner, other.user, owner, user)
-			}
+		if other.home == home {
+			return nil, fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+				home, other.owner, other.user, owner, user)
 		}
+		return nil, fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a run on a shared account must use the uid:gid of the owner's live containers and of other runs on that login",
+			login, other.owner, other.user, owner, user)
 	}
 	reservation := &credentialUserReservation{
-		homes: homes,
+		home:  home,
+		login: login,
 		user:  user,
 		owner: owner,
 		run:   run,
@@ -126,7 +128,8 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 			continue
 		}
 		reservation := &credentialUserReservation{
-			homes: entry.homes(),
+			home:  entry.memberID,
+			login: entry.loginMember,
 			user:  entry.runUser,
 			owner: "live run " + string(entry.runID),
 			run:   entry,
@@ -144,13 +147,13 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
 	for other := range s.credentialUsers {
-		if other.reserves(entry.member) && other.user != user {
+		if other.blocks(entry.member, "", user) {
 			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
 				entry.member, other.owner, other.user, user)
 		}
 	}
 	reservation := &credentialUserReservation{
-		homes:    []domain.MemberID{entry.member},
+		home:     entry.member,
 		user:     user,
 		owner:    "environment terminal " + string(entry.member),
 		terminal: entry,
@@ -163,19 +166,10 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 }
 
 // reserveRunUser records the resolved run user and reserves its writable
-// member homes for the full live-run registry lifetime.
+// member home and shared login for the full live-run registry lifetime.
 func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {
-	_, err := s.reserveCredentialUser(entry.homes(), user, sharedHome, "live run "+string(entry.runID), entry)
+	_, err := s.reserveCredentialUser(entry.memberID, entry.loginMember, user, sharedHome, "live run "+string(entry.runID), entry)
 	return err
-}
-
-// homes lists the member homes the run's ownership pass changes: the home
-// it mounts, and the account owner's when it mounts login paths from it.
-func (e *supervised) homes() []domain.MemberID {
-	if e.loginMember == "" {
-		return []domain.MemberID{e.memberID}
-	}
-	return []domain.MemberID{e.memberID, e.loginMember}
 }
 
 // errKillRequested aborts provisioning when a Kill was accepted for the

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -228,7 +229,10 @@ func TestLoginMissingMatchesLaunch(t *testing.T) {
 		t.Fatal("launch without the owner's login was accepted")
 	}
 	if !missing(e.member.ID, e.owner.ID, "aider") {
-		t.Fatal("own definition the owner lacks is not reported missing")
+		t.Fatal("the launcher's own definition on a shared account is not reported missing")
+	}
+	if missing(e.member.ID, e.member.ID, "aider") {
+		t.Fatal("the launcher's own definition on their own account reports a missing login")
 	}
 	if missing(e.member.ID, e.owner.ID, "fake") || missing(e.member.ID, e.member.ID, "claude") {
 		t.Fatal("a harness without login paths, or the caller's own account, reports a missing login")
@@ -240,19 +244,63 @@ func TestLoginMissingMatchesLaunch(t *testing.T) {
 	writeHomeFiles(t, e.ownerHome, claudeLogin, ".aider/auth.json")
 	aider.CredentialPaths = []string{"/root/.aider/auth.json"}
 	storeMemberDefinition(t, e.testEnv, e.owner.ID, aider)
-	for _, name := range []string{"claude", "aider"} {
-		if missing(e.member.ID, e.owner.ID, name) {
-			t.Fatalf("%s with the owner's login reported missing", name)
-		}
+	if missing(e.member.ID, e.owner.ID, "claude") {
+		t.Fatal("claude with the owner's login reported missing")
 	}
-	for _, rel := range []string{".claude", ".aider"} {
-		if _, err := os.Lstat(filepath.Join(e.adaHome, rel)); !os.IsNotExist(err) {
-			t.Fatalf("LoginMissing created %s in the launcher's home: %v", rel, err)
-		}
+	if !missing(e.member.ID, e.owner.ID, "aider") {
+		t.Fatal("the launcher's own definition is launchable because the owner defined one too")
+	}
+	if _, err := os.Lstat(filepath.Join(e.adaHome, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("LoginMissing created .claude in the launcher's home: %v", err)
 	}
 
 	replaceWithLink(t, filepath.Join(e.ownerHome, claudeLogin), filepath.Join(e.ownerHome, ".aider/auth.json"))
 	if !missing(e.member.ID, e.owner.ID, "claude") {
 		t.Fatal("symlinked owner login is not reported missing")
+	}
+}
+
+// The empty file a pin creates is a mountpoint, not a login: a recipient's
+// launch on the sharer's account is refused and reported missing, while the
+// sharer's own containers still pin it.
+func TestSharerPlaceholderIsNotALogin(t *testing.T) {
+	t.Parallel()
+	e := newSharerEnv(t)
+	if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
+		t.Fatalf("sharer run subpath mounts = %+v, want the pin", got)
+	}
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.owner.ID, e.member.ID, "on placeholder", "claude", domain.LaunchTUI)
+	if err == nil || !strings.Contains(err.Error(), "is not logged in to claude") {
+		t.Fatalf("recipient launch on the placeholder = %v, want the not-logged-in refusal", err)
+	}
+	if missing, err := e.sched.LoginMissing(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || !missing {
+		t.Fatalf("LoginMissing on the placeholder = %v, %v; want true", missing, err)
+	}
+	if got := subpathMounts(e.terminal(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
+		t.Fatalf("sharer terminal subpath mounts = %+v, want the pin", got)
+	}
+}
+
+// A login file with another hard link in the sharer's home is neither shared
+// nor pinned: handing it over would hand over the other name too.
+func TestSharerHardLinkedLoginIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newSharerEnv(t)
+	writeHomeFiles(t, e.adaHome, ".ssh/id_ed25519")
+	if err := os.MkdirAll(filepath.Join(e.adaHome, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(e.adaHome, ".ssh/id_ed25519"), filepath.Join(e.adaHome, claudeLogin)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.owner.ID, e.member.ID, "on hard link", "claude", domain.LaunchTUI)
+	if err == nil || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("recipient launch on a hard-linked login = %v, want a hard-link refusal", err)
+	}
+	if missing, err := e.sched.LoginMissing(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || !missing {
+		t.Fatalf("LoginMissing on a hard-linked login = %v, %v; want true", missing, err)
+	}
+	if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
+		t.Fatalf("sharer run subpath mounts = %+v, want none", got)
 	}
 }

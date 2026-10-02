@@ -38,7 +38,9 @@ type inodeKey struct{ dev, ino uint64 }
 // (including object directories, so the run can add new objects),
 // unprotected files, and member homes - is chowned normally. The member's
 // live containers use one uid:gid mapping, so this pass cannot flip ownership
-// back and forth.
+// back and forth. A shared login is not held against its owner: an owner's
+// container with another uid takes the login back here, and a recipient's
+// live run on it loses access.
 func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mounts []runtime.Mount, user string) error {
 	if user == "" {
 		return nil
@@ -94,6 +96,8 @@ func chownSubpath(base, sub string, uid, gid int) error {
 		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
 	}
 	switch {
+	case info.Mode().IsRegular() && info.Sys().(*syscall.Stat_t).Nlink > 1:
+		err = errors.New("has another hard link, which the chown would also hand over")
 	case info.Mode().IsRegular():
 		err = parent.Lchown(leaf, uid, gid)
 	case info.IsDir():

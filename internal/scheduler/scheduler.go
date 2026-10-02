@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -225,11 +224,15 @@ type Scheduler struct {
 	shells int
 }
 
-// credentialUserReservation protects the writable member homes a container
-// changes ownership in from other ownership changes while it is pending or
-// live. Root containers do not need a reservation because they skip chown.
+// credentialUserReservation protects the writable member home a container
+// mounts, and the login it mounts from another member's shared account,
+// from ownership changes to another uid:gid while it is pending or live.
+// Root containers do not need a reservation because they skip chown.
 type credentialUserReservation struct {
-	homes    []domain.MemberID
+	home domain.MemberID
+	// login is the account owner whose login paths the container mounts,
+	// empty when it mounts none.
+	login    domain.MemberID
 	user     string
 	owner    string
 	run      *supervised
@@ -240,8 +243,19 @@ type credentialUserReservation struct {
 	pending bool
 }
 
-func (r *credentialUserReservation) reserves(member domain.MemberID) bool {
-	return slices.Contains(r.homes, member)
+// blocks reports whether r keeps a container that mounts home, and login's
+// login paths when login is set, from running as user. The owner of a home
+// always wins: a reservation that only mounts a login from home never blocks
+// a container whose home it is, while the owner's live containers and other
+// runs on the same login block a run on that login with another mapping.
+func (r *credentialUserReservation) blocks(home, login domain.MemberID, user string) bool {
+	if r.user == user {
+		return false
+	}
+	if r.home == home {
+		return true
+	}
+	return login != "" && (r.home == login || r.login == login)
 }
 
 // supervised is the in-memory state of one run with a live container.
@@ -260,8 +274,8 @@ type supervised struct {
 	// HomeMember so a later restart still knows.
 	legacyHome bool
 	// loginMember is the account owner whose login paths the container
-	// mounts and whose home the ownership pass therefore also changes;
-	// empty when nothing of another member's is mounted.
+	// mounts and the ownership pass therefore also changes; empty when
+	// nothing of another member's is mounted.
 	loginMember domain.MemberID
 	// reporter is how much this run's harness can say about its own state
 	// (internal/harness). It is fixed at launch, because the reporter is
@@ -696,19 +710,17 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	return harness.Argv(argv, task), profile, nil
 }
 
-// errNoAccountDefinition completes the refusal of a launch of member's own
-// harness definition on an account whose owner has none of that name.
-var errNoAccountDefinition = errors.New("has none of that name to say which login paths it shares")
+// errMemberDefinitionOnly refuses member's own harness definition on
+// another member's account. A member definition declares no login the
+// owner agreed to share, so only server-wide definitions can.
+var errMemberDefinitionOnly = errors.New("is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares")
 
 // launchProfile resolves the profile and argv templates for one launch by
 // member on account's shared account. Resolution precedence, in member's own
 // context: the server-wide admin spec, then member's stored definition, then
-// the shipped registry. The launcher decides what executes; the account owner
-// decides what an account share exposes. So when account differs from member
-// and the harness is member's own definition, the profile's CredentialPaths
-// come from account's stored definition of the same name, never member's,
-// which could otherwise name any path in the owner's home. Admin specs and the
-// registry are server-controlled and apply to both sides.
+// the shipped registry. Admin specs and the registry are server-controlled,
+// so their CredentialPaths decide what a share exposes; member's own
+// definition is refused on another member's account.
 func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, []string, []string, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
@@ -751,14 +763,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
 	}
 	if memberDefined && account != member {
-		ownerSpec, found, err := s.memberHarnessSpec(ctx, account, harnessName)
-		if err != nil {
-			return harness.Profile{}, nil, nil, err
-		}
-		if !found {
-			return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: harness %q is your own definition, and the shared account %s %w; its owner adds one with: aether agent add %s", harnessName, account, errNoAccountDefinition, harnessName)
-		}
-		profile.CredentialPaths = ownerSpec.CredentialPaths
+		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
 	}
 	return profile, tui, headless, nil
 }

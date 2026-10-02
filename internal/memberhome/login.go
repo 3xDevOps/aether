@@ -15,9 +15,11 @@ import (
 
 // LoginPathIsDir reports whether the home-relative login path rel in
 // member's home is a directory (true) or a regular file (false). A missing
-// path returns an error matching fs.ErrNotExist. A symlink at any component,
-// or a final entry of any other type, makes the path unshareable. The runtime
-// enforces the same rule when it mounts the path; this is the early refusal.
+// path, or an empty file, returns an error matching fs.ErrNotExist: an empty
+// file is a mountpoint Aether created, not a login. A symlink at any
+// component, a file with another hard link, or a final entry of any other
+// type makes the path unshareable. The runtime enforces the symlink rule when
+// it mounts the path; this is the early refusal.
 func (m *Manager) LoginPathIsDir(member domain.MemberID, rel string) (bool, error) {
 	home, err := m.openHome(member)
 	if err != nil {
@@ -38,6 +40,10 @@ func (m *Manager) LoginPathIsDir(member domain.MemberID, rel string) (bool, erro
 		return false, fmt.Errorf("memberhome: login path %s in %q is a symlink and cannot be shared", rel, member)
 	case info.IsDir():
 		return true, nil
+	case info.Mode().IsRegular() && hasMultipleLinks(info):
+		return false, fmt.Errorf("memberhome: login path %s in %q has another hard link and cannot be shared", rel, member)
+	case info.Mode().IsRegular() && info.Size() == 0:
+		return false, fmt.Errorf("memberhome: login path %s in %q is empty: %w", rel, member, fs.ErrNotExist)
 	case info.Mode().IsRegular():
 		return false, nil
 	}

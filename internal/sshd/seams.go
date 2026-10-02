@@ -58,8 +58,8 @@ func launchWithOptions(ctx context.Context, runs RunController, workspace domain
 type RunController interface {
 	Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
 	// LoginMissing reports whether member's launch of harness on account
-	// would be refused for want of the account owner's login, resolving it
-	// as Launch does without changing either member's home.
+	// would be refused over the account owner's login, resolving it as
+	// Launch does without changing either member's home.
 	LoginMissing(ctx context.Context, member, account domain.MemberID, harness string) (bool, error)
 	// ContainerAddr resolves the network address of a supervised run
 	// container.

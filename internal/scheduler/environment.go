@@ -188,8 +188,8 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 	return mounts, nil
 }
 
-// accountLogin is one of a profile's login paths that exists in an account
-// owner's home.
+// accountLogin is one of a profile's login paths that holds a login in an
+// account owner's home: a directory or a non-empty file.
 type accountLogin struct {
 	rel string
 	dir bool
@@ -197,8 +197,9 @@ type accountLogin struct {
 
 // accountLogins resolves profile's login paths in account's home without
 // changing anything in it. A profile that declares none has nothing to share.
-// One whose declared paths are all missing is refused, since the run could
-// only start logged out, and so is a path that cannot be shared.
+// One whose declared paths are all missing or empty files is refused, since
+// the run could only start logged out, and so is a path that cannot be
+// shared.
 func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, profile harness.Profile) ([]accountLogin, error) {
 	paths, err := profile.LoginPaths()
 	if err != nil {
@@ -226,21 +227,21 @@ func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, 
 	for i, rel := range paths {
 		shown[i] = "~/" + rel
 	}
-	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: none of %s exists in their home; %s logs in from their own environment terminal (aether terminal)",
+	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: no login at %s in their home; %s logs in from their own environment terminal (aether terminal)",
 		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName)
 }
 
 // LoginMissing reports whether member's launch of harnessName on account
-// would be refused over the account owner's login: the owner has no
-// definition of a member-defined harness's name, or the harness's login
-// paths are missing from the owner's home or cannot be shared. It resolves
-// exactly as a launch does, but changes nothing in either home.
+// would be refused over the account owner's login: the harness is member's
+// own definition, or its login paths are missing from the owner's home or
+// cannot be shared. It resolves exactly as a launch does, but changes
+// nothing in either home.
 func (s *Scheduler) LoginMissing(ctx context.Context, member, account domain.MemberID, harnessName string) (bool, error) {
 	if account == member || s.cfg.Homes == nil {
 		return false, nil
 	}
 	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
-	if errors.Is(err, errNoAccountDefinition) {
+	if errors.Is(err, errMemberDefinitionOnly) {
 		return true, nil
 	}
 	if err != nil {

@@ -740,7 +740,8 @@ type AgentInfo struct {
 	// empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// LoginMissing is true when a launch of this agent on the listed shared
-	// account would be refused for want of the account owner's login. It is
-	// never set for the caller's own account.
+	// account would be refused over its login: the account owner has none
+	// for it, or it is the caller's own definition, which runs only on their
+	// own account. It is never set for the caller's own account.
 	LoginMissing bool `json:"login_missing,omitempty"`
 }

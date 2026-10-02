@@ -5,6 +5,7 @@ package scheduler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -195,5 +196,21 @@ func TestApplyRunOwnershipSubpathOnly(t *testing.T) {
 	}
 	if got := info.Sys().(*syscall.Stat_t).Uid; got != 0 {
 		t.Fatalf("file outside the base chowned to %d", got)
+	}
+
+	if err := os.Remove(filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(owner, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(owner, ".ssh/id"), filepath.Join(owner, ".claude/.credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, mounts[:1], "2000:2000"); err == nil || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("ownership pass on a hard-linked login = %v, want a refusal", err)
+	}
+	if got := uid(".ssh/id"); got != 0 {
+		t.Fatalf("file hard-linked to the login chowned to %d", got)
 	}
 }
