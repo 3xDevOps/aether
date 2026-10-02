@@ -1022,8 +1022,9 @@ accepts a file or `-` for standard input. The result contains a durable
 **Success and failure are terminal**: a run holds one terminal report. After
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
-report. Relaunching the run (`aether relaunch <run>`) supersedes the terminal
-report, so the reopened agent can report again under a new idempotency key;
+report. Relaunching the run (**Relaunch** on its card, or `aether relaunch
+<run>`) supersedes the terminal report, so the reopened agent can report again
+under a new idempotency key;
 the superseded report's key then fails with `CodeConflict`. **Blocked is
 nonterminal**: a run may file any number of blocked reports, before or after
 one another.
