@@ -782,7 +782,16 @@ share the same login and installed files. See [harnesses.md](harnesses.md).
 
 A member's **agent account** is their vendor login for each agent CLI, the
 subscription a run spends. A member may explicitly let another collaborator
-launch runs on that account:
+launch runs on that account. In the dashboard:
+
+- **Share or revoke:** the owner opens **Members** and, under **Your agent
+  account**, presses **Share account** beside the teammate, or **Revoke
+  access** to take it back.
+- **Launch on it:** the recipient presses **New run** on the Board and picks
+  the owner, listed as `<name> (shared)`, in the **Account** picker
+  (**Integrator account** when launching a swarm).
+
+The CLI equivalent, for agents and scripts:
 
 ```sh
 # Account owner
@@ -796,10 +805,9 @@ aether run "triage the failures" --agent codex --account <owner-member-id>
 aether account revoke <member-id>
 ```
 
-The dashboard exposes the same existing account-sharing controls on **Members**
-and an **Account** picker in the launch dialog. The run is owned by the
-authenticated launcher and runs in the launcher's environment: their saved
-image, home, git identity, GitHub login, installed agents, and configuration.
+The run is owned by the authenticated launcher and runs in the launcher's
+environment: their saved image, home, git identity, GitHub login, installed
+agents, and configuration.
 The selected account supplies only the agent's login file, read-write, plus
 vendor quota and cost attribution. `omp` is the exception: it shares the
 owner's whole `~/.omp/agent` directory, from which omp loads extensions and
@@ -811,31 +819,43 @@ what a recipient's run can still do with the login.
 
 Before launching on a shared account, the recipient:
 
-- Installs the agent in their own environment: `aether agent add <name>`,
-  then installs it in `aether terminal`. The vendor login is not needed for
-  an agent they only borrow. The owner's executables never run in the
-  recipient's container, except an `omp` owner's extensions and MCP servers.
-- Connects their own GitHub with `aether github connect`
-  ([environment-home.md](environment-home.md#connect-github)); the run pushes
-  and opens pull requests as the recipient.
+- Installs the agent in their own environment. In the dashboard, **Set up an
+  agent** in the launch dialog opens **Agents**, where **Add agent** types the
+  vendor installer into the terminal dock. From the CLI: `aether agent add
+  <name>`, then install it in `aether terminal`. The vendor login is not
+  needed for an agent they only borrow. The owner's executables never run in
+  the recipient's container, except an `omp` owner's extensions and MCP
+  servers.
+- Connects their own GitHub; the run pushes and opens pull requests as the
+  recipient. In the local dashboard (`aether gui`), that is **Connect
+  GitHub** in the onboarding wizard's Agents step. The server-hosted
+  dashboard has no GitHub control, so there it is `aether github connect`
+  ([environment-home.md](environment-home.md#connect-github)), which is also
+  the CLI equivalent.
 
 A member-defined agent (`aether agent add`) runs only on its member's own
-account; a launch of it on a shared account is refused:
+account. On a shared account the launch dialog lists it as `<name> (your
+account only)` and does not offer it; a launch from the CLI is refused:
 
 ```
 scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
 ```
 
-A launch on a shared account whose owner has no login for that agent, or
-only an empty file at its login path, fails with a reason like:
+An agent whose owner has no login for it, or only an empty file at its login
+path, is listed as `<name> (not logged in)`. The owner logs in from the
+terminal dock on their own Board, and the recipient presses **Refresh
+agents**. A launch from the CLI fails with a reason like:
 
 ```
 provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in to claude in their own environment terminal
 ```
 
-After sharing, the owner runs `aether terminal stop` and reopens the
-terminal, so a Claude Code login refreshed there reaches recipients' runs
-([security.md](security.md#account-sharing) explains why).
+A Claude Code login refreshed in the owner's environment terminal reaches
+recipients' runs only if that terminal was started after the owner's first
+share ([security.md](security.md#account-sharing) explains why). When the
+terminal is running at that share, **Members** says so and offers **Stop
+environment**; the owner then reopens it with **Open** in the terminal dock
+on the Board. From the CLI: `aether terminal stop`, then `aether terminal`.
 
 Runs on a shared account, and every container that mounts a sharing owner's
 home - their runs, their environment terminal, and candidate verification
@@ -868,9 +888,10 @@ than the run's.
 Sharing is directional. It does not let the recipient open the owner's
 environment terminal, and admins get no implicit account access. Revocation
 blocks new launches and relaunches but does not stop existing runs; stop them
-first if access must end immediately. A run started on a shared account
-before the server upgrade that narrowed shares to the login file still mounts
-the owner's whole home until it ends, and cannot be relaunched.
+first if access must end immediately, with **Kill** in the run's header
+(`aether kill <run-id>`). A run started on a shared account before the server
+upgrade that narrowed shares to the login file still mounts the owner's whole
+home until it ends, and cannot be relaunched.
 
 The dashboard's bottom-left status bar reads the selected account's
 subscription quota through the read-only `account.usage` RPC. An empty

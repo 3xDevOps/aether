@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
+import { initialEnvTerminal } from '@/store/env-terminal'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 
@@ -206,6 +207,68 @@ describe('members view', () => {
     await waitFor(() => expect(client.accountShare).toHaveBeenCalledWith(bob.id))
     fireEvent.click(await screen.findByRole('button', { name: 'Revoke access' }))
     await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
+  })
+
+  describe('after a first share', () => {
+    const notice =
+      "Your environment terminal was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from the terminal dock on the Board. Runs you already have running keep the mounts they started with until they end."
+    const sharing = (running: boolean) =>
+      fakeApi({
+        accountList: vi
+          .fn()
+          .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+          .mockResolvedValue({ accounts: [alice], shared_with: [bob] }),
+        accountShare: vi.fn(async () => ({})),
+        terminalStatus: vi.fn(async () => ({ running, tabs: running ? ['main'] : [] })),
+        terminalStop: vi.fn(async () => ({})),
+      })
+    beforeEach(() => useStore.setState({ envTerminal: initialEnvTerminal }))
+
+    it('offers to stop a terminal started before the share', async () => {
+      const client = sharing(true)
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      const status = await screen.findByRole('status')
+      expect(status.querySelector('p')?.textContent).toBe(notice)
+
+      fireEvent.click(within(status).getByRole('button', { name: 'Stop environment' }))
+      const dialog = within(await screen.findByRole('alertdialog'))
+      expect(dialog.getByText(/so does everything running in it/)).toBeDefined()
+      expect(client.terminalStop).not.toHaveBeenCalled()
+      fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+      await waitFor(() => expect(client.terminalStop).toHaveBeenCalled())
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+      expect(useStore.getState().envTerminal.status?.running).toBe(false)
+    })
+
+    it('shows the stop error in the confirmation', async () => {
+      const client = sharing(true)
+      vi.mocked(client.terminalStop).mockRejectedValue(new Error('stop container: daemon is down'))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      const dialog = within(await screen.findByRole('alertdialog'))
+      fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+      expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
+    })
+
+    it('says nothing more when no terminal is running', async () => {
+      const client = sharing(false)
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await waitFor(() => expect(client.terminalStatus).toHaveBeenCalled())
+      await screen.findByRole('button', { name: 'Revoke access' })
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Stop environment' })).toBeNull()
+    })
   })
 
   it('renders the server refusal verbatim when a role change is denied', async () => {

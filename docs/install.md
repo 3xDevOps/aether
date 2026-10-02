@@ -407,17 +407,23 @@ way to get there is to have just updated.
 A run on a shared agent account now uses its launcher's image and home and
 mounts only the agent's login from the account owner's home
 ([security.md](security.md#account-sharing)). Recipients install the agent in
-their own environment and run `aether github connect` themselves; they no
-longer get the owner's tools, image, GitHub login, or files. Runs on a shared
-account, and every container that mounts a sharing owner's home (their runs,
-their environment terminal, and candidate verification started by them or by
-their runs), need Docker Engine 26.0 or newer; on an older engine Aether
-refuses them with `runtime: docker engine API "1.44" cannot mount a path
-beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`. A
-member-defined agent no longer launches on a shared account. Containers
-created before the upgrade still mount the owner's whole home until they end,
-and relaunching one is refused; stop shared runs before or after upgrading to
-end that exposure immediately.
+their own environment (**Agents** > **Add agent**, or `aether agent add`) and
+connect their own GitHub (**Connect GitHub** in the local dashboard's
+onboarding, or `aether github connect`); they no longer get the owner's tools,
+image, GitHub login, or files. Runs on a shared account, and every container
+that mounts a sharing owner's home (their runs, their environment terminal,
+and candidate verification started by them or by their runs), need Docker
+Engine 26.0 or newer; on an older engine Aether refuses them with `runtime:
+docker engine API "1.44" cannot mount a path beneath a member home; that needs
+API 1.45 (Docker Engine 26.0) or newer`. A member-defined agent no longer
+launches on a shared account. Containers created before the upgrade still
+mount the owner's whole home until they end, and relaunching one is refused;
+stop shared runs before or after upgrading to end that exposure immediately
+(**Kill** in the run's header, or `aether kill <run-id>`). A member who
+already shares stops and reopens their environment terminal once after the
+upgrade, so a Claude Code login refreshed there reaches recipients' runs:
+**Stop environment**, then **Open**, in the terminal dock on the Board, or
+`aether terminal stop`, then `aether terminal`.
 
 ## Manual install
 

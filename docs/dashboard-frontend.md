@@ -1066,9 +1066,11 @@ member-defined agent, which runs only on the caller's own account. The form
 takes the reason from those two flags, never from `source`: a member-defined
 name that is also a server-wide definition launches the server-wide one, so
 it can be `login_missing`. It lists the first as disabled "(not logged in)"
-entries and says "<owner> is not logged in to <agent>", and the second as
-"(your account only)" entries with "Your own agent definitions run only on
-your own account"; the swarm grid disables their worker rows the same way and
+entries and says "<owner> is not logged in to <agent>", that the owner logs
+in from the terminal dock on their own Board, and to press **Refresh
+agents** then; the second as "(your account only)" entries with "Your own
+agent definitions run only on your own account" and which **Account** entry
+launches them; the swarm grid disables their worker rows the same way and
 drops a ticked worker whose agent stops being launchable when the lists
 refresh. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
@@ -1088,7 +1090,10 @@ also remembers the most recently used installed agent for each account and
 falls back to the first installed entry. With nothing installed nothing is
 preselected, so Launch stays disabled until the member picks one: "No agent is
 installed in your environment." and a **Set up an agent** button sit beside the
-field rather than replacing it, and the button opens the Agents view. A failed
+field rather than replacing it, and the button opens the Agents view. On a
+shared account the note adds that the run starts the agent installed in the
+caller's environment with the owner's login, so the caller installs it
+without logging in. A failed
 list request shows its error and no setup button - nothing here can fix a
 gateway that did not answer - and Launch stays disabled there too. **Refresh
 agents** retries discovery after a connection failure or an installation
@@ -1699,6 +1704,15 @@ environment container**, which is the wait Docker's container start accounts
 for; a second tab, a tab switch or an expanded dock is **Connecting to your
 environment**, with no container to start. A refused or failed start replaces
 the terminal with the gateway's own error instead.
+
+The same stop confirmation (`StopEnvironmentDialog`) backs the Members
+page's notice after a member's first account share: containers started
+before that share lack the in-place mount of Claude Code's login file
+([security.md](security.md#account-sharing)), so when the store's
+`envTerminal.status`, re-read with `terminal.status` at the share, says the
+terminal is running, **Your agent account** says so and offers **Stop
+environment**. A share while another grant already exists shows nothing,
+because the page cannot tell whether the terminal predates the first one.
 
 - **The socket is `attach.ts`**, framework-free. It reuses `backoff()` from
   `src/lib/stream.ts`, splits paste input below the gateway's 64 KiB frame cap,

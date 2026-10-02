@@ -47,11 +47,12 @@ way.
 
 ### Account sharing
 
-`aether account share <member-id>` lets that member launch runs on your agent
-account (`aether run --account <your-member-id>`, or the launch dialog's
-**Account** picker) so they use your agent CLI subscription. The launcher
-remains the run owner and actor; usage and cost are attributed to the selected
-account.
+Sharing your agent account with a member (**Share account** under **Your
+agent account** on **Members**, or `aether account share <member-id>`) lets
+them launch runs on it from the launch dialog's **Account** picker (or
+`aether run --account <your-member-id>`), so they use your agent CLI
+subscription. The launcher remains the run owner and actor; usage and cost
+are attributed to the selected account.
 
 A run always starts from its launcher's saved image, or the standard image,
 with the launcher's home as `$HOME`. Git identity, `.gitconfig`, the gh login,
@@ -146,21 +147,23 @@ Aether creates one volume per sharing owner, named
 `aether-home-<hash>` and labelled `aether.managed=true`, as a bind of that
 owner's home; removing the volume does not delete the home.
 
-**Claude's login file.** Claude Code replaces `~/.claude/.credentials.json`
-by rename on every token refresh and writes in place only when the rename
-fails, so a refresh in the owner's own container would leave recipients'
-runs holding the old file. Once a member has shared their account, Aether
-therefore also mounts that file in place in the member's own runs and
-environment terminal, creating an empty file when none exists, so every
-writer updates the one file recipients' runs hold. The empty file is not a
-login: until the owner logs in, a recipient's `claude` launch is refused. A
-login file with another hard link is neither mounted in place nor shared. A
-container the owner started before sharing, typically the long-lived
-environment terminal, lacks that mount: run `aether terminal stop` after
-sharing and reopen it. In a container with the mount, Claude's `/logout`
-revokes the login at Anthropic and reports success but cannot delete the
-file; the dead tokens are cleared on the next refresh. Members who share
-nothing are unaffected.
+**Claude's login file.** Claude Code replaces `~/.claude/.credentials.json` by
+rename on every token refresh and writes in place only when the rename fails,
+so a refresh in the owner's own container would leave recipients' runs holding
+the old file. Once a member has shared their account, Aether therefore also
+mounts that file in place in the member's own runs and environment terminal,
+creating an empty file when none exists, so every writer updates the one file
+recipients' runs hold. The empty file is not a login: until the owner logs in,
+a recipient's `claude` launch is refused. A login file with another hard link
+is neither mounted in place nor shared. A container the owner started before
+sharing, typically the long-lived environment terminal, lacks that mount, so
+stop it and open it again. When the terminal is running at a first share,
+**Members** says so and offers **Stop environment**; **Open** in the terminal
+dock on the Board starts it again. From the CLI: `aether terminal stop`, then
+`aether terminal`. In a container with the mount, Claude's `/logout` revokes
+the login at Anthropic and reports success but cannot delete the file; the
+dead tokens are cleared on the next refresh. Members who share nothing are
+unaffected.
 
 **Non-root images.** With a non-root image, a run hands the login path to its
 own uid before it starts. The owner's containers are never refused because of
@@ -179,7 +182,8 @@ uid, and a recipient's live run with another uid loses access the same way.
 
 Revoking a grant blocks later launches and relaunches. It does not stop an
 already-running container or remove the login mounted into it. Stop those
-runs before revoking access when immediate removal matters.
+runs before revoking access when immediate removal matters: **Kill** in the
+run's header, or `aether kill <run-id>`.
 
 Containers created before shares were narrowed to the login path still mount
 the account owner's whole home until they end. They stay supervised, and
@@ -190,7 +194,7 @@ scheduler: invalid run state transition: run <run-id> predates the narrowed acco
 ```
 
 Stop those runs, before or after upgrading, to end that exposure
-immediately.
+immediately: **Kill** in the run's header, or `aether kill <run-id>`.
 
 This narrows what an account share exposes. It does not change the role
 model: a collaborator can still steer another member's live run

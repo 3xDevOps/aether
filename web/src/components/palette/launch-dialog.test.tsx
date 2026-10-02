@@ -82,10 +82,12 @@ describe('launch dialog', () => {
     })))
   })
   it('offers setup, and the pinned custom harness, when nothing is installed', async () => {
+    useStore.setState({ info: serverInfo })
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
 
     await screen.findByText('No agent is installed in your environment.')
+    expect(screen.getByText('Set one up before launching work. Set up an agent opens Agents, where Add agent installs it.')).toBeDefined()
     const agent = screen.getByLabelText('Agent')
     // Nothing is picked for the member, so the launch stays blocked.
     expect(agent.textContent).toBe('Choose an agent')
@@ -182,6 +184,22 @@ describe('launch dialog', () => {
     )
   })
 
+  it('sends a recipient with nothing installed to set up their own environment', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+      ? [agentInfo({ installed: false })]
+      : [agentInfo()])
+    await open()
+
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await screen.findByText('No agent is installed in your environment.')
+    expect(screen.getByText("A run on Bob's account starts the agent installed in your environment with Bob's login, so install it in your environment; you need not log in to it. Set up an agent opens Agents, where Add agent installs it.")).toBeDefined()
+    expect(screen.getByText("Uses Bob's agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.")).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))
+    expect(useStore.getState().route.name).toBe('agents')
+  })
+
   it('refuses an agent the shared account owner is not logged in to', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
@@ -192,7 +210,7 @@ describe('launch dialog', () => {
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
     await waitFor(() => expect(screen.getByLabelText('Agent').textContent).toBe('codex'))
     expect(screen.getByRole('status').textContent).toBe(
-      'Bob is not logged in to claude, so it cannot launch on this account. Bob logs in from their own environment terminal.',
+      'Bob is not logged in to claude, so it cannot launch on this account. Bob logs in from the terminal dock on their own Board; then press Refresh agents.',
     )
     await openSelect(screen.getByLabelText('Agent'))
     expect(screen.getByRole('option', { name: 'claude (not logged in)' }).getAttribute('aria-disabled')).toBe('true')
@@ -213,7 +231,7 @@ describe('launch dialog', () => {
 
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe(
-      'Your own agent definitions run only on your own account: myagent.',
+      'Your own agent definitions run only on your own account: myagent. To launch one, choose your own account, marked (you), under Account.',
     ))
     expect(screen.queryByText(/not logged in/)).toBeNull()
     await openSelect(screen.getByLabelText('Agent'))
@@ -233,7 +251,7 @@ describe('launch dialog', () => {
 
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe(
-      'Bob is not logged in to aider, so it cannot launch on this account. Bob logs in from their own environment terminal.',
+      'Bob is not logged in to aider, so it cannot launch on this account. Bob logs in from the terminal dock on their own Board; then press Refresh agents.',
     ))
     expect(screen.queryByText(/your own account/)).toBeNull()
     await openSelect(screen.getByLabelText('Agent'))

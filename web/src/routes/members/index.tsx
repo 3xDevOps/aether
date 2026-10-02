@@ -42,6 +42,7 @@ import type { Member } from '@/lib/types'
 import { cn, field, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { MemberAvatar } from '@/routes/board/member-avatar'
+import { StopEnvironmentDialog } from '@/routes/board/stop-environment-dialog'
 import { InvitationsSection } from '@/routes/members/invitations'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -75,6 +76,11 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const [error, setError] = useState<string | null>(null)
   const [sharedWith, setSharedWith] = useState<Member[]>([])
   const [sharing, setSharing] = useState<string | null>(null)
+  // Set by a first share, which only containers created after it honour.
+  const [firstShare, setFirstShare] = useState<Member | null>(null)
+  const [stoppingTerminal, setStoppingTerminal] = useState(false)
+  const terminalRunning = useStore((s) => s.envTerminal.status?.running === true)
+  const setTerminalStatus = useStore((s) => s.setEnvTerminalStatus)
 
   // The roster the store holds came from hydration; this view is the one
   // place approvals happen, so opening it re-reads the list.
@@ -108,6 +114,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
       const shared = sharedWith.some((entry) => entry.id === member.id)
       if (shared) {
         await client.accountRevoke(member.id)
+        setFirstShare(null)
       } else {
         await client.accountShare(member.id)
       }
@@ -117,6 +124,10 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
           ? `Account access revoked from ${member.display_name}`
           : `Account shared with ${member.display_name}`,
       )
+      if (!shared && sharedWith.length === 0 && caps.hasWS('terminal')) {
+        setFirstShare(member)
+        setTerminalStatus(await client.terminalStatus())
+      }
     } catch (err) {
       setError(message(err))
     } finally {
@@ -383,17 +394,40 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                 </div>
                 <ul className="border-y border-border text-xs text-muted-foreground">
                   <li className="border-b border-border px-3 py-1.5">
-                    Your agent logins and vendor quota are shared; your environment,
-                    files, and GitHub login are not, except through omp: an omp share
-                    hands over your whole ~/.omp/agent, where their runs can plant code
-                    that your own omp sessions run with your home. Share omp only with
-                    someone you would give your home to. Their runs can use, refresh,
-                    replace, or log out those logins.
+                    Your agent logins and vendor quota are shared, and their runs can
+                    use, refresh, replace, or log out those logins. Your environment,
+                    files, and GitHub login are not.
+                  </li>
+                  <li className="border-b border-border px-3 py-1.5">
+                    Except omp: an omp share hands over your whole ~/.omp/agent, where
+                    their runs can plant code that your own omp sessions run with your
+                    home. Share omp only with someone you would give your home to.
                   </li>
                   <li className="px-3 py-1.5">
                     Their runs remain attributed to them; running agents are not stopped.
                   </li>
                 </ul>
+                {firstShare && terminalRunning && (
+                  <div
+                    role="status"
+                    className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-3 py-2 text-xs"
+                  >
+                    <p className="min-w-0 max-w-2xl">
+                      Your environment terminal was started before you shared, so a
+                      Claude Code login written there will not reach{' '}
+                      {firstShare.display_name}&apos;s runs until you stop it and open it
+                      again from the terminal dock on the Board. Runs you already have
+                      running keep the mounts they started with until they end.
+                    </p>
+                    <Button
+                      size="default"
+                      variant="outline"
+                      onClick={() => setStoppingTerminal(true)}
+                    >
+                      Stop environment
+                    </Button>
+                  </div>
+                )}
                 <ul className="divide-y border-b border-border">
                   {roster
                     .filter((member) => member.id !== self.id)
@@ -486,6 +520,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         </div>
       </div>
 
+      {stoppingTerminal && (
+        <StopEnvironmentDialog client={client} onClose={() => setStoppingTerminal(false)} />
+      )}
       {inviting && <InviteDialog client={client} onClose={() => setInviting(false)} />}
       {removing && (
         <RemoveDialog
