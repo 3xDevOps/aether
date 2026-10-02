@@ -80,6 +80,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const [firstShare, setFirstShare] = useState<Member | null>(null)
   const [stoppingTerminal, setStoppingTerminal] = useState(false)
   const [terminalUnread, setTerminalUnread] = useState(false)
+  // Counts terminal reads so one answered after a stop is dropped: it
+  // describes the terminal the stop ended.
+  const terminalRead = useRef(0)
   const terminalRunning = useStore((s) => s.envTerminal.status?.running === true)
   const setTerminalStatus = useStore((s) => s.setEnvTerminalStatus)
 
@@ -123,7 +126,15 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         if (sharedWith.length === 0 && caps.hasWS('terminal')) {
           setFirstShare(member)
           setTerminalUnread(false)
-          client.terminalStatus().then(setTerminalStatus, () => setTerminalUnread(true))
+          const read = ++terminalRead.current
+          client.terminalStatus().then(
+            (status) => {
+              if (terminalRead.current === read) setTerminalStatus(status)
+            },
+            () => {
+              if (terminalRead.current === read) setTerminalUnread(true)
+            },
+          )
         }
       }
       await refetchShares()
@@ -527,7 +538,14 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
       </div>
 
       {stoppingTerminal && (
-        <StopEnvironmentDialog client={client} onClose={() => setStoppingTerminal(false)} />
+        <StopEnvironmentDialog
+          client={client}
+          onClose={() => setStoppingTerminal(false)}
+          onStopped={() => {
+            terminalRead.current++
+            setFirstShare(null)
+          }}
+        />
       )}
       {inviting && <InviteDialog client={client} onClose={() => setInviting(false)} />}
       {removing && (

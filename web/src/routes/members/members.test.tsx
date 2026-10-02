@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
@@ -275,6 +275,40 @@ describe('members view', () => {
       )
       expect(within(status).getByRole('button', { name: 'Stop environment' })).toBeDefined()
       expect(await screen.findByText('account.list: gateway closed')).toBeDefined()
+    })
+
+    it('drops the advice after a stop, also when the terminal could not be checked', async () => {
+      const client = sharing(true)
+      vi.mocked(client.terminalStatus).mockRejectedValue(new Error('terminal.status: gateway closed'))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
+
+      await waitFor(() => expect(client.terminalStop).toHaveBeenCalled())
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    })
+
+    it('ignores a terminal read answered after the stop', async () => {
+      const client = sharing(true)
+      let answer: (status: { running: boolean; tabs: string[] }) => void = () => {}
+      vi.mocked(client.terminalStatus).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+      useStore.setState({
+        envTerminal: { ...initialEnvTerminal, status: { running: true, tabs: ['main'] } },
+      })
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+      await act(async () => answer({ running: true, tabs: ['main'] }))
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(useStore.getState().envTerminal.status?.running).toBe(false)
     })
 
     it('says nothing more when no terminal is running', async () => {

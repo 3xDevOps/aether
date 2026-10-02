@@ -18,9 +18,11 @@ import { useStore } from '@/store'
 export function StopEnvironmentDialog({
   client,
   onClose,
+  onStopped,
 }: {
   client: Api
   onClose: () => void
+  onStopped?: () => void
 }) {
   const reset = useStore((s) => s.resetEnvTerminal)
   const setStatus = useStore((s) => s.setEnvTerminalStatus)
@@ -34,6 +36,7 @@ export function StopEnvironmentDialog({
     try {
       await client.terminalStop()
       const status = useStore.getState().envTerminal.status
+      onStopped?.()
       onClose()
       reset()
       setStatus({ ...status, running: false, tabs: [] })
