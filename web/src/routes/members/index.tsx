@@ -79,6 +79,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   // Set by a first share, which only containers created after it honour.
   const [firstShare, setFirstShare] = useState<Member | null>(null)
   const [stoppingTerminal, setStoppingTerminal] = useState(false)
+  const [terminalUnread, setTerminalUnread] = useState(false)
   const terminalRunning = useStore((s) => s.envTerminal.status?.running === true)
   const setTerminalStatus = useStore((s) => s.setEnvTerminalStatus)
 
@@ -117,6 +118,13 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         setFirstShare(null)
       } else {
         await client.accountShare(member.id)
+        // The share is granted from here on, so the advice must not depend
+        // on the reads that follow succeeding.
+        if (sharedWith.length === 0 && caps.hasWS('terminal')) {
+          setFirstShare(member)
+          setTerminalUnread(false)
+          client.terminalStatus().then(setTerminalStatus, () => setTerminalUnread(true))
+        }
       }
       await refetchShares()
       toast.success(
@@ -124,10 +132,6 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
           ? `Account access revoked from ${member.display_name}`
           : `Account shared with ${member.display_name}`,
       )
-      if (!shared && sharedWith.length === 0 && caps.hasWS('terminal')) {
-        setFirstShare(member)
-        setTerminalStatus(await client.terminalStatus())
-      }
     } catch (err) {
       setError(message(err))
     } finally {
@@ -407,13 +411,15 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                     Their runs remain attributed to them; running agents are not stopped.
                   </li>
                 </ul>
-                {firstShare && terminalRunning && (
+                {firstShare && (terminalRunning || terminalUnread) && (
                   <div
                     role="status"
                     className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-3 py-2 text-xs"
                   >
                     <p className="min-w-0 max-w-2xl">
-                      Your environment terminal was started before you shared, so a
+                      {terminalRunning
+                        ? 'Your environment terminal was started before you shared, so a'
+                        : 'Your environment terminal could not be checked. If it is open, it was started before you shared, so a'}{' '}
                       Claude Code login written there will not reach{' '}
                       {firstShare.display_name}&apos;s runs until you stop it and open it
                       again from the terminal dock on the Board. Runs you already have
