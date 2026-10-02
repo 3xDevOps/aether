@@ -132,11 +132,24 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 
 	// Re-read under the lifecycle admission before promoting so title or
 	// other metadata updates are not clobbered by a stale terminal snapshot.
+	// The retained sidecar still carries the report that closed the run.
+	// It is cleared on disk before the row reopens, so a crash after the
+	// promotion cannot re-arm the reopened run with it. On the terminal
+	// row this clears, the arm is already spent.
 	s.mu.Lock()
 	sameEntry := s.runs[run] == entry
+	var clearErr error
+	if sameEntry {
+		entry.reported = ""
+		entry.blockedReason, entry.blockedShown = "", false
+		clearErr = s.writeSidecar(entry.sidecar())
+	}
 	s.mu.Unlock()
 	if !sameEntry {
 		return nil, retainedTransitionError()
+	}
+	if clearErr != nil {
+		return nil, fmt.Errorf("scheduler: relaunch: clear the reported outcome: %w", clearErr)
 	}
 	// archiveMu serializes this re-read-then-promote against SetArchived
 	// so the two can never interleave.
@@ -151,12 +164,6 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, retainedTransitionError()
 	}
 	fresh = latest
-	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
-		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
-			s.archiveMu.Unlock()
-			return nil, fmt.Errorf("scheduler: relaunch: %w", supersedeErr)
-		}
-	}
 
 	// StartedAt is persisted on the run row before the container is thawed.
 	// The sidecar carries the same launch generation so a crash at either
@@ -275,6 +282,14 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			}
 			return joinRollback(fmt.Errorf("scheduler: relaunch rollback row: %w", rowErr), restoreErr)
 		}
+		// UpdateRun cleared outcome_unseen with the status change; an
+		// outcome the owner had not seen is still unseen.
+		var unseenErr error
+		if terminalRow.OutcomeUnseen {
+			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, nil, nil); flagErr != nil {
+				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
+			}
+		}
 
 		s.mu.Lock()
 		if s.runs[run] == entry {
@@ -285,7 +300,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			entry.destroyPending = false
 		}
 		s.mu.Unlock()
-		return joinRollback()
+		return joinRollback(unseenErr)
 	}
 
 	if paused {
@@ -315,6 +330,15 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.mu.Unlock()
 		return nil, rollback(retainedTransitionError())
 	}
+	// The terminal report is superseded only once nothing can roll the
+	// relaunch back, so a failed relaunch leaves the run's report standing.
+	// From here a late hand-off of the old report is older than startedAt.
+	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
+		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
+			s.mu.Unlock()
+			return nil, rollback(fmt.Errorf("scheduler: relaunch: %w", supersedeErr))
+		}
+	}
 	entry.status = domain.RunRunning
 	entry.startedAt = now
 	entry.evidenceIdentity = relaunchIdentity
@@ -322,8 +346,6 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	entry.retainedUntil = nil
 	entry.paused = false
 	entry.destroyPending = false
-	entry.reported = ""
-	entry.blockedReason, entry.blockedShown = "", false
 	s.publish(ctx, events.Event{
 		WorkspaceID: fresh.WorkspaceID,
 		RunID:       run,
@@ -434,8 +456,7 @@ func (s *Scheduler) adoptLiveSidecar(r *domain.Run, sc sidecar) *supervised {
 	if sc.RunID != "" && sc.RunID != string(r.ID) {
 		return nil
 	}
-	sc.Retained = false
-	sc.RetainedUntil = nil
+	sc.clearRetainedClose()
 	sc.DestroyPending = false
 	mode := sc.Mode
 	if mode == "" {
@@ -858,8 +879,7 @@ func (s *Scheduler) admitDestroyPendingOwner(ctx context.Context, r *domain.Run,
 		s.mu.Unlock()
 		return owner, true
 	}
-	current.Retained = false
-	current.RetainedUntil = nil
+	current.clearRetainedClose()
 	current.DestroyPending = true
 	entry := s.entryFromSidecar(fresh, current)
 	entry.containerID = cid
@@ -1093,8 +1113,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	// marker. On reboot, the active durable row wins: stale terminal-retention
 	// metadata must not make the sweep destroy this live container.
 	if sc.Retained || sc.RetainedUntil != nil {
-		sc.Retained = false
-		sc.RetainedUntil = nil
+		sc.clearRetainedClose()
 		sc.DestroyPending = false
 	}
 	cid := runtime.ID(sc.ContainerID)
@@ -1277,8 +1296,7 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 	// The active row is authoritative if a relaunch won just before this
 	// admission. Do not let a stale retained marker turn this owner into a
 	// terminal cleanup candidate.
-	current.Retained = false
-	current.RetainedUntil = nil
+	current.clearRetainedClose()
 	current.DestroyPending = false
 	entry := s.entryFromSidecar(fresh, current)
 	entry.containerID = cid
@@ -1483,6 +1501,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		reportedAt:       reportedAt,
 		blockedReason:    sc.BlockedReason,
 		blockedShown:     sc.BlockedShown,
+		blockedReportID:  sc.BlockedReportID,
 		launchMode:       mode,
 		status:           r.Status,
 		startedAt:        started,

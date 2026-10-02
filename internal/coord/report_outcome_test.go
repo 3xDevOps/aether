@@ -3,8 +3,10 @@ package coord
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -12,35 +14,39 @@ import (
 )
 
 type outcomeCall struct {
-	run    domain.RunID
-	status domain.RunStatus
-	reason string
+	run      domain.RunID
+	status   domain.RunStatus
+	reason   string
+	reportID string
 }
 
 // recordingOutcomes is the scheduler side of OutcomeSink.
 type recordingOutcomes struct {
-	mu    sync.Mutex
-	err   error
-	calls []outcomeCall
+	mu         sync.Mutex
+	err        error
+	calls      []outcomeCall
+	reportedAt []time.Time
 }
 
-func (o *recordingOutcomes) FinishReported(_ context.Context, run domain.RunID, outcome domain.RunStatus) error {
+func (o *recordingOutcomes) FinishReported(_ context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.err != nil {
 		return o.err
 	}
+	o.reportedAt = append(o.reportedAt, reportedAt)
 	o.calls = append(o.calls, outcomeCall{run: run, status: outcome})
 	return nil
 }
 
-func (o *recordingOutcomes) ReportBlocked(_ context.Context, run domain.RunID, summary string) error {
+func (o *recordingOutcomes) ReportBlocked(_ context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.err != nil {
 		return o.err
 	}
-	o.calls = append(o.calls, outcomeCall{run: run, reason: summary})
+	o.reportedAt = append(o.reportedAt, reportedAt)
+	o.calls = append(o.calls, outcomeCall{run: run, reason: summary, reportID: reportID})
 	return nil
 }
 
@@ -78,16 +84,24 @@ func TestCoordReportDrivesAnOrdinaryRun(t *testing.T) {
 	})
 	run := h.run(0)
 
-	report(t, h, run, protocol.CoordOutcomeBlocked, "need\nthe staging key", "blocked-1")
+	blocked := report(t, h, run, protocol.CoordOutcomeBlocked, "need\nthe staging key", "blocked-1")
 	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
 	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
 
 	want := []outcomeCall{
-		{run: run, reason: "need the staging key"},
+		{run: run, reason: "need the staging key", reportID: blocked.ReportID},
 		{run: run, status: domain.RunCompleted},
 	}
 	if got := outcomes.recorded(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("scheduler calls = %+v, want %+v", got, want)
+	}
+	// Each call carries its report's finalization time, which the
+	// scheduler compares with the run's current launch.
+	for i, key := range []string{"blocked-1", "success-1"} {
+		stored, err := h.db.GetCoordReportByIdempotency(context.Background(), run, key)
+		if err != nil || stored.FinalizedAt == nil || !outcomes.reportedAt[i].Equal(*stored.FinalizedAt) {
+			t.Fatalf("call %d reportedAt = %v, want report %q finalized_at (%+v, %v)", i, outcomes.reportedAt[i], key, stored, err)
+		}
 	}
 }
 
@@ -155,5 +169,34 @@ func TestCoordReportSkipsMissionAndSupersededReports(t *testing.T) {
 	pub, err := h.db.GetCoordReportPublication(ctx, result.ReportID)
 	if err != nil || pub.State != store.CoordReportPublicationPublished {
 		t.Fatalf("superseded publication = %+v, %v; want published", pub, err)
+	}
+}
+
+// TestCoordReportRefusesASupersededKey: after a relaunch superseded the
+// run's success, the reopened agent reusing that key is told to pick a new
+// one instead of being handed the old result, and a new key reports again.
+func TestCoordReportRefusesASupersededKey(t *testing.T) {
+	ctx := context.Background()
+	outcomes := &recordingOutcomes{}
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_superseded"}
+		c.Outcomes = outcomes
+	})
+	run := h.run(0)
+	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
+	if err := h.db.SupersedeCoordTerminalReport(ctx, run); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+
+	_, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeConflict ||
+		!strings.Contains(rpcErr.Message, "superseded") || !strings.Contains(rpcErr.Message, "new idempotency key") {
+		t.Fatalf("reused superseded key = %+v, want a conflict naming the relaunch and a new key", rpcErr)
+	}
+	report(t, h, run, protocol.CoordOutcomeSuccess, "done again", "success-2")
+	if got := outcomes.recorded(); len(got) != 2 || got[1] != (outcomeCall{run: run, status: domain.RunCompleted}) {
+		t.Fatalf("scheduler calls = %+v, want a second finish for the new key", got)
 	}
 }

@@ -1023,19 +1023,24 @@ accepts a file or `-` for standard input. The result contains a durable
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
 report. Relaunching the run (`aether relaunch <run>`) supersedes the terminal
-report, so the reopened agent can report again. **Blocked is nonterminal**: a
-run may file any number of blocked reports, before or after one another.
+report, so the reopened agent can report again under a new idempotency key;
+the superseded report's key then fails with `CodeConflict`. **Blocked is
+nonterminal**: a run may file any number of blocked reports, before or after
+one another.
 
 What a report does depends on the run:
 
 - **Ordinary run** (no mission assignment). Success or failure finishes the
   run once the agent's turn ends: Aether commits the work (`aether:` for
   success, `wip:` for failure), publishes the run branch, and records
-  `completed` or `failed`, which moves the run out of **Working**. If the
-  turn has not ended two minutes after the report (a harness without a
-  status reporter never says it has), the next `--poll-interval` check
-  finishes the run anyway; if the agent process exits first, the exit
-  finishes it with the reported status, whatever its exit code. A TUI run keeps its paused
+  `completed` or `failed`, which moves the run out of **Working**. A
+  permission or question prompt is not the end of the turn. A harness
+  without a status reporter never says its turn ended, so there the first
+  `--poll-interval` check two minutes after the report finishes the run; a
+  harness with one is finished by the turn end alone, however long the agent
+  keeps working. If the agent process exits first, the run takes the reported
+  status, whatever its exit code, even when the report reaches the server
+  after the exit. A TUI run keeps its paused
   container for relaunch, exactly like a closed run, with the reason
   `agent reported success; retained container` or
   `agent reported failure; retained container`; a headless run, or a TUI run
@@ -1044,11 +1049,14 @@ What a report does depends on the run:
   until its owner opens it (`run.seen`) or a status change such as Close or
   relaunch clears it. A Close or Kill that lands first wins, and Close
   still re-labels a finished run as merged or abandoned. Blocked moves the run
-  to **Needs you** with the reason `blocked: <summary>` the next time it parks
-  (the end of the turn, or a stall), until the agent resumes.
+  to **Needs you** with the reason `blocked: <summary>` the next time its turn
+  ends (or it stalls, on a harness without a status reporter), until the agent
+  resumes; a permission or question prompt before that keeps its own reason.
 - **Mission worker.** Success submits the attempt and the server then stops
   that worker. Failure fails the attempt without treating it as a task
-  result. Blocked does not stop the worker or submit the task.
+  result. Blocked does not stop the worker or submit the task. A worker may
+  file several blocked reports and still report success or failure after
+  them.
 - **Mission integrator.** The report is recorded; it does not end the run.
 
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
@@ -1111,10 +1119,12 @@ has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
 
 The two meet on an ordinary run. After a success or failure `coord.report`,
-the next `waiting` hook is the end of the turn that reported, so it finishes
-the run instead of parking it. After a blocked `coord.report`, the next
-`waiting` hook parks the run with the `blocked: <summary>` reason instead of
-`waiting for your input`; the first `working` hook after that park clears it.
+the next `waiting for your input` hook is the end of the turn that reported,
+so it finishes the run instead of parking it; a `waiting for your permission`
+or `waiting for your answer` hook parks it as usual. After a blocked
+`coord.report`, the next `waiting for your input` hook parks the run with the
+`blocked: <summary>` reason instead; the first `working` hook after that park
+clears it.
 The scheduler applies a report as part of its durable publication, so a
 server restart or a temporarily unreachable run is retried, not lost.
 

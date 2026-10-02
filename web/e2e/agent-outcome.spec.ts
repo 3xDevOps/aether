@@ -8,13 +8,15 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 // The executable starts while the container is still provisioning, so the
 // report retries until the socket answers. The idempotency key makes a retry
-// after an ambiguous failure safe.
+// after an ambiguous failure safe. The Stop hook ends the turn the way Claude
+// Code's own hook does: the finish waits for that, not for a deadline.
 const reportSuccess = `i=0
 until aether-internal report --outcome success --summary 'outcome review fixture' --idempotency-key outcome-review-fixture >/dev/null; do
   i=$((i + 1))
   if [ "$i" -ge 300 ]; then exit 1; fi
   sleep 0.1
 done
+printf '%s\\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
 sleep 600`
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
@@ -40,7 +42,7 @@ test('an agent success report waits in Needs you until its owner opens the run',
   await expect(card('Needs you').getByText('The agent reported success; open the run to review it.')).toBeVisible()
   await expect(card('Needs you').getByLabel('Done', { exact: true })).toBeVisible()
 
-  await card('Needs you').getByRole('button', { name: task }).click()
+  await card('Needs you').getByRole('button', { name: task, exact: true }).click()
   await expect
     .poll(async () => (await alice.api.rpc<{ run: { outcome_unseen?: boolean } }>('run.get', { run_id: run.id })).run.outcome_unseen ?? false)
     .toBe(false)

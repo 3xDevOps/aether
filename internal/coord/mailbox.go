@@ -625,10 +625,14 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
-		errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
+		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||
+		errors.Is(err, store.ErrCoordReportSuperseded) {
 		message := fmt.Sprintf("%s: run %s already reported success or failure under another idempotency key", method, run)
-		if errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
+		switch {
+		case errors.Is(err, store.ErrCoordReportIdempotencyConflict):
 			message = fmt.Sprintf("%s: idempotency_key %q was used with different report inputs", method, p.IdempotencyKey)
+		case errors.Is(err, store.ErrCoordReportSuperseded):
+			message = fmt.Sprintf("%s: the report under idempotency_key %q was superseded when the run was relaunched; report again with a new idempotency key", method, p.IdempotencyKey)
 		}
 		return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: message}
 	}
@@ -866,41 +870,6 @@ func (s *Service) publishReportEvidence(ctx context.Context, report *store.Coord
 	s.mu.Lock()
 	delete(s.reportPackets, report.ID)
 	s.mu.Unlock()
-	return nil
-}
-
-// applyRunOutcome hands an ordinary run's report to the scheduler before the
-// publication is marked done, so the outbox retries a failed hand-off. A
-// mission worker or integrator keeps its mission lifecycle, and a report a
-// relaunch superseded no longer speaks for the run.
-func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
-	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
-		return nil
-	}
-	if s.cfg.Mission != nil {
-		assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrMissionStale) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("report outcome assignment: %w", err)
-		}
-		if assignment.MissionID != "" {
-			return nil
-		}
-	}
-	var err error
-	switch report.Outcome {
-	case store.CoordOutcomeSuccess:
-		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunCompleted)
-	case store.CoordOutcomeFailure:
-		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunFailed)
-	case store.CoordOutcomeBlocked:
-		err = s.cfg.Outcomes.ReportBlocked(ctx, report.RunID, reportReason(report.Summary))
-	}
-	if err != nil {
-		return fmt.Errorf("report outcome: %w", err)
-	}
 	return nil
 }
 

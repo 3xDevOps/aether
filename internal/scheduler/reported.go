@@ -5,17 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// reportFinishDeadline is how long an armed run waits for its agent's turn
-// to end before the poll loop finishes it anyway: a harness with no status
-// reporter never says the turn ended, and an agent may keep going.
+// reportFinishDeadline is how long an armed run on a harness with no status
+// reporter waits before the poll loop finishes it: that harness never says
+// its turn ended.
 const reportFinishDeadline = 2 * time.Minute
 
 const (
@@ -24,6 +26,8 @@ const (
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"
 	blockedReasonPrefix           = "blocked: "
+	exitedCompletedReason         = "agent exited; results committed"
+	exitedFailedReasonPrefix      = "agent exited "
 )
 
 // closeSpec is what ending a live run records: a human's merged or
@@ -146,39 +150,87 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 
 // FinishReported arms a live run to finish with the outcome its agent
 // reported through coord.report: completed for success, failed for failure.
-// It only records the request; the run finishes on the agent's next waiting
-// report, at reportFinishDeadline, or when the process exits, whichever is
-// first. A run that is already terminal or gone needs nothing. A run with
-// no live owner yet returns an error so the caller retries.
-func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcome domain.RunStatus) error {
+// It only records the request; the run finishes on the agent's next
+// turn-end wait, at reportFinishDeadline when the harness cannot report
+// one, or when the process exits, whichever is first. reportedAt is when
+// the report was finalized: a report older than the run's current launch
+// speaks for a launch a relaunch already ended and is ignored. A run whose
+// process exited first takes the reported outcome over the exit's (see
+// overrideExitLocked). A run with no live owner that is not terminal yet
+// returns an error so the caller retries.
+func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
 	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
 		return fmt.Errorf("%w: reported outcome must be completed or failed, got %q", ErrInvalidTransition, outcome)
 	}
 	s.mu.Lock()
-	if entry := s.runs[run]; entry != nil {
-		defer s.mu.Unlock()
-		if entry.status.Terminal() || entry.reported == outcome {
-			return nil
-		}
-		prior, priorAt, blocked, shown := entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown
-		entry.reported, entry.reportedAt = outcome, time.Now().UTC()
-		entry.blockedReason, entry.blockedShown = "", false
-		if err := s.writeSidecar(entry.sidecar()); err != nil {
-			entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown = prior, priorAt, blocked, shown
-			return fmt.Errorf("scheduler: arm reported finish for %s: %w", run, err)
-		}
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	if entry == nil || entry.status.Terminal() {
+		return s.overrideExitLocked(ctx, run, outcome, reportedAt)
+	}
+	if reportedAt.Before(entry.startedAt) || entry.reported == outcome {
 		return nil
 	}
-	s.mu.Unlock()
-	return s.requireFinished(ctx, run, "finish reported run")
+	prior, priorAt, blocked, shown := entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown
+	entry.reported, entry.reportedAt = outcome, time.Now().UTC()
+	entry.blockedReason, entry.blockedShown = "", false
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown = prior, priorAt, blocked, shown
+		return fmt.Errorf("scheduler: arm reported finish for %s: %w", run, err)
+	}
+	return nil
 }
 
-// ReportBlocked records the summary of the agent's blocked report. The next
-// park - a waiting report or a stall - shows it as the needs-attention
-// reason instead of the generic one, and the first resume after that park
-// clears it. Parking right away would not survive: the report is made from
-// inside a tool call, so a working report follows it.
-func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, summary string) error {
+// overrideExitLocked records a reported outcome on a run whose process
+// exited before the report reached the scheduler, so the exit wrote the
+// row first. Invariant: the agent's report outranks its exit code, as it
+// does in finalize. That is the only reason this write skips
+// legalTransition, which refuses failed -> completed, so it is reachable
+// only from FinishReported and rewrites only an ordinary run's row whose
+// status and reason the exit produced in the same launch the report came
+// from. A human close, a kill, a retained close, an interrupted run and a
+// mission run are left alone. The caller must hold s.mu.
+func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: finish reported run %s: %w", run, err)
+	}
+	if !r.Status.Terminal() {
+		return fmt.Errorf("scheduler: finish reported run %s: the run is %s and has no live container yet", run, r.Status)
+	}
+	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
+		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
+	if !exited || r.MissionID != "" || (r.StartedAt != nil && reportedAt.Before(*r.StartedAt)) {
+		return nil
+	}
+	reason := publicRunStatusReason(reportedClose(outcome).reason)
+	if err := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, nil, nil); err != nil {
+		return fmt.Errorf("scheduler: finish reported run %s over its exit: %w", run, err)
+	}
+	if e := s.runs[run]; e != nil {
+		e.status = outcome
+	}
+	s.publish(ctx, events.Event{
+		WorkspaceID: r.WorkspaceID,
+		RunID:       run,
+		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: true},
+	})
+	return nil
+}
+
+// ReportBlocked records the summary of the agent's blocked report reportID.
+// The next turn-end park - a waiting-for-input report, or a stall on a
+// harness with no reporter - shows it as the needs-attention reason instead
+// of the generic one, and the first resume after that park clears it. A
+// permission or answer wait keeps its own reason and leaves it pending.
+// Parking right away would not survive: the report is made from inside a
+// tool call, so a working report follows it. A replay of the report last
+// applied, or a report older than the run's current launch, changes
+// nothing.
+func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
 	reason := blockedReasonPrefix + summary
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
 		reason = string(runes[:maxPublicRunStatusReason])
@@ -186,13 +238,14 @@ func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, summary
 	s.mu.Lock()
 	if entry := s.runs[run]; entry != nil {
 		defer s.mu.Unlock()
-		if entry.status.Terminal() || entry.reported != "" {
+		if entry.status.Terminal() || entry.reported != "" || entry.blockedReportID == reportID ||
+			reportedAt.Before(entry.startedAt) {
 			return nil
 		}
-		blocked, shown := entry.blockedReason, entry.blockedShown
-		entry.blockedReason, entry.blockedShown = reason, false
+		blocked, shown, id := entry.blockedReason, entry.blockedShown, entry.blockedReportID
+		entry.blockedReason, entry.blockedShown, entry.blockedReportID = reason, false, reportID
 		if err := s.writeSidecar(entry.sidecar()); err != nil {
-			entry.blockedReason, entry.blockedShown = blocked, shown
+			entry.blockedReason, entry.blockedShown, entry.blockedReportID = blocked, shown, id
 			return fmt.Errorf("scheduler: record blocked report for %s: %w", run, err)
 		}
 		return nil
@@ -229,13 +282,16 @@ func (s *Scheduler) startReportedFinishLocked(entry *supervised) {
 	go s.finishReported(entry)
 }
 
-// finishOverdueReports finishes armed runs whose agent never ended its turn.
+// finishOverdueReports finishes armed runs on harnesses that cannot say
+// their turn ended. A harness that can is finished by that report alone, so
+// an agent that keeps working after it reported is not cut off.
 func (s *Scheduler) finishOverdueReports() {
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, entry := range s.runs {
-		if entry.reported != "" && !entry.status.Terminal() && now.Sub(entry.reportedAt) >= reportFinishDeadline {
+		if entry.reported != "" && entry.reporter == harness.ReporterNone && !entry.status.Terminal() &&
+			now.Sub(entry.reportedAt) >= reportFinishDeadline {
 			s.startReportedFinishLocked(entry)
 		}
 	}
@@ -250,35 +306,58 @@ func (s *Scheduler) finishReported(entry *supervised) {
 	defer cancel()
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		entry.reportFinishing = false
-		s.mu.Unlock()
-	}()
+	if err := s.finishReportedLocked(ctx, entry); err != nil {
+		slog.Warn("scheduler: finish reported run", "run", entry.runID, "error", err)
+	}
+	s.mu.Lock()
+	entry.reportFinishing = false
+	s.mu.Unlock()
+}
 
+// finishReportedLocked is finishReported under entry.lifecycleMu. A failed
+// close is retried after another deadline rather than on every poll.
+func (s *Scheduler) finishReportedLocked(ctx context.Context, entry *supervised) error {
 	s.mu.Lock()
 	outcome := entry.reported
 	if s.runs[entry.runID] != entry || outcome == "" || entry.finalizing || entry.killRequested || entry.destroyPending {
 		s.mu.Unlock()
-		return
+		return nil
 	}
 	if entry.status.Terminal() {
 		entry.reported = ""
-		if err := s.writeSidecar(entry.sidecar()); err != nil {
-			slog.Warn("scheduler: persist cleared reported outcome", "run", entry.runID, "error", err)
+		err := s.writeSidecar(entry.sidecar())
+		if err != nil {
+			entry.reported = outcome
+			err = fmt.Errorf("persist cleared reported outcome: %w", err)
 		}
 		s.mu.Unlock()
-		return
+		return err
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
 	mode, paused := entry.launchMode, entry.paused
 	s.mu.Unlock()
 
 	if err := s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, paused, reportedClose(outcome)); err != nil {
-		slog.Warn("scheduler: finish reported run", "run", entry.runID, "outcome", outcome, "error", err)
-		// Retry after another deadline rather than on every poll.
 		s.mu.Lock()
 		entry.reportedAt = time.Now().UTC()
 		s.mu.Unlock()
+		return fmt.Errorf("close with reported %s: %w", outcome, err)
 	}
+	return nil
+}
+
+// clearRetainedClose drops what a retained sidecar promised once its run's
+// row is active again: a relaunch reopened the run, so both the retention
+// and the report that closed it are over. Left in place, the report would
+// re-arm the reopened run. A sidecar with no retained marker is a live
+// run's own, and its arm stands.
+func (sc *sidecar) clearRetainedClose() {
+	if !sc.Retained && sc.RetainedUntil == nil {
+		return
+	}
+	sc.Retained = false
+	sc.RetainedUntil = nil
+	sc.ReportedOutcome = ""
+	sc.BlockedReason = ""
+	sc.BlockedShown = false
 }

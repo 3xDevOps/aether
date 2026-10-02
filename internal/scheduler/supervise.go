@@ -186,15 +186,19 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	case reported != "":
 		to, reason, byReport = reported, reportedClose(reported).reason, true
 	case code == 0:
-		to, reason = domain.RunCompleted, "agent exited; results committed"
+		to, reason = domain.RunCompleted, exitedCompletedReason
 	default:
-		to, reason = domain.RunFailed, fmt.Sprintf("agent exited %d", code)
+		to, reason = domain.RunFailed, fmt.Sprintf(exitedFailedReasonPrefix+"%d", code)
 	}
 	s.mu.Lock()
 	// A Kill accepted after the snapshot above still owns the outcome: the
-	// caller was told the kill succeeded.
-	if entry.killRequested {
+	// caller was told the kill succeeded. A report armed while the results
+	// were committing still outranks the exit code.
+	switch {
+	case entry.killRequested:
 		to, reason, actor, byReport = domain.RunAbandoned, "killed", entry.killActor, false
+	case reported == "" && entry.reported != "" && !entry.status.Terminal():
+		to, reason, byReport = entry.reported, reportedClose(entry.reported).reason, true
 	}
 	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, byReport)
 	s.mu.Unlock()
@@ -520,11 +524,15 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
 				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
-				if e.blockedReason != "" {
+				// The stall is the turn end only on a harness that cannot
+				// report one; elsewhere the agent is quiet mid-turn and the
+				// blocked reason waits for its turn-end report.
+				showsBlocked := e.blockedReason != "" && e.reporter == harness.ReporterNone
+				if showsBlocked {
 					reason = e.blockedReason
 				}
 				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
-				if err == nil && e.blockedReason != "" && !e.blockedShown {
+				if err == nil && showsBlocked && !e.blockedShown {
 					e.blockedShown = true
 					if serr := s.writeSidecar(e.sidecar()); serr != nil {
 						slog.Warn("scheduler: persist shown blocked reason", "run", e.runID, "error", serr)

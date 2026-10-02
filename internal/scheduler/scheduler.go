@@ -340,8 +340,11 @@ type supervised struct {
 	// blockedReason is the agent's latest blocked report as a status
 	// reason, and blockedShown whether a park has shown it yet; the first
 	// resume after that park clears both (see ReportBlocked).
-	blockedReason string
-	blockedShown  bool
+	// blockedReportID is the last blocked report applied, kept after the
+	// reason clears so a replay of it cannot bring the reason back.
+	blockedReason   string
+	blockedShown    bool
+	blockedReportID string
 }
 
 type pendingRun struct {

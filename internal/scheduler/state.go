@@ -189,6 +189,7 @@ type sidecar struct {
 	ReportedOutcome  domain.RunStatus  `json:"reported_outcome,omitempty"`
 	BlockedReason    string            `json:"blocked_reason,omitempty"`
 	BlockedShown     bool              `json:"blocked_shown,omitempty"`
+	BlockedReportID  string            `json:"blocked_report_id,omitempty"`
 	ExitObserved     bool              `json:"exit_observed"`
 	ExitCode         int               `json:"exit_code"`
 	EvidenceIdentity string            `json:"evidence_identity,omitempty"`
@@ -219,6 +220,7 @@ func (e *supervised) sidecar() sidecar {
 		ReportedOutcome:  e.reported,
 		BlockedReason:    e.blockedReason,
 		BlockedShown:     e.blockedShown,
+		BlockedReportID:  e.blockedReportID,
 		ExitObserved:     e.exitObserved,
 		ExitCode:         e.exitCode,
 		EvidenceIdentity: e.evidenceIdentity,

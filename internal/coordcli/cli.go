@@ -263,8 +263,9 @@ are explicit identities for retry-safe starts and retries.
 
 Submit one durable outcome. Success and failure are terminal: a run has one
 terminal report, and after it any new report fails with a conflict until the
-run is relaunched. Blocked is nonterminal, may repeat, and is not a way to wait
-for a peer or human.
+run is relaunched. A relaunch supersedes it: report again under a new
+idempotency key, because the old key now fails with a conflict. Blocked is
+nonterminal, may repeat, and is not a way to wait for a peer or human.
 Ordinary run: success or failure finishes the run when your turn ends. Aether
 commits your work, publishes the run branch, and moves the run out of Working
 to completed (success) or failed (failure). Blocked moves it to Needs you with
@@ -460,7 +461,8 @@ reporting: finishing cleans up the run's development resources.
 Blocked moves the run to Needs you with your summary as the reason once your
 turn ends. It may repeat and does not use up the terminal report; it is not a
 way to wait. Do not report while idle or waiting on a peer or human. After a
-terminal report, end your turn and take no new work.
+terminal report, end your turn and take no new work. If the run is relaunched,
+report again with a new idempotency key.
 `
 
 const skillRetry = `For an uncertain mutation, retry identical inputs with the same idempotency

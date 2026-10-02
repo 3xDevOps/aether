@@ -37,10 +37,12 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	persist := false
 	switch report.State {
 	case agentstatus.Waiting:
-		if entry.reported != "" {
+		turnEnded := report.Reason == agentstatus.ReasonInput
+		if entry.reported != "" && turnEnded {
 			// The turn that reported a terminal outcome has ended, so the
 			// agent's last message is in the transcript. Finish off this
-			// path: the hook is waiting on the answer.
+			// path: the hook is waiting on the answer. A permission or
+			// answer wait is the agent still mid-turn; it parks below.
 			s.startReportedFinishLocked(entry)
 			return nil
 		}
@@ -50,11 +52,15 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 		// two are what separate the next turn from the frames the finished
 		// one is still painting (see unparks).
 		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+		// Only a turn-end wait shows the blocked reason: a permission or
+		// answer wait names what the member must do right now, and the
+		// blocked reason stays pending for the turn end.
 		reason := report.Reason
-		if entry.blockedReason != "" {
+		showsBlocked := false
+		if turnEnded && entry.blockedReason != "" {
 			reason = entry.blockedReason
+			showsBlocked = !entry.blockedShown
 		}
-		showsBlocked := entry.blockedReason != "" && !entry.blockedShown
 		// needs-attention -> needs-attention is legal and is the point: a
 		// run parked by a stall, or waiting for a different thing, gets the
 		// reason the agent is actually waiting for. Saying again what the

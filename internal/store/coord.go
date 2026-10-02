@@ -30,6 +30,11 @@ var ErrCoordPeerLimit = errors.New("store: coordination peer limit reached")
 // report (success or failure) under a different idempotency key.
 var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
 
+// ErrCoordReportSuperseded means a retry reused the idempotency key of a
+// terminal report a relaunch superseded. The reopened run reports again
+// under a new key.
+var ErrCoordReportSuperseded = errors.New("store: coordination report was superseded by a relaunch")
+
 // ErrCoordReportIdempotencyConflict means a retry reused a report key with
 // different semantic inputs.
 var ErrCoordReportIdempotencyConflict = errors.New("store: coordination report idempotency conflict")
@@ -691,9 +696,10 @@ func validateCoordReportRefs(refs []string) error {
 }
 
 // ReserveCoordReport durably records a report before any evidence capture.
-// A retry with the same key returns the persisted pending or finalized row.
-// A new key receives ErrCoordReportConflict while the run holds an active
-// terminal report, whatever the new outcome.
+// A retry with the same key returns the persisted pending or finalized row,
+// or ErrCoordReportSuperseded once a relaunch superseded it. A new key
+// receives ErrCoordReportConflict while the run holds an active terminal
+// report, whatever the new outcome.
 func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
 		return false, err
@@ -751,6 +757,9 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		if qerr != nil {
 			return false, fmt.Errorf("store: reserve coord report: read existing: %w", qerr)
 		}
+		if prior.SupersededAt != nil {
+			return false, fmt.Errorf("%w: run %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
+		}
 		if prior.Outcome != report.Outcome || prior.Summary != report.Summary ||
 			prior.NextAction != report.NextAction ||
 			!equalStringSlices(prior.InputEvidenceRefs, report.InputEvidenceRefs) {
@@ -772,9 +781,12 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 	return true, nil
 }
 
-// SupersedeCoordTerminalReport retires the run's active terminal report, if
-// any, so the run can report again. The row stays as history and same-key
-// retries still replay it.
+// SupersedeCoordTerminalReport retires the run's finalized terminal report,
+// if any, so the run can report again. The row stays as history, and a
+// same-key retry receives ErrCoordReportSuperseded. A pending reservation
+// is left active: it was never accepted, so it closed nothing, and only its
+// own key's retry can finalize it, which then reports for the current
+// launch.
 func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error {
 	supersededAt, err := encodeTime(time.Now().UTC())
 	if err != nil {
@@ -782,8 +794,8 @@ func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`UPDATE coord_reports SET superseded_at = ?
-		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL`,
-		supersededAt, run); err != nil {
+		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND state = ? AND superseded_at IS NULL`,
+		supersededAt, run, CoordReportFinalized); err != nil {
 		return fmt.Errorf("store: supersede coord report for run %s: %w", run, err)
 	}
 	return nil

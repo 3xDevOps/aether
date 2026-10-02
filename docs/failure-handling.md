@@ -295,8 +295,8 @@ every retained TUI run against the runtime's actual containers:
   with its reason: the last report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
   repaint - does not read as the turn resuming. A run its agent already
-  reported success or failure on still finishes: the next end of turn, or
-  two minutes after the restart, finishes it.
+  reported success or failure on still finishes at the next end of turn, or,
+  on a harness without a status reporter, two minutes after the restart.
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run is not relaunchable.
@@ -349,8 +349,9 @@ container:
 aether-internal report --outcome success --summary 'Implemented and tested the change.'
 ```
 
-When that turn ends - or two minutes later if the harness never reports the
-end of a turn - Aether does what Close does, with the agent's outcome:
+When that turn ends - not at a permission or question prompt within it, and
+two minutes later on a harness that never reports the end of a turn - Aether
+does what Close does, with the agent's outcome:
 it pauses the container, commits (`aether:` for success, `wip:` for
 `--outcome failure`), publishes the branch, records `completed` or `failed`
 with the reason `agent reported success; retained container` or
@@ -569,7 +570,8 @@ answer, with a reason that reads `waiting for your input`,
 `waiting for your permission` or `waiting for your answer`. There is no
 delay: the report arrives as the agent stops. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
-turn parks with `blocked: <summary>` instead, until it resumes. A server restart does not
+turn parks at its end with `blocked: <summary>` instead of
+`waiting for your input`, until it resumes. A server restart does not
 change that: the report is recovered with the run, so a run that was
 waiting for you is still waiting for you afterwards.
 
