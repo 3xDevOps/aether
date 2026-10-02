@@ -592,17 +592,17 @@ container immediately. A failed run's partial work is committed as `wip:`.
 
 Before a launch, the server may update the shipped agent installed in the
 member home ([harnesses.md](harnesses.md#updates-before-launch)). No update
-problem stops the launch. A nonzero exit, a runtime error, or an update still
-running after 3 minutes leaves the installed version in place, the run starts
-on it, and the run's timeline in the dashboard records the cause:
+problem stops the launch. A launch waits at most 25 seconds for the update,
+then starts the agent on whatever is installed at that moment. A nonzero
+exit, a runtime error, or an updater stopped after 10 minutes is recorded on
+the timeline of the run that started the update:
 
 ```text
-could not update codex before launch; starting the installed version codex-cli 0.155.1: the updater exited 1: <updater output>
+could not update codex from codex-cli 0.155.1: the updater exited 1: <updater output>
 ```
 
 The server log has the same failure as `scheduler: harness update failed`.
-The next launch from that home tries again after 15 minutes. Killing the run
-during the update cancels the update and records nothing.
+The next launch from that home tries again after 15 minutes.
 `--harness-update=false` turns updates off.
 
 ### SSH drop mid-attach

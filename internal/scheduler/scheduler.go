@@ -137,6 +137,9 @@ type Config struct {
 	// harnessUpdateTimeout overrides defaultHarnessUpdateTimeout; only tests
 	// set it.
 	harnessUpdateTimeout time.Duration
+	// harnessUpdateWait overrides defaultHarnessUpdateWait; only tests set
+	// it.
+	harnessUpdateWait time.Duration
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour

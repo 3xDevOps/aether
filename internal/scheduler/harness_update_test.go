@@ -32,6 +32,8 @@ type updateRuntime struct {
 	release chan struct{}
 	started chan struct{}
 	updated bool
+	// afterFails makes the version probe fail once the update ran.
+	afterFails bool
 }
 
 func newUpdateRuntime(t *testing.T) *updateRuntime {
@@ -40,6 +42,9 @@ func newUpdateRuntime(t *testing.T) *updateRuntime {
 		if len(argv) == 2 && argv[1] == "--version" {
 			r.mu.Lock()
 			defer r.mu.Unlock()
+			if r.updated && r.afterFails {
+				return 1, "", nil
+			}
 			if r.updated {
 				return 0, r.after + "\n", nil
 			}
@@ -187,7 +192,7 @@ func TestHarnessUpdateNotesVersionChange(t *testing.T) {
 	rt.after = "2.1.1 (Claude Code)"
 
 	run, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"updated claude before launch, from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)"}
+	want := []string{"updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
 	}
@@ -224,6 +229,26 @@ func TestHarnessUpdateNotesVersionChange(t *testing.T) {
 	}
 }
 
+// An update whose new version cannot be read still says it updated, and
+// counts as a success.
+func TestHarnessUpdateUnreadableNewVersion(t *testing.T) {
+	t.Parallel()
+	e, rt, clock := newUpdateEnv(t, nil)
+	installInHome(t, e, "claude")
+	rt.afterFails = true
+
+	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	want := []string{"updated claude from 2.1.0 (Claude Code) to an unknown version"}
+	if got := noteMessages(notes); !slices.Equal(got, want) {
+		t.Fatalf("notes = %q, want %q", got, want)
+	}
+	clock.advance(harnessUpdateInterval - time.Minute)
+	launchNotes(t, e, "claude", domain.LaunchTUI)
+	if n := len(rt.updates()); n != 1 {
+		t.Fatalf("update containers inside the interval = %d, want 1", n)
+	}
+}
+
 func TestHarnessUpdateCurrentIsQuietAndRechecksAfterInterval(t *testing.T) {
 	t.Parallel()
 	e, rt, clock := newUpdateEnv(t, nil)
@@ -252,7 +277,7 @@ func TestHarnessUpdateFailureStillLaunches(t *testing.T) {
 	rt.output = "Failed to fetch\x1b[0m latest version:\nnetwork unreachable\n"
 
 	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"could not update claude before launch; starting the installed version 2.1.0 (Claude Code): " +
+	want := []string{"could not update claude from 2.1.0 (Claude Code): " +
 		"the updater exited 1: Failed to fetch[0m latest version: network unreachable"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
@@ -276,7 +301,7 @@ func TestHarnessUpdateTimeoutStillLaunches(t *testing.T) {
 	rt.release = make(chan struct{})
 
 	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"could not update claude before launch; starting the installed version 2.1.0 (Claude Code): " +
+	want := []string{"could not update claude from 2.1.0 (Claude Code): " +
 		"the updater did not finish within 50ms"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
@@ -290,7 +315,7 @@ func TestHarnessUpdateCreateFailureStillLaunches(t *testing.T) {
 	rt.createErr = errors.New("runtime: create container: no space left on device")
 
 	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"could not update claude before launch; starting the installed version: " +
+	want := []string{"could not update claude: " +
 		"runtime: create container: no space left on device"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
@@ -323,70 +348,169 @@ func TestHarnessUpdateSkipped(t *testing.T) {
 	}
 }
 
-func TestHarnessUpdateRunsOncePerHome(t *testing.T) {
-	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, nil)
-	installInHome(t, e, "claude")
-	rt.release = make(chan struct{})
-	sub := e.subscribe(t)
+// launchAsync launches claude in the background and returns its result.
+func launchAsync(ctx context.Context, e *testEnv) chan launchResult {
+	out := make(chan launchResult, 1)
+	go func() {
+		run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "task", "claude", domain.LaunchTUI)
+		out <- launchResult{run, err}
+	}()
+	return out
+}
 
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for range 2 {
-		wg.Go(func() {
-			_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "claude", domain.LaunchTUI)
-			errs <- err
-		})
-	}
-	<-rt.started
-	waitStatusEvent(t, sub, "", domain.RunProvisioning)
-	waitStatusEvent(t, sub, "", domain.RunProvisioning)
-	rt.mu.Lock()
-	close(rt.release)
-	rt.release = nil
-	rt.mu.Unlock()
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("Launch: %v", err)
-		}
-	}
-	if n := len(rt.updates()); n != 1 {
-		t.Fatalf("update containers = %d, want 1 for two launches on one home", n)
+type launchResult struct {
+	run *domain.Run
+	err error
+}
+
+func awaitLaunch(t *testing.T, results chan launchResult) launchResult {
+	t.Helper()
+	select {
+	case got := <-results:
+		return got
+	case <-time.After(waitTimeout):
+		t.Fatal("Launch did not return")
+		return launchResult{}
 	}
 }
 
-func TestHarnessUpdateKilledRunEndsKilled(t *testing.T) {
+func (r *updateRuntime) releaseUpdate() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	close(r.release)
+	r.release = nil
+}
+
+// updateExecs counts the update scripts that have started.
+func updateExecs(e *testEnv) int {
+	n := 0
+	for _, call := range e.rt.execRuns() {
+		if len(call.argv) == 3 && call.argv[0] == "/bin/sh" {
+			n++
+		}
+	}
+	return n
+}
+
+// A launch that outwaits the update starts on the installed version, and the
+// update's result still lands on the run that started it.
+func TestHarnessUpdateWaitExpiresAndResultLandsLater(t *testing.T) {
 	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, nil)
+	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 50 * time.Millisecond })
 	installInHome(t, e, "claude")
+	rt.after = "2.1.1 (Claude Code)"
 	rt.release = make(chan struct{})
 	sub := e.subscribe(t)
 
-	errs := make(chan error, 1)
-	go func() {
-		_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "claude", domain.LaunchTUI)
-		errs <- err
-	}()
+	first := launchAsync(t.Context(), e)
+	<-rt.started
+	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	want := []string{"starting the installed version 2.1.0 (Claude Code) while claude updates"}
+	if got := noteMessages(notes); !slices.Equal(got, want) {
+		t.Fatalf("waiting run notes = %q, want %q", got, want)
+	}
+	trigger := awaitLaunch(t, first)
+	if trigger.err != nil || trigger.run.Status != domain.RunRunning {
+		t.Fatalf("triggering launch = %+v, want running", trigger)
+	}
+	rt.releaseUpdate()
+	for {
+		ev := waitTimelineEvent(t, sub, trigger.run.ID, events.TimelineNote)
+		msg := ev.Payload.(events.TimelinePayload).Message
+		if strings.HasPrefix(msg, "starting the installed version") {
+			continue
+		}
+		if msg != "updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)" {
+			t.Fatalf("result note = %q", msg)
+		}
+		return
+	}
+}
+
+// While one update is held open, a second launch on the same home waits on
+// it instead of starting its own.
+func TestHarnessUpdateRunsOncePerHome(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 50 * time.Millisecond })
+	installInHome(t, e, "claude")
+	rt.release = make(chan struct{})
+
+	first := launchAsync(t.Context(), e)
+	<-rt.started
+	second, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	if len(notes) != 1 || !strings.HasSuffix(noteMessages(notes)[0], "while claude updates") {
+		t.Fatalf("second launch notes = %q, want it to have waited on the running update", noteMessages(notes))
+	}
+	if n, execs := len(rt.updates()), updateExecs(e); n != 1 || execs != 1 {
+		t.Fatalf("while held: update containers = %d, update execs = %d, want 1 and 1", n, execs)
+	}
+	firstRun := awaitLaunch(t, first)
+	if firstRun.err != nil {
+		t.Fatalf("first Launch: %v", firstRun.err)
+	}
+	rt.releaseUpdate()
+	waitFor(t, "the held update to finish", func() bool {
+		_, err := e.rt.get(rt.ids[0])
+		return errors.Is(err, runtime.ErrNotFound)
+	})
+	for _, id := range []domain.RunID{firstRun.run.ID, second.ID} {
+		e.waitStoreStatus(t, id, domain.RunRunning)
+	}
+	if n, execs := len(rt.updates()), updateExecs(e); n != 1 || execs != 1 {
+		t.Fatalf("after release: update containers = %d, update execs = %d, want 1 and 1", n, execs)
+	}
+}
+
+// Killing the run that waits for an update ends the run, not the install.
+func TestHarnessUpdateKillDoesNotStopUpdate(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 200 * time.Millisecond })
+	installInHome(t, e, "claude")
+	rt.after = "2.1.1 (Claude Code)"
+	rt.release = make(chan struct{})
+	sub := e.subscribe(t)
+
+	results := launchAsync(t.Context(), e)
 	provisioning := waitStatusEvent(t, sub, "", domain.RunProvisioning)
 	<-rt.started
 	if err := e.sched.Kill(t.Context(), provisioning.RunID, e.member.ID); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
-	select {
-	case err := <-errs:
-		if err == nil {
-			t.Fatal("Launch succeeded after a kill during the update")
-		}
-	case <-time.After(waitTimeout):
-		t.Fatal("Launch did not return after a kill during the update")
-	}
+	awaitLaunch(t, results)
 	if r := e.waitStoreStatus(t, provisioning.RunID, domain.RunAbandoned); r.Reason != "killed" {
 		t.Fatalf("run reason = %q, want killed", r.Reason)
 	}
-	if _, err := e.rt.get(rt.ids[0]); !errors.Is(err, runtime.ErrNotFound) {
-		t.Fatalf("update container still exists: %v", err)
+	rt.releaseUpdate()
+	for {
+		ev := waitTimelineEvent(t, sub, provisioning.RunID, events.TimelineNote)
+		if msg := ev.Payload.(events.TimelinePayload).Message; strings.HasPrefix(msg, "updated claude") {
+			return
+		}
+	}
+}
+
+// A launch request that goes away while it waits leaves the update running.
+func TestHarnessUpdateSurvivesCancelledLaunch(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newUpdateEnv(t, nil)
+	installInHome(t, e, "claude")
+	rt.after = "2.1.1 (Claude Code)"
+	rt.release = make(chan struct{})
+	sub := e.subscribe(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	results := launchAsync(ctx, e)
+	provisioning := waitStatusEvent(t, sub, "", domain.RunProvisioning)
+	<-rt.started
+	cancel()
+	// Returns well before the 25-second wait: the cancelled request ended it.
+	awaitLaunch(t, results)
+	rt.releaseUpdate()
+	for {
+		ev := waitTimelineEvent(t, sub, provisioning.RunID, events.TimelineNote)
+		if msg := ev.Payload.(events.TimelinePayload).Message; strings.HasPrefix(msg, "updated claude") {
+			return
+		}
 	}
 }
 

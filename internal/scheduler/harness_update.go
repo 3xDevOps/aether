@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,12 +20,14 @@ import (
 )
 
 const (
-	harnessUpdateInterval       = 6 * time.Hour
-	harnessUpdateRetry          = 15 * time.Minute
-	defaultHarnessUpdateTimeout = 3 * time.Minute
-	harnessUpdateSlow           = 5 * time.Second
-	harnessUpdateKillPoll       = 250 * time.Millisecond
+	harnessUpdateInterval = 6 * time.Hour
+	harnessUpdateRetry    = 15 * time.Minute
+	// defaultHarnessUpdateWait keeps a launch well inside the 60 seconds the
+	// dashboard gateway allows one control call (internal/localgw).
+	defaultHarnessUpdateWait    = 25 * time.Second
+	defaultHarnessUpdateTimeout = 10 * time.Minute
 	harnessUpdateDestroyTimeout = 30 * time.Second
+	harnessVersionTimeout       = 15 * time.Second
 	maxHarnessVersion           = 64
 )
 
@@ -33,17 +36,25 @@ type harnessUpdateKey struct {
 	harness string
 }
 
+// harnessUpdateState is guarded by Scheduler.mu.
 type harnessUpdateState struct {
-	// lock is a one-slot semaphore a waiter can abandon when its launch is
-	// cancelled. next is read and written only while holding it.
-	lock chan struct{}
-	next time.Time
+	next    time.Time
+	running *harnessUpdateRun
 }
 
-// updateHarness brings the shipped harness installed in the run's member
-// home current before the run container exists. Nothing it does can fail
-// the launch: the run starts on whatever version is installed afterwards.
-func (s *Scheduler) updateHarness(ctx context.Context, entry *supervised, run *domain.Run, plan *EnvironmentPlan, profile harness.Profile) {
+// harnessUpdateRun is one update in flight; done closes when it finishes.
+// before is guarded by Scheduler.mu.
+type harnessUpdateRun struct {
+	done   chan struct{}
+	before string
+}
+
+// updateHarness starts an update of the shipped harness installed in the
+// run's member home when one is due, and waits a bounded time for the
+// update in flight. The update runs detached from the launch, so a dropped
+// request or a kill never stops an install halfway, and nothing it does can
+// fail the launch.
+func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *EnvironmentPlan, profile harness.Profile) {
 	if s.cfg.HarnessUpdateDisabled || profile.UpdateScript == "" || len(profile.TUIArgs) == 0 {
 		return
 	}
@@ -62,103 +73,110 @@ func (s *Scheduler) updateHarness(ctx context.Context, entry *supervised, run *d
 	}
 	state := s.harnessUpdates[key]
 	if state == nil {
-		state = &harnessUpdateState{lock: make(chan struct{}, 1)}
+		state = &harnessUpdateState{}
 		s.harnessUpdates[key] = state
 	}
+	update := state.running
+	if update == nil && !s.cfg.Now().Before(state.next) {
+		update = &harnessUpdateRun{done: make(chan struct{})}
+		state.running = update
+		// One name per home and harness: only one update per key runs at a
+		// time, so a match is left over from a crashed server.
+		name := "harness-update-" + filepath.Base(home.HostPath) + "-" + profile.Name
+		spec := runtime.Spec{
+			Name:  name,
+			Image: plan.Image,
+			// The launch goes on to add coordination variables to plan.Env.
+			Env:        maps.Clone(plan.Env),
+			Mounts:     []runtime.Mount{home},
+			User:       plan.User,
+			WorkingDir: plan.Home,
+			// Outlives the execs, and ends on its own if the server dies first.
+			Command:     []string{"/bin/sh", "-c", "sleep 900"},
+			CreationKey: name,
+		}
+		go s.runHarnessUpdate(state, update, run.WorkspaceID, run.ID, spec, exe, profile)
+	}
 	s.mu.Unlock()
-
-	updateCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go s.cancelOnKill(updateCtx, cancel, entry)
+	if update == nil {
+		return
+	}
+	wait := s.cfg.harnessUpdateWait
+	if wait <= 0 {
+		wait = defaultHarnessUpdateWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	select {
-	case state.lock <- struct{}{}:
-	case <-updateCtx.Done():
+	case <-update.done:
 		return
-	}
-	defer func() { <-state.lock }()
-	if s.cfg.Now().Before(state.next) {
+	case <-ctx.Done():
 		return
+	case <-timer.C:
 	}
-
-	slow := time.AfterFunc(harnessUpdateSlow, func() {
-		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote,
-			"updating "+profile.Name+" before launch")
-	})
-	before, after, err := s.runHarnessUpdate(updateCtx, plan, home, exe, profile)
-	slow.Stop()
-	if updateCtx.Err() != nil {
-		return
-	}
-	if err != nil {
-		state.next = s.cfg.Now().Add(harnessUpdateRetry)
-		slog.Warn("scheduler: harness update failed", "run", run.ID, "harness", profile.Name, "error", err)
-		installed := "the installed version"
-		if before != "" {
-			installed += " " + before
-		}
-		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote,
-			fmt.Sprintf("could not update %s before launch; starting %s: %s",
-				profile.Name, installed, publicRunStatusReason(harnessUpdateText(err.Error()))))
-		return
-	}
-	state.next = s.cfg.Now().Add(harnessUpdateInterval)
-	if after == "" || after == before {
-		return
-	}
-	msg := "updated " + profile.Name + " before launch, "
+	s.mu.Lock()
+	before := update.before
+	s.mu.Unlock()
+	msg := "starting the installed version "
 	if before != "" {
-		msg += "from " + before + " "
+		msg += before + " "
 	}
-	s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, msg+"to "+after)
+	s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, msg+"while "+profile.Name+" updates")
 }
 
-// cancelOnKill ends a pre-launch update when the run is killed. Kill only
-// flags a provisioning run, and an update can outlast the launch's other
-// steps by minutes.
-func (s *Scheduler) cancelOnKill(ctx context.Context, cancel context.CancelFunc, entry *supervised) {
-	tick := time.NewTicker(harnessUpdateKillPoll)
-	defer tick.Stop()
-	for {
-		s.mu.Lock()
-		killed := entry.killRequested
-		s.mu.Unlock()
-		if killed {
-			cancel()
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
+// runHarnessUpdate runs one update to completion and reports its result on
+// the run that started it.
+func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessUpdateRun, workspace domain.WorkspaceID, runID domain.RunID, spec runtime.Spec, exe string, profile harness.Profile) {
+	timeout := s.cfg.harnessUpdateTimeout
+	if timeout <= 0 {
+		timeout = defaultHarnessUpdateTimeout
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	before, after, err := s.updateInContainer(ctx, update, spec, exe, profile.UpdateScript)
+	if err != nil && ctx.Err() != nil {
+		err = fmt.Errorf("the updater did not finish within %s", timeout)
+	}
+	next := harnessUpdateInterval
+	switch {
+	case err != nil:
+		next = harnessUpdateRetry
+		slog.Warn("scheduler: harness update failed", "run", runID, "harness", profile.Name, "error", err)
+		msg := "could not update " + profile.Name
+		if before != "" {
+			msg += " from " + before
+		}
+		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote,
+			msg+": "+publicRunStatusReason(harnessUpdateText(err.Error())))
+	case after != before:
+		msg := "updated " + profile.Name
+		if before != "" {
+			msg += " from " + before
+		}
+		if after == "" {
+			after = "an unknown version"
+		}
+		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after)
+	}
+	s.mu.Lock()
+	state.next = s.cfg.Now().Add(next)
+	state.running = nil
+	close(update.done)
+	s.mu.Unlock()
 }
 
-// runHarnessUpdate runs the profile's UpdateScript in a throwaway container
-// with the run's image, user, environment and member home, and reports the
-// harness version before and after it.
-func (s *Scheduler) runHarnessUpdate(ctx context.Context, plan *EnvironmentPlan, home runtime.Mount, exe string, profile harness.Profile) (before, after string, err error) {
-	// One name per home and harness: the state lock allows only one such
-	// container at a time, so a match is left over from a crashed server.
-	name := "harness-update-" + filepath.Base(home.HostPath) + "-" + profile.Name
-	if leftover, findErr := s.cfg.Runtime.FindByCreationKey(ctx, name); findErr == nil {
+// updateInContainer runs script in a throwaway container with the run's
+// image, user, environment and member home, and reports the harness version
+// before and after it.
+func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdateRun, spec runtime.Spec, exe, script string) (before, after string, err error) {
+	if leftover, findErr := s.cfg.Runtime.FindByCreationKey(ctx, spec.CreationKey); findErr == nil {
 		if destroyErr := s.cfg.Runtime.Destroy(ctx, leftover); destroyErr != nil {
 			return "", "", fmt.Errorf("remove the update container a previous server left behind: %w", destroyErr)
 		}
 	} else if !errors.Is(findErr, runtime.ErrNotFound) {
 		return "", "", findErr
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, runtime.Spec{
-		Name:       name,
-		Image:      plan.Image,
-		Env:        plan.Env,
-		Mounts:     []runtime.Mount{home},
-		User:       plan.User,
-		WorkingDir: plan.Home,
-		// Outlives the execs, and ends on its own if the server dies first.
-		Command:     []string{"/bin/sh", "-c", "sleep 600"},
-		CreationKey: name,
-	})
+	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
 		return "", "", err
 	}
@@ -172,17 +190,12 @@ func (s *Scheduler) runHarnessUpdate(ctx context.Context, plan *EnvironmentPlan,
 	if err = s.cfg.Runtime.Start(ctx, cid); err != nil {
 		return "", "", err
 	}
-	timeout := s.cfg.harnessUpdateTimeout
-	if timeout <= 0 {
-		timeout = defaultHarnessUpdateTimeout
-	}
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	before = s.harnessVersion(execCtx, cid, exe, plan.Home)
-	code, stdout, stderr, err := s.cfg.Runtime.Exec(execCtx, cid, []string{"/bin/sh", "-c", profile.UpdateScript}, plan.Home)
+	before = s.harnessVersion(ctx, cid, exe, spec.WorkingDir)
+	s.mu.Lock()
+	update.before = before
+	s.mu.Unlock()
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", script}, spec.WorkingDir)
 	switch {
-	case err != nil && ctx.Err() == nil && execCtx.Err() != nil:
-		return before, "", fmt.Errorf("the updater did not finish within %s", timeout)
 	case err != nil:
 		return before, "", err
 	case code != 0:
@@ -191,7 +204,11 @@ func (s *Scheduler) runHarnessUpdate(ctx context.Context, plan *EnvironmentPlan,
 		}
 		return before, "", fmt.Errorf("the updater exited %d", code)
 	}
-	return before, s.harnessVersion(execCtx, cid, exe, plan.Home), nil
+	// A script that succeeds near the deadline must still get its version
+	// read.
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), harnessVersionTimeout)
+	defer cancel()
+	return before, s.harnessVersion(probeCtx, cid, exe, spec.WorkingDir), nil
 }
 
 // harnessVersion is the first line of "<exe> --version", or "" when the

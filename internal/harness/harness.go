@@ -340,7 +340,8 @@ func (p Profile) SteerSuffix() string {
 	return p.SteerSubmit
 }
 
-const codexUpdateScript = `command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and codex updates through npm" >&2; exit 1; }
+const codexUpdateScript = `[ -d "$HOME/.local/lib/node_modules/@openai/codex" ] || { echo "codex in ~/.local/bin was not installed with npm, so Aether cannot update it" >&2; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and codex updates through npm" >&2; exit 1; }
 latest=$(npm view @openai/codex version --fetch-retries=0) && [ -n "$latest" ] || exit 1
 case "$(codex --version)" in *" $latest") exit 0 ;; esac
 npm install -g --prefix "$HOME/.local" "@openai/codex@$latest"`

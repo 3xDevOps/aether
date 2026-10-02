@@ -1021,10 +1021,10 @@ transport for installation and login.
 Before it launches a run, the server updates the shipped agent installed in
 the member home's `~/.local/bin`. It runs the agent's own update command in a
 short-lived container with the run's image, user, environment, and member
-home, then starts the run. The first launch per member home and agent checks
-for an update; after that, a launch checks again once 6 hours have passed, or
-15 minutes after a failed update. Concurrent launches on one home, such as a
-swarm, share one update.
+home. The first launch per member home and agent checks for an update; after
+that, a launch checks again once 6 hours have passed, or 15 minutes after a
+failed update. Concurrent launches on one home, such as a swarm, share one
+update.
 
 | Agent | Update command |
 | --- | --- |
@@ -1035,7 +1035,9 @@ swarm, share one update.
 
 Codex does not use `codex update`: it installs into the image's global npm
 prefix, outside the member home, and reports success while the home copy stays
-old.
+old. A `codex` in `~/.local/bin` that npm did not install is not updated, and
+the update reports `codex in ~/.local/bin was not installed with npm, so
+Aether cannot update it`.
 
 Nothing else is touched: no agent configuration, plugins, extensions, or
 release channel. These are never updated:
@@ -1047,16 +1049,33 @@ release channel. These are never updated:
 - an agent installed in the image rather than in `~/.local/bin` of the member
   home.
 
-The run's timeline in the dashboard shows what happened. An update still
-running after 5 seconds adds `updating <agent> before launch`. A new version adds
-`updated <agent> before launch, from <old> to <new>`. An update that fails,
-times out after 3 minutes, or cannot reach the vendor's release server does
-not stop the launch; the run starts on the installed version and the timeline shows the
-real cause:
+A launch waits at most 25 seconds for the update. If it is still running, the
+agent starts on whatever is installed at that moment, the update finishes in
+the background, and the run's timeline in the dashboard shows:
 
 ```text
-could not update claude before launch; starting the installed version 2.1.288 (Claude Code): the updater exited 1: <updater output>
+starting the installed version 2.1.288 (Claude Code) while claude updates
 ```
+
+The update's result appears on the timeline of the run that started it, also
+when it finishes after the agent started. A new version reads
+`updated <agent> from <old> to <new>`, or `to an unknown version` when the
+new `--version` cannot be read; an unchanged one adds nothing. A
+failure, including a vendor release server that cannot be reached, never
+stops a launch; the timeline shows the real cause:
+
+```text
+could not update claude from 2.1.288 (Claude Code): the updater exited 1: <updater output>
+```
+
+An updater still running after 10 minutes is stopped and reported as
+`the updater did not finish within 10m0s`. Killing the run or closing the
+dashboard does not stop an update.
+
+npm-based updates (`codex`, `pi`) replace files in place. An agent started
+while one runs, or a run already using that agent, can see a broken install
+until the update finishes. Running `npm install` for the agent yourself in
+the terminal has the same effect.
 
 A newer CLI may migrate its own state in the member home on first start, and
 Aether does not roll an update back. Relaunching a retained run reuses its
