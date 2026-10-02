@@ -22,17 +22,30 @@ Layers, per the design spec's testing strategy:
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
   GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
-  job log. The `integration` matrix in `.github/workflows/ci.yml`
-  gives `internal/server` five shards: `server-chaos`
-  (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
-  (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
-  (`INTEGRATION_RUN=^TestIntegrationMission`), `server-heavy`
-  (`INTEGRATION_RUN=^TestIntegration(EndToEnd|MultiMember|ServerUpdate)`),
-  and `server-rest` (`INTEGRATION_SKIP_PATTERN` of the other four shards' tests).
-  `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
-  `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
-  `./internal/server`. The `smoke` job runs `internal/harness` on the images
-  it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  job log. Six browser-independent shards in the `integration` matrix in
+  `.github/workflows/ci.yml` start without waiting for browser images:
+  `server-chaos` (`INTEGRATION_RUN=^TestIntegrationChaos`),
+  `server-coordination` (`INTEGRATION_RUN=^TestIntegrationCoordination`),
+  `server-mission` (`INTEGRATION_RUN=^TestIntegrationMission`),
+  `server-heavy`
+  (`INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'`),
+  `scheduler` (`INTEGRATION_PKGS=./internal/scheduler`), and `rest`.
+  The four named server shards use `INTEGRATION_PKGS=./internal/server`.
+  `rest` dynamically discovers integration packages, excluding
+  `./internal/harness`, `./internal/scheduler`, and `./internal/server`;
+  it skips `^TestDockerBrowser`, whose coverage belongs to the native
+  amd64/arm64 `browser` jobs. The separate `integration-server-rest` job
+  loads `browser-image-amd64` and runs `./internal/server` with
+  `INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'`.
+  This catch-all retains tests that do not start with `TestIntegration`.
+  Both integration job families use `sudo env`, preserving `PATH`, `HOME`,
+  `GOFLAGS`, `AETHER_BROWSER_TEST_IMAGE`, and `AETHER_BROWSER_IMAGE`.
+  The separate unit suites remain unprivileged: the root-only
+  `TestApplyRunOwnershipHardlinkSafe` and both privilege branches of
+  `TestRecoveredTerminalUsesCapturedUserAndHomeForImages` must stay covered.
+  The `smoke` job runs `internal/harness` on the images it builds natively
+  on amd64 and arm64, alongside `scripts/standard-image-smoke.sh` toolchain
+  and native Git checks. A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
   the release matrix. A markdown file anywhere else, including a dashboard
   end-to-end fixture, does not. The `changes` job runs
@@ -78,8 +91,23 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
-  job.
+  no Go test and no jsdom test reaches. CI runs four isolated
+  `dashboard-e2e` runners, each with its own Docker daemon and Playwright
+  `workers: 1`; `fullyParallel` remains `false`. Each runner loads the tested
+  browser and standard images and runs `make test-e2e` with
+  `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
+  `make test-e2e` remains unsharded and still builds the embedded dashboard
+  and binaries first. The four shards partition the same 64 registered cases
+  once each: 48 desktop and 16 mobile, currently 16 cases per shard.
+  The `chromium` project excludes `**/*.mobile.spec.ts`; only the `mobile`
+  project owns those specs. The opt-in real-GitHub case keeps its existing
+  credential gate; listing or sharding it does not prove it ran.
+  Each shard retains `playwright-report-<shard>` (from
+  `web/playwright-report/`) and `playwright-results-<shard>` (from
+  `web/test-results/`) for seven days on success or failure, including phone
+  screenshots and failure evidence. Only shard 1 may save the shared
+  Playwright browser cache, on a non-cancelled push to `main`; a cache miss
+  never skips browser installation or tests.
   Remote-development scenarios live in `web/e2e/development-browser/`
   (shared real companion, login, live app update, popups, takeover and phone
   viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
@@ -88,13 +116,17 @@ Layers, per the design spec's testing strategy:
   and push, plus opt-in actual GitHub PR publication). These use deterministic
   harness fixtures, not authenticated vendor-agent loops.
 
-Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
-install and reinstall must preserve the CLI and unrelated files in the
-documented CLI directory and detect only the desktop directory as an installed
-app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real shortcut
-launcher with a target path containing spaces, an ampersand, and non-ASCII
-characters, and checks the launched process's working directory. These checks
-run before desktop packaging.
+CI's native `windows` job builds, vets, and tests the full Windows client
+package closure (`./cmd/aether` and its repository dependencies). It owns
+the selected `internal/localops` regressions rather than repeating them in
+the `Windows install` workflow. `TestInstallDesktopWindowsPreservesCLI`
+requires install and reinstall to preserve the CLI and unrelated files in
+the documented CLI directory and detect only the desktop directory as an
+installed app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real
+shortcut launcher with a target path containing spaces, an ampersand, and
+non-ASCII characters, and checks the launched process's working directory.
+Moving their invocation does not remove either regression or either
+installer lane.
 
 The `Windows install` workflow runs `scripts/install-test.ps1` under Windows
 PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
@@ -110,13 +142,62 @@ exact bytes and their checksum so the scenario tests the checkout, not the
 latest published release. It installs and rebuilds the desktop, verifies
 the unchanged CLI, and launches the installed Start Menu shortcut with the
 pre-install `PATH`. Playwright checks that window's onboarding screen
-and saves a screenshot. Windows PowerShell uses system Node; PowerShell 7 hides
-system Node to exercise the verified private download. Defender scans the
+and saves a screenshot. Windows PowerShell 5.1 uses system Node; PowerShell 7
+(`pwsh`) hides system Node to exercise the verified private download.
+The seven-day screenshot artifacts are `windows-desktop-powershell-system`
+and `windows-desktop-pwsh-downloaded`, uploaded even after failure when a
+screenshot exists. Defender scans the
 download and install tree without exclusions or disabled remediation. The
 gate rejects new detections even when Defender has already remediated them,
 and checks that installation changed neither protection settings nor exclusions.
 This is a detection gate, not a guarantee that an unsigned release will
 never receive a false positive on another machine.
+
+## Workflow and release-build gates
+
+`make lint-workflows` runs pinned actionlint v1.7.12; CI invokes it in the
+`lint` job. `make test-scripts` includes
+`sh scripts/release-ci-check-test.sh`, which exercises the real release
+checker's run selection and rejection behavior with only the GitHub API
+boundary replaced. The checker requires the latest matching run/current
+attempt of this repository's `.github/workflows/ci.yml` to be a completed,
+successful `push` on `main` for the exact full release commit SHA. Missing,
+malformed, or failed API responses and a newer pending or failed run reject
+publication; an older success, PR run, or merge-group run cannot substitute.
+See [release instructions](install.md#releases) for the publishing gate.
+
+CI's `release-build` matrix has six Go lanes: Linux, Darwin, and Windows,
+each for amd64 and arm64. They call `make release-binaries` with
+`SERVER_PLATFORMS`, `EDGE_PLATFORMS`, and `CLI_PLATFORMS` selecting one
+target: Linux builds server, edge, and CLI; Darwin and Windows build CLI
+only. Each lane uploads `binaries-go-<goos>-<goarch>`. The independent
+`android` job validates the Gradle wrapper and runs `make android`, uploading
+`aether-android-unsigned.apk` and `aether-android-unsigned.aab` in
+`binaries-android`. All seven artifacts have seven-day retention and missing
+outputs fail upload. Locally, `make release-binaries` builds all ten Go
+assets by default without Android or Docker; `make release` still adds
+Android. Go builds still need the dashboard's Bun and Node toolchain.
+
+`windows-defender` depends on the Go matrix, not Android. It downloads only
+`binaries-go-windows-*`, merges their contents, and requires both
+`aether-windows-amd64.exe` and `aether-windows-arm64.exe` for scanning.
+It enables realtime and cloud protection and updates signatures before
+scanning; missing, quarantined, or detected executables fail the gate.
+This static scan supplements, rather than replaces, the runtime installer
+Defender scenarios above. Android and every Go lane remain required CI
+coverage.
+
+Go caches separate module downloads from compiled objects. Both are scoped
+to host OS/architecture, runner environment, resolved toolchain, and module
+digest; compiler caches also isolate the lane and commit, with fallback only
+within the same lane. Only pushes to `main` write: `build-and-test`,
+`windows`, and arm64 `smoke` own their respective host's module/native
+compiler archives; each Go release-build lane owns its
+`release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
+The installer uses a separate `windows-install` compiler lane; only its
+PowerShell/system-Node main lane saves that cache and its Bun dependency
+cache, leaving Windows module writes to CI's `windows` job. Cache reuse
+does not replace any build or validation gate.
 
 ## Headless browser and remote-development acceptance
 

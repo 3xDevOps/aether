@@ -22,14 +22,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted runners are ephemeral, so untrusted pull request code does
-# not need an admin gate before checkout. Caches still save only on push to
-# main: one Linux job may save a given key, and a pull-request cache can
-# evict the default-branch cache. runner.environment stays in every cache
-# key so a self-hosted archive is never restored onto a hosted VM. Several
-# Linux jobs share one Go key and one bun key, so only build-and-test saves
-# them.
-# Windows saves its own Go cache: a different runner.os keeps that key
-# distinct.
+# not need an admin gate before checkout. Caches save only on pushes to
+# main. Go module archives are separate from compiler archives, whose keys
+# also include their native or cross-build lane. Each lane has one writer;
+# build-and-test owns Linux amd64 native Go and bun, windows owns Windows
+# native Go, and smoke owns Linux arm64 native Go. These three Go owners
+# also save modules for their host. runner.environment stays in every key
+# so a self-hosted archive is never restored onto a hosted VM.
 # The unit-test packages the `unit` matrix runs on runners of their own.
 # build-and-test runs every other package. Keep this list and the matrix in
 # step.
@@ -120,6 +119,8 @@ jobs:
         run: make fmt-check
       - name: Vet
         run: make vet
+      - name: Lint workflows
+        run: make lint-workflows
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -172,22 +173,19 @@ jobs:
         run: make test-native-hooks
       - name: Build binaries
         run: make build
-      # Every Linux job shares this Go cache key, and actions/cache/save
-      # rejects a second reservation of the same key, so only one job may
-      # save it - this one, since it is the job every push always runs and
-      # its own steps exercise the widest set of packages (unit tests
-      # included). Other Linux jobs restore only. The bun cache follows the
-      # same rule and the same owner. windows saves its own Go cache: a
-      # different runner.os keeps its key from colliding with this one.
+      # Own the Linux amd64 module and native compiler archives, plus bun.
+      # Other native Linux amd64 jobs restore only; cross-build jobs save
+      # their own compiler variants without racing this module writer.
       # Saved on a red run too: a failed test does not invalidate compiled
       # objects or downloaded modules, and a flaky suite would otherwise leave
       # every following run cold.
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+          save-modules: 'true'
       - uses: ./.github/actions/bun-cache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
 
@@ -228,9 +226,8 @@ jobs:
           GOFLAGS: -timeout=30m
         run: make test TEST_PKGS="${{ matrix.pkgs }}"
 
-  # Only internal/harness needs the agent images, so it is the only job that
-  # waits for them to build; the sharded `integration` jobs below start at
-  # once.
+  # internal/harness needs the agent images built here. The independent
+  # integration shards start without waiting for these images.
   smoke:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
@@ -273,6 +270,8 @@ jobs:
           tags: aether-standard:ci
           cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
           cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=standard-{0}-main', matrix.arch) || '' }}
+      - name: Prove standard environment tools and native Git
+        run: sh scripts/standard-image-smoke.sh aether-standard:ci
       # The agent CLIs on top, at whatever version their vendors ship
       # today: that is the drift this image exists to catch. It carries no
       # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
@@ -304,6 +303,11 @@ jobs:
           path: ${{ runner.temp }}/aether-standard.tar
           compression-level: 0
           retention-days: 1
+      - uses: ./.github/actions/go-cache
+        if: ${{ !cancelled() && matrix.arch == 'arm64' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          mode: save
+          save-modules: 'true'
 
   # Build the same Dockerfile on both supported server architectures. This
   # gate is display-free; browser libraries and Chromium exist only inside
@@ -329,6 +333,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
       - uses: docker/setup-buildx-action@v3
       - name: Build the browser companion
         uses: docker/build-push-action@v6
@@ -365,15 +372,14 @@ jobs:
       contents: read
     uses: ./.github/workflows/edge-image.yml
 
-  # Sharded so the slow server scenarios do not share one runner. Five shards
-  # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is
-  # every other integration package, so a package that gains integration tests
-  # is gated without a change here. The browser runtime tests run once in the
-  # browser job; its tested image is loaded here for server-level scenarios.
+  # Five shards cover internal/server by test name, balanced by the durations
+  # -v prints; scheduler is its own package; rest dynamically discovers every
+  # other integration package. Only server-rest needs the browser image, so
+  # the six image-independent shards do not wait for or transfer it.
   integration:
     name: integration (${{ matrix.shard }})
-    needs: [changes, browser]
-    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     # ubuntu-latest provides Docker for these real-runtime tests.
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -389,8 +395,6 @@ jobs:
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
           - shard: server-heavy
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
-          - shard: server-rest
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
           - shard: scheduler
             make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
@@ -409,6 +413,36 @@ jobs:
       # The matrix values are literals from this file, passed as make
       # assignments. -v prints each test's duration, which is what the
       # shards are balanced by.
+      - name: Integration tests (real Docker, real git)
+        env:
+          GOFLAGS: -v
+          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
+          AETHER_BROWSER_IMAGE: aether/browser:test
+        # Preserve the root suite as well as the separate non-root unit suite:
+        # ownership and recovery tests exercise different privilege branches.
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
+            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
+            make test-integration ${{ matrix.make }}
+
+  integration-server-rest:
+    name: integration (server-rest)
+    needs: [changes, browser]
+    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
       - uses: actions/download-artifact@v4
         with:
           name: browser-image-amd64
@@ -426,7 +460,8 @@ jobs:
           sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
-            make test-integration ${{ matrix.make }}
+            make test-integration INTEGRATION_PKGS=./internal/server \
+              INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
 
   dashboard:
     needs: changes
@@ -462,10 +497,15 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
+    name: dashboard-e2e (${{ matrix.shard }}/4)
     needs: [changes, browser, smoke]
     if: ${{ !cancelled() && needs.browser.result == 'success' && needs.smoke.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -539,18 +579,24 @@ jobs:
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
             "AETHER_E2E_STANDARD_IMAGE=$AETHER_E2E_STANDARD_IMAGE" \
-            make test-e2e
+            make test-e2e E2E_ARGS='--shard=${{ matrix.shard }}/4'
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with
       # every assertion green. Not on a cancelled job, which has no report.
       - uses: actions/upload-artifact@v4
         if: success() || failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: web/playwright-report/
           retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: playwright-results-${{ matrix.shard }}
+          path: web/test-results/
+          retention-days: 7
       - uses: actions/cache/save@v4
-        if: github.event_name == 'push'
+        if: ${{ !cancelled() && matrix.shard == 1 && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
@@ -677,17 +723,22 @@ jobs:
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
           go test ./cmd/aether $pkgs
       - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+          save-modules: 'true'
 
   release-build:
+    name: release-build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
-    # The Android build runs a Gradle daemon in a container; a wedged one
-    # would otherwise hold the runner for GitHub's six-hour default.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -700,6 +751,7 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
+          variant: release-${{ matrix.goos }}-${{ matrix.goarch }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -710,16 +762,45 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
-      # `make release` builds the Android shell too, in its pinned SDK
-      # container, so a broken shell fails the pull request. The container
-      # carries the SDK; only Gradle's dependency and distribution caches are
-      # worth keeping between runs, and actions/cache stores paths relative to
-      # the workspace, so the Makefile's default cache directory is moved into
-      # it. The key includes runner.environment so a self-hosted archive is
-      # never restored onto a hosted VM.
-      # Restored on every run and saved only after a push to main. One job
-      # may save a given key, and a pull-request cache can evict the
-      # default-branch cache.
+      - name: Cross-compile release binaries
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          linux_platforms=""
+          if [ "$TARGET_OS" = linux ]; then
+            linux_platforms="linux/$TARGET_ARCH"
+          fi
+          make release-binaries \
+            SERVER_PLATFORMS="$linux_platforms" \
+            EDGE_PLATFORMS="$linux_platforms" \
+            CLI_PLATFORMS="$TARGET_OS/$TARGET_ARCH"
+      - uses: ./.github/actions/go-cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          mode: save
+          variant: release-${{ matrix.goos }}-${{ matrix.goarch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-go-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    # A wedged Gradle daemon must not hold the runner for the six-hour default.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history so git describe can version the build
+      # The pinned SDK container carries the Android toolchain. Keep only
+      # Gradle's dependency and distribution caches, inside the workspace so
+      # the archive restores at the same path. Only this main job writes it.
       - uses: actions/cache/restore@v4
         with:
           path: .gradle-cache
@@ -735,24 +816,27 @@ jobs:
       # points at v4.4.3, while v4.4.4 is the current v4 release and carries
       # the newer known-wrapper checksums this step reads.
       - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - name: Cross-compile release matrix
+      - name: Build and test unsigned Android artifacts
         env:
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
-        run: make release
+        run: make android
       # The daemon logs and the compiled-script caches are large and
       # machine-specific; saving them would cost more than it returns.
       - name: Trim the Gradle cache before it is saved
         if: ${{ !cancelled() }}
         run: rm -rf .gradle-cache/daemon .gradle-cache/native
       - uses: actions/cache/save@v4
-        if: github.event_name == 'push'
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries
-          path: dist/
+          name: binaries-android
+          path: |
+            dist/aether-android-unsigned.apk
+            dist/aether-android-unsigned.aab
+          if-no-files-found: error
           retention-days: 7
 
   # Scans the binaries the release matrix just produced with the Defender
@@ -769,7 +853,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: binaries
+          pattern: binaries-go-windows-*
+          merge-multiple: true
           path: dist
       # The runner image ships with real-time protection, cloud reporting and
       # sample submission switched off, so an untouched runner calls every
@@ -797,14 +882,9 @@ jobs:
         shell: powershell
         run: |
           $mpcmdrun = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
-          # An empty match would otherwise skip the loop and report clean
-          # without having scanned anything - the failure that matters most,
-          # because it means the release matrix or the artifact is broken.
-          $exes = @(Get-ChildItem dist\aether-windows-*.exe -ErrorAction SilentlyContinue)
-          if ($exes.Count -eq 0) {
-            Write-Host "::error::no Windows binaries in dist/; the artifact download or release-build is broken"
-            exit 1
-          }
+          # Require both architectures; a missing or quarantined binary must
+          # fail rather than silently turn a partial download into a pass.
+          $exes = @(Get-Item dist\aether-windows-amd64.exe, dist\aether-windows-arm64.exe -ErrorAction Stop)
           $failed = @()
           foreach ($exe in $exes) {
             Write-Host "scanning $($exe.Name)"
