@@ -1048,6 +1048,26 @@ environment snapshot and does not claim that the reported work was verified.
 If capture or durable storage fails, the outcome is not accepted, and the
 runtime resources remain recoverable.
 
+Mission submission acceptance distinguishes source availability from
+completeness. A readable retained transcript satisfies a `transcript`
+requirement even when it reaches the 16 MiB cap. `mission.show` exposes that
+source as `available: true, truncated: true`; it is partial evidence, not a
+complete transcript or proof that verification passed. Acceptance checks the
+packet's workspace, run, retained revision, expiry, and retained bytes.
+Missing or unreadable required sources remain unavailable.
+
+An older server may have recorded a capped transcript as unavailable on a
+still-proposed submission. After upgrading, the next authorized
+`task accept-submission` revalidates the retained packet and updates those
+facts atomically with acceptance. It does not infer availability from the
+detail text or repair an expired or missing packet. Retrying an accepted
+operation preserves its receipt even after later evidence expiry, while
+still enforcing current authorization.
+
+Candidate integration has a separate completeness policy: a truncated source
+listed in `required_sources` remains refused. See
+[candidate source validation](integration.md#candidate-identity-and-assembly).
+
 Finalization and event publication are crash-safe. Finalization writes a
 durable pending publication row and a deterministic evidence-event ID. The
 event is appended before the report is marked published; if an append result

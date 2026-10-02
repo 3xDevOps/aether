@@ -314,15 +314,21 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 	if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
 		return nil, authorizeErr
 	}
-	if submission.State == domain.SubmissionProposed {
-		if evidenceErr := s.validateSubmissionEvidence(ctx, mission, task, submission); evidenceErr != nil {
-			return nil, evidenceErr
-		}
-	}
 	if len(submission.ScopeViolations) > 0 && strings.TrimSpace(p.ScopeDisposition) == "" {
 		return nil, errors.New("mission: scope disposition is required for out-of-scope submission")
 	}
-	accepted, err := s.cfg.Missions.AcceptSubmission(ctx, submission.ID, run, p.ExpectedIntegratorGeneration, p.ExpectedAcceptedSetVersion, p.ScopeDisposition, p.IdempotencyKey)
+	var accepted *domain.Acceptance
+	accept := func(validated *store.SubmissionEvidenceValidation) error {
+		var acceptErr error
+		accepted, acceptErr = s.cfg.Missions.AcceptSubmission(ctx, submission.ID, run, p.ExpectedIntegratorGeneration, p.ExpectedAcceptedSetVersion, p.ScopeDisposition, p.IdempotencyKey, validated)
+		return acceptErr
+	}
+	if submission.State == domain.SubmissionProposed {
+		err = s.withSubmissionEvidence(ctx, mission, task, submission, accept)
+	} else {
+		// A durable receipt is immutable even after its original sources expire.
+		err = accept(nil)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -354,62 +360,68 @@ func (s *Service) authorizeMissionTaskActor(ctx context.Context, mission *domain
 	return err
 }
 
-func (s *Service) validateSubmissionEvidence(ctx context.Context, mission *domain.Mission, task *domain.Task, submission *domain.Submission) error {
+func (s *Service) withSubmissionEvidence(ctx context.Context, mission *domain.Mission, task *domain.Task, submission *domain.Submission, accept func(*store.SubmissionEvidenceValidation) error) error {
 	if s.cfg.Evidence == nil || mission == nil || task == nil || task.Revision == nil || submission == nil {
 		return fmt.Errorf("%w: retained evidence is unavailable", store.ErrMissionNotReady)
 	}
-	packet, err := s.cfg.Evidence.Get(ctx, mission.WorkspaceID, submission.Ref.EvidenceRef)
-	if err != nil {
-		return fmt.Errorf("%w: retained evidence lookup failed: %v", store.ErrMissionNotReady, err)
-	}
-	if packet.ID != submission.Ref.EvidenceRef ||
-		packet.WorkspaceID != string(mission.WorkspaceID) ||
-		packet.RunID != string(submission.Ref.RunID) ||
-		packet.RetainedRevision != submission.Ref.RetainedRevision {
-		return fmt.Errorf("%w: retained evidence identity does not match submission", store.ErrMissionNotReady)
-	}
-	if available, detail := packetEvidenceState(s.cfg.Now, packet); !available {
-		if detail == "" {
-			detail = "retained evidence is unavailable"
-		}
-		return fmt.Errorf("%w: %s", store.ErrMissionNotReady, detail)
-	}
-	validKinds := make(map[string]bool, len(packet.Sources)+2)
-	hasRetainedPacket := false
-	validKinds["retained_packet"] = true
+	ids := []string{submission.Ref.EvidenceRef}
 	for _, fact := range submission.Evidence {
-		if fact.Kind == "retained_packet" && fact.Ref == packet.ID {
-			hasRetainedPacket = true
+		if fact.Kind == "input" && fact.Ref != "" && !containsString(ids, fact.Ref) {
+			ids = append(ids, fact.Ref)
 		}
 	}
-	if !hasRetainedPacket {
-		return fmt.Errorf("%w: retained packet evidence fact is missing", store.ErrMissionNotReady)
-	}
-	for _, source := range packet.Sources {
-		name := strings.TrimSpace(source.Name)
-		if name != "" && source.Available && !source.Truncated {
-			validKinds[name] = true
+	return s.cfg.Evidence.WithSubmissionSources(ctx, mission.WorkspaceID, ids, func(packets []protocol.EvidencePacket) error {
+		if len(packets) != len(ids) {
+			return fmt.Errorf("%w: retained evidence lookup failed", store.ErrMissionNotReady)
 		}
-	}
-	for _, fact := range submission.Evidence {
-		ref := strings.TrimSpace(fact.Ref)
-		if ref == "" || ref == packet.ID || fact.Kind == "retained_packet" {
-			continue
+		packet := packets[0]
+		if submission.Ref.WorkspaceID != mission.WorkspaceID ||
+			packet.ID != submission.Ref.EvidenceRef ||
+			packet.WorkspaceID != string(mission.WorkspaceID) ||
+			packet.RunID != string(submission.Ref.RunID) ||
+			packet.Origin.Kind != protocol.EvidenceOriginRun || packet.Origin.ID != packet.RunID ||
+			packet.RetainedRevision != submission.Ref.RetainedRevision {
+			return fmt.Errorf("%w: retained evidence identity does not match submission", store.ErrMissionNotReady)
 		}
-		other, lookupErr := s.cfg.Evidence.Get(ctx, mission.WorkspaceID, ref)
-		if lookupErr != nil || other.ID != ref || other.WorkspaceID != string(mission.WorkspaceID) {
-			continue
+		if available, detail := packetEvidenceState(s.cfg.Now, packet); !available {
+			return fmt.Errorf("%w: %s", store.ErrMissionNotReady, detail)
 		}
-		if available, _ := packetEvidenceState(s.cfg.Now, other); available {
-			validKinds[fact.Kind] = true
+		current := packetSubmissionEvidence(s.cfg.Now, packet)
+		facts := make([]domain.SubmissionEvidence, len(submission.Evidence))
+		validKinds := make(map[string]bool, len(current)+1)
+		for i, prior := range submission.Evidence {
+			fact := domain.SubmissionEvidence{Kind: prior.Kind, Ref: prior.Ref, Detail: "retained evidence source is unavailable"}
+			if prior.Kind == "input" {
+				// Input references authorize packet presence only, never an
+				// arbitrary source kind claimed by the persisted fact.
+				for j, id := range ids {
+					other := packets[j]
+					if id == prior.Ref && other.ID == id && other.WorkspaceID == string(mission.WorkspaceID) {
+						fact.Available, fact.Detail = packetEvidenceState(s.cfg.Now, other)
+						break
+					}
+				}
+			} else if prior.Ref == packet.ID {
+				for _, observed := range current {
+					if observed.Kind == prior.Kind {
+						fact = observed
+						break
+					}
+				}
+			}
+			facts[i] = fact
+			validKinds[fact.Kind] = validKinds[fact.Kind] || fact.Available
 		}
-	}
-	for _, requirement := range task.Revision.EvidenceRequirements {
-		if !validKinds[requirement.Kind] {
-			return fmt.Errorf("%w: required evidence %q is unavailable", store.ErrMissionNotReady, requirement.Kind)
+		if !validKinds["retained_packet"] {
+			return fmt.Errorf("%w: retained packet evidence fact is missing", store.ErrMissionNotReady)
 		}
-	}
-	return nil
+		for _, requirement := range task.Revision.EvidenceRequirements {
+			if !validKinds[requirement.Kind] {
+				return fmt.Errorf("%w: required evidence %q is unavailable", store.ErrMissionNotReady, requirement.Kind)
+			}
+		}
+		return accept(&store.SubmissionEvidenceValidation{Ref: submission.Ref, Evidence: facts})
+	})
 }
 
 // createTask persists a server-issued task and its durable idempotency receipt.

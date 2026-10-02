@@ -234,6 +234,7 @@ type SubmissionEvidence struct {
 	Kind      string `json:"kind"`
 	Ref       string `json:"ref"`
 	Available bool   `json:"available"`
+	Truncated bool   `json:"truncated,omitempty"`
 	Detail    string `json:"detail,omitempty"`
 }
 

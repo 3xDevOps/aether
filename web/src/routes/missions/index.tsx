@@ -643,6 +643,7 @@ function TaskCard({
     (submission) =>
       submission.state === 'accepted' && submission.task_revision === task.current_revision,
   )
+  const evidenceExceptions = accepted?.evidence.filter((source) => !source.available || source.truncated) ?? []
   return (
     <article className="border bg-card p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -713,6 +714,19 @@ function TaskCard({
           <p className="font-medium">Accepted submission · revision {accepted.task_revision}</p>
           <p className="mt-0.5 font-mono break-all">{accepted.ref.run_id} · {accepted.ref.retained_revision}</p>
           {accepted.ref.evidence_ref && <p className="mt-0.5">Evidence: {accepted.ref.evidence_ref}</p>}
+          {evidenceExceptions.length > 0 && (
+            <>
+              <p className="mt-1 text-muted-foreground">Evidence observations at acceptance, not a live availability check. Retained sources may later expire.</p>
+              <ul aria-label="Evidence exceptions at acceptance" className="mt-0.5 space-y-0.5 text-state-needs-attention">
+                {evidenceExceptions.map((source, index) => (
+                  <li key={`${source.kind}-${source.ref}-${index}`} className="whitespace-pre-wrap break-words">
+                    {source.kind}: {source.available ? 'Partial retained evidence (truncated).' : 'Unavailable at acceptance.'}
+                    {source.detail && <span className="text-muted-foreground">{' '}{source.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {(accepted.scope_violations ?? []).length > 0 && <p className="mt-0.5 text-state-needs-attention">Scope violations: {accepted.scope_violations!.join(', ')}</p>}
           {accepted.acceptance?.scope_disposition && <p className="mt-0.5">Scope disposition: {accepted.acceptance.scope_disposition}</p>}
         </div>

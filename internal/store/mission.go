@@ -23,6 +23,15 @@ var (
 	ErrMissionAmendmentRequired   = errors.New("store: revision requires human approval")
 )
 
+// SubmissionEvidenceValidation is a server-observed refresh, not client input.
+// The caller must hold evidence retention locks through AcceptSubmission.
+// Only availability/completeness observations may change; fact identities and
+// the submission's exact retained reference remain immutable.
+type SubmissionEvidenceValidation struct {
+	Ref      domain.SubmissionRef
+	Evidence []domain.SubmissionEvidence
+}
+
 // MissionStore is intentionally separate from Store. Services can type-assert
 type MissionStore interface {
 	MissionControlStore
@@ -50,7 +59,7 @@ type MissionStore interface {
 	SubmitAttempt(context.Context, domain.AttemptID, uint64, uint64, domain.SubmissionRef, []domain.SubmissionEvidence, []string) (*domain.Submission, error)
 	GetSubmission(context.Context, domain.SubmissionID) (*domain.Submission, error)
 	ListSubmissions(context.Context, domain.MissionID, domain.TaskID) ([]*domain.Submission, error)
-	AcceptSubmission(context.Context, domain.SubmissionID, domain.RunID, uint64, uint64, string, string) (*domain.Acceptance, error)
+	AcceptSubmission(context.Context, domain.SubmissionID, domain.RunID, uint64, uint64, string, string, *SubmissionEvidenceValidation) (*domain.Acceptance, error)
 	PendingMissionControlChange(context.Context, domain.MissionID) (uint64, error)
 	AckMissionControlChange(context.Context, domain.MissionID, uint64) error
 	AbandonTask(context.Context, domain.TaskID, int, uint64, string) error
