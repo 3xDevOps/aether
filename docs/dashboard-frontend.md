@@ -1704,9 +1704,10 @@ the terminal with the gateway's own error instead.
   A mirror uses the toolbar's controller/viewer names and **Take control**, not
   a repeated read-only instruction. Live, acknowledged local control is shown by
   the toolbar's **(this tab)** controller marker and **Release** action, plus a
-  steady 2px teal inset outline around the terminal while input is writable.
-  The pointer-transparent outline uses `--accent-soft-foreground`, never changes
-  layout or animates, and stays identical under reduced motion. It is absent
+  steady 1px teal inset outline around the terminal while input is writable.
+  The pointer-transparent outline uses `--primary`, the **Release** button's
+  fill, in both themes. It never changes layout or animates, and stays
+  identical under reduced motion. It is absent
   during replay or history reading, and on release, mirroring, disconnect or
   denied steering.
   Starting runs keep their spinner; ended runs say **This run is not running**.
@@ -2675,7 +2676,7 @@ about itself and appears wherever the member is an admin.
   dots bouncing in `--state-working` on board cards, run headers and run lists.
   Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
   The fixed dot box prevents a row shifting when a run starts or stops.
-- **Motion is optional.** The controlling terminal's 2px teal outline is always
+- **Motion is optional.** The controlling terminal's 1px teal outline is always
   static. Working dots and the sidebar pulse stop moving under
   `prefers-reduced-motion: reduce`. The original
   shooting-star scene appears only at desktop startup and is skipped under

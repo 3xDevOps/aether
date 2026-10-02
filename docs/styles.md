@@ -152,11 +152,12 @@ presentation state. Domain status enums remain unchanged.
 lists. The labeled run-status chip reserves the full width of all three dots
 before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. Live local control has a steady 2px teal inset outline around
+remain static. Live local control has a steady 1px teal inset outline around
 the terminal, alongside the toolbar's **(this tab)** controller marker and
-**Release** action. The pointer-transparent outline uses
-`--accent-soft-foreground` without changing layout; it appears only while this
-tab has live, acknowledged writable control, outside replay and history reading.
+**Release** action. The pointer-transparent outline uses `--primary`, the
+**Release** button's fill, in both themes without changing layout; it appears
+only while this tab has live, acknowledged writable control, outside replay and
+history reading.
 It disappears on release, mirroring, disconnect or denied steering. It never
 orbits or animates and is identical under normal and reduced motion.
 Under `prefers-reduced-motion: reduce`,
