@@ -263,6 +263,12 @@ type Profile struct {
 	// holding the harness's native login state. Everything else in a shared
 	// run is the launcher's. Resolve them with LoginPaths.
 	CredentialPaths []string
+	// PinLogin means the CLI replaces its login file by rename instead of
+	// rewriting it, so once the member has shared their account the file is
+	// mounted in place in their own containers too; the rename then fails
+	// with EBUSY and the CLI's own in-place fallback keeps every writer on
+	// the inode recipients' runs hold. Definitions never set it.
+	PinLogin bool
 	// LocalRoot is the home-relative directory captured as the agent
 	// profile (e.g. ".claude"). Empty means no profile sync (custom).
 	// The container target is filepath.ToSlash(path.Join(HomeDir(user), LocalRoot)).
@@ -354,9 +360,13 @@ var profiles = map[string]Profile{
 		// sandbox.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
 		CredentialPaths: []string{".claude/.credentials.json"},
-		LocalRoot:       ".claude",
-		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		DiscoveryArgs:   []string{"--append-system-prompt", DiscoveryInstruction},
+		// Claude Code writes the login to a temporary file and renames it
+		// over the old one, and rewrites it in place only when that rename
+		// fails with EXDEV, EPERM, EEXIST or EBUSY.
+		PinLogin:      true,
+		LocalRoot:     ".claude",
+		DenyNames:     []string{".credentials.json", "credentials", ".claude.json"},
+		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
 		// Claude Code runs a command on every lifecycle event a settings
 		// file registers, and --settings merges one more settings document
 		// over the member's own for this launch alone.

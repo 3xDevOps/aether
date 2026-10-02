@@ -671,16 +671,45 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 // command resolves argv and profile for one launch by member on account's
-// shared account. Resolution precedence, in member's own context: the
-// server-wide admin spec, then member's stored definition, then the shipped
-// registry. The launcher decides what executes; the account owner decides
-// what an account share exposes. So when account differs from member and the
-// harness is member's own definition, the profile's CredentialPaths come from
-// account's stored definition of the same name, never member's, which could
-// otherwise name any path in the owner's home. Admin specs and the registry
-// are server-controlled and apply to both sides.
+// shared account, with the profile from launchProfile.
 func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
 	task = s.withCoAuthorInstruction(task)
+	profile, tui, headless, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return nil, harness.Profile{}, err
+	}
+	var argv []string
+	switch mode {
+	case domain.LaunchTUI:
+		argv = tui
+	case domain.LaunchHeadless:
+		argv = headless
+	default:
+		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
+	}
+	if harnessName == "fake" && len(argv) == 0 {
+		argv = strings.Fields(os.Getenv(fakeAgentEnv))
+	}
+	if len(argv) == 0 {
+		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
+	}
+	return harness.Argv(argv, task), profile, nil
+}
+
+// errNoAccountDefinition completes the refusal of a launch of member's own
+// harness definition on an account whose owner has none of that name.
+var errNoAccountDefinition = errors.New("has none of that name to say which login paths it shares")
+
+// launchProfile resolves the profile and argv templates for one launch by
+// member on account's shared account. Resolution precedence, in member's own
+// context: the server-wide admin spec, then member's stored definition, then
+// the shipped registry. The launcher decides what executes; the account owner
+// decides what an account share exposes. So when account differs from member
+// and the harness is member's own definition, the profile's CredentialPaths
+// come from account's stored definition of the same name, never member's,
+// which could otherwise name any path in the owner's home. Admin specs and the
+// registry are server-controlled and apply to both sides.
+func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, []string, []string, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
 	spec, ok := s.harnesses[harnessName]
@@ -688,7 +717,7 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	if !ok {
 		memberSpec, found, err := s.memberHarnessSpec(ctx, member, harnessName)
 		if err != nil {
-			return nil, harness.Profile{}, err
+			return harness.Profile{}, nil, nil, err
 		}
 		spec, ok, memberDefined = memberSpec, found, found
 	}
@@ -719,34 +748,19 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
+		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
 	}
 	if memberDefined && account != member {
 		ownerSpec, found, err := s.memberHarnessSpec(ctx, account, harnessName)
 		if err != nil {
-			return nil, harness.Profile{}, err
+			return harness.Profile{}, nil, nil, err
 		}
 		if !found {
-			return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q is your own definition, and the shared account %s has none of that name to say which login paths it shares; its owner adds one with: aether agent add %s", harnessName, account, harnessName)
+			return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: harness %q is your own definition, and the shared account %s %w; its owner adds one with: aether agent add %s", harnessName, account, errNoAccountDefinition, harnessName)
 		}
 		profile.CredentialPaths = ownerSpec.CredentialPaths
 	}
-	var argv []string
-	switch mode {
-	case domain.LaunchTUI:
-		argv = tui
-	case domain.LaunchHeadless:
-		argv = headless
-	default:
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
-	}
-	if harnessName == "fake" && len(argv) == 0 {
-		argv = strings.Fields(os.Getenv(fakeAgentEnv))
-	}
-	if len(argv) == 0 {
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
-	}
-	return harness.Argv(argv, task), profile, nil
+	return profile, tui, headless, nil
 }
 
 // wrapTUICommand makes the configured harness the first child of a

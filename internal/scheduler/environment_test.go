@@ -10,6 +10,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
@@ -18,7 +19,12 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
-	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes}}
+	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
 		Variables: map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
 	}}

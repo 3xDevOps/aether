@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -133,13 +134,18 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				return nil, err
 			}
 			if len(logins) > 0 {
-				nestings = make(map[string]string, len(logins))
-				for _, m := range logins {
-					nestings[m.ContainerPath] = home
-				}
 				plan.Mounts = append(plan.Mounts, logins...)
 				plan.LoginMember = run.AccountMemberID
 			}
+		}
+		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
+		if err != nil {
+			return nil, err
+		}
+		plan.Mounts = append(plan.Mounts, pins...)
+		nestings = make(map[string]string, len(plan.Mounts)-1)
+		for _, m := range plan.Mounts[1:] {
+			nestings[m.ContainerPath] = home
 		}
 	}
 	var roots []string
@@ -157,23 +163,48 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	return plan, nil
 }
 
-// loginMounts mounts each of profile's login paths that exists in account's
-// home over the same path in launcher's home. A profile that declares none
-// mounts nothing; one whose declared paths are all missing is refused, since
-// the run could only start logged out.
+// loginMounts mounts each of account's logins for profile over the same path
+// in launcher's home.
 func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
-	paths, err := profile.LoginPaths()
-	if err != nil {
-		return nil, fmt.Errorf("scheduler: %w", err)
-	}
-	if len(paths) == 0 {
-		return nil, nil
+	logins, err := s.accountLogins(ctx, account, profile)
+	if err != nil || len(logins) == 0 {
+		return nil, err
 	}
 	ownerHome, err := s.cfg.Homes.Path(account)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: resolve account home: %w", err)
 	}
-	var mounts []runtime.Mount
+	mounts := make([]runtime.Mount, 0, len(logins))
+	for _, login := range logins {
+		if prepareErr := s.cfg.Homes.PrepareLoginMountpoint(launcher, login.rel, login.dir); prepareErr != nil {
+			return nil, fmt.Errorf("scheduler: %w", prepareErr)
+		}
+		mounts = append(mounts, runtime.Mount{
+			HostPath:      ownerHome,
+			Subpath:       login.rel,
+			ContainerPath: path.Join(home, login.rel),
+		})
+	}
+	return mounts, nil
+}
+
+// accountLogin is one of a profile's login paths that exists in an account
+// owner's home.
+type accountLogin struct {
+	rel string
+	dir bool
+}
+
+// accountLogins resolves profile's login paths in account's home without
+// changing anything in it. A profile that declares none has nothing to share.
+// One whose declared paths are all missing is refused, since the run could
+// only start logged out, and so is a path that cannot be shared.
+func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, profile harness.Profile) ([]accountLogin, error) {
+	paths, err := profile.LoginPaths()
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	var logins []accountLogin
 	for _, rel := range paths {
 		dir, pathErr := s.cfg.Homes.LoginPathIsDir(account, rel)
 		if errors.Is(pathErr, fs.ErrNotExist) {
@@ -182,17 +213,10 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 		if pathErr != nil {
 			return nil, fmt.Errorf("scheduler: %w", pathErr)
 		}
-		if prepareErr := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, dir); prepareErr != nil {
-			return nil, fmt.Errorf("scheduler: %w", prepareErr)
-		}
-		mounts = append(mounts, runtime.Mount{
-			HostPath:      ownerHome,
-			Subpath:       rel,
-			ContainerPath: path.Join(home, rel),
-		})
+		logins = append(logins, accountLogin{rel: rel, dir: dir})
 	}
-	if len(mounts) > 0 {
-		return mounts, nil
+	if len(logins) > 0 || len(paths) == 0 {
+		return logins, nil
 	}
 	owner, err := s.cfg.Store.GetMember(ctx, account)
 	if err != nil {
@@ -204,6 +228,68 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 	}
 	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: none of %s exists in their home; %s logs in from their own environment terminal (aether terminal)",
 		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName)
+}
+
+// LoginMissing reports whether member's launch of harnessName on account
+// would be refused over the account owner's login: the owner has no
+// definition of a member-defined harness's name, or the harness's login
+// paths are missing from the owner's home or cannot be shared. It resolves
+// exactly as a launch does, but changes nothing in either home.
+func (s *Scheduler) LoginMissing(ctx context.Context, member, account domain.MemberID, harnessName string) (bool, error) {
+	if account == member || s.cfg.Homes == nil {
+		return false, nil
+	}
+	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
+	if errors.Is(err, errNoAccountDefinition) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, err = s.accountLogins(ctx, account, profile)
+	return err != nil, nil
+}
+
+// pinnedLogins mounts each login file of a PinLogin harness in member's own
+// home over itself once member shares their account, except where the plan
+// already mounts another member's login. A login path that is a directory or
+// cannot be shared is left unpinned rather than refused: it cannot be shared
+// either, and refusing would keep the member from the terminal that fixes it.
+// A grantee still pending approval counts: approval takes effect while this
+// member's containers keep running.
+func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
+	grantees, err := s.cfg.Store.ListAccountGrantees(ctx, member)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: list account grantees: %w", err)
+	}
+	if len(grantees) == 0 {
+		return nil, nil
+	}
+	var pins []runtime.Mount
+	for _, profile := range harness.Profiles() {
+		if !profile.PinLogin {
+			continue
+		}
+		paths, err := profile.LoginPaths()
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+		for _, rel := range paths {
+			target := path.Join(home, rel)
+			if slices.ContainsFunc(planned, func(m runtime.Mount) bool { return m.ContainerPath == target }) {
+				continue
+			}
+			dir, pathErr := s.cfg.Homes.LoginPathIsDir(member, rel)
+			if errors.Is(pathErr, fs.ErrNotExist) {
+				pathErr = s.cfg.Homes.PrepareLoginMountpoint(member, rel, false)
+			}
+			if pathErr != nil || dir {
+				continue
+			}
+			pins = append(pins, runtime.Mount{HostPath: homePath, Subpath: rel, ContainerPath: target})
+		}
+	}
+	return pins, nil
 }
 
 func worktreePath(run *domain.Run) string {
