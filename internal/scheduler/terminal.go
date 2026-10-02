@@ -382,7 +382,7 @@ func (s *Scheduler) resolveTerminalMetadata(sup *terminalSupervision, user, home
 		sup.runUser = user
 	}
 	for other := range s.credentialUsers {
-		if other == reservation || other.memberID != sup.member {
+		if other == reservation || !other.reserves(sup.member) {
 			continue
 		}
 		if other.user != user {
@@ -408,7 +408,7 @@ func (s *Scheduler) checkTerminalOwnership(sup *terminalSupervision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for other := range s.credentialUsers {
-		if other == sup.userReservation || other.memberID != sup.member {
+		if other == sup.userReservation || !other.reserves(sup.member) {
 			continue
 		}
 		if other.user != sup.runUser {
@@ -431,7 +431,7 @@ func (s *Scheduler) retainTerminalReservation(entry *terminalSupervision, user s
 	}
 	s.syncRunUserReservationsLocked()
 	reservation := &credentialUserReservation{
-		memberID: entry.member,
+		homes:    []domain.MemberID{entry.member},
 		user:     user,
 		owner:    "environment terminal " + string(entry.member),
 		terminal: entry,

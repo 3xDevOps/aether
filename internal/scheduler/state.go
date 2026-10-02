@@ -158,18 +158,25 @@ type sidecar struct {
 	RunID string `json:"run_id"`
 	// TerminalMember identifies a member-terminal reference kept outside the
 	// run sidecar directory. It is never populated for run supervision.
-	TerminalMember   string            `json:"terminal_member,omitempty"`
-	ContainerID      string            `json:"container_id"`
-	WorkspaceID      string            `json:"workspace_id"`
-	Mode             domain.LaunchMode `json:"mode,omitempty"`
-	Paused           bool              `json:"paused"`
-	KillRequested    bool              `json:"kill_requested"`
-	Retained         bool              `json:"retained,omitempty"`
-	RetainedUntil    *time.Time        `json:"retained_until,omitempty"`
-	DestroyPending   bool              `json:"destroy_pending,omitempty"`
-	EvidencePending  bool              `json:"evidence_pending,omitempty"`
-	RunUser          string            `json:"run_user,omitempty"`
-	Home             string            `json:"home,omitempty"`
+	TerminalMember  string            `json:"terminal_member,omitempty"`
+	ContainerID     string            `json:"container_id"`
+	WorkspaceID     string            `json:"workspace_id"`
+	Mode            domain.LaunchMode `json:"mode,omitempty"`
+	Paused          bool              `json:"paused"`
+	KillRequested   bool              `json:"kill_requested"`
+	Retained        bool              `json:"retained,omitempty"`
+	RetainedUntil   *time.Time        `json:"retained_until,omitempty"`
+	DestroyPending  bool              `json:"destroy_pending,omitempty"`
+	EvidencePending bool              `json:"evidence_pending,omitempty"`
+	RunUser         string            `json:"run_user,omitempty"`
+	Home            string            `json:"home,omitempty"`
+	// HomeMember is whose persistent home the container mounts. A file
+	// without it was written before account shares were narrowed, when a
+	// container mounted the run account's whole home.
+	HomeMember string `json:"home_member,omitempty"`
+	// LoginMember is the account owner whose login paths the container
+	// mounts, empty when it mounts none.
+	LoginMember      string            `json:"login_member,omitempty"`
 	Reporter         harness.Reporter  `json:"reporter,omitempty"`
 	AgentState       agentstatus.State `json:"agent_state,omitempty"`
 	AgentReason      string            `json:"agent_reason,omitempty"`
@@ -184,8 +191,13 @@ type sidecar struct {
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
+	var homeMember string
+	if !e.legacyHome {
+		homeMember = string(e.memberID)
+	}
 	return sidecar{
 		RunID:            string(e.runID),
+		HomeMember:       homeMember,
 		ContainerID:      string(e.containerID),
 		WorkspaceID:      string(e.workspaceID),
 		Mode:             e.launchMode,
@@ -197,6 +209,7 @@ func (e *supervised) sidecar() sidecar {
 		EvidencePending:  e.evidencePending,
 		RunUser:          e.runUser,
 		Home:             e.home,
+		LoginMember:      string(e.loginMember),
 		Reporter:         e.reporter,
 		AgentState:       e.agentReport.State,
 		AgentReason:      e.agentReport.Reason,

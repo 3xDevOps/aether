@@ -3,15 +3,18 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -19,7 +22,8 @@ import (
 type inodeKey struct{ dev, ino uint64 }
 
 // applyRunOwnership hands writable host surfaces (a run checkout when
-// present, plus the member's persistent home) to the resolved non-root
+// present, the member's persistent home, and only the login paths an
+// account share mounts from the owner's home) to the resolved non-root
 // container user before the container is created. Root containers (user == "")
 // need no pass: the v1 default stance is a root agent and a root server.
 //
@@ -56,9 +60,54 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mou
 		if m.ReadOnly {
 			continue
 		}
+		if m.Subpath != "" {
+			if err := chownSubpath(m.HostPath, m.Subpath, uid, gid); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// chownSubpath chowns only what a subpath mount exposes: base/sub, and
+// everything beneath it when it is a directory. base belongs to another
+// member, whose containers control every entry inside it, so each component
+// of sub is pinned without following a symlink.
+func chownSubpath(base, sub string, uid, gid int) error {
+	home, err := os.OpenRoot(base)
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	defer func() { _ = home.Close() }()
+	parent, err := rootfs.OpenRoot(home, path.Dir(sub))
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	defer func() { _ = parent.Close() }()
+	leaf := path.Base(sub)
+	info, err := parent.Lstat(leaf)
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	switch {
+	case info.Mode().IsRegular():
+		err = parent.Lchown(leaf, uid, gid)
+	case info.IsDir():
+		var dir *os.Root
+		dir, err = rootfs.OpenRoot(parent, leaf)
+		if err == nil {
+			err = chownRoot(dir, uid, gid, nil)
+			_ = dir.Close()
+		}
+	default:
+		err = errors.New("neither a regular file nor a directory")
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
 	}
 	return nil
 }
@@ -125,12 +174,19 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
 	}
 	defer func() { _ = root.Close() }()
-	err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+	if err := chownRoot(root, uid, gid, protected); err != nil {
+		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
+	}
+	return nil
+}
+
+func chownRoot(root *os.Root, uid, gid int, protected map[inodeKey]struct{}) error {
+	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.Type().IsRegular() && len(protected) > 0 {
-			info, ierr := root.Lstat(path)
+			info, ierr := root.Lstat(name)
 			if ierr != nil {
 				return ierr
 			}
@@ -139,10 +195,6 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 				return nil
 			}
 		}
-		return root.Lchown(path, uid, gid)
+		return root.Lchown(name, uid, gid)
 	})
-	if err != nil {
-		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
-	}
-	return nil
 }

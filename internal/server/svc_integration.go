@@ -205,8 +205,9 @@ func integrationCleanup(svc *integration.Service) func(context.Context) error {
 
 // integrationEnvironment is the only place where the candidate service gets
 // an execution environment. It resolves the authenticated human directly,
-// while agent actors use the account member recorded on their run. No request
-// field can select a member or grant access to another account.
+// while agent actors use their run's owner, whose environment the run
+// container mounts. No request field can select a member or grant access to
+// another account.
 func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *domain.Workspace, string) (runtime.Spec, error) {
 	return func(ctx context.Context, actor integration.Actor, ws *domain.Workspace, checkout string) (runtime.Spec, error) {
 		if d.Store == nil || d.Runs == nil {
@@ -225,7 +226,7 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 			if run.WorkspaceID != ws.ID {
 				return runtime.Spec{}, fmt.Errorf("integration: run %q does not belong to workspace %q", actor.RunID, ws.ID)
 			}
-			memberID = run.AccountMember()
+			memberID = run.MemberID
 		}
 		if memberID == "" {
 			return runtime.Spec{}, fmt.Errorf("integration: authenticated member is required")

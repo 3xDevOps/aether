@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -32,10 +35,16 @@ type EnvironmentPlan struct {
 	Home        string
 	Path        string
 	Mounts      []runtime.Mount
+	// LoginMember is the account owner whose login paths are mounted, empty
+	// when the plan mounts nothing from another member's home.
+	LoginMember domain.MemberID
 }
 
 // BuildEnvironmentPlan resolves the image, user, environment, and
-// server-owned mounts for one member container.
+// server-owned mounts for one member container: the member's image and home.
+// A run launched on another member's shared account additionally mounts the
+// harness's declared login paths from that account owner's home over the
+// same paths in the member's home, and nothing else of the owner's.
 func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, profile harness.Profile, purpose EnvironmentPurpose) (*EnvironmentPlan, error) {
 	switch purpose {
 	case EnvironmentPurposeRun, EnvironmentPurposeTerminal:
@@ -107,6 +116,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		SetupScript: setupScript,
 		User:        user, Home: home, Path: env["PATH"],
 	}
+	var nestings map[string]string
 	if s.cfg.Homes != nil {
 		homePath, pathErr := s.cfg.Homes.Path(member.ID)
 		if pathErr != nil {
@@ -117,6 +127,20 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			ContainerPath: home,
 			ReadOnly:      false,
 		})
+		if purpose == EnvironmentPurposeRun && run != nil && run.AccountMemberID != "" && run.AccountMemberID != member.ID {
+			logins, err := s.loginMounts(ctx, member.ID, run.AccountMemberID, profile, home)
+			if err != nil {
+				return nil, err
+			}
+			if len(logins) > 0 {
+				nestings = make(map[string]string, len(logins))
+				for _, m := range logins {
+					nestings[m.ContainerPath] = home
+				}
+				plan.Mounts = append(plan.Mounts, logins...)
+				plan.LoginMember = run.AccountMemberID
+			}
+		}
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
@@ -126,10 +150,60 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		OwnedRoots:        roots,
 		WorktreeHostPath:  worktreePath(run),
 		WorktreeMountPath: s.cfg.WorktreeMount,
+		AllowedNestings:   nestings,
 	}); validateErr != nil {
 		return nil, validateErr
 	}
 	return plan, nil
+}
+
+// loginMounts mounts each of profile's login paths that exists in account's
+// home over the same path in launcher's home. A profile that declares none
+// mounts nothing; one whose declared paths are all missing is refused, since
+// the run could only start logged out.
+func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
+	paths, err := profile.LoginPaths()
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	ownerHome, err := s.cfg.Homes.Path(account)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: resolve account home: %w", err)
+	}
+	var mounts []runtime.Mount
+	for _, rel := range paths {
+		dir, pathErr := s.cfg.Homes.LoginPathIsDir(account, rel)
+		if errors.Is(pathErr, fs.ErrNotExist) {
+			continue
+		}
+		if pathErr != nil {
+			return nil, fmt.Errorf("scheduler: %w", pathErr)
+		}
+		if prepareErr := s.cfg.Homes.PrepareLoginMountpoint(launcher, rel, dir); prepareErr != nil {
+			return nil, fmt.Errorf("scheduler: %w", prepareErr)
+		}
+		mounts = append(mounts, runtime.Mount{
+			HostPath:      ownerHome,
+			Subpath:       rel,
+			ContainerPath: path.Join(home, rel),
+		})
+	}
+	if len(mounts) > 0 {
+		return mounts, nil
+	}
+	owner, err := s.cfg.Store.GetMember(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: get account owner: %w", err)
+	}
+	shown := make([]string, len(paths))
+	for i, rel := range paths {
+		shown[i] = "~/" + rel
+	}
+	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: none of %s exists in their home; %s logs in from their own environment terminal (aether terminal)",
+		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName)
 }
 
 func worktreePath(run *domain.Run) string {

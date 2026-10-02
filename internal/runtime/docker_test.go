@@ -3,10 +3,13 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -491,6 +494,50 @@ func TestContainerConfigAdditionalMounts(t *testing.T) {
 		t.Errorf("profile mount = %+v", prof)
 	}
 }
+
+// A subpath mount reaches Docker as a volume of the base directory with a
+// volume subpath, never as a bind of the joined path, and bind mounts are
+// unchanged beside it.
+func TestContainerConfigSubpathMount(t *testing.T) {
+	d := &Docker{namePrefix: defaultNamePrefix}
+	spec := validSpec()
+	spec.Mounts = []Mount{
+		{HostPath: "/srv/aether/homes/m1", ContainerPath: "/root"},
+		{HostPath: "/srv/aether/homes/m2", Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"},
+	}
+	_, hostCfg := d.containerConfig(spec)
+	if len(hostCfg.Mounts) != 3 {
+		t.Fatalf("Mounts = %v, want worktree + 2 additional", hostCfg.Mounts)
+	}
+	wantBind := mount.Mount{
+		Type:        mount.TypeBind,
+		Source:      "/srv/aether/homes/m1",
+		Target:      "/root",
+		BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate},
+	}
+	if got := hostCfg.Mounts[1]; !reflect.DeepEqual(got, wantBind) {
+		t.Errorf("home mount = %+v, want %+v", got, wantBind)
+	}
+	sum := sha256.Sum256([]byte("/srv/aether/homes/m2"))
+	wantVolume := mount.Mount{
+		Type:   mount.TypeVolume,
+		Source: "aether-home-" + hex.EncodeToString(sum[:])[:32],
+		Target: "/root/.claude/.credentials.json",
+		VolumeOptions: &mount.VolumeOptions{
+			NoCopy:  true,
+			Subpath: ".claude/.credentials.json",
+			Labels:  map[string]string{labelManaged: "true"},
+			DriverConfig: &mount.Driver{
+				Name:    "local",
+				Options: map[string]string{"type": "none", "o": "bind", "device": "/srv/aether/homes/m2"},
+			},
+		},
+	}
+	if got := hostCfg.Mounts[2]; !reflect.DeepEqual(got, wantVolume) {
+		t.Errorf("login mount = %+v, want %+v", got, wantVolume)
+	}
+}
+
 func writeExecFrame(w io.Writer, stream stdcopy.StdType, payload []byte) error {
 	var header [8]byte
 	header[0] = byte(stream)

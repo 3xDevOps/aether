@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -224,11 +225,11 @@ type Scheduler struct {
 	shells int
 }
 
-// credentialUserReservation protects one writable member home from
-// ownership changes while its container is pending or live. Root containers
-// do not need a reservation because they skip chown.
+// credentialUserReservation protects the writable member homes a container
+// changes ownership in from other ownership changes while it is pending or
+// live. Root containers do not need a reservation because they skip chown.
 type credentialUserReservation struct {
-	memberID domain.MemberID
+	homes    []domain.MemberID
 	user     string
 	owner    string
 	run      *supervised
@@ -239,15 +240,29 @@ type credentialUserReservation struct {
 	pending bool
 }
 
+func (r *credentialUserReservation) reserves(member domain.MemberID) bool {
+	return slices.Contains(r.homes, member)
+}
+
 // supervised is the in-memory state of one run with a live container.
 type supervised struct {
 	runID       domain.RunID
 	workspaceID domain.WorkspaceID
 	containerID runtime.ID
 	task        string
-	// memberID identifies the persistent home shared by every live run
-	// belonging to the member.
+	// memberID identifies the persistent home the container mounts, shared
+	// by every live container of that member: the launcher's, or for a
+	// container created before account shares were narrowed, the account
+	// owner's.
 	memberID domain.MemberID
+	// legacyHome marks a container whose sidecar predates HomeMember: it
+	// mounts the run account's whole home. It keeps the sidecar without
+	// HomeMember so a later restart still knows.
+	legacyHome bool
+	// loginMember is the account owner whose login paths the container
+	// mounts and whose home the ownership pass therefore also changes;
+	// empty when nothing of another member's is mounted.
+	loginMember domain.MemberID
 	// reporter is how much this run's harness can say about its own state
 	// (internal/harness). It is fixed at launch, because the reporter is
 	// wired into the container's launch command, and recovered from the
@@ -655,21 +670,27 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 	return nil
 }
 
-// command resolves argv and profile for one launch. Resolution precedence:
-// the server-wide admin spec, then the member's own stored definition, then
-// the shipped registry. Member definitions only shape argv inside that
-// member's own container, so they never leak across members.
-func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
+// command resolves argv and profile for one launch by member on account's
+// shared account. Resolution precedence, in member's own context: the
+// server-wide admin spec, then member's stored definition, then the shipped
+// registry. The launcher decides what executes; the account owner decides
+// what an account share exposes. So when account differs from member and the
+// harness is member's own definition, the profile's CredentialPaths come from
+// account's stored definition of the same name, never member's, which could
+// otherwise name any path in the owner's home. Admin specs and the registry
+// are server-controlled and apply to both sides.
+func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
 	task = s.withCoAuthorInstruction(task)
 	profile, inRegistry := harness.Lookup(harnessName)
 	var tui, headless []string
 	spec, ok := s.harnesses[harnessName]
+	memberDefined := false
 	if !ok {
 		memberSpec, found, err := s.memberHarnessSpec(ctx, member, harnessName)
 		if err != nil {
 			return nil, harness.Profile{}, err
 		}
-		spec, ok = memberSpec, found
+		spec, ok, memberDefined = memberSpec, found, found
 	}
 	switch {
 	case ok:
@@ -699,6 +720,16 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
+	}
+	if memberDefined && account != member {
+		ownerSpec, found, err := s.memberHarnessSpec(ctx, account, harnessName)
+		if err != nil {
+			return nil, harness.Profile{}, err
+		}
+		if !found {
+			return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q is your own definition, and the shared account %s has none of that name to say which login paths it shares; its owner adds one with: aether agent add %s", harnessName, account, harnessName)
+		}
+		profile.CredentialPaths = ownerSpec.CredentialPaths
 	}
 	var argv []string
 	switch mode {

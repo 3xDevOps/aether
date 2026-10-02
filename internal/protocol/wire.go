@@ -17,8 +17,9 @@ type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	MemberID    string `json:"member_id"`
-	// AccountMemberID identifies the member whose environment and vendor
-	// credentials back the run. MemberID remains the run owner and actor.
+	// AccountMemberID identifies the member whose vendor login backs the
+	// run. MemberID remains the run owner and actor; the run's environment
+	// is its launcher's.
 	AccountMemberID string `json:"account_member_id"`
 	Task            string `json:"task"`
 	Title           string `json:"title,omitempty"`

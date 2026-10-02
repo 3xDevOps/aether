@@ -49,10 +49,11 @@ func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, prof
 	return user, nil
 }
 
-// reserveCredentialUser atomically reserves a writable member home's
-// non-root uid:gid. Runs that share a member home must use one mapping, so
-// no ownership pass can race a live container using another mapping.
-func (s *Scheduler) reserveCredentialUser(member domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
+// reserveCredentialUser atomically reserves the non-root uid:gid for every
+// writable member home in homes. Containers that share a member home must use
+// one mapping, so no ownership pass can race a live container using another
+// mapping.
+func (s *Scheduler) reserveCredentialUser(homes []domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
@@ -63,17 +64,21 @@ func (s *Scheduler) reserveCredentialUser(member domain.MemberID, user string, s
 		return nil, nil
 	}
 	for other := range s.credentialUsers {
-		if other.memberID != member || other.user == user {
+		if other.user == user {
 			continue
 		}
-		return nil, fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
-			member, other.owner, other.user, owner, user)
+		for _, member := range homes {
+			if other.reserves(member) {
+				return nil, fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+					member, other.owner, other.user, owner, user)
+			}
+		}
 	}
 	reservation := &credentialUserReservation{
-		memberID: member,
-		user:     user,
-		owner:    owner,
-		run:      run,
+		homes: homes,
+		user:  user,
+		owner: owner,
+		run:   run,
 	}
 	s.credentialUsers[reservation] = struct{}{}
 	if run != nil {
@@ -121,10 +126,10 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 			continue
 		}
 		reservation := &credentialUserReservation{
-			memberID: entry.memberID,
-			user:     entry.runUser,
-			owner:    "live run " + string(entry.runID),
-			run:      entry,
+			homes: entry.homes(),
+			user:  entry.runUser,
+			owner: "live run " + string(entry.runID),
+			run:   entry,
 		}
 		s.credentialUsers[reservation] = struct{}{}
 		entry.userReservation = reservation
@@ -139,13 +144,13 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
 	for other := range s.credentialUsers {
-		if other.memberID == entry.member && other.user != user {
+		if other.reserves(entry.member) && other.user != user {
 			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
 				entry.member, other.owner, other.user, user)
 		}
 	}
 	reservation := &credentialUserReservation{
-		memberID: entry.member,
+		homes:    []domain.MemberID{entry.member},
 		user:     user,
 		owner:    "environment terminal " + string(entry.member),
 		terminal: entry,
@@ -158,10 +163,19 @@ func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string)
 }
 
 // reserveRunUser records the resolved run user and reserves its writable
-// member home for the full live-run registry lifetime.
+// member homes for the full live-run registry lifetime.
 func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bool) error {
-	_, err := s.reserveCredentialUser(entry.memberID, user, sharedHome, "live run "+string(entry.runID), entry)
+	_, err := s.reserveCredentialUser(entry.homes(), user, sharedHome, "live run "+string(entry.runID), entry)
 	return err
+}
+
+// homes lists the member homes the run's ownership pass changes: the home
+// it mounts, and the account owner's when it mounts login paths from it.
+func (e *supervised) homes() []domain.MemberID {
+	if e.loginMember == "" {
+		return []domain.MemberID{e.memberID}
+	}
+	return []domain.MemberID{e.memberID, e.loginMember}
 }
 
 // errKillRequested aborts provisioning when a Kill was accepted for the
@@ -213,7 +227,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
 	}
-	argv, profile, err := s.command(ctx, account, harness, mode, task)
+	argv, profile, err := s.command(ctx, member, account, harness, mode, task)
 	if err != nil {
 		return nil, err
 	}
@@ -221,9 +235,8 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
-	accountMember, err := s.cfg.Store.GetMember(ctx, account)
-	if err != nil {
-		return nil, err
+	if _, accountErr := s.cfg.Store.GetMember(ctx, account); accountErr != nil {
+		return nil, accountErr
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
@@ -304,7 +317,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
 	persistSupervisor := opts.AssignedRunID != ""
-	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile, persistSupervisor); err != nil {
+	if err := s.provision(ctx, run, ws, actor, argv, profile, persistSupervisor); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -316,12 +329,12 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	entry := &supervised{
 		runID:       run.ID,
 		workspaceID: run.WorkspaceID,
 		task:        run.Task,
-		memberID:    run.AccountMember(),
+		memberID:    run.MemberID,
 		launchMode:  run.Mode,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
@@ -341,14 +354,14 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile, persistSupervisor); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, argv, profile, persistSupervisor); err != nil {
 		s.failProvisioning(run, actor.ID, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
 	if err != nil {
 		return fmt.Errorf("create checkout: %w", err)
@@ -360,12 +373,13 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)
 	}
-	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, account, profile, EnvironmentPurposeRun)
+	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	entry.home = plan.Home
+	entry.loginMember = plan.LoginMember
 	s.mu.Unlock()
 	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return reserveErr

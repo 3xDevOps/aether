@@ -520,7 +520,7 @@ func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunc
 	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
-func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, _ domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harnessName string, mode domain.LaunchMode) error {
 	l.calls++
 	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {
 		return errors.New(`scheduler: harness "legacy" has no command for mode "tui"`)

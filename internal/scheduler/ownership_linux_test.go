@@ -126,3 +126,74 @@ func TestApplyRunOwnershipRootIsNoop(t *testing.T) {
 		t.Fatalf("applyRunOwnership(root): %v", err)
 	}
 }
+
+// A subpath mount hands only base/sub to the run user - a file, or a
+// directory and everything beneath it - never the rest of base, and refuses
+// to reach through a symlink planted in base.
+func TestApplyRunOwnershipSubpathOnly(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	e := newTestEnv(t, nil)
+	owner := filepath.Join(t.TempDir(), "homes", "owner")
+	for _, dir := range []string{".claude", ".omp/agent/sessions", ".ssh"} {
+		if err := os.MkdirAll(filepath.Join(owner, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{".claude/.credentials.json", ".claude/settings.json", ".omp/agent/agent.db", ".omp/agent/sessions/1", ".ssh/id", ".gitconfig"} {
+		if err := os.WriteFile(filepath.Join(owner, file), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mounts := []runtime.Mount{
+		{HostPath: owner, Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"},
+		{HostPath: owner, Subpath: ".omp/agent", ContainerPath: "/root/.omp/agent"},
+	}
+	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, mounts, "1000:1000"); err != nil {
+		t.Fatalf("applyRunOwnership: %v", err)
+	}
+	uid := func(rel string) uint32 {
+		t.Helper()
+		info, err := os.Lstat(filepath.Join(owner, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Sys().(*syscall.Stat_t).Uid
+	}
+	for _, rel := range []string{".claude/.credentials.json", ".omp/agent", ".omp/agent/agent.db", ".omp/agent/sessions/1"} {
+		if got := uid(rel); got != 1000 {
+			t.Errorf("%s owned by %d, want 1000", rel, got)
+		}
+	}
+	for _, rel := range []string{".", ".claude", ".claude/settings.json", ".omp", ".ssh", ".ssh/id", ".gitconfig"} {
+		if got := uid(rel); got != 0 {
+			t.Errorf("%s chowned to %d", rel, got)
+		}
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, ".credentials.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, mounts[:1], "2000:2000"); err == nil {
+		t.Fatal("ownership pass followed a symlinked directory")
+	}
+	info, err := os.Lstat(filepath.Join(outside, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Sys().(*syscall.Stat_t).Uid; got != 0 {
+		t.Fatalf("file outside the base chowned to %d", got)
+	}
+}

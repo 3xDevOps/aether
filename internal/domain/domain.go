@@ -588,10 +588,12 @@ type Run struct {
 	WorkspaceID WorkspaceID
 	// MemberID is the owning member (transferable via handoff).
 	MemberID MemberID
-	// AccountMemberID owns the environment, credentials, profile, and vendor
-	// quota used by this run. It normally equals MemberID; a different value
-	// records an explicit account-share launch without changing run ownership
-	// or actor attribution. Empty rows from older schemas fall back to MemberID.
+	// AccountMemberID owns the vendor login and quota used by this run. It
+	// normally equals MemberID; a different value records an explicit
+	// account-share launch, which mounts only the harness's login paths from
+	// this member's home into the launcher's environment, without changing
+	// run ownership or actor attribution. Empty rows from older schemas fall
+	// back to MemberID.
 	AccountMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
@@ -664,8 +666,9 @@ func (r *Run) AccountMember() MemberID {
 }
 
 // AccountShare grants Grantee permission to launch agents with Owner's
-// environment and vendor account. The authenticated grantee remains the run
-// owner and the actor recorded in the timeline.
+// vendor login: the harness's declared login paths from Owner's home, inside
+// Grantee's own environment. The authenticated grantee remains the run owner
+// and the actor recorded in the timeline.
 type AccountShare struct {
 	Owner     MemberID
 	Grantee   MemberID

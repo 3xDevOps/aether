@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -200,9 +201,41 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		})}
 	}
 	for _, m := range spec.Mounts {
+		if m.Subpath != "" {
+			hostCfg.Mounts = append(hostCfg.Mounts, subpathMount(m))
+			continue
+		}
 		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	return cfg, hostCfg
+}
+
+// subpathMount translates a Subpath mount into a volume mount of the base
+// directory with a volume subpath. A plain bind of HostPath/Subpath would be
+// resolved by path at every container start, following any symlink a
+// container sharing the base planted after validation. The engine instead
+// confines a volume subpath's symlinks to the volume root, opens the result
+// with RESOLVE_BENEATH and RESOLVE_NO_SYMLINKS, and mounts that descriptor
+// (Docker API 1.45 or later). The volume name is derived from the base so
+// every run mounting one base reuses one volume.
+func subpathMount(m Mount) mount.Mount {
+	sum := sha256.Sum256([]byte(m.HostPath))
+	return mount.Mount{
+		Type:     mount.TypeVolume,
+		Source:   "aether-home-" + hex.EncodeToString(sum[:])[:32],
+		Target:   m.ContainerPath,
+		ReadOnly: m.ReadOnly,
+		VolumeOptions: &mount.VolumeOptions{
+			// Never copy image content into the base directory.
+			NoCopy:  true,
+			Subpath: m.Subpath,
+			Labels:  map[string]string{labelManaged: "true"},
+			DriverConfig: &mount.Driver{
+				Name:    "local",
+				Options: map[string]string{"type": "none", "o": "bind", "device": m.HostPath},
+			},
+		},
+	}
 }
 
 // bindMount translates one Mount into Docker create arguments using only
