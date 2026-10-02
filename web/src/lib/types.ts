@@ -875,8 +875,9 @@ export interface AgentInfo {
   source: 'shipped' | 'member'
   /** Whether the caller's persistent environment contains the executable. */
   installed?: boolean
-  /** For a shared account: its owner has no login for this agent, so a launch
-   * on that account is refused. */
+  /** For a shared account: a launch on that account is refused, because its
+   * owner has no login for this agent or the agent is the caller's own
+   * definition, which runs only on their own account. */
   login_missing?: boolean
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string

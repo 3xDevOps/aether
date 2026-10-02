@@ -204,6 +204,23 @@ describe('launch dialog', () => {
     })))
   })
 
+  it('says the caller\'s own definition runs only on their own account', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+      ? [agentInfo(), agentInfo({ name: 'myagent', source: 'member', login_missing: true })]
+      : [agentInfo()])
+    await open()
+
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(
+      'Your own agent definitions run only on your own account: myagent.',
+    ))
+    expect(screen.queryByText(/not logged in/)).toBeNull()
+    await openSelect(screen.getByLabelText('Agent'))
+    expect(screen.getByRole('option', { name: 'myagent (your account only)' }).getAttribute('aria-disabled')).toBe('true')
+    await closeList()
+  })
+
   it('refuses a headless launch with no task, and says why', async () => {
     await open()
 
@@ -322,6 +339,43 @@ describe('launch dialog', () => {
       expect(worker.disabled).toBe(true)
       expect(worker.checked).toBe(false)
       expect(worker.closest('label')?.textContent).toBe('Bob · claude · Bob is not logged in to claude')
+    })
+
+    it('drops a ticked worker whose agent stops being launchable, and never sends it', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+      vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
+      await openSwarm()
+      const worker = await screen.findByRole('checkbox', { name: /Bob · claude/ }) as HTMLInputElement
+      fireEvent.click(worker)
+      await waitFor(() => expect(worker.checked).toBe(true))
+
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+        ? [agentInfo({ login_missing: true })]
+        : [agentInfo()])
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh agents' }))
+      await waitFor(() => {
+        const refreshed = screen.getByRole('checkbox', { name: /Bob · claude/ }) as HTMLInputElement
+        expect(refreshed.disabled).toBe(true)
+        expect(refreshed.checked).toBe(false)
+      })
+
+      setObjective('coordinate without Bob')
+      fireEvent.click(screen.getByRole('button', { name: 'Create swarm' }))
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+      const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+      expect(params.execution_choices.some((choice) => choice.account_member_id === bob.id)).toBe(false)
+    })
+
+    it('says a worker on the caller\'s own definition runs only on their own account', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+        ? [agentInfo({ name: 'myagent', source: 'member', login_missing: true })]
+        : [agentInfo()])
+      await openSwarm()
+
+      const worker = await screen.findByRole('checkbox', { name: /Bob · myagent/ }) as HTMLInputElement
+      expect(worker.disabled).toBe(true)
+      expect(worker.closest('label')?.textContent).toBe('Bob · myagent · your own definition runs only on your own account')
     })
 
     it('sends the same choices in the same order, under the same key, after a re-tick', async () => {
