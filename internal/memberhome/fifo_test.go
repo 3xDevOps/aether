@@ -89,3 +89,13 @@ func TestSigningKeySurvivesASwapToAFIFO(t *testing.T) {
 	cancel()
 	<-swapped
 }
+
+func TestLoginPathIsDirRefusesAFIFO(t *testing.T) {
+	manager, owner, _ := newLoginHomes(t)
+	if err := syscall.Mkfifo(filepath.Join(owner, ".pipe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.LoginPathIsDir("owner", ".pipe"); err == nil || !strings.Contains(err.Error(), "cannot be shared") {
+		t.Fatalf("FIFO login = %v, want refusal", err)
+	}
+}

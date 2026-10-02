@@ -1365,7 +1365,14 @@ CREATE INDEX idx_member_devices_identity ON member_devices(provider, subject);
 CREATE INDEX idx_member_devices_approval_code
 	ON member_devices(approval_code) WHERE approval_code <> '';
 `,
-	// v46: a run keeps one active terminal report instead of one report.
+	// v46: whose persistent home a run's container mounts, fixed at launch;
+	// a handoff changes member_id, never this. No backfill: NULL marks a row
+	// from before account shares were narrowed, when a run's container
+	// mounted its account's whole home.
+	`
+ALTER TABLE runs ADD COLUMN home_member_id TEXT REFERENCES members(id);
+`,
+	// v47: a run keeps one active terminal report instead of one report.
 	// Blocked reports no longer use the slot, and a relaunch supersedes the
 	// terminal report so the reopened agent can report again. SQLite cannot
 	// drop the inline UNIQUE (run_id), so the table is rebuilt; publications
@@ -1406,7 +1413,7 @@ CREATE UNIQUE INDEX idx_coord_reports_active_terminal
 	ON coord_reports(run_id)
 	WHERE outcome IN ('success', 'failure') AND superseded_at IS NULL;
 `,
-	// v47: outcome_unseen marks a run an agent's report finished that its
+	// v48: outcome_unseen marks a run an agent's report finished that its
 	// owner has not opened yet.
 	`
 ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
@@ -1415,7 +1422,7 @@ ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
-var foreignKeysOffMigrations = map[int]bool{45: true, 46: true}
+var foreignKeysOffMigrations = map[int]bool{45: true, 47: true}
 
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so

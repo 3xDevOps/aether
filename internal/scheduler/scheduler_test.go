@@ -264,7 +264,9 @@ func readSavedTerminalImage(t *testing.T, e *testEnv, member domain.MemberID, re
 	return data
 }
 
-func TestSaveTerminalImageUsesRunAccountHome(t *testing.T) {
+// A run's terminal images land in the home its container mounts, which for
+// a shared-account launch is the launcher's, never the account owner's.
+func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	account := &domain.Member{
@@ -281,26 +283,29 @@ func TestSaveTerminalImageUsesRunAccountHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	image := []byte("run account image")
+	image := []byte("run home image")
 	path, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", image)
 	if err != nil {
 		t.Fatalf("SaveTerminalImage: %v", err)
 	}
-	if got := readSavedTerminalImage(t, e, account.ID, path); string(got) != string(image) {
+	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(image) {
 		t.Fatalf("saved image = %q, want %q", got, image)
 	}
-
-	launcherHome, err := e.cfg.Homes.Path(e.member.ID)
-	if err != nil {
-		t.Fatalf("launcher home: %v", err)
+	if err = e.sched.ValidateTerminalImage(t.Context(), run.ID, path); err != nil {
+		t.Fatalf("ValidateTerminalImage: %v", err)
 	}
-	launcherImages := filepath.Join(launcherHome, ".aether", "terminal-images")
-	entries, err := os.ReadDir(launcherImages)
+
+	accountHome, err := e.cfg.Homes.Path(account.ID)
+	if err != nil {
+		t.Fatalf("account home: %v", err)
+	}
+	accountImages := filepath.Join(accountHome, ".aether", "terminal-images")
+	entries, err := os.ReadDir(accountImages)
 	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("read launcher image directory: %v", err)
+		t.Fatalf("read account image directory: %v", err)
 	}
 	if len(entries) != 0 {
-		t.Fatalf("launcher home received terminal image: %v", entries)
+		t.Fatalf("account home received terminal image: %v", entries)
 	}
 }
 
@@ -1007,7 +1012,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 func TestCommandTemplates(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	argv, profile, err := e.sched.command(t.Context(), e.member.ID, "claude", domain.LaunchHeadless, "do it")
+	argv, profile, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -1018,7 +1023,7 @@ func TestCommandTemplates(t *testing.T) {
 	if profile.Name != "claude" || len(profile.CredentialPaths) == 0 {
 		t.Fatalf("claude profile = %+v, want registry profile with credential paths", profile)
 	}
-	if _, _, codexErr := e.sched.command(t.Context(), e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
+	if _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
 		t.Fatalf("codex tui: %v", codexErr)
 	}
 	// A Config.Harnesses argv override replaces the registry template but
@@ -1026,7 +1031,7 @@ func TestCommandTemplates(t *testing.T) {
 	e2 := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"my-claude", "{task}"}}}
 	})
-	argv, profile, err = e2.sched.command(t.Context(), e2.member.ID, "claude", domain.LaunchTUI, "go")
+	argv, profile, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go")
 	if err != nil {
 		t.Fatalf("command with override: %v", err)
 	}
@@ -1037,7 +1042,7 @@ func TestCommandTemplates(t *testing.T) {
 		t.Fatalf("override lost registry profile: %+v", profile)
 	}
 	// "custom" ships with no command of its own: it requires an override.
-	if _, _, err := e.sched.command(t.Context(), e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
+	if _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
 		t.Fatal("custom without an override accepted")
 	}
 }
@@ -1076,7 +1081,7 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	}
 }
 
-func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
+func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	account := &domain.Member{
@@ -1099,14 +1104,14 @@ func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
 	}
 	c := e.rt.byName(string(run.ID))
 	if c == nil || len(c.spec.Mounts) != 1 {
-		t.Fatalf("container mounts = %+v, want account home", c)
+		t.Fatalf("container mounts = %+v, want only the launcher's home", c)
 	}
-	wantHome, err := e.cfg.Homes.Path(account.ID)
+	wantHome, err := e.cfg.Homes.Path(e.member.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.spec.Mounts[0].HostPath != wantHome {
-		t.Fatalf("home mount = %q, want account home %q", c.spec.Mounts[0].HostPath, wantHome)
+		t.Fatalf("home mount = %q, want launcher home %q", c.spec.Mounts[0].HostPath, wantHome)
 	}
 	if c.spec.Env["GIT_AUTHOR_NAME"] != e.member.DisplayName ||
 		c.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(account.ID) {
@@ -1485,7 +1490,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 			},
 		}
 	})
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
+	argv, prof, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
@@ -1503,11 +1508,11 @@ func TestCustomHarnessDefinition(t *testing.T) {
 func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, "legacy", domain.LaunchTUI)
+	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "legacy", domain.LaunchTUI)
 	if want := `scheduler: unknown harness "legacy"; register it with: aether agent add legacy`; err == nil || err.Error() != want {
 		t.Fatalf("validate an unknown harness = %v, want %q", err, want)
 	}
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, "claude", domain.LaunchTUI); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchTUI); err != nil {
 		t.Fatalf("validate claude tui: %v", err)
 	}
 }
@@ -1532,7 +1537,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	argv, _, err := s.command(t.Context(), "", "fake", domain.LaunchTUI, "integration task")
+	argv, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task")
 	if err != nil {
 		t.Fatalf("fake command: %v", err)
 	}

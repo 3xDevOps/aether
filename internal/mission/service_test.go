@@ -513,6 +513,8 @@ type validatingLauncher struct {
 	// refuseAll stands for a harness definition removed after a request
 	// already succeeded.
 	refuseAll bool
+	// validated records each validation's run owner and account.
+	validated [][2]domain.MemberID
 }
 
 func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
@@ -520,8 +522,9 @@ func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunc
 	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
-func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, _ domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
 	l.calls++
+	l.validated = append(l.validated, [2]domain.MemberID{member, account})
 	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {
 		return errors.New(`scheduler: harness "legacy" has no command for mode "tui"`)
 	}
@@ -579,6 +582,40 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	}
 	if launcher.calls != calls {
 		t.Fatalf("worker dispatch asked the validator %d times, want none", launcher.calls-calls)
+	}
+}
+
+// TestLaunchValidationResolvesForTheRunOwner: an integrator on a shared
+// account is validated as its run owner's launch on that account, since a
+// launch resolves the harness in the run owner's context.
+func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
+	ctx := context.Background()
+	f := newPlanGateFixture(t)
+	launcher := &validatingLauncher{recordingLauncher: f.launcher}
+	f.svc.cfg.Runs = launcher
+	owner := regressionMember(t, f.db, "owner")
+	if err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(owner.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}
+	created, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-shared",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+		MissionID: created.Mission.ID, ExpectedGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "replace-shared",
+		Integrator: protocol.MissionIntegrator(integrator),
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	want := [2]domain.MemberID{f.member.ID, owner.ID}
+	if len(launcher.validated) != 2 || launcher.validated[0] != want || launcher.validated[1] != want {
+		t.Fatalf("validated (run owner, account) = %v, want %v for the create and the replacement", launcher.validated, want)
 	}
 }
 

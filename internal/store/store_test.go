@@ -1357,10 +1357,10 @@ func TestTerminalPersistence(t *testing.T) {
 	}
 }
 
-// A database at v46 gains outcome_unseen clear on every existing run.
-func TestRunOutcomeUnseenMigrationFromV46(t *testing.T) {
+// A database at v47 gains outcome_unseen clear on every existing run.
+func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	t.Parallel()
-	const previous = 46
+	const previous = 47
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

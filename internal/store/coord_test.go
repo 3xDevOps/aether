@@ -349,7 +349,7 @@ func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 // drops coord_reports, which publications reference ON DELETE CASCADE, so
 // both rows must survive it.
 func TestCoordReportSlotMigrationKeepsReportsAndPublications(t *testing.T) {
-	const slotVersion = 46
+	const slotVersion = 47
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

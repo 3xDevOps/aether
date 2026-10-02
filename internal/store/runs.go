@@ -54,6 +54,9 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		return err
 	}
 	r.AccountMemberID = r.AccountMember()
+	if r.HomeMemberID == "" {
+		r.HomeMemberID = r.MemberID
+	}
 	var id string
 	id = string(r.ID)
 	var ts time.Time
@@ -90,12 +93,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		return fmt.Errorf("store: create run: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status,
+		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt,
@@ -115,7 +118,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		baseCheckedAt         *int64
 		archivedAt            *int64
 	)
-	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.Task, &r.Harness,
+	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.HomeMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
@@ -136,7 +139,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	return &r, nil
 }
 
-const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, runs.task, runs.harness, runs.mode, runs.status,
+const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen`
@@ -244,8 +247,11 @@ func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*d
 	return collect(rows, scanRun)
 }
 
-// UpdateRun writes r's columns except archived_at and outcome_unseen; a
-// status change clears outcome_unseen, as UpdateRunStatus does.
+// UpdateRun writes a run snapshot back. It never writes home_member_id: the
+// home a run's container mounts is fixed when the row is created, and a
+// stale or hand-built snapshot must not be able to change or clear it. It
+// never writes archived_at or outcome_unseen either; a status change clears
+// outcome_unseen, as UpdateRunStatus does.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err

@@ -2,10 +2,11 @@
 
 Each member has one server-owned home directory under `<data>/homes/<member>`.
 Aether mounts it read-write as `$HOME` in the member's environment terminal and
-every run using that member's agent account, including the run's shell tabs.
-Those containers also start from that member's saved image, or the standard
-image when none is saved. An explicit account share permits another member's
-run to use both; see [teams.md](teams.md#agent-accounts).
+every run the member launches, including the run's shell tabs and runs on
+another member's shared agent account. Those containers also start from that
+member's saved image, or the standard image when none is saved. A share of
+your own account exposes only the launched agent's login to the recipient's
+runs, not the rest of this home; see [teams.md](teams.md#agent-accounts).
 
 ## What persists
 
@@ -27,14 +28,17 @@ terminal turns that layer into your member image so later runs get it; see
 
 The local dashboard (`aether gui`) and CLI list both the agents Aether ships
 and the ones members define. Its launch form and onboarding wizard's First run
-step only offer agents whose executable is installed in the selected account's
-`~/.local/bin`, and with none installed they say so and offer **Set up an
-agent** rather than a launch the server would refuse; the Agents page still
-lists uninstalled shipped agents so you can set them up. The server-hosted
-dashboard has no onboarding wizard.
+step only offer agents whose executable is installed in your own
+`~/.local/bin`, also when launching on a shared account, and with none
+installed they say so and offer **Set up an agent** rather than a launch the
+server would refuse; the Agents page still lists uninstalled shipped agents so
+you can set them up. On a shared account, an agent whose owner has no login
+for it is not offered either, nor is your own member-defined agent, which
+runs only on your own account. The server-hosted dashboard has no onboarding
+wizard.
 
 Discovery follows relative symlinks and absolute links under `/root` or
-`/home/aether` within that account's home. Claude's native installer uses an
+`/home/aether` within your home. Claude's native installer uses an
 absolute link to its versioned executable. Broken links, links outside the
 home, and files without executable permission are not marked installed.
 Use **Refresh agents** after installing in an open terminal; no app or server
@@ -53,14 +57,16 @@ install the agent into `~/.local/bin`, and complete the vendor login there:
 aether terminal
 ```
 
-After setup, every run using that account sees the same executable and login
-state. A member-defined agent also records its launch arguments for later runs.
+After setup, every run you launch sees the same executable and login state.
+A member-defined agent also records its launch arguments for later runs.
 The terminal command ships in this release series.
 
 ## Connect GitHub
 
-Connect GitHub once and every run using that account can push branches to the
-workspace's upstream repository, open pull requests, and sign its commits.
+Connect GitHub once and every run you launch, including on another member's
+shared agent account, can push branches to the workspace's upstream
+repository, open pull requests, and sign its commits as you. Sharing your own
+agent account never gives another member's runs your GitHub login.
 Because the home is shared read-write, active runs can see the files too after
 their agent reloads. Both halves happen in the member home, so no run needs
 its own credentials.
@@ -189,8 +195,8 @@ commits; install the OpenSSH client package on the server
 exists, changing your name or address rewrites the identity in the home's
 `.gitconfig` too, so the signature and the author stay the same person.
 
-Container root in every run using this account can read and replace the
-credentials and the key. Read [security.md](security.md#github-credentials-and-signing-keys)
+Container root in every run you launch can read and replace the credentials
+and the key. Read [security.md](security.md#github-credentials-and-signing-keys)
 before connecting an account whose reach is wider than this workspace.
 
 ## No gh in the environment
@@ -265,10 +271,11 @@ unsafe paths, symlink components, hardlinks, and nonregular files, while
 preserving directory and staged-file ownership.
 
 The import writes the authenticated member's own persistent home. Because that
-home is mounted read-write in the environment terminal and in every run using
-the account, imported or edited files are visible immediately, including to
-active runs; the agent may need to reload. An account share intentionally gives
-another member's run the same home, not an isolated per-run profile. A snapshot
+home is mounted read-write in the environment terminal and in every run the
+member launches, imported or edited files are visible immediately, including
+to active runs; the agent may need to reload. It is not an isolated per-run
+profile, and a share of your agent account does not expose it, except the
+`~/.omp/agent` directory an `omp` share mounts. A snapshot
 pin is audit metadata, not a private writable copy, and changing configuration
 does not rebuild an installed-agent image.
 

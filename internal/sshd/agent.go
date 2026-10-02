@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -69,6 +70,10 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 	return protocol.AgentRegisterResult(p), nil
 }
 
+// agentList describes what a launch by member on the requested account would
+// run: member's own executables and definitions, since a run uses its
+// launcher's environment, and on another member's account whether that
+// account has the login the launch needs.
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.AgentListParams](raw)
 	if perr != nil {
@@ -78,6 +83,25 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
+	describe := func(name, source, executable, installScript string) (protocol.AgentInfo, error) {
+		installed, err := s.agentInstalled(member, executable)
+		if err != nil {
+			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
+		}
+		info := protocol.AgentInfo{Name: name, Source: source, Installed: installed, InstallScript: installScript}
+		if account != member {
+			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
+			if err != nil {
+				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", name, err)
+			}
+			info.LoginMissing = shared == scheduler.SharedLoginMissing
+			info.OwnAccountOnly = shared == scheduler.SharedOwnDefinitionOnly
+			if shared == scheduler.SharedLoginUnavailable {
+				info.Unavailable = refusal
+			}
+		}
+		return info, nil
+	}
 	// "custom" (deployment escape hatch) and "fake" (deterministic test
 	// harness, registered scheduler-side) are deliberately not advertised.
 	var agents []protocol.AgentInfo
@@ -85,18 +109,13 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		installed, err := s.agentInstalled(account, p.TUIArgs[0])
+		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript)
 		if err != nil {
-			return nil, rpcError(fmt.Errorf("check agent %q: %w", p.Name, err))
+			return nil, rpcError(err)
 		}
-		agents = append(agents, protocol.AgentInfo{
-			Name:          p.Name,
-			Source:        "shipped",
-			Installed:     installed,
-			InstallScript: p.InstallScript,
-		})
+		agents = append(agents, info)
 	}
-	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, account)
+	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, member)
 	if serr != nil {
 		return nil, rpcError(serr)
 	}
@@ -105,15 +124,11 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
 		}
-		installed, err := s.agentInstalled(account, def.Executable)
+		info, err := describe(row.Name, "member", def.Executable, "")
 		if err != nil {
-			return nil, rpcError(fmt.Errorf("check agent %q: %w", row.Name, err))
+			return nil, rpcError(err)
 		}
-		agents = append(agents, protocol.AgentInfo{
-			Name:      row.Name,
-			Source:    "member",
-			Installed: installed,
-		})
+		agents = append(agents, info)
 	}
 	// Shipped names and a member's rows are each sorted, but the merged
 	// view must be sorted by name across both sources.
@@ -137,7 +152,7 @@ func (s *Server) agentInstalled(member domain.MemberID, executable string) (bool
 
 	// Vendor installers use absolute container-home symlinks. Resolve each
 	// component explicitly; os.Root confines even concurrent symlink swaps
-	// to this account's home instead of following a link on the server host.
+	// to the member's home instead of following a link on the server host.
 	pending := []string{".local", "bin", executable}
 	resolved := []string{}
 	links := 0

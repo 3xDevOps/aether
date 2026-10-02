@@ -17,8 +17,9 @@ type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	MemberID    string `json:"member_id"`
-	// AccountMemberID identifies the member whose environment and vendor
-	// credentials back the run. MemberID remains the run owner and actor.
+	// AccountMemberID identifies the member whose vendor login backs the
+	// run. MemberID remains the run owner and actor; the run's environment
+	// is its launcher's.
 	AccountMemberID string `json:"account_member_id"`
 	Task            string `json:"task"`
 	Title           string `json:"title,omitempty"`
@@ -748,4 +749,14 @@ type AgentInfo struct {
 	// InstallScript is the shipped harness's vendor install command. It is
 	// empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
+	// LoginMissing is true when a launch of this agent on the listed shared
+	// account would be refused because the account owner has no login for
+	// it. OwnAccountOnly is true when it would be refused because the agent
+	// resolves to the caller's own definition, which runs only on their own
+	// account. Unavailable is the launch's refusal when the owner's login
+	// exists but cannot be shared. At most one is set, and none for the
+	// caller's own account.
+	LoginMissing   bool   `json:"login_missing,omitempty"`
+	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
+	Unavailable    string `json:"unavailable,omitempty"`
 }

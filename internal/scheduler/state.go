@@ -171,18 +171,21 @@ type sidecar struct {
 	RunID string `json:"run_id"`
 	// TerminalMember identifies a member-terminal reference kept outside the
 	// run sidecar directory. It is never populated for run supervision.
-	TerminalMember   string            `json:"terminal_member,omitempty"`
-	ContainerID      string            `json:"container_id"`
-	WorkspaceID      string            `json:"workspace_id"`
-	Mode             domain.LaunchMode `json:"mode,omitempty"`
-	Paused           bool              `json:"paused"`
-	KillRequested    bool              `json:"kill_requested"`
-	Retained         bool              `json:"retained,omitempty"`
-	RetainedUntil    *time.Time        `json:"retained_until,omitempty"`
-	DestroyPending   bool              `json:"destroy_pending,omitempty"`
-	EvidencePending  bool              `json:"evidence_pending,omitempty"`
-	RunUser          string            `json:"run_user,omitempty"`
-	Home             string            `json:"home,omitempty"`
+	TerminalMember  string            `json:"terminal_member,omitempty"`
+	ContainerID     string            `json:"container_id"`
+	WorkspaceID     string            `json:"workspace_id"`
+	Mode            domain.LaunchMode `json:"mode,omitempty"`
+	Paused          bool              `json:"paused"`
+	KillRequested   bool              `json:"kill_requested"`
+	Retained        bool              `json:"retained,omitempty"`
+	RetainedUntil   *time.Time        `json:"retained_until,omitempty"`
+	DestroyPending  bool              `json:"destroy_pending,omitempty"`
+	EvidencePending bool              `json:"evidence_pending,omitempty"`
+	RunUser         string            `json:"run_user,omitempty"`
+	Home            string            `json:"home,omitempty"`
+	// LoginMember is the account owner whose login paths the container
+	// mounts, empty when it mounts none.
+	LoginMember      string            `json:"login_member,omitempty"`
 	Reporter         harness.Reporter  `json:"reporter,omitempty"`
 	AgentState       agentstatus.State `json:"agent_state,omitempty"`
 	AgentReason      string            `json:"agent_reason,omitempty"`
@@ -223,6 +226,7 @@ func (e *supervised) sidecar() sidecar {
 		EvidencePending:  e.evidencePending,
 		RunUser:          e.runUser,
 		Home:             e.home,
+		LoginMember:      string(e.loginMember),
 		Reporter:         e.reporter,
 		AgentState:       e.agentReport.State,
 		AgentReason:      e.agentReport.Reason,
