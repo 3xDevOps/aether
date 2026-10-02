@@ -238,7 +238,7 @@ test('pull branch needs a published commit and local pull capability', async () 
   await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(record.id))
 })
 
-test('relaunch is offered only for a retained TUI close', () => {
+test('relaunch is offered only for a retained TUI close or agent report', () => {
   const initial = render(<RunActions run={seed({ paused: false })} />)
   expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
   initial.unmount()
@@ -260,6 +260,22 @@ test('relaunch is offered only for a retained TUI close', () => {
     expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
     unsuccessfulRender.unmount()
   }
+
+  for (const [status, reason] of [
+    ['completed', 'agent reported success; retained container'],
+    ['failed', 'agent reported failure; retained container'],
+  ] as const) {
+    const reported = seed({ run: { status, mode: 'tui', reason } })
+    const reportedRender = render(<RunActions run={reported} />)
+    expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
+    reportedRender.unmount()
+  }
+  const reportedNoContainer = seed({
+    run: { status: 'completed', mode: 'tui', reason: 'agent reported success' },
+  })
+  const reportedNoContainerRender = render(<RunActions run={reportedNoContainer} />)
+  expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
+  reportedNoContainerRender.unmount()
 
   const expired = seed({
     run: { status: 'merged', mode: 'tui', reason: 'retained container expired' },

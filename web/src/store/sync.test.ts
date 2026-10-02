@@ -733,6 +733,34 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
   })
 
+  it('flags an agent-reported outcome, and clears it on run.outcome_seen or the next transition', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    const reported = { from: 'running', to: 'completed', reason: 'agent reported success', outcome_unseen: true }
+    await applyEvent(store, statusEvent({ payload: reported }), fakeApi())
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(true)
+
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_seen', seq: 6, type: 'run.outcome_seen', payload: {} }),
+      fakeApi(),
+    )
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(false)
+    expect(store.getState().runs.run_1.status).toBe('completed')
+
+    await applyEvent(store, statusEvent({ id: 'evt_again', seq: 7, payload: reported }), fakeApi())
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(true)
+    // A status event without the field - a close, a relaunch, an older
+    // gateway - clears it.
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_closed', seq: 8, payload: { from: 'completed', to: 'merged' } }),
+      fakeApi(),
+    )
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(false)
+  })
+
   it('updates a run protection flag from run.protected events', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

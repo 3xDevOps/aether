@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { awaitingReview, runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { MemberAvatar } from '@/routes/board/member-avatar'
@@ -208,9 +208,18 @@ export function RunCard({
             </span>
           </button>
           <div className="min-w-0 overflow-hidden">
-            {state === 'needs-attention' && summary && (
+            {state === 'needs-attention' && summary ? (
               <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
                 {summary}
+              </p>
+            ) : awaitingReview(run) && (
+              <p
+                className={cn(
+                  'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 text-muted-foreground coarse:line-clamp-1',
+                  run.status === 'failed' ? 'border-state-failed/60' : 'border-state-done/60',
+                )}
+              >
+                The agent reported {run.status === 'failed' ? 'failure' : 'success'}; open the run to review it.
               </p>
             )}
           </div>

@@ -12,6 +12,7 @@ const samples: Record<EventType, unknown> = {
   'run.deleted': {},
   'run.protected': { protected: true },
   'run.archived': { archived_at: '2026-08-14T10:00:00Z', deletes_at: '2026-08-28T10:00:00Z' },
+  'run.outcome_seen': {},
   'run.agent': { kind: 'tool', tool: 'Bash', detail: 'go test ./...' },
   'run.diff': {
     files: [

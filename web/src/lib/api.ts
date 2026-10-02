@@ -830,6 +830,8 @@ export const api = {
     call<{ run: Run }>('run.archive', { run_id: runID, archived }).then((r) => r.run),
   runRelaunch: (runID: string) =>
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
+  runSeen: (runID: string) =>
+    call<{ run: Run }>('run.seen', { run_id: runID }).then((r) => r.run),
   // The two endpoints that are not RPC methods: patch text is a read of a
   // working tree, and disk usage has no place on the frozen server.info
   // result. See docs/local-gateway.md.

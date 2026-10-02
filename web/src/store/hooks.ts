@@ -41,15 +41,16 @@ export function useSidebarGroups(): SidebarGroup[] {
 
 /**
  * How many runs are waiting on a human right now - the count behind the
- * sidebar's badge. Stalls, clean exits and pending approvals all present
- * as needs-attention, so one number covers the whole notification path.
+ * sidebar's badge. Stalls, clean exits, pending approvals and unreviewed
+ * agent outcomes all need you, so one number covers the whole notification
+ * path.
  */
 export function useAttentionCount(): number {
   const input = useSidebarInput()
   return useMemo(() => {
     const attentionRunIDs = new Set(
       sidebarRuns(input)
-        .filter((run) => run.state === 'needs-attention')
+        .filter((run) => run.needsYou)
         .map((run) => run.run.id),
     )
     for (const run of Object.values(input.runs)) {

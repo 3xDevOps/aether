@@ -49,6 +49,8 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** An agent report finished the run and its owner has not opened it yet. */
+  outcome_unseen?: boolean
   base_commit?: string
   base_branch?: string
   base_source?: string
@@ -652,6 +654,8 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+  /** True only on the transition an agent report caused. */
+  outcome_unseen?: boolean
 }
 
 export interface GitBranchPayload {

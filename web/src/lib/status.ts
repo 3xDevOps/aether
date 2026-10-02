@@ -2,7 +2,7 @@
 // unchanged, this is the two-layer status vocabulary from the GUI spec
 // (the harness glyph says who, the state dot says what).
 
-import type { Approval, RunStatus } from '@/lib/types'
+import type { Approval, Run, RunStatus } from '@/lib/types'
 import { pendingApprovals } from '@/store/approvals'
 
 export type PresentationState =
@@ -38,6 +38,23 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
     case 'abandoned':
       return 'done'
   }
+}
+
+/**
+ * An agent report finished the run and its owner has not opened it yet. The
+ * run keeps its done or failed presentation state, so finished-run checks
+ * still hold; only where it is listed changes (`needsYou`).
+ */
+export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
+  return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
+}
+
+/** Whether a run is listed with the runs waiting on a human. */
+export function needsYou(
+  run: Pick<Run, 'status' | 'outcome_unseen'>,
+  state: PresentationState,
+): boolean {
+  return state === 'needs-attention' || awaitingReview(run)
 }
 
 const fallbackLabelLength = 120

@@ -2,7 +2,7 @@
 // input so the component can memoize on exactly what it reads.
 
 import { useMemo } from 'react'
-import { runState, type PresentationState } from '@/lib/status'
+import { needsYou, runState, type PresentationState } from '@/lib/status'
 import type { Member, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { isUnseen, type Ack } from '@/store/board'
@@ -100,7 +100,7 @@ export function board(s: BoardInput): BoardData {
       archivedCards.push(card)
       continue
     }
-    columns[bucketOf(state)].push(card)
+    columns[needsYou(run, state) ? 'needs-you' : bucketOf(state)].push(card)
   }
 
   const newestFirst = (a: BoardCard, b: BoardCard) =>

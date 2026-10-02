@@ -2,6 +2,7 @@
 // things that need a human come first.
 
 import {
+  needsYou,
   runState,
   stateLabel,
   stateRank,
@@ -33,7 +34,14 @@ export interface SidebarInput {
 export interface SidebarRun {
   run: RunRecord
   state: PresentationState
+  /** Listed with the runs waiting on a human; see `needsYou`. */
+  needsYou: boolean
   owner?: Member
+}
+
+/** The state a run is ranked and grouped by: its own, or needs-attention while it needs you. */
+function standing(entry: SidebarRun): PresentationState {
+  return entry.needsYou ? 'needs-attention' : entry.state
 }
 
 export interface SidebarRunTree extends SidebarRun {
@@ -58,8 +66,8 @@ function byAttention(
 export function sortRuns(runs: SidebarRun[]): SidebarRun[] {
   return [...runs].sort((a, b) =>
     byAttention(
-      { state: a.state, changedAt: a.run.stateChangedAt },
-      { state: b.state, changedAt: b.run.stateChangedAt },
+      { state: standing(a), changedAt: a.run.stateChangedAt },
+      { state: standing(b), changedAt: b.run.stateChangedAt },
     ),
   )
 }
@@ -72,12 +80,14 @@ export function sidebarRuns(s: SidebarInput): SidebarRun[] {
     // A live run can never be hidden, so the archive check only applies
     // once the run has actually stopped.
     if (run.archived_at && isArchivable(run.status)) continue
+    const state = runState(
+      run.status,
+      s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
+    )
     entries.push({
       run,
-      state: runState(
-        run.status,
-        s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
-      ),
+      state,
+      needsYou: needsYou(run, state),
       owner: s.members[run.member_id],
     })
   }
@@ -116,7 +126,7 @@ export function sidebarGroups(s: SidebarInput): SidebarGroup[] {
     const tree = { ...root, children: children.get(root.run.id) ?? [] }
     const [key, label] =
       s.groupBy === 'status'
-        ? [entry.state, stateLabel[entry.state]]
+        ? [standing(entry), stateLabel[standing(entry)]]
         : ownerOf(root)
     const group = groups.get(key)
     if (group) group.runs.push(tree)

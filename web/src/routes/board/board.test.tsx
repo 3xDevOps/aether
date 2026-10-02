@@ -577,6 +577,41 @@ describe('board', () => {
     expect(needsYou.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
   })
 
+  it('deals an unreviewed agent outcome into Needs you with its finished state, until it is seen', () => {
+    const success = run({
+      id: 'run_reported_success',
+      task: 'agent says done',
+      status: 'completed',
+      reason: 'agent reported success',
+      outcome_unseen: true,
+      finished_at: '2026-08-14T10:30:00Z',
+    })
+    const failure = run({
+      id: 'run_reported_failure',
+      task: 'agent says stuck',
+      status: 'failed',
+      reason: 'agent reported failure; retained container',
+      outcome_unseen: true,
+      finished_at: '2026-08-14T10:31:00Z',
+    })
+    seed([success, failure])
+    render(<Board />)
+
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('The agent reported success; open the run to review it.')).toBeDefined()
+    expect(needsYou.getByText('The agent reported failure; open the run to review it.')).toBeDefined()
+    // The real state, not the amber needs-attention one.
+    expect(needsYou.getByLabelText('Done')).toBeDefined()
+    expect(needsYou.getByLabelText('Failed')).toBeDefined()
+    expect(needsYou.queryByLabelText('Needs you')).toBeNull()
+    expect(column('Done').queryByText('agent says done')).toBeNull()
+
+    act(() => useStore.getState().applyOutcomeSeen(success.id))
+    expect(column('Done').getByText('agent says done')).toBeDefined()
+    expect(column('Done').queryByText(/open the run to review it/)).toBeNull()
+    expect(needsYou.getByText('agent says stuck')).toBeDefined()
+  })
+
   it('keeps the board identity across an inbox refresh that changed nothing', () => {
     seed([working])
     act(() =>

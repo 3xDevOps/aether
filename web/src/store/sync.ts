@@ -20,6 +20,7 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
+import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
@@ -416,9 +417,12 @@ export async function applyEvent(
           }
         }
       }
-      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)
+      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time, p.outcome_unseen)
       break
     }
+    case 'run.outcome_seen':
+      store.getState().applyOutcomeSeen(ev.run_id)
+      break
     case 'run.title': {
       const p = ev.payload as RunTitlePayload
       if (!store.getState().runs[ev.run_id]) {
@@ -673,6 +677,8 @@ export function connect(store: RootStore, client: Api = api): () => void {
       })
   })
 
+  const stopOutcomeSeen = watchOutcomeSeen(store, client)
+
   const missionRefreshes = new Set<string>()
   let refreshingMissions = false
   let missionGeneration = 0
@@ -868,6 +874,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     lifecycle.abort()
     stopWake()
     stopSelection()
+    stopOutcomeSeen()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }
