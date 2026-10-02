@@ -107,6 +107,9 @@ type Config struct {
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
 	CoordinationDisabled bool
+	// HarnessUpdateDisabled stops pre-launch harness updates. The zero
+	// value keeps them on, which is the shipped default.
+	HarnessUpdateDisabled bool
 	// WhoIs overrides tailnet identity resolution; nil keeps the default
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
@@ -337,6 +340,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunContainerTTL:      cfg.RunContainerTTL,
 		MinFreeBytes:         cfg.MinFreeDiskBytes,
 		ServerBinary:         cfg.ServerBinary,
+
+		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
 		return nil, err
 	}

@@ -588,6 +588,23 @@ cleans up the container; it does not receive a replacement shell. Headless
 clean exit still commits and publishes, records `completed`, and destroys the
 container immediately. A failed run's partial work is committed as `wip:`.
 
+### Agent update fails, or the vendor is unreachable
+
+Before a launch, the server may update the shipped agent installed in the
+member home ([harnesses.md](harnesses.md#updates-before-launch)). No update
+problem stops the launch. A nonzero exit, a runtime error, or an update still
+running after 3 minutes leaves the installed version in place, the run starts
+on it, and the run's timeline in the dashboard records the cause:
+
+```text
+could not update codex before launch; starting the installed version codex-cli 0.155.1: the updater exited 1: <updater output>
+```
+
+The server log has the same failure as `scheduler: harness update failed`.
+The next launch from that home tries again after 15 minutes. Killing the run
+during the update cancels the update and records nothing.
+`--harness-update=false` turns updates off.
+
 ### SSH drop mid-attach
 
 The PTY session belongs to the server, not to the connection, so a dropped

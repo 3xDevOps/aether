@@ -495,6 +495,33 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
 		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
 	}
+	// The scheduler would run the shipped CLI's updater against a program
+	// the definition may not even launch.
+	if override.UpdateScript != "" {
+		t.Fatalf("override inherited the registry update script %q", override.UpdateScript)
+	}
+}
+
+// The scheduler updates a harness it can find in ~/.local/bin by its TUI
+// executable, so an update script without those is never run, and opencode
+// and custom must never be updated.
+func TestUpdateScripts(t *testing.T) {
+	var updated []string
+	for _, p := range Profiles() {
+		if p.UpdateScript == "" {
+			continue
+		}
+		updated = append(updated, p.Name)
+		if p.InstallScript == "" || len(p.TUIArgs) == 0 {
+			t.Errorf("%s has an update script but no install script or TUI argv", p.Name)
+		}
+	}
+	if want := []string{"claude", "codex", "omp", "pi"}; !slices.Equal(updated, want) {
+		t.Fatalf("profiles with an update script = %v, want %v", updated, want)
+	}
+	if pi, _ := Lookup("pi"); pi.UpdateScript != "pi update --self" {
+		t.Errorf("pi update script %q must update pi alone, never the member's packages", pi.UpdateScript)
+	}
 }
 
 // The dashboard cannot import this registry, so it repeats the shipped

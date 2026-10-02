@@ -10,7 +10,9 @@ Two rules shape everything below:
 
 1. **Aether does not install agents for you.** A member runs the displayed
    vendor install command in their environment terminal. The command should
-   install the executable into `~/.local/bin`.
+   install the executable into `~/.local/bin`. Once a shipped agent is
+   installed there, Aether keeps it current; see
+   [Updates before launch](#updates-before-launch).
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
    Credentials remain in the member home; an explicit account share mounts that
@@ -1014,6 +1016,56 @@ the explicit browser import writes selected configuration there, and the
 definition resolves argv for that member. The terminal is the only setup
 transport for installation and login.
 
+## Updates before launch
+
+Before it launches a run, the server updates the shipped agent installed in
+the member home's `~/.local/bin`. It runs the agent's own update command in a
+short-lived container with the run's image, user, environment, and member
+home, then starts the run. The first launch per member home and agent checks
+for an update; after that, a launch checks again once 6 hours have passed, or
+15 minutes after a failed update. Concurrent launches on one home, such as a
+swarm, share one update.
+
+| Agent | Update command |
+| --- | --- |
+| `claude` | `claude update` |
+| `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix "$HOME/.local" "@openai/codex@<version>"` |
+| `pi` | `pi update --self` |
+| `omp` | `omp update` |
+
+Codex does not use `codex update`: it installs into the image's global npm
+prefix, outside the member home, and reports success while the home copy stays
+old.
+
+Nothing else is touched: no agent configuration, plugins, extensions, or
+release channel. These are never updated:
+
+- an agent defined by a member, or a shipped name an administrator overrides
+  with `--harness-definitions`;
+- `opencode`, because an upgrade can cross a major version that the managed
+  OpenCode wrapper refuses (see [Managed native loading](#managed-native-loading));
+- an agent installed in the image rather than in `~/.local/bin` of the member
+  home.
+
+The run's timeline in the dashboard shows what happened. An update still
+running after 5 seconds adds `updating <agent> before launch`. A new version adds
+`updated <agent> before launch, from <old> to <new>`. An update that fails,
+times out after 3 minutes, or cannot reach the vendor's release server does
+not stop the launch; the run starts on the installed version and the timeline shows the
+real cause:
+
+```text
+could not update claude before launch; starting the installed version 2.1.288 (Claude Code): the updater exited 1: <updater output>
+```
+
+A newer CLI may migrate its own state in the member home on first start, and
+Aether does not roll an update back. Relaunching a retained run reuses its
+container and does not update. `omp` and Claude Code keep the files of
+previous versions in the member home; Aether does not prune them.
+
+To turn updates off for the whole server, start it with
+`aether-server serve --harness-update=false`.
+
 ## Agent configuration: import and Files
 
 Open **Configuration** from the Agents page, the shared navigation rail, or
@@ -1133,7 +1185,10 @@ matches those bytes. No path automatically synchronizes later local changes.
 ## Adding a harness
 
 The registry defines argv templates for both modes, credential/configuration
-roots, denylist, API-key passthrough, taskless discovery, and status reporting.
+roots, denylist, API-key passthrough, taskless discovery, status reporting,
+the install command (`InstallScript`), and the optional pre-launch update
+command (`UpdateScript`), which must be a cheap no-op when the CLI is current
+and must update only the program.
 An output adapter is optional; see [adapters.md](adapters.md).
 Inbox support is a separate capability: follow the
 [harness integration guide](harness-integration.md) for the durable CLI,

@@ -324,6 +324,11 @@ type Profile struct {
 	// member's terminal (aether terminal). It must install into ~/.local/bin.
 	// A failed install leaves the member in the terminal to install manually.
 	InstallScript string
+	// UpdateScript brings the CLI installed in ~/.local/bin current and is a
+	// cheap no-op when it already is. The scheduler runs it with /bin/sh -c
+	// before a launch. It updates the program only, never the member's
+	// plugins, extensions, channel or configuration.
+	UpdateScript string
 }
 
 // SteerSuffix returns the bytes that follow a steering message: the
@@ -334,6 +339,11 @@ func (p Profile) SteerSuffix() string {
 	}
 	return p.SteerSubmit
 }
+
+const codexUpdateScript = `command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and codex updates through npm" >&2; exit 1; }
+latest=$(npm view @openai/codex version --fetch-retries=0) && [ -n "$latest" ] || exit 1
+case "$(codex --version)" in *" $latest") exit 0 ;; esac
+npm install -g --prefix "$HOME/.local" "@openai/codex@$latest"`
 
 // profiles is the shipped registry. "custom" is the escape hatch: its
 // command comes from the deployment's run/workspace harness configuration
@@ -364,6 +374,7 @@ var profiles = map[string]Profile{
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
+		UpdateScript:  "claude update",
 	},
 	"codex": {
 		Name:            "codex",
@@ -387,6 +398,10 @@ var profiles = map[string]Profile{
 		// member's persistent home. Without npm in the image the member
 		// installs manually, as before.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
+		// "codex update" installs into the image's global npm prefix, not
+		// the home, and reinstalling with --prefix rewrites the whole
+		// package even when it is current, so compare versions first.
+		UpdateScript: codexUpdateScript,
 	},
 	"pi": {
 		Name:         "pi",
@@ -407,6 +422,8 @@ var profiles = map[string]Profile{
 		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+		// --self alone: --extensions and --all update the member's packages.
+		UpdateScript: "pi update --self",
 	},
 	// omp is a fork of pi and takes the same extension. It has a
 	// permission prompt of its own, which --auto-approve bypasses.
@@ -426,6 +443,7 @@ var profiles = map[string]Profile{
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		NativeCoordination: true,
 		InstallScript:      "curl -fsSL https://omp.sh/install | sh",
+		UpdateScript:       "omp update",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -457,6 +475,8 @@ var profiles = map[string]Profile{
 		},
 		DiscoveryFiles: map[string][]byte{DiscoveryFileName: []byte(DiscoveryInstruction + "\n")},
 		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",
+		// No UpdateScript: an upgrade can cross a major version that the
+		// managed OpenCode launch wrapper refuses.
 	},
 	"custom": {Name: "custom"},
 }

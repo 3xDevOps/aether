@@ -128,8 +128,15 @@ type Config struct {
 	// terminal container for the coordination CLI. Coordinated runs also use
 	// it for lifecycle callbacks; empty means DefaultServerBinary.
 	ServerBinary string
+	// HarnessUpdateDisabled stops the scheduler from updating a shipped
+	// harness installed in the member home before a launch
+	// (harness_update.go). The zero value keeps updates on.
+	HarnessUpdateDisabled bool
 	// turnTail overrides defaultTurnTail; only tests set it.
 	turnTail time.Duration
+	// harnessUpdateTimeout overrides defaultHarnessUpdateTimeout; only tests
+	// set it.
+	harnessUpdateTimeout time.Duration
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -222,6 +229,9 @@ type Scheduler struct {
 	// drop each stream under the person typing into it, so they hold the idle
 	// check open the way an active run does.
 	shells int
+	// harnessUpdates is the pre-launch harness update state per member home
+	// and harness (harness_update.go).
+	harnessUpdates map[harnessUpdateKey]*harnessUpdateState
 }
 
 // credentialUserReservation protects one writable member home from
@@ -695,6 +705,7 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		profile.DiscoveryEnv = nil
 		profile.DiscoveryFiles = nil
 		profile.NativeCoordination = false
+		profile.UpdateScript = ""
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:
