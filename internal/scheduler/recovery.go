@@ -1437,6 +1437,15 @@ func containerHome(env []string) string {
 	return ""
 }
 
+// sidecarHomeMember is whose home sc's container mounts: a sidecar without
+// HomeMember predates narrowed shares and mounts the run account's home.
+func sidecarHomeMember(r *domain.Run, sc sidecar) domain.MemberID {
+	if sc.HomeMember != "" {
+		return domain.MemberID(sc.HomeMember)
+	}
+	return r.AccountMember()
+}
+
 func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	started := time.Now().UTC()
 	if r.StartedAt != nil {
@@ -1453,10 +1462,6 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if mode == "" {
 		mode = r.Mode
 	}
-	homeMember := domain.MemberID(sc.HomeMember)
-	if homeMember == "" {
-		homeMember = r.AccountMember()
-	}
 	return &supervised{
 		runID: r.ID,
 		// The workspace comes off the run row, not the sidecar: a sidecar
@@ -1465,7 +1470,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		workspaceID: r.WorkspaceID,
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
-		memberID:    homeMember,
+		memberID:    sidecarHomeMember(r, sc),
 		legacyHome:  sc.HomeMember == "",
 		loginMember: domain.MemberID(sc.LoginMember),
 		// The reporter and the last report both come off the sidecar,

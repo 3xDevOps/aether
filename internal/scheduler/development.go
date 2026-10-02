@@ -27,6 +27,9 @@ type LiveRun struct {
 	Workdir     string
 	User        string
 	Env         []string
+	// HomeMember is whose home the container mounts. A handoff changes the
+	// run's owner but never this.
+	HomeMember domain.MemberID
 }
 
 func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPaused bool) (LiveRun, error) {
@@ -59,7 +62,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 		if found != runtime.ID(sc.ContainerID) {
 			return live, errors.New("recorded run container identity mismatch")
 		}
-		live = LiveRun{Run: *run, ContainerID: found, Workdir: s.cfg.WorktreeMount, User: sc.RunUser}
+		live = LiveRun{Run: *run, ContainerID: found, Workdir: s.cfg.WorktreeMount, User: sc.RunUser, HomeMember: sidecarHomeMember(run, sc)}
 		if sc.Home != "" {
 			live.Env = append(live.Env, "HOME="+sc.Home)
 		}
@@ -78,7 +81,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 		s.mu.Unlock()
 		return live, errors.New("run lifecycle changed; retry")
 	}
-	live = LiveRun{Run: *run, ContainerID: e.containerID, Workdir: s.cfg.WorktreeMount, User: e.runUser}
+	live = LiveRun{Run: *run, ContainerID: e.containerID, Workdir: s.cfg.WorktreeMount, User: e.runUser, HomeMember: e.memberID}
 	if e.home != "" {
 		live.Env = append(live.Env, "HOME="+e.home)
 	}
