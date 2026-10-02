@@ -111,11 +111,13 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 		return "", err
 	}
 	if slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" }) {
-		ping, err := d.cli.Ping(ctx, client.PingOptions{})
+		// Negotiating here settles the version the create request is sent
+		// at, so ClientVersion reports it rather than the client's maximum.
+		ping, err := d.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
 		if err != nil {
 			return "", fmt.Errorf("runtime: read docker engine API version: %w", err)
 		}
-		if err := requireSubpathAPI(ping.APIVersion); err != nil {
+		if err := requireSubpathAPI(ping.APIVersion, d.cli.ClientVersion()); err != nil {
 			return "", err
 		}
 	}
@@ -221,13 +223,20 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 }
 
 // minSubpathAPI is the first Docker API version whose engine honours a volume
-// subpath. An older engine ignores the field and mounts the whole base, so a
-// subpath mount is refused there instead of sent.
+// subpath. An older engine, or a request sent at an older version, ignores
+// the field and mounts the whole base, so a subpath mount is refused there
+// instead of sent.
 const minSubpathAPI = "1.45"
 
-func requireSubpathAPI(version string) error {
-	if version == "" || versions.LessThan(version, minSubpathAPI) {
-		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", version, minSubpathAPI)
+// requireSubpathAPI checks both the engine's API version and the one the
+// client sends requests at. Negotiation never sends below the engine's, so a
+// lower client version is a DOCKER_API_VERSION pin.
+func requireSubpathAPI(engine, sent string) error {
+	if engine == "" || versions.LessThan(engine, minSubpathAPI) {
+		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", engine, minSubpathAPI)
+	}
+	if versions.LessThan(sent, minSubpathAPI) {
+		return fmt.Errorf("runtime: docker client sends API %q (DOCKER_API_VERSION), which cannot mount a path beneath a member home; that needs API %s or newer", sent, minSubpathAPI)
 	}
 	return nil
 }
@@ -236,10 +245,10 @@ func requireSubpathAPI(version string) error {
 // directory with a volume subpath. A plain bind of HostPath/Subpath would be
 // resolved by path at every container start, following any symlink a
 // container sharing the base planted after validation. The engine instead
-// confines a volume subpath's symlinks to the volume root, opens the result
-// with RESOLVE_BENEATH and RESOLVE_NO_SYMLINKS, and mounts that descriptor
-// (Docker API 1.45 or later). The volume name is derived from the base so
-// every run mounting one base reuses one volume.
+// resolves a volume subpath beneath the volume root at every start: a
+// symlink that stays inside the base is followed, one that leaves it is
+// refused (Docker API 1.45 or later). The volume name is derived from the
+// base so every run mounting one base reuses one volume.
 func subpathMount(m Mount) mount.Mount {
 	sum := sha256.Sum256([]byte(m.HostPath))
 	return mount.Mount{
