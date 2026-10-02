@@ -27,7 +27,7 @@ export function StateDot({ state, className, decorative = false }: MarkProps) {
 }
 
 /** Three bouncing dots: the working state, in motion. The animation and its
- * reduced-motion fallback live in `index.css` next to the steering signal. */
+ * reduced-motion fallback live in `index.css`. */
 function WorkingDots({ state, className, decorative = false }: MarkProps) {
   return (
     <span {...labelling(state, decorative)} className={cn('working-dots', className)}>

@@ -400,50 +400,6 @@
   }
 }
 @layer components {
-  /* Ownership belongs to this live attachment, not merely its member. The
-     overlay never changes terminal geometry or intercepts terminal input. */
-  .terminal-control-border {
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    width: 100%;
-    height: 100%;
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-soft-foreground) 40%, transparent);
-    pointer-events: none;
-  }
-
-  .terminal-control-border rect {
-    x: 1px;
-    y: 1px;
-    width: calc(100% - 2px);
-    height: calc(100% - 2px);
-    fill: none;
-    stroke: var(--accent-soft-foreground);
-    stroke-width: 2;
-    stroke-linecap: round;
-    animation: terminal-control-orbit 7s linear infinite;
-  }
-
-  .terminal-control-trail {
-    stroke-dasharray: 18 32;
-    opacity: 0.16;
-  }
-
-  .terminal-control-wake {
-    stroke-dasharray: 7 43;
-    opacity: 0.45;
-  }
-
-  .terminal-control-border .terminal-control-head {
-    stroke-dasharray: 1.2 48.8;
-    stroke-width: 3;
-  }
-
-  @keyframes terminal-control-orbit {
-    from { stroke-dashoffset: 0; }
-    to { stroke-dashoffset: 100; }
-  }
-
   /* The box is the state dot's 0.5rem and the three dots overflow it, so a
      row's leading column does not resize when its run starts or stops
      working. */
@@ -507,15 +463,6 @@
   /* One dot at the static mark's size, so the fallback is the same 0.5rem
      round mark every other state draws. */
   @media (prefers-reduced-motion: reduce) {
-    .terminal-control-border {
-      box-shadow: inset 0 0 0 1px var(--accent-soft-foreground);
-    }
-
-    .terminal-control-border rect {
-      animation: none;
-      display: none;
-    }
-
     .working-dots span {
       opacity: 1;
       animation: none;

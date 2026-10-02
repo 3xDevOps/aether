@@ -154,7 +154,6 @@ function TerminalRoute({ params }: RouteProps) {
   const stalePresence = roomStatusControl !== roomControl || Boolean(roomStatusError)
   const localControl = state.connection === 'live' && state.write &&
     controlMetadata?.has_control === true && steerable && !state.steerDenied
-  const liveWritable = localControl && !replaying && !readingHistory
   const controllerID = localControl ? self.id : roomStatus?.controller?.member_id
   const controllerMember = controllerID ? members[controllerID] : undefined
   const controllerName = controllerMember?.display_name || controllerID
@@ -271,13 +270,6 @@ function TerminalRoute({ params }: RouteProps) {
       <div {...panelProps}>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
-            {liveWritable && (
-              <svg aria-hidden="true" focusable="false" className="terminal-control-border">
-                <rect pathLength="100" className="terminal-control-trail" />
-                <rect pathLength="100" className="terminal-control-wake" />
-                <rect pathLength="100" className="terminal-control-head" />
-              </svg>
-            )}
             <TerminalPane
               key={runID}
               controller={controller}

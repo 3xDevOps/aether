@@ -1702,10 +1702,8 @@ the terminal with the gateway's own error instead.
   grants write only when no controller exists; a second tab cannot become a
   second writer.
   A mirror uses the toolbar's controller/viewer names and **Take control**, not
-  a repeated read-only instruction. Live, acknowledged local control adds a
-  quiet teal border with two tapered highlights circulating around its edge.
-  Replay, history reading, disconnect, revocation or a non-steerable run removes
-  it. Reduced motion retains a static teal border without the traveling highlights.
+  a repeated read-only instruction. Live, acknowledged local control is shown by
+  the toolbar's **(this tab)** controller marker and **Release** action.
   Starting runs keep their spinner; ended runs say **This run is not running**.
   Whether a member may steer is the server's answer:
   `-32001` downgrades the attach to a mirror and disables the toggle. An
