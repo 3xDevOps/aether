@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { agentInfo, alice, run, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, run, serverInfo, workspace } from '@/test/fixtures'
 import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
@@ -85,7 +85,7 @@ describe('launch dialog', () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
 
-    await screen.findByText('No agent is installed in this account.')
+    await screen.findByText('No agent is installed in your environment.')
     const agent = screen.getByLabelText('Agent')
     // Nothing is picked for the member, so the launch stays blocked.
     expect(agent.textContent).toBe('Choose an agent')
@@ -180,6 +180,28 @@ describe('launch dialog', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Agent').textContent).toBe('myagent'),
     )
+  })
+
+  it('refuses an agent the shared account owner is not logged in to', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+      ? [agentInfo({ login_missing: true }), agentInfo({ name: 'codex' })]
+      : [agentInfo()])
+    await open()
+
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await waitFor(() => expect(screen.getByLabelText('Agent').textContent).toBe('codex'))
+    expect(screen.getByRole('status').textContent).toBe(
+      'Bob is not logged in to claude, so it cannot launch on this account. Bob logs in from their own environment terminal.',
+    )
+    await openSelect(screen.getByLabelText('Agent'))
+    expect(screen.getByRole('option', { name: 'claude (not logged in)' }).getAttribute('aria-disabled')).toBe('true')
+    await closeList()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      harness: 'codex', account_member_id: bob.id,
+    })))
   })
 
   it('refuses a headless launch with no task, and says why', async () => {
@@ -287,6 +309,19 @@ describe('launch dialog', () => {
       expect(params.execution_choices).toEqual([
         { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
       ])
+    })
+
+    it('offers no worker choice on an agent the account owner is not logged in to', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+        ? [agentInfo({ login_missing: true })]
+        : [agentInfo()])
+      await openSwarm()
+
+      const worker = await screen.findByRole('checkbox', { name: /Bob · claude/ }) as HTMLInputElement
+      expect(worker.disabled).toBe(true)
+      expect(worker.checked).toBe(false)
+      expect(worker.closest('label')?.textContent).toBe('Bob · claude · Bob is not logged in to claude')
     })
 
     it('sends the same choices in the same order, under the same key, after a re-tick', async () => {

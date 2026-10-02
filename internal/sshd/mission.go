@@ -66,9 +66,10 @@ func AuthorizeLaunch(ctx context.Context, st store.Store, actorID domain.MemberI
 	return LaunchAdmission{Actor: actor, Account: account}, nil
 }
 
-// ResolveLaunchAccount implements the existing directional whole-home share
-// rule. It is shared by human and mission launches so administrators do not
-// acquire implicit credential-use authority.
+// ResolveLaunchAccount returns the account a launch by actor runs on: actor's
+// own, or requested when its owner has shared their agent login with actor.
+// Shares are directional. It is shared by human and mission launches so
+// administrators do not acquire implicit credential-use authority.
 func ResolveLaunchAccount(ctx context.Context, st store.Store, actor domain.MemberID, requested string) (domain.MemberID, error) {
 	account := domain.MemberID(requested)
 	if account == "" || account == actor {

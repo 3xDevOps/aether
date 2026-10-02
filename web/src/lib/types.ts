@@ -873,8 +873,11 @@ export interface WorkspaceSelector {
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
-  /** Whether the account's persistent environment contains the executable. */
+  /** Whether the caller's persistent environment contains the executable. */
   installed?: boolean
+  /** For a shared account: its owner has no login for this agent, so a launch
+   * on that account is refused. */
+  login_missing?: boolean
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string
 }

@@ -361,6 +361,9 @@ type fakeRuns struct {
 	calls           []string
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
+	// missingLogins names the harnesses LoginMissing reports, keyed by
+	// "member:account:harness".
+	missingLogins map[string]bool
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -424,6 +427,12 @@ func (f *fakeRuns) LaunchOptions() []domain.LaunchOptions {
 
 func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (f *fakeRuns) LoginMissing(_ context.Context, member, account domain.MemberID, harness string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.missingLogins[fmt.Sprintf("%s:%s:%s", member, account, harness)], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {

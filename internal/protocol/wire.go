@@ -739,4 +739,8 @@ type AgentInfo struct {
 	// InstallScript is the shipped harness's vendor install command. It is
 	// empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
+	// LoginMissing is true when a launch of this agent on the listed shared
+	// account would be refused for want of the account owner's login. It is
+	// never set for the caller's own account.
+	LoginMissing bool `json:"login_missing,omitempty"`
 }

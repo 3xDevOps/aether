@@ -277,7 +277,10 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 	}
 }
 
-func TestAgentListDiscoversSharedAccountInstallations(t *testing.T) {
+// Discovery on a shared account describes what a launch there would run: the
+// caller's own installations and definitions, never the owner's, and whether
+// the owner has the login each agent needs.
+func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	t.Parallel()
 	s, owner := newAgentTestServer(t)
 	ctx := context.Background()
@@ -290,24 +293,52 @@ func TestAgentListDiscoversSharedAccountInstallations(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.Homes = homes
-	home, err := homes.Path(owner.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.MkdirAll(filepath.Join(home, ".local/bin"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(home, "agent-version"), []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"claude", "mybot"} {
-		if err = os.Symlink("/root/agent-version", filepath.Join(home, ".local/bin", name)); err != nil {
-			t.Fatal(err)
+	install := func(member domain.MemberID, names ...string) {
+		t.Helper()
+		home, pathErr := homes.Path(member)
+		if pathErr != nil {
+			t.Fatal(pathErr)
+		}
+		if mkdirErr := os.MkdirAll(filepath.Join(home, ".local/bin"), 0o700); mkdirErr != nil {
+			t.Fatal(mkdirErr)
+		}
+		for _, name := range names {
+			if writeErr := os.WriteFile(filepath.Join(home, ".local/bin", name), []byte("#!/bin/sh\n"), 0o700); writeErr != nil {
+				t.Fatal(writeErr)
+			}
 		}
 	}
+	install(owner.ID, "claude", "mybot")
+	install(grantee.ID, "codex", "ownbot")
 	if _, perr := callAgentRegister(t, s, owner.ID, validAgentDefinition()); perr != nil {
 		t.Fatal(perr)
 	}
+	own := validAgentDefinition()
+	own.Name, own.Executable = "ownbot", "ownbot"
+	own.TUIArgs = []string{"ownbot", harness.TaskPlaceholder}
+	own.HeadlessArgs = []string{"ownbot", "-p", harness.TaskPlaceholder}
+	if _, perr := callAgentRegister(t, s, grantee.ID, own); perr != nil {
+		t.Fatal(perr)
+	}
+	shared := func(name string) string { return string(grantee.ID) + ":" + string(owner.ID) + ":" + name }
+	s.cfg.Runs = &fakeRuns{missingLogins: map[string]bool{
+		shared("claude"): true,
+		shared("ownbot"): true,
+		string(grantee.ID) + ":" + string(grantee.ID) + ":claude": true,
+	}}
+	list := func(params []byte) map[string]protocol.AgentInfo {
+		t.Helper()
+		result, perr := s.agentList(ctx, grantee.ID, params)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		agents := map[string]protocol.AgentInfo{}
+		for _, agent := range result.(protocol.AgentListResult).Agents {
+			agents[agent.Name] = agent
+		}
+		return agents
+	}
+
 	raw, err := json.Marshal(protocol.AgentListParams{AccountMemberID: string(owner.ID)})
 	if err != nil {
 		t.Fatal(err)
@@ -315,27 +346,32 @@ func TestAgentListDiscoversSharedAccountInstallations(t *testing.T) {
 	if _, perr := s.agentList(ctx, grantee.ID, raw); perr == nil || perr.Code != protocol.CodeDenied {
 		t.Fatalf("unshared account discovery = %v, want denied", perr)
 	}
-	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+	if err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
-	result, perr := s.agentList(ctx, grantee.ID, raw)
-	if perr != nil {
-		t.Fatal(perr)
+	agents := list(raw)
+	if _, ok := agents["mybot"]; ok {
+		t.Fatalf("the owner's definition is listed for the grantee: %+v", agents)
 	}
-	installed := map[string]bool{}
-	for _, agent := range result.(protocol.AgentListResult).Agents {
-		installed[agent.Name] = agent.Installed
+	for name, want := range map[string]protocol.AgentInfo{
+		"claude": {Name: "claude", Source: "shipped", Installed: false, LoginMissing: true},
+		"codex":  {Name: "codex", Source: "shipped", Installed: true, LoginMissing: false},
+		"ownbot": {Name: "ownbot", Source: "member", Installed: true, LoginMissing: true},
+	} {
+		got := agents[name]
+		got.InstallScript = ""
+		if got != want {
+			t.Fatalf("shared %s = %+v, want %+v", name, got, want)
+		}
 	}
-	if !installed["claude"] || !installed["mybot"] {
-		t.Fatalf("shared account installations = %v", installed)
+
+	agents = list(nil)
+	if _, ok := agents["mybot"]; ok || !agents["codex"].Installed || !agents["ownbot"].Installed || agents["claude"].Installed {
+		t.Fatalf("own account agents = %+v, want only the grantee's installations and definitions", agents)
 	}
-	result, perr = s.agentList(ctx, grantee.ID, nil)
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	for _, agent := range result.(protocol.AgentListResult).Agents {
-		if agent.Installed || agent.Name == "mybot" {
-			t.Fatalf("owner installation leaked into grantee's own account: %+v", agent)
+	for _, agent := range agents {
+		if agent.LoginMissing {
+			t.Fatalf("own account %s reports a missing login", agent.Name)
 		}
 	}
 }
