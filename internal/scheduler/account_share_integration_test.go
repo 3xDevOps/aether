@@ -6,7 +6,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -160,11 +162,11 @@ func (r shareRun) close(t *testing.T, e *testEnv) {
 	})
 }
 
-// TestIntegrationSharedAccountRunDocker launches a real run for Ada on
-// Grace's shared account: the container is Ada's image and home with only
-// Grace's Claude login mounted in, and Ada's identity authors its commit.
-// Ada's later run on her own account mounts nothing of Grace's.
-func TestIntegrationSharedAccountRunDocker(t *testing.T) {
+// newShareDockerEnv is a scheduler on the real engine whose "claude" harness
+// prints the login it finds and exits into the supervisor's login shell,
+// with a second member, Grace, beside the test member Ada.
+func newShareDockerEnv(t *testing.T) (*testEnv, *runtime.Docker, *client.Client, *domain.Member) {
+	t.Helper()
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
 		runtime.WithNetworkMode("none"),
@@ -190,14 +192,23 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 				`sleep 1; printf 'harness-login:%s\n' "$(cat "$HOME/.claude/.credentials.json")"; sleep 1`}},
 		}
 	})
-	ctx := t.Context()
 	owner := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if err = e.db.CreateMember(ctx, owner); err != nil {
+	if err = e.db.CreateMember(t.Context(), owner); err != nil {
 		t.Fatal(err)
 	}
+	return e, docker, cli, owner
+}
+
+// TestIntegrationSharedAccountRunDocker launches a real run for Ada on
+// Grace's shared account: the container is Ada's image and home with only
+// Grace's Claude login mounted in, and Ada's identity authors its commit.
+// Ada's later run on her own account mounts nothing of Grace's.
+func TestIntegrationSharedAccountRunDocker(t *testing.T) {
+	e, docker, cli, owner := newShareDockerEnv(t)
+	ctx := t.Context()
 	// A run on Grace's account that used her image would fail here: it
 	// does not exist in the engine.
-	if err = e.db.UpdateMemberImage(ctx, owner.ID, "aether/grace-absent:1"); err != nil {
+	if err := e.db.UpdateMemberImage(ctx, owner.ID, "aether/grace-absent:1"); err != nil {
 		t.Fatal(err)
 	}
 	ownerHome, err := e.cfg.Homes.Path(owner.ID)
@@ -263,5 +274,59 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 	}
 	own.want(t, "cat /root/.claude/.credentials.json", "")
 	own.want(t, "cat /root/.gitconfig", adaGitconfig)
+	own.close(t, e)
+}
+
+// TestIntegrationSharerPinDocker shares Grace's account with Ada for real:
+// Grace's own run then has her Claude login mounted in place, so a rename
+// over it fails busy and an in-place write lands in the host file, and Ada's
+// run on Grace's account reads that same file, including writes Grace's run
+// makes while both are live.
+func TestIntegrationSharerPinDocker(t *testing.T) {
+	e, docker, cli, owner := newShareDockerEnv(t)
+	ctx := t.Context()
+	if err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	ownerHome, err := e.cfg.Homes.Path(owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedHome(t, ownerHome, map[string]string{".claude/.credentials.json": "grace-login"})
+	login := filepath.Join(ownerHome, ".claude", ".credentials.json")
+	inode := func() uint64 {
+		t.Helper()
+		info, err := os.Stat(login)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Sys().(*syscall.Stat_t).Ino
+	}
+	before := inode()
+
+	own := launchShareRun(t, e, docker, cli, owner.ID, owner.ID, "owner smoke", "grace-login")
+	mounts := own.ownerMounts(t, ownerHome)
+	t.Logf("mountinfo: %v", mounts)
+	if !slices.ContainsFunc(mounts, func(m string) bool {
+		return strings.HasSuffix(m, "/.claude/.credentials.json at /root/.claude/.credentials.json")
+	}) {
+		t.Fatalf("Grace's own run does not mount her login in place: %v", mounts)
+	}
+	code, out := own.sh(t, "printf replaced > /root/.claude/.new && mv -f /root/.claude/.new /root/.claude/.credentials.json")
+	if code == 0 || !strings.Contains(strings.ToLower(out), "busy") {
+		t.Fatalf("rename over the pinned login = exit %d, %q; want it refused busy", code, out)
+	}
+	own.want(t, "printf grace-refreshed > /root/.claude/.credentials.json && cat /root/.claude/.credentials.json", "grace-refreshed")
+	if data, err := os.ReadFile(login); err != nil || string(data) != "grace-refreshed" || inode() != before {
+		t.Fatalf("host login = %q, %v, inode changed %v; want the in-place write in the same file", data, err, inode() != before)
+	}
+
+	shared := launchShareRun(t, e, docker, cli, e.member.ID, owner.ID, "shared after pin", "grace-refreshed")
+	own.want(t, "printf grace-second > /root/.claude/.credentials.json && cat /root/.claude/.credentials.json", "grace-second")
+	shared.want(t, "cat /root/.claude/.credentials.json", "grace-second")
+	if inode() != before {
+		t.Fatal("the login was replaced rather than written in place")
+	}
+	shared.close(t, e)
 	own.close(t, e)
 }
