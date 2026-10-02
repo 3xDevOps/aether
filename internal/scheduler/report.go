@@ -43,6 +43,15 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 			// agent's last message is in the transcript. Finish off this
 			// path: the hook is waiting on the answer. A permission or
 			// answer wait is the agent still mid-turn; it parks below.
+			// The wait is recorded without the park, which the finish
+			// would only flash on the board: a failed finish is retried
+			// on it, and recovery finishes on it.
+			if entry.agentReport != report {
+				entry.agentReport = report
+				if err := s.writeSidecar(entry.sidecar()); err != nil {
+					slog.Warn("scheduler: persist agent report", "run", run, "error", err)
+				}
+			}
 			s.startReportedFinishLocked(entry)
 			return nil
 		}

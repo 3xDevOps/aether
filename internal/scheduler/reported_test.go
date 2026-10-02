@@ -1,8 +1,11 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -731,48 +734,62 @@ func TestRelaunchClearsTheArmBeforeReopening(t *testing.T) {
 	}
 }
 
-// TestRecoveryDropsAStaleArmWithTheRetainedMarker: a crash after a
-// relaunch promoted the row, but before it rewrote the retained sidecar,
-// leaves an active row with a retained, armed sidecar. Recovery drops the
-// arm with the marker, so the reopened run does not finish on its own.
-func TestRecoveryDropsAStaleArmWithTheRetainedMarker(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
-	ctx := t.Context()
-	run, _ := e.launchFake(t, "crash mid relaunch")
-	e.finishByDeadline(t, run.ID)
+// crashArmedAtTurnEnd parks a reporting run at its turn end, stops the
+// scheduler, and rewrites the run's sidecar as a crash would leave it: armed
+// with a reported success, and when retained, with the retained marker a
+// close writes just before its row transition. The row stays parked.
+func (e *testEnv) crashArmedAtTurnEnd(t *testing.T, retained bool) domain.RunID {
+	t.Helper()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waitingForInput); err != nil {
+		t.Fatalf("turn-end wait: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if err := e.sched.Close(); err != nil {
 		t.Fatalf("Close scheduler: %v", err)
 	}
-	row, err := e.db.GetRun(ctx, run.ID)
+	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil {
-		t.Fatalf("GetRun: %v", err)
+		t.Fatalf("readSidecar: %v", err)
 	}
-	now := time.Now().UTC()
-	row.Status, row.Reason, row.StartedAt, row.FinishedAt = domain.RunRunning, "", &now, nil
-	if err := e.db.UpdateRun(ctx, row); err != nil {
-		t.Fatalf("promote row: %v", err)
+	sc.ReportedOutcome = domain.RunCompleted
+	if retained {
+		until := time.Now().UTC().Add(time.Hour)
+		sc.Retained, sc.RetainedUntil = true, &until
 	}
-	if stale, err := e.sched.readSidecar(run.ID); err != nil || !stale.Retained || stale.ReportedOutcome == "" {
-		t.Fatalf("crash-state sidecar = %+v, %v; want retained and armed", stale, err)
+	if err := e.sched.writeSidecar(sc); err != nil {
+		t.Fatalf("writeSidecar: %v", err)
 	}
+	return run.ID
+}
 
-	s2 := e.newScheduler(t, e.rt, newFakePTY())
-	startScheduler(t, s2)
-	waitFor(t, "reopened run recovered", func() bool {
-		s2.mu.Lock()
-		defer s2.mu.Unlock()
-		owner := s2.runs[run.ID]
-		return owner != nil && owner.status == domain.RunRunning
-	})
-	s2.mu.Lock()
-	armed := s2.runs[run.ID].reported
-	s2.mu.Unlock()
-	if armed != "" {
-		t.Fatalf("recovered reopened run is armed with %q", armed)
-	}
-	if sc, err := s2.readSidecar(run.ID); err != nil || sc.Retained || sc.ReportedOutcome != "" {
-		t.Fatalf("recovered sidecar = %+v, %v; want neither retention nor arm", sc, err)
+// TestRecoveryFinishesAnArmedRunWhoseTurnEnded: a restart between the turn
+// end and the finish, or a close that died between its retained marker and
+// its row transition, leaves an armed run parked at its turn end. No
+// further turn-end wait will come, so recovery finishes it on the first
+// poll; the retained marker on the active row is dropped, the arm kept.
+func TestRecoveryFinishesAnArmedRunWhoseTurnEnded(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		retained bool
+	}{{"restart mid-finish", false}, {"crash mid-close", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newReportingEnv(t, func(cfg *Config) {
+				cfg.StallThreshold = time.Hour
+				cfg.PollInterval = 10 * time.Millisecond
+			})
+			run := e.crashArmedAtTurnEnd(t, tc.retained)
+
+			s2 := e.newScheduler(t, e.rt, newFakePTY())
+			startScheduler(t, s2)
+			row := e.waitStoreStatus(t, run, domain.RunCompleted)
+			if row.Reason != reportedSuccessRetainedReason || !row.OutcomeUnseen {
+				t.Fatalf("recovered finish = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedSuccessRetainedReason)
+			}
+		})
 	}
 }
 
@@ -888,4 +905,255 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 			t.Fatalf("row = %+v, %v; want the kill untouched", got, err)
 		}
 	})
+}
+
+// TestReportAfterTheTurnEndedFinishesAtOnce: the report's hand-off can
+// arrive after the agent already parked at its turn end, and no further
+// turn-end wait will come. The run finishes on the hand-off. A relaunch
+// forgets that turn end, so the reopened agent's own report waits for its
+// own.
+func TestReportAfterTheTurnEndedFinishesAtOnce(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+		t.Fatalf("turn-end wait: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	sub := e.subscribe(t)
+	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted)
+	if p.From != domain.RunNeedsAttention || p.Reason != reportedSuccessRetainedReason {
+		t.Fatalf("finish event = %+v, want needs-attention -> completed because %q", p, reportedSuccessRetainedReason)
+	}
+	waitFor(t, "retained owner", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		owner := e.sched.runs[run.ID]
+		return owner != nil && owner.retained && !owner.reportFinishing
+	})
+
+	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		t.Fatalf("FinishReported after relaunch: %v", err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	armed, finishing := entry.reported, entry.reportFinishing
+	e.sched.mu.Unlock()
+	if armed != domain.RunCompleted || finishing {
+		t.Fatalf("relaunched run after its report: armed %q, finishing %v; want armed, waiting for its turn end", armed, finishing)
+	}
+	expectNoStatusEvent(t, sub, run.ID, "a report before the reopened turn ended")
+}
+
+// failingReportedFinishStore fails the next fail reported-finish row writes.
+type failingReportedFinishStore struct {
+	store.Store
+	fail atomic.Int32
+}
+
+func (s *failingReportedFinishStore) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	if s.fail.Add(-1) >= 0 {
+		return errors.New("test: reported finish row write failed")
+	}
+	return s.Store.FinishRunReported(ctx, id, status, reason, startedAt, finishedAt)
+}
+
+// TestFailedReportedFinishIsRetried: a finish whose close failed is retried
+// by the poll loop once reportFinishDeadline passes again, whether the turn
+// end came before the report or after it. The agent is idle at its prompt
+// and will not end another turn on its own.
+func TestFailedReportedFinishIsRetried(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		parkedBefore bool
+	}{{"parked before the report", true}, {"turn end after the report", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			failing := &failingReportedFinishStore{}
+			e := newReportingEnv(t, func(cfg *Config) {
+				failing.Store = cfg.Store
+				cfg.Store = failing
+			})
+			ctx := t.Context()
+			run, _ := e.launchReporting(t)
+			e.waitStoreStatus(t, run.ID, domain.RunRunning)
+			failing.fail.Store(1)
+			if tc.parkedBefore {
+				if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+					t.Fatalf("turn-end wait: %v", err)
+				}
+			}
+			if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+				t.Fatalf("FinishReported: %v", err)
+			}
+			if !tc.parkedBefore {
+				if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+					t.Fatalf("turn-end wait: %v", err)
+				}
+			}
+			e.sched.mu.Lock()
+			entry := e.sched.runs[run.ID]
+			e.sched.mu.Unlock()
+			waitFor(t, "the failed finish", func() bool {
+				e.sched.mu.Lock()
+				defer e.sched.mu.Unlock()
+				return failing.fail.Load() <= 0 && !entry.reportFinishing
+			})
+			if row, err := e.db.GetRun(ctx, run.ID); err != nil || row.Status.Terminal() {
+				t.Fatalf("row after the failed finish = %+v, %v; want it still live", row, err)
+			}
+
+			e.expireReportDeadline(t, run.ID)
+			if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); row.Reason != reportedSuccessRetainedReason {
+				t.Fatalf("retried finish reason = %q, want %q", row.Reason, reportedSuccessRetainedReason)
+			}
+		})
+	}
+}
+
+// TestReportFinalizedWhileProvisioningStillArms: the coordination socket
+// answers before the run turns running, so a report can be finalized
+// before the launch's StartedAt and handed off after it. Only a relaunch
+// makes a report stale.
+func TestReportFinalizedWhileProvisioningStillArms(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "early report")
+	row := e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	early := row.StartedAt.Add(-time.Second)
+	if err := e.sched.ReportBlocked(ctx, run.ID, "report-blocked-1", "need the staging key", early); err != nil {
+		t.Fatalf("ReportBlocked: %v", err)
+	}
+	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, early); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	armed, blocked := entry.reported, entry.blockedReportID
+	e.sched.mu.Unlock()
+	if armed != domain.RunCompleted || blocked != "report-blocked-1" {
+		t.Fatalf("after reports finalized while provisioning: armed %q, blocked %q; want both applied", armed, blocked)
+	}
+}
+
+// exitOverrideBus hands a late success report to the scheduler the moment
+// a run's exit records failed, as a deferred outbox hand-off can while
+// finalize is still running.
+type exitOverrideBus struct {
+	events.Bus
+	sched atomic.Pointer[Scheduler]
+	once  sync.Once
+	err   error
+}
+
+func (b *exitOverrideBus) Publish(ctx context.Context, ev events.Event) (events.Event, error) {
+	out, err := b.Bus.Publish(ctx, ev)
+	if p, ok := ev.Payload.(events.RunStatusPayload); ok && p.To == domain.RunFailed &&
+		strings.HasPrefix(p.Reason, exitedFailedReasonPrefix) {
+		if s := b.sched.Load(); s != nil {
+			// publish runs under s.mu, which overrideExitLocked needs.
+			b.once.Do(func() { b.err = s.overrideExitLocked(ctx, ev.RunID, domain.RunCompleted, time.Now()) })
+		}
+	}
+	return out, err
+}
+
+// TestFinishEvidenceFollowsAnOverriddenExit: a report that overrides the
+// exit while finalize is still running decides the finish evidence too.
+func TestFinishEvidenceFollowsAnOverriddenExit(t *testing.T) {
+	t.Parallel()
+	bus := &exitOverrideBus{}
+	e := newTestEnv(t, func(cfg *Config) {
+		bus.Bus = cfg.Bus
+		cfg.Bus = bus
+	})
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	e.sched.UseEvidence(capture)
+	bus.sched.Store(e.sched)
+	ctx := t.Context()
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "late report", "fake", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	e.rt.byName(string(run.ID)).exitNow(1)
+	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
+	if bus.err != nil {
+		t.Fatalf("overrideExitLocked: %v", bus.err)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); row.Reason != reportedSuccessReason {
+		t.Fatalf("row reason = %q, want %q", row.Reason, reportedSuccessReason)
+	}
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	var keys []string
+	for _, req := range capture.reqs {
+		if strings.HasPrefix(req.IdempotencyKey, "finish:"+string(run.ID)+":") {
+			keys = append(keys, req.IdempotencyKey)
+		}
+	}
+	if len(keys) != 1 || !strings.HasSuffix(keys[0], ":"+string(domain.RunCompleted)) {
+		t.Fatalf("finish evidence keys = %v, want one for the completed row", keys)
+	}
+}
+
+// TestStalledArmedRunFinishesAtTheDeadline: a hook that never delivers the
+// turn end leaves a run on a reporter harness armed. Once it stalls into
+// needs-attention it is not working, so the deadline finishes it.
+func TestStalledArmedRunFinishesAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, func(cfg *Config) { cfg.StallThreshold = time.Millisecond })
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	waitFor(t, "the run to stall", func() bool {
+		e.sched.checkStalls(ctx)
+		r, err := e.db.GetRun(ctx, run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention
+	})
+	e.expireReportDeadline(t, run.ID)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); row.Reason != reportedSuccessRetainedReason {
+		t.Fatalf("finish reason = %q, want %q", row.Reason, reportedSuccessRetainedReason)
+	}
+}
+
+// TestOlderBlockedReportNeverReplacesANewerOne: an older blocked report
+// whose publication is retried after a newer one landed changes nothing,
+// and the sidecar keeps the newer one's finalized time for a restart.
+func TestOlderBlockedReportNeverReplacesANewerOne(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "two blockers")
+	older := time.Now().UTC()
+	newer := older.Add(time.Second)
+	if err := e.sched.ReportBlocked(ctx, run.ID, "report-blocked-2", "need the prod key", newer); err != nil {
+		t.Fatalf("newer ReportBlocked: %v", err)
+	}
+	if err := e.sched.ReportBlocked(ctx, run.ID, "report-blocked-1", "need the staging key", older); err != nil {
+		t.Fatalf("older ReportBlocked: %v", err)
+	}
+	e.sched.mu.Lock()
+	reason := e.sched.runs[run.ID].blockedReason
+	e.sched.mu.Unlock()
+	if reason != "blocked: need the prod key" {
+		t.Fatalf("blocked reason = %q, want the newer report's", reason)
+	}
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.BlockedReportAt == nil || !sc.BlockedReportAt.Equal(newer) {
+		t.Fatalf("sidecar = %+v, %v; want the newer report's finalized time", sc, err)
+	}
 }

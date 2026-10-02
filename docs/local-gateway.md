@@ -398,8 +398,9 @@ call it; anyone else, admins included, gets `-32001`. Clearing publishes a
 `run.outcome_seen` event with an empty payload and a timeline note; calling
 it on a run whose flag is already clear returns the run and publishes
 nothing. Every `run.status` payload carries `outcome_unseen` as the run's
-flag after that transition: `true` on the finish a report causes, `false`
-after a later status change such as a close or relaunch.
+flag after that event, including a same-status re-label such as retention
+expiry: `true` from the finish a report causes until the owner opens the run,
+`false` after a later status change such as a close or relaunch.
 
 `run.relaunch` is another proxied control-channel method:
 

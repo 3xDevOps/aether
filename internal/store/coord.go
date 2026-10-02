@@ -781,12 +781,11 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 	return true, nil
 }
 
-// SupersedeCoordTerminalReport retires the run's finalized terminal report,
-// if any, so the run can report again. The row stays as history, and a
-// same-key retry receives ErrCoordReportSuperseded. A pending reservation
-// is left active: it was never accepted, so it closed nothing, and only its
-// own key's retry can finalize it, which then reports for the current
-// launch.
+// SupersedeCoordTerminalReport retires the run's terminal report, if any,
+// so the run can report again: a finalized report, or a pending reservation
+// whose evidence capture failed, which would otherwise hold the slot
+// against every new key the reopened agent reports under. The row stays as
+// history, and a same-key retry receives ErrCoordReportSuperseded.
 func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error {
 	supersededAt, err := encodeTime(time.Now().UTC())
 	if err != nil {
@@ -794,8 +793,8 @@ func (d *DB) SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`UPDATE coord_reports SET superseded_at = ?
-		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND state = ? AND superseded_at IS NULL`,
-		supersededAt, run, CoordReportFinalized); err != nil {
+		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL`,
+		supersededAt, run); err != nil {
 		return fmt.Errorf("store: supersede coord report for run %s: %w", run, err)
 	}
 	return nil

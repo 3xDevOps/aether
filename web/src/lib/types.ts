@@ -654,7 +654,7 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
-  /** True only on the transition an agent report caused. */
+  /** The run's flag after this transition; absent means false. */
   outcome_unseen?: boolean
 }
 

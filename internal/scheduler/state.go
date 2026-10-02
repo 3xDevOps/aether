@@ -190,6 +190,8 @@ type sidecar struct {
 	BlockedReason    string            `json:"blocked_reason,omitempty"`
 	BlockedShown     bool              `json:"blocked_shown,omitempty"`
 	BlockedReportID  string            `json:"blocked_report_id,omitempty"`
+	BlockedReportAt  *time.Time        `json:"blocked_report_at,omitempty"`
+	RelaunchedAt     *time.Time        `json:"relaunched_at,omitempty"`
 	ExitObserved     bool              `json:"exit_observed"`
 	ExitCode         int               `json:"exit_code"`
 	EvidenceIdentity string            `json:"evidence_identity,omitempty"`
@@ -201,6 +203,13 @@ type sidecar struct {
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
+	var relaunchedAt, blockedReportAt *time.Time
+	if t := e.relaunchedAt; !t.IsZero() {
+		relaunchedAt = &t
+	}
+	if t := e.blockedReportAt; !t.IsZero() {
+		blockedReportAt = &t
+	}
 	return sidecar{
 		RunID:            string(e.runID),
 		ContainerID:      string(e.containerID),
@@ -221,6 +230,8 @@ func (e *supervised) sidecar() sidecar {
 		BlockedReason:    e.blockedReason,
 		BlockedShown:     e.blockedShown,
 		BlockedReportID:  e.blockedReportID,
+		BlockedReportAt:  blockedReportAt,
+		RelaunchedAt:     relaunchedAt,
 		ExitObserved:     e.exitObserved,
 		ExitCode:         e.exitCode,
 		EvidenceIdentity: e.evidenceIdentity,

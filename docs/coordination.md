@@ -1023,9 +1023,10 @@ accepts a file or `-` for standard input. The result contains a durable
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
 report. Relaunching the run (**Relaunch** on its card, or `aether relaunch
-<run>`) supersedes the terminal report, so the reopened agent can report again
-under a new idempotency key;
-the superseded report's key then fails with `CodeConflict`. **Blocked is
+<run>`) supersedes the terminal report, including one whose evidence capture
+failed and was never accepted, so the reopened agent can report again under a
+new idempotency key; the superseded report's key then fails with
+`CodeConflict`. **Blocked is
 nonterminal**: a run may file any number of blocked reports, before or after
 one another.
 
@@ -1035,13 +1036,18 @@ What a report does depends on the run:
   run once the agent's turn ends: Aether commits the work (`aether:` for
   success, `wip:` for failure), publishes the run branch, and records
   `completed` or `failed`, which moves the run out of **Working**. A
-  permission or question prompt is not the end of the turn. A harness
-  without a status reporter never says its turn ended, so there the first
-  `--poll-interval` check two minutes after the report finishes the run; a
-  harness with one is finished by the turn end alone, however long the agent
-  keeps working. If the agent process exits first, the run takes the reported
-  status, whatever its exit code, even when the report reaches the server
-  after the exit. A TUI run keeps its paused
+  permission or question prompt is not the end of the turn. A report that
+  reaches the server after the turn already ended finishes the run at once.
+  A harness without a status reporter never says its turn ended, so there
+  the first `--poll-interval` check two minutes after the report finishes
+  the run; a harness with one is finished by the turn end alone, however
+  long the agent keeps working, unless the run is in **Needs you** (stalled,
+  or at a prompt) at that check, which then finishes it. A finish that fails
+  is retried by the same check two minutes later. If the agent process exits
+  first, the run takes the reported status, whatever its exit code, even
+  when the report reaches the server after the exit; the commit the exit
+  already published keeps the exit's `aether:` or `wip:` prefix, and the
+  run's status and report are the record. A TUI run keeps its paused
   container for relaunch, exactly like a closed run, with the reason
   `agent reported success; retained container` or
   `agent reported failure; retained container`; a headless run, or a TUI run
@@ -1053,6 +1059,8 @@ What a report does depends on the run:
   to **Needs you** with the reason `blocked: <summary>` the next time its turn
   ends (or it stalls, on a harness without a status reporter), until the agent
   resumes; a permission or question prompt before that keeps its own reason.
+  The newest blocked report decides the reason: an older one the server
+  retries delivering after it changes nothing.
 - **Mission worker.** Success submits the attempt and the server then stops
   that worker. Failure fails the attempt without treating it as a task
   result. Blocked does not stop the worker or submit the task. A worker may

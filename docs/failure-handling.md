@@ -295,8 +295,10 @@ every retained TUI run against the runtime's actual containers:
   with its reason: the last report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
   repaint - does not read as the turn resuming. A run its agent already
-  reported success or failure on still finishes at the next end of turn, or,
-  on a harness without a status reporter, two minutes after the restart.
+  reported success or failure on still finishes: right after recovery when
+  its turn had already ended, otherwise at the next end of turn, or two
+  minutes after the restart on a harness without a status reporter or once
+  the run is in needs-attention.
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run is not relaunchable.
@@ -316,7 +318,10 @@ every retained TUI run against the runtime's actual containers:
 Headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
 `failed` for an error - or the outcome the agent reported, whatever the exit
-code - and destroys the container immediately. A `completed`
+code - and destroys the container immediately. A report that reaches the
+server after the exit still sets the run's status; the commit the exit
+already published keeps the exit's `aether:` or `wip:` prefix, and the
+status and report are the record. A `completed`
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
@@ -349,10 +354,13 @@ container:
 aether-internal report --outcome success --summary 'Implemented and tested the change.'
 ```
 
-When that turn ends - not at a permission or question prompt within it, and
-two minutes later on a harness that never reports the end of a turn - Aether
-does what Close does, with the agent's outcome:
-it pauses the container, commits (`aether:` for success, `wip:` for
+When that turn ends - not at a permission or question prompt within it -
+Aether does what Close does, with the agent's outcome. A report that reaches
+the server after the turn already ended acts at once. Two minutes after the
+report, a run on a harness that never reports the end of a turn, or one
+parked in needs-attention, is finished the same way, and a finish that
+failed is retried. The finish
+pauses the container, commits (`aether:` for success, `wip:` for
 `--outcome failure`), publishes the branch, records `completed` or `failed`
 with the reason `agent reported success; retained container` or
 `agent reported failure; retained container`, and retains the container

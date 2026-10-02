@@ -306,13 +306,11 @@ func TestCoordReportTerminalSlot(t *testing.T) {
 	}
 }
 
-// TestCoordReportSupersedeKeepsAPendingReservation: a relaunch supersedes
-// only an accepted (finalized) terminal report. A pending reservation never
-// closed the run, and superseding it would let its own retry finalize into
-// a report every hand-off skips while the slot sat free. It stays the
-// active reservation instead: a new key conflicts, and finishing it under
-// its key yields an active report for the reopened launch.
-func TestCoordReportSupersedeKeepsAPendingReservation(t *testing.T) {
+// TestCoordReportSupersedeRetiresAPendingReservation: a reservation whose
+// evidence capture failed holds the terminal slot. A relaunch supersedes it
+// too, so the reopened agent can report under a new key, and a retry of the
+// old key gets the superseded-key conflict.
+func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -322,21 +320,27 @@ func TestCoordReportSupersedeKeepsAPendingReservation(t *testing.T) {
 	if _, err := db.ReserveCoordReport(ctx, pending); err != nil {
 		t.Fatalf("ReserveCoordReport: %v", err)
 	}
+	blocked := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeBlocked, Summary: "stuck", IdempotencyKey: "blocked-1"}
+	if _, err := db.ReserveCoordReport(ctx, blocked); !errors.Is(err, ErrCoordReportConflict) {
+		t.Fatalf("new key while the reservation is pending = %v, want ErrCoordReportConflict", err)
+	}
 	if err := db.SupersedeCoordTerminalReport(ctx, run.ID); err != nil {
 		t.Fatalf("SupersedeCoordTerminalReport: %v", err)
 	}
-	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.SupersededAt != nil {
-		t.Fatalf("pending report after supersede = %+v, %v; want it still active", got, err)
+	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportPending || got.SupersededAt == nil {
+		t.Fatalf("pending report after supersede = %+v, %v; want it pending and superseded", got, err)
 	}
-	other := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-2"}
-	if _, err := db.ReserveCoordReport(ctx, other); !errors.Is(err, ErrCoordReportConflict) {
-		t.Fatalf("new key while the reservation is pending = %v, want ErrCoordReportConflict", err)
+	retry := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1"}
+	if _, err := db.ReserveCoordReport(ctx, retry); !errors.Is(err, ErrCoordReportSuperseded) {
+		t.Fatalf("retry of the superseded key = %v, want ErrCoordReportSuperseded", err)
 	}
-	if _, err := db.FinalizeCoordReport(ctx, pending); err != nil {
-		t.Fatalf("FinalizeCoordReport: %v", err)
-	}
-	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportFinalized || got.SupersededAt != nil {
-		t.Fatalf("finalized reservation = %+v, %v; want the active, finalized report", got, err)
+	for _, next := range []*CoordReport{
+		{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeBlocked, Summary: "stuck", IdempotencyKey: "blocked-2"},
+		{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done again", IdempotencyKey: "success-2"},
+	} {
+		if _, err := db.ReserveCoordReport(ctx, next); err != nil {
+			t.Fatalf("%s report under a new key after supersede: %v", next.Outcome, err)
+		}
 	}
 }
 

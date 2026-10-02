@@ -261,11 +261,13 @@ type supervised struct {
 	killRequested bool
 	killActor     domain.MemberID
 	// agentReport is the last thing the agent said about itself, zero until
-	// it says anything and again whenever activity un-parks the run. It is
-	// only ever set to a report the run's status already matches, so a
-	// report the store refused leaves the silence fallback armed. Mirrored
-	// into the run's sidecar on every change, so a run the agent parked
-	// for its member comes back from a restart still held for them.
+	// it says anything and again whenever activity un-parks the run or a
+	// relaunch reopens it. It is only ever set to a report the run's status
+	// already matches, so a report the store refused leaves the silence
+	// fallback armed - except the turn-end wait that starts a reported
+	// finish, which is recorded without the park (see ReportAgentState).
+	// Mirrored into the run's sidecar on every change, so a run the agent
+	// parked for its member comes back from a restart still held for them.
 	agentReport agentstatus.Report
 	// lastWorking is when the agent last said it was working. A report is
 	// the only trace its hook leaves - it writes nothing to the terminal
@@ -340,11 +342,18 @@ type supervised struct {
 	// blockedReason is the agent's latest blocked report as a status
 	// reason, and blockedShown whether a park has shown it yet; the first
 	// resume after that park clears both (see ReportBlocked).
-	// blockedReportID is the last blocked report applied, kept after the
-	// reason clears so a replay of it cannot bring the reason back.
+	// blockedReportID is the last blocked report applied and
+	// blockedReportAt when it was finalized, kept after the reason clears
+	// so neither a replay of it nor an older report retried after it can
+	// bring a reason back.
 	blockedReason   string
 	blockedShown    bool
 	blockedReportID string
+	blockedReportAt time.Time
+	// relaunchedAt is when the last relaunch reopened the run, zero for a
+	// run never relaunched. A report finalized before it speaks for a
+	// launch that relaunch ended.
+	relaunchedAt time.Time
 }
 
 type pendingRun struct {

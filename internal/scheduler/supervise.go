@@ -212,6 +212,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 	identity := ""
 	s.mu.Lock()
+	// The status the row ended with: a report handed off since the
+	// transition may have overridden the exit's (see overrideExitLocked).
+	to = entry.status
 	if s.runs[entry.runID] == entry {
 		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
 		entry.evidenceIdentity = identity

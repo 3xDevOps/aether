@@ -993,8 +993,9 @@ summary.
 **Awaiting review is server state.** `Run.outcome_unseen` on `run.get` and
 `run.list` is true while an agent-reported outcome is unopened by the owner;
 absent (an older gateway) means false. Every `run.status` event sets the flag
-to its payload's `outcome_unseen`, which is true only on the transition an
-agent report caused, so a later close or relaunch clears it. A
+to its payload's `outcome_unseen`, the row's flag after that event - a
+same-status re-label such as retention expiry included - so a later close or
+relaunch clears it. A
 `run.outcome_seen` event, or the Run `run.seen` returns, clears it. `run.seen`
 is gated on `cap.hasMethod('run.seen')`, owner-only, and idempotent.
 
