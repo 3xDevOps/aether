@@ -38,6 +38,8 @@ type attachConn struct {
 	pendingInputError bool
 	replayDone        chan struct{}
 	controlQueue      chan protocol.DashAttachControl
+	controlQueueMu    sync.Mutex
+	controlReserved   int
 	controlCtx        context.Context
 	controlCancel     context.CancelCauseFunc
 	replayOnce        sync.Once
@@ -269,23 +271,46 @@ func (c *attachConn) sendControl(control protocol.DashAttachControl) error {
 	if !c.framed || !c.interactive {
 		return nil
 	}
+	c.controlQueueMu.Lock()
+	defer c.controlQueueMu.Unlock()
+	if err := c.controlQueueErrorLocked(); err != nil {
+		return err
+	}
+	c.controlQueue <- control
+	return nil
+}
+
+func (c *attachConn) controlQueueErrorLocked() error {
 	if c.controlQueue == nil || c.controlCtx == nil {
 		return io.ErrClosedPipe
 	}
-	select {
-	case <-c.controlCtx.Done():
+	if err := c.controlCtx.Err(); err != nil {
 		return context.Cause(c.controlCtx)
-	default:
 	}
-	select {
-	case <-c.controlCtx.Done():
-		return context.Cause(c.controlCtx)
-	case c.controlQueue <- control:
-		return nil
-	default:
+	if len(c.controlQueue)+c.controlReserved >= cap(c.controlQueue) {
 		c.controlCancel(errInteractiveControlQueueFull)
 		return errInteractiveControlQueueFull
 	}
+	return nil
+}
+
+func (c *attachConn) reserveControl() error {
+	c.controlQueueMu.Lock()
+	defer c.controlQueueMu.Unlock()
+	if err := c.controlQueueErrorLocked(); err != nil {
+		return err
+	}
+	c.controlReserved++
+	return nil
+}
+
+// Reserved acknowledgements cannot fail after lease installation. A later
+// transport failure belongs to the committed grant, not a cancelled takeover.
+func (c *attachConn) sendReservedControl(control protocol.DashAttachControl) {
+	c.controlQueueMu.Lock()
+	defer c.controlQueueMu.Unlock()
+	c.controlReserved--
+	c.controlQueue <- control
 }
 
 func (c *attachConn) Read(p []byte) (int, error) {
@@ -295,6 +320,9 @@ func (c *attachConn) Read(p []byte) (int, error) {
 	for len(c.pending) == 0 {
 		line, err := protocol.ReadLine(c.r)
 		if err != nil {
+			if c.controlCancel != nil {
+				c.controlCancel(err)
+			}
 			return 0, err
 		}
 		var control protocol.DashAttachControl
@@ -321,7 +349,7 @@ func (c *attachConn) Read(p []byte) (int, error) {
 			c.pending = data
 			c.pendingControl = control
 			c.pendingInputError = false
-		case protocol.DashAttachControlFrame:
+		case protocol.DashAttachControlFrame, protocol.DashAttachTakeover:
 			if c.controlHandler != nil {
 				c.controlHandler(control)
 			}
@@ -349,7 +377,12 @@ func (c *attachConn) reportPendingInputError(err error) {
 	}
 }
 
-func (c *attachConn) Close() error { return c.ch.Close() }
+func (c *attachConn) Close() error {
+	if c.controlCancel != nil {
+		c.controlCancel(context.Canceled)
+	}
+	return c.ch.Close()
+}
 
 func (c *attachConn) Write(p []byte) (int, error) {
 	c.mu.Lock()

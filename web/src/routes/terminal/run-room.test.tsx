@@ -254,36 +254,6 @@ describe('Run Room', () => {
     expect(useStore.getState().roomStatus.run_2).toBeUndefined()
   })
 
-  it('confirms an occupied takeover and names the current controller', () => {
-    const take = vi.fn()
-    const occupied = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
-    const client = fakeApi({ runRoomStatus: vi.fn(async () => occupied) })
-    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: occupied }, roomMessages: {} })
-    render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    expect(screen.getByText(/Bob currently controls/)).toBeDefined()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Take control' }).at(-1)!)
-    expect(take).toHaveBeenCalledWith(true)
-  })
-  it('confirms takeover from another session of the same member', () => {
-    const take = vi.fn()
-    const occupied = status({
-      controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' },
-    })
-    const mirror = { ...control, has_control: false }
-    useStore.setState({
-      members: { [alice.id]: alice, [bob.id]: bob },
-      roomStatus: { run_1: occupied },
-      roomMessages: {},
-    })
-    render(<RunRoom run={run()} client={fakeApi()} selfID={alice.id} control={mirror} onTakeControl={take} onReleaseControl={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    expect(screen.getByText(/Alice currently controls/)).toBeDefined()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Take control' }).at(-1)!)
-    expect(take).toHaveBeenCalledWith(true)
-  })
 
   it('keeps room control available for a needs-attention run', () => {
     const take = vi.fn()
@@ -295,9 +265,9 @@ describe('Run Room', () => {
     render(<RunRoom run={run({ status: 'needs-attention' })} client={fakeApi()} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     const button = screen.getByRole('button', { name: 'Take control' })
-    expect(button).toHaveProperty('disabled', false)
+    expect(button.getAttribute('aria-disabled')).toBe('false')
     fireEvent.click(button)
-    expect(take).toHaveBeenCalledWith(false)
+    expect(take).toHaveBeenCalledWith()
   })
   it('disables taking control for a completed run', () => {
     const take = vi.fn()
@@ -306,7 +276,7 @@ describe('Run Room', () => {
     render(<RunRoom run={run({ status: 'completed' })} client={client} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     const button = screen.getByRole('button', { name: 'Take control' })
-    expect(button).toHaveProperty('disabled', true)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(button)
     expect(take).not.toHaveBeenCalled()
   })
@@ -317,8 +287,8 @@ describe('Run Room', () => {
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: occupied }, roomMessages: {} })
     render(<RunRoom run={run({ status: 'completed' })} client={client} selfID={alice.id} control={control} onTakeControl={vi.fn()} onReleaseControl={release} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    const button = screen.getByRole('button', { name: 'Release control' })
-    expect(button).toHaveProperty('disabled', true)
+    const button = screen.getByRole('button', { name: 'Release' })
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(button)
     expect(release).not.toHaveBeenCalled()
   })
@@ -613,7 +583,7 @@ describe('Run Room', () => {
     render(<RunRoom run={run()} client={client} selfID={alice.id} control={control} onTakeControl={vi.fn()} onReleaseControl={release} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     expect(screen.getByText(`Controller: ${alice.display_name}`)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Release control' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(release).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Approve now' }))
     await waitFor(() => expect(client.runRoomDecide).toHaveBeenCalledWith(expect.objectContaining({
@@ -644,7 +614,7 @@ describe('Run Room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     expect(screen.queryByRole('button', { name: 'Approve now' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
-    if (runStatus === 'running') expect(screen.queryByRole('button', { name: 'Release control' })).toBeNull()
+    if (runStatus === 'running') expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'Inspect the result' } })
     fireEvent.click(screen.getByRole('button', { name: 'Queue steer' }))

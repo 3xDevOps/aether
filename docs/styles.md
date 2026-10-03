@@ -152,15 +152,20 @@ presentation state. Domain status enums remain unchanged.
 lists. The labeled run-status chip reserves the full width of all three dots
 before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. Live local control has a steady 1px teal inset outline around
-the terminal, alongside the toolbar's **(this tab)** controller marker and
-**Release** action. The pointer-transparent outline uses `--primary`, the
-**Release** button's fill, in both themes without changing layout; it appears
-only while this tab has live, acknowledged writable control, outside replay and
-history reading.
-It disappears on release, mirroring, disconnect or denied steering. It never
-orbits or animates and is identical under normal and reduced motion.
-Under `prefers-reduced-motion: reduce`,
+remain static. Live local control has a 1.5px teal inset outline around the
+terminal, alongside the toolbar's **(this tab)** controller marker and
+**Release** action. The pointer-transparent outline mixes `--primary` with
+12% white without changing layout. It appears only with live, acknowledged
+writable control, outside replay and history reading.
+Acquisition and voluntary release propagate along the outline over 720ms,
+preserving the former initial speed and decelerating toward the endpoint.
+A control-lost takeover uses a 540ms red transition and 1440ms retraction:
+1980ms total, three times the former duration.
+An occupied five-second hold fills both control buttons diagonally in red and
+traces the holder's border red. Text above and below the fill edge uses the
+appropriate foreground independently. A seven-second holder decision follows.
+Under `prefers-reduced-motion: reduce`, ownership changes are instant,
+takeover fills and borders become static red indicators with countdowns, and
 working dots and sidebar pulses stop moving; labels retain the state meaning.
 Loading spinners and delayed skeletons remain functional feedback.
 

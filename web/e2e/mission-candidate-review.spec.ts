@@ -152,7 +152,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   const viewing = await inspectWorker()
   expect(viewing.takeover_active ?? false).toBe(false)
   await room.getByRole('button', { name: 'Take control', exact: true }).click()
-  await expect(room.getByRole('button', { name: 'Release control', exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(room.getByRole('button', { name: 'Release', exact: true })).toBeVisible({ timeout: 30_000 })
   const controlled = await inspectWorker()
   expect(controlled.takeover_active).toBe(true)
   expect(controlled.takeover_member_id).toBe(aliceID)

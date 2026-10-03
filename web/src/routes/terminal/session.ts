@@ -18,6 +18,8 @@ import {
   type Attachment,
   type ControlMetadata,
   type ControlResult,
+  type TakeoverAction,
+  type TakeoverState,
 } from '@/routes/terminal/attach'
 import { initialTerminal, type TerminalRunFence, type TerminalState } from '@/store/terminal'
 import { useStore } from '@/store'
@@ -48,14 +50,21 @@ export interface RunTerminalSessionInput {
   finishStructuralReplay?: (generation: number) => void | Promise<void>
 }
 
+export interface TakeoverSnapshot extends TakeoverState {
+  receivedAt: number
+}
+
 export interface RunTerminalSessionResult {
   state: TerminalState
   replaying: boolean
   controlMetadata: ControlMetadata | undefined
   sessionMissing: boolean
+  takeover: TakeoverSnapshot | undefined
+  takeoverError: string | undefined
+  requestTakeover: (action: TakeoverAction, id: string, generation?: number) => boolean
   send: (data: string) => void
   resize: (cols: number, rows: number) => void
-  takeControl: (takeover?: boolean) => void
+  takeControl: () => void
   releaseControl: () => void
   retry: () => void
 }
@@ -132,8 +141,6 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     terminal,
     phone,
     automaticWrite,
-    identityKey,
-    terminalCacheEpoch,
     authorityKey,
   } = input
   const refs = useLatestRefs(input)
@@ -147,7 +154,10 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const [replaying, setReplaying] = useState(false)
   const [controlMetadata, setControlMetadata] = useState<ControlMetadata>()
   const [sessionMissing, setSessionMissing] = useState(false)
+  const [takeover, setTakeover] = useState<TakeoverSnapshot>()
+  const [takeoverError, setTakeoverError] = useState<string>()
   const attachmentRef = useRef<Attachment | null>(null)
+  const takeoverRequestedRef = useRef(false)
   const terminalRef = useRef<Terminal | null>(terminal)
   const intentMatches = fenceMatches(storedWriteIntent, input)
   const explicitWriteRef = useRef<boolean | null>(
@@ -180,6 +190,8 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   // still waiting for its font and `terminal` is null.
   useLayoutEffect(() => {
     setControlMetadata(undefined)
+    setTakeover(undefined)
+    setTakeoverError(undefined)
     setSessionMissing(false)
     setReplaying(false)
     setTerminal(runID, initialTerminal)
@@ -196,22 +208,14 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const rememberWriteIntent = useCallback(
     (write: boolean) => {
       explicitWriteRef.current = write
-      const fence = currentFence({ run, identityKey, terminalCacheEpoch, authorityKey })
+      const fence = currentFence(refs.current)
       if (fence === null) {
         clearWriteIntent(runID)
         return
       }
       setWriteIntent(runID, { ...fence, write })
     },
-    [
-      authorityKey,
-      clearWriteIntent,
-      identityKey,
-      run,
-      runID,
-      setWriteIntent,
-      terminalCacheEpoch,
-    ],
+    [clearWriteIntent, refs, runID, setWriteIntent],
   )
   const beginStructuralReplay = useCallback((): StructuralReplayOwner | null => {
     const owner = refs.current
@@ -298,6 +302,10 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     (result: ControlResult) => {
       updateControl(result)
       if (result.ok) {
+        if (result.has_control && takeoverRequestedRef.current) {
+          takeoverRequestedRef.current = false
+          rememberWriteIntent(true)
+        }
         setTerminal(runID, { message: null, refused: false })
         return
       }
@@ -316,7 +324,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         })
       }
     },
-    [clearWriteIntent, runID, setTerminal, updateControl],
+    [clearWriteIntent, rememberWriteIntent, runID, setTerminal, updateControl],
   )
 
   useEffect(() => {
@@ -402,6 +410,30 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
       },
       onControl: updateControl,
       onControlResult,
+      onTakeover: (result) => {
+        if (result === null) {
+          takeoverRequestedRef.current = false
+          setTakeover(undefined)
+          setTakeoverError(undefined)
+          return
+        }
+        setTakeoverError(result.ok ? undefined : result.error ?? 'Takeover request refused')
+        if (!result.ok) {
+          setTerminal(runID, { message: result.error ?? 'Takeover request refused' })
+          // A repeated decision refusal must also settle its in-flight button.
+          // Retain the original clock anchor when no newer snapshot arrived.
+          setTakeover((current) => current ? { ...current } : undefined)
+        }
+        if (result.takeover) {
+          const active = result.takeover.phase === 'holding' || result.takeover.phase === 'review'
+          if (!active) takeoverRequestedRef.current = false
+          setTakeover(active ? { ...result.takeover, receivedAt: performance.now() } : undefined)
+          if (result.takeover.phase === 'denied' &&
+            result.takeover.requester_session_id === attachment.controlMetadata?.().control_session_id) {
+            setTerminal(runID, { message: 'The controller denied your takeover request.' })
+          }
+        }
+      },
       onState: (connection) =>
         setTerminal(runID, connection === 'offline' ? { connection, write: false } : { connection }),
       onRefused: (message, code) => {
@@ -524,6 +556,12 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     clearWriteIntent(runID)
     previousAutomaticRef.current = automaticWrite
     setControlMetadata(undefined)
+    if (takeover && takeover.requester_session_id === controlMetadata?.control_session_id) {
+      takeoverRequestedRef.current = false
+      attachmentRef.current?.requestTakeover('cancel', takeover.id)
+    }
+    setTakeover(undefined)
+    setTakeoverError(undefined)
     setTerminal(runID, { steerDenied: false, write: false })
     pendingAuthorityControlRef.current = {
       authorityKey,
@@ -537,6 +575,8 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     runID,
     setTerminal,
     state.steerDenied,
+    takeover,
+    controlMetadata,
   ])
 
   useEffect(() => {
@@ -571,15 +611,22 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     attachmentRef.current?.resize(cols, rows)
   }, [])
 
-  const takeControl = useCallback((takeover = false) => {
+  const takeControl = useCallback(() => {
     rememberWriteIntent(true)
-    attachmentRef.current?.setControl(true, takeover)
+    attachmentRef.current?.setControl(true)
   }, [rememberWriteIntent])
 
   const releaseControl = useCallback(() => {
     rememberWriteIntent(false)
     attachmentRef.current?.setControl(false)
   }, [rememberWriteIntent])
+
+  const requestTakeover = useCallback((action: TakeoverAction, id: string, generation?: number) => {
+    const sent = attachmentRef.current?.requestTakeover(action, id, generation) ?? false
+    if (sent && action === 'start') takeoverRequestedRef.current = true
+    if (action === 'cancel') takeoverRequestedRef.current = false
+    return sent
+  }, [])
 
   const retry = useCallback(() => {
     setSessionMissing(false)
@@ -597,6 +644,9 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     replaying,
     controlMetadata: committedControlMetadata,
     sessionMissing,
+    takeover: authorityChanged ? undefined : takeover,
+    takeoverError,
+    requestTakeover,
     send,
     resize,
     takeControl,

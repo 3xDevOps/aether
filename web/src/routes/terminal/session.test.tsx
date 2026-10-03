@@ -565,9 +565,9 @@ describe('useRunTerminalSession', () => {
   it('puts a pre-ack control request on the attach header', () => {
     const mounted = mount()
     const socket = StubSocket.last()
-    act(() => mounted.result.current.takeControl(true))
+    act(() => mounted.result.current.takeControl())
     act(() => socket.onopen?.())
-    expect(socket.frames()[0]).toMatchObject({ write: true, takeover: true })
+    expect(socket.frames()[0]).toMatchObject({ write: true })
     act(() => {
       socket.onmessage?.({
         data: JSON.stringify({

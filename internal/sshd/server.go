@@ -206,6 +206,7 @@ type Server struct {
 	controlMu       sync.Mutex
 	controlAttaches map[string]map[string]controlAttach
 	controlAttachID atomic.Uint64
+	takeovers       takeoverCoordinator
 }
 
 // New builds a server, loading (or generating) the host key.

@@ -496,8 +496,11 @@ func TestInteractiveAttachTakeoverCauseAndSupersededNotification(t *testing.T) {
 					t.Fatalf("displaced input reached PTY: %q", input)
 				}
 			}
+			if err := e.srv.cfg.Control.Release(string(e.run.ID), e.member.ID, session, replacementAck.ControlGeneration); err != nil {
+				t.Fatal(err)
+			}
 			wire.send(t, protocol.DashAttachControl{
-				Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true, Takeover: true,
+				Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true,
 			})
 			_, acquired := wire.next(t)
 			if acquired == nil || !acquired.OK || !acquired.HasControl || acquired.ControlGeneration <= replacementAck.ControlGeneration {
