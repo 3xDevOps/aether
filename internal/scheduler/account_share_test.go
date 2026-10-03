@@ -1057,6 +1057,20 @@ func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
 		t.Fatal("~/.claude.json was replaced rather than rewritten in place")
 	}
 
+	// Setup started but never finished, or recorded as not done, is marked
+	// done too: Claude Code runs its wizard for anything but true.
+	i := newShareEnv(t, nil)
+	writeHomeFiles(t, i.ownerHome, ".claude/.credentials.json")
+	if err := os.WriteFile(filepath.Join(i.adaHome, ".claude.json"), []byte(`{"hasCompletedOnboarding":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	i.launchSpec(t, "claude")
+	if state, _ := read(t, i.adaHome); state["hasCompletedOnboarding"] != true {
+		t.Fatalf("launcher ~/.claude.json = %v, want hasCompletedOnboarding true", state)
+	}
+
+	// A file the CLI owns in a shape Aether does not rewrite - not a JSON
+	// object, or too large - is left alone and the launch still starts.
 	g := newShareEnv(t, nil)
 	writeHomeFiles(t, g.ownerHome, ".claude/.credentials.json")
 	if err := os.WriteFile(filepath.Join(g.adaHome, ".claude.json"), []byte("[]"), 0o600); err != nil {
@@ -1065,6 +1079,16 @@ func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
 	g.launchSpec(t, "claude")
 	if data, _ := os.ReadFile(filepath.Join(g.adaHome, ".claude.json")); string(data) != "[]" {
 		t.Fatalf("a non-object ~/.claude.json was rewritten to %q", data)
+	}
+	j := newShareEnv(t, nil)
+	writeHomeFiles(t, j.ownerHome, ".claude/.credentials.json")
+	large := []byte(`{"pad":"` + strings.Repeat("x", 5<<20) + `"}`)
+	if err := os.WriteFile(filepath.Join(j.adaHome, ".claude.json"), large, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	j.launchSpec(t, "claude")
+	if info, err := os.Stat(filepath.Join(j.adaHome, ".claude.json")); err != nil || info.Size() != int64(len(large)) {
+		t.Fatalf("an oversized ~/.claude.json was changed: %v %v", info, err)
 	}
 
 	h := newShareEnv(t, nil)
