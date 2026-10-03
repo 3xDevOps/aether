@@ -180,18 +180,6 @@ func (h *recordingSlogHandler) hasMessage(want string) bool {
 	return false
 }
 
-type failingRetainedCloseStore struct {
-	store.Store
-	err error
-}
-
-func (s *failingRetainedCloseStore) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	if reason == retainedCloseReason {
-		return s.err
-	}
-	return s.Store.UpdateRunStatus(ctx, id, status, reason, startedAt, finishedAt)
-}
-
 func TestFinalizeLogsRetainedSidecarFailure(t *testing.T) {
 	e := newTestEnv(t, nil)
 	destroyErr := errors.New("test: destroy unavailable")
@@ -225,38 +213,22 @@ func TestFinalizeLogsRetainedSidecarFailure(t *testing.T) {
 	}
 }
 
-func TestCloseRunLogsRetainedTransitionFailure(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) {
-		cfg.RunContainerTTL = -time.Second
-	})
+func TestCloseRunCaptureFailureKeepsFrozenEvidenceUntilRetry(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = -time.Second })
 	capture := newSchedulerEvidenceCapture(e.ws.ID)
 	capture.failures = 1
 	e.sched.UseEvidence(capture)
-	run, container := e.launchFake(t, "retained transition diagnostics")
-	transitionErr := errors.New("test: retained close transition unavailable")
-	e.sched.cfg.Store = &failingRetainedCloseStore{Store: e.db, err: transitionErr}
-
-	handler := &recordingSlogHandler{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged)
-	if err == nil || !strings.Contains(err.Error(), "evidence capture unavailable") {
-		t.Fatalf("CloseRun error = %v, want primary evidence failure", err)
+	run, container := e.launchFake(t, "retain evidence until captured")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err == nil {
+		t.Fatal("close accepted failed evidence capture")
 	}
-	if !handler.hasMessage("scheduler: retain run after evidence capture failure") {
-		t.Fatal("primary evidence capture failure was not logged")
+	if container.currentState() != "paused" || !e.sched.RetainsContainer(t.Context(), run.ID) {
+		t.Fatal("failed capture released its frozen evidence sources")
 	}
-	if !handler.hasMessage("scheduler: retained close transition after evidence capture failure") {
-		t.Fatal("retained close transition failure was not logged")
-	}
-	row := e.waitStoreStatus(t, run.ID, domain.RunMerged)
-	if row.Reason != "closed" {
-		t.Fatalf("row reason after failed evidence capture = %q, want closed", row.Reason)
-	}
-	if got := container.currentState(); got != "paused" {
-		t.Fatalf("container state after failed evidence capture = %q, want paused", got)
+	e.sched.sweepRetained(t.Context())
+	waitFor(t, "captured container cleanup", func() bool { return e.rt.byName(string(run.ID)) == nil })
+	if capture.packetCount() != 1 {
+		t.Fatalf("retry captured %d packets, want one durable packet", capture.packetCount())
 	}
 }
 

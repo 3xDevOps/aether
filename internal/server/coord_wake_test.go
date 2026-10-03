@@ -695,16 +695,11 @@ func TestCoordWakeReportSubmissionOrdersAcceptedFrame(t *testing.T) {
 			})
 			done := wakeSocketCall(client)
 			awaitWakeBarrier(t, ready)
-			err := f.missions.ReconcileReport(ctx, f.run.ID, report, packet)
+			var submitted chan error
 			if frameFirst {
-				if !errors.Is(err, store.ErrConflict) {
-					t.Fatalf("submission passed an admitted, incomplete frame: %v", err)
-				}
-				attempt, getErr := f.db.GetAttempt(ctx, f.attempt.ID)
-				if getErr != nil || attempt.State != f.attempt.State {
-					t.Fatalf("contended report changed attempt: %+v, %v", attempt, getErr)
-				}
-			} else if err != nil {
+				submitted = make(chan error, 1)
+				go func() { submitted <- f.missions.ReconcileReport(ctx, f.run.ID, report, packet) }()
+			} else if err := f.missions.ReconcileReport(ctx, f.run.ID, report, packet); err != nil {
 				t.Fatal(err)
 			}
 			resume()
@@ -718,12 +713,17 @@ func TestCoordWakeReportSubmissionOrdersAcceptedFrame(t *testing.T) {
 			}
 			awaitWakeBarrier(t, admissionFinished)
 			if frameFirst {
-				if err = f.missions.ReconcileReport(ctx, f.run.ID, report, packet); err != nil {
-					t.Fatalf("deferred submission did not commit after accepted frame: %v", err)
+				select {
+				case reportErr := <-submitted:
+					if reportErr != nil {
+						t.Fatalf("submission did not commit after accepted frame: %v", reportErr)
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatal("submission did not finish after accepted frame")
 				}
 				var next protocol.CoordStatusResult
-				if err = client.Call(protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{}, &next); err != nil {
-					t.Fatal(err)
+				if callErr := client.Call(protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{}, &next); callErr != nil {
+					t.Fatal(callErr)
 				}
 				if next.WakeAdmitted {
 					t.Fatal("submitted worker received a subsequent admitted wake")

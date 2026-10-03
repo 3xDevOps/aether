@@ -139,14 +139,17 @@ harness lifecycle command:
 ```sh
 printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
 /opt/aether/aether-server report codex '{"type":"agent-turn-complete"}'
-/opt/aether/aether-server report pi --event session.idle
-/opt/aether/aether-server report opencode --event session.idle
+/opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
+/opt/aether/aether-server report opencode --json '{"state":"working","input_updates":[{"operation":"replace","requests":[]}]}'
 ```
 
-These callbacks invoke wire method `run.report` and update only the run's
-current `working` or `waiting` status. They are not an agent outcome, are not
-an MCP tool, and do not create a durable report or evidence receipt. Harness
-callbacks are hidden lifecycle plumbing, not commands for an operator or
+These callbacks invoke wire method `run.report`. They update execution
+(`working` or the legacy `waiting` wire value, displayed as Idle) and/or
+correlated pending input requests. A request-only update leaves execution
+unchanged. They are not an agent outcome, are not an MCP tool, and do not
+create a coordination report or evidence receipt. See
+[status reporting](harnesses.md#status-reporting) for request lifetimes.
+Harness callbacks are hidden lifecycle plumbing, not commands for an operator or
 worker to run. The callback exits promptly even when status reporting is
 unavailable so it cannot block the harness.
 

@@ -20,8 +20,12 @@ describe('attention hooks', () => {
     })
   })
 
-  it('counts a run with status and unanswered-question attention once', () => {
-    const attention = run({ id: 'attention', status: 'needs-attention' })
+  it('counts a run with both native input and an unanswered room question once', () => {
+    const attention = run({
+      id: 'attention',
+      status: 'running',
+      pending_inputs: [{ id: 'q1', session_id: 'session-1', kind: 'question' }],
+    })
     useStore.setState({
       runs: { [attention.id]: toRecord(attention) },
       members: { [alice.id]: alice },

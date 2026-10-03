@@ -3,7 +3,9 @@
 // transfer all travelling through the server's durable room and attach paths.
 
 import type { Locator } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { expect, test } from './fixtures'
+import { runContainer } from './harness/docker'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
@@ -88,6 +90,24 @@ test('two members share comments, moderated steering, and explicit control trans
       await expect(viewers.getByRole('img')).toHaveCount(2)
       await expect(viewers.getByRole('img', { name: aliceDisplayName, exact: true })).toBeVisible()
       await expect(viewers.getByRole('img', { name: bobDisplayName, exact: true })).toBeVisible()
+    }
+
+    const nativeRequest = { id: 'room-native-question', session_id: 'room-native-session', kind: 'question' }
+    for (const requests of [[nativeRequest], []]) {
+      execFileSync('docker', [
+        'exec', runContainer(run.id), '/opt/aether/aether-server', 'report', 'pi', '--json',
+        JSON.stringify({
+          ...(requests.length ? { state: 'working' } : {}),
+          input_updates: [{ operation: 'replace', requests }],
+        }),
+      ], { encoding: 'utf8', timeout: 15_000 })
+      for (const viewerPage of [page, bobPage]) {
+        const header = viewerPage.locator('header').filter({
+          has: viewerPage.getByRole('heading', { name: task, exact: true }),
+        })
+        await expect(header.getByRole('button', { name: /^Needs input:/ })).toHaveCount(requests.length)
+        await expect(header.getByText('Working', { exact: true })).toBeVisible()
+      }
     }
 
     await bobPage.getByRole('button', { name: 'Open Run Room' }).click()
@@ -200,14 +220,15 @@ test('two members share comments, moderated steering, and explicit control trans
       )
       .toEqual({ list: 1, get: 1 })
     await page.goto(alice.url)
-    const needsYou = page.getByRole('region', { name: 'Needs you' })
-    await expect(needsYou.getByText(task, { exact: true })).toBeVisible()
+    const card = page.locator(`[data-run-id="${run.id}"]`)
+    await expect(card.getByText(task, { exact: true })).toBeVisible()
+    await expect(card.getByRole('button', { name: /Needs input: 1 unanswered question/ })).toBeVisible()
     await expect(
-      needsYou.getByText('1 unanswered question - open Run Room to answer', {
+      card.getByText('1 unanswered question - open Run Room to answer', {
         exact: true,
       }),
     ).toBeVisible()
-    await needsYou.getByRole('button', { name: task, exact: true }).click()
+    await card.getByRole('button', { name: task, exact: true }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   } finally {
     await bobContext.close()

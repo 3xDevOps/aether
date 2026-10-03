@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -251,7 +252,7 @@ func TestInteractiveAttachAcquireInputReleaseReacquire(t *testing.T) {
 		ControlGeneration: generation,
 	})
 	_, release := wire.next(t)
-	if release == nil || !release.OK || release.HasControl || release.ControlGeneration != generation {
+	if release == nil || !release.OK || release.HasControl || release.ControlGeneration != generation || release.RevocationReason != "" {
 		t.Fatalf("release response = %+v, want released generation %d", release, generation)
 	}
 
@@ -364,12 +365,12 @@ func TestInteractiveAttachLaterGrantRevocationContinuesWatching(t *testing.T) {
 	}
 	laterGeneration := granted.ControlGeneration
 
-	if displaced, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), func() error { return nil }); err != nil || displaced == nil {
+	if displaced, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), control.RevocationRevoked, func() error { return nil }); err != nil || displaced == nil {
 		t.Fatalf("invalidate later grant = displaced %+v, error %v", displaced, err)
 	}
 	_, revoked := wire.next(t)
 	if revoked == nil || revoked.OK || revoked.HasControl ||
-		revoked.ControlGeneration != laterGeneration {
+		revoked.ControlGeneration != laterGeneration || revoked.RevocationReason != "revoked" {
 		t.Fatalf("later revocation = %+v, want exact generation %d", revoked, laterGeneration)
 	}
 
@@ -418,7 +419,7 @@ func TestInteractiveAttachRevocationPreservesObserving(t *testing.T) {
 		t.Fatalf("demote collaborator: %v", err)
 	}
 	_, revoked := wire.next(t)
-	if revoked == nil || revoked.OK || revoked.HasControl || revoked.ControlGeneration != ack.ControlGeneration {
+	if revoked == nil || revoked.OK || revoked.HasControl || revoked.ControlGeneration != ack.ControlGeneration || revoked.RevocationReason != "permission" {
 		t.Fatalf("revocation response = %+v, want a control fence", revoked)
 	}
 	if err := interactive.emit([]byte("still observing")); err != nil {
@@ -445,6 +446,107 @@ func TestInteractiveAttachRevocationPreservesObserving(t *testing.T) {
 	}
 	if data, ctl := wire.next(t); string(data) != "observing remains" || ctl != nil {
 		t.Fatalf("output after denied input = %q/%+v, want observing continuity", data, ctl)
+	}
+}
+
+func TestInteractiveAttachTakeoverCauseAndSupersededNotification(t *testing.T) {
+	for _, session := range []string{"other-tab", "original-tab"} {
+		t.Run(session, func(t *testing.T) {
+			e := controlAttachEnv(t)
+			e.srv.cfg.revalidateInterval = time.Hour
+			e.srv.cfg.PTY = &interactiveTestPTY{fakePTY: e.pty}
+			wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+				ControlSessionID: "original-tab",
+			})
+			if !ack.OK || !ack.HasControl {
+				t.Fatalf("initial control = %+v", ack)
+			}
+			replacement, replacementAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+				ControlSessionID: session, Takeover: true,
+			}, true)
+			defer func() { _ = replacement.ch.Close() }()
+			if !replacementAck.OK || !replacementAck.HasControl {
+				t.Fatalf("replacement control = %+v", replacementAck)
+			}
+			if session == "original-tab" {
+				// Registration replaces this session's callback. Input must
+				// still discover the old incarnation's exact cause.
+				wire.send(t, protocol.DashAttachControl{
+					Type: protocol.DashAttachInput, Data: "stale",
+					ControlGeneration: ack.ControlGeneration,
+				})
+			}
+			_, revoked := wire.next(t)
+			want := "takeover"
+			if session == "original-tab" {
+				want = "revoked"
+			}
+			if revoked == nil || revoked.OK || revoked.HasControl ||
+				revoked.ControlSessionID != "original-tab" || revoked.ControlGeneration != ack.ControlGeneration ||
+				revoked.RevocationReason != want || revoked.RequestID != 0 {
+				t.Fatalf("displaced control = %+v, want %s for generation %d", revoked, want, ack.ControlGeneration)
+			}
+			if session == "original-tab" {
+				_, rejected := wire.next(t)
+				if rejected == nil || rejected.Code != protocol.CodeConflict {
+					t.Fatalf("stale input response = %+v", rejected)
+				}
+				_, _, _, input, _ := e.pty.state()
+				if input != "" {
+					t.Fatalf("displaced input reached PTY: %q", input)
+				}
+			}
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true, Takeover: true,
+			})
+			_, acquired := wire.next(t)
+			if acquired == nil || !acquired.OK || !acquired.HasControl || acquired.ControlGeneration <= replacementAck.ControlGeneration {
+				t.Fatalf("reacquisition = %+v", acquired)
+			}
+			e.srv.cancelControlAttach(string(e.run.ID), "original-tab", ack.ControlGeneration, errAttachControlRevoked)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachInput, Data: "new-authority",
+				ControlGeneration: acquired.ControlGeneration,
+			})
+			if data, ctl := wire.next(t); string(data) != "echo:new-authority" || ctl != nil {
+				t.Fatalf("input after old notification = %q/%+v", data, ctl)
+			}
+		})
+	}
+}
+
+func TestInteractiveAttachInputReportsOriginalTakeoverAfterLaterPermissionRevocation(t *testing.T) {
+	e := controlAttachEnv(t)
+	e.srv.cfg.revalidateInterval = time.Hour
+	e.srv.cfg.PTY = &interactiveTestPTY{fakePTY: e.pty}
+	wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+		ControlSessionID: "displaced-tab",
+	})
+	if !ack.OK || !ack.HasControl {
+		t.Fatalf("initial control = %+v", ack)
+	}
+	if _, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(e.member.ID), "replacement-tab", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), control.RevocationPermission, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	wire.send(t, protocol.DashAttachControl{
+		Type: protocol.DashAttachInput, Data: "must-not-arrive",
+		ControlGeneration: ack.ControlGeneration,
+	})
+	_, revoked := wire.next(t)
+	if revoked == nil || revoked.HasControl || revoked.RevocationReason != "takeover" ||
+		revoked.ControlGeneration != ack.ControlGeneration || revoked.ControlSessionID != "displaced-tab" {
+		t.Fatalf("delayed revocation = %+v, want original takeover", revoked)
+	}
+	_, rejected := wire.next(t)
+	if rejected == nil || rejected.Code != protocol.CodeConflict {
+		t.Fatalf("displaced input response = %+v", rejected)
+	}
+	_, _, _, input, _ := e.pty.state()
+	if input != "" {
+		t.Fatalf("displaced input reached PTY: %q", input)
 	}
 }
 
@@ -513,7 +615,7 @@ func TestInteractiveAttachRevocationUsesOldGeneration(t *testing.T) {
 	}
 
 	_, revoked := wire.next(t)
-	if revoked == nil || revoked.OK || revoked.HasControl {
+	if revoked == nil || revoked.OK || revoked.HasControl || revoked.RevocationReason != "revoked" {
 		t.Fatalf("revocation response = %+v, want a control fence", revoked)
 	}
 	if revoked.ControlGeneration != oldGeneration {
@@ -546,7 +648,7 @@ func TestInteractiveAttachAckPrecedesQueuedControl(t *testing.T) {
 		t.Fatalf("queued-control first record = %q/%+v, want replay output", data, ctl)
 	}
 	_, ctl := wire.next(t)
-	if ctl == nil || ctl.OK || ctl.HasControl || ctl.ControlGeneration != ack.ControlGeneration {
+	if ctl == nil || ctl.OK || ctl.HasControl || ctl.ControlGeneration != ack.ControlGeneration || ctl.RevocationReason != "revoked" {
 		t.Fatalf("queued control record = %+v, want post-replay fence", ctl)
 	}
 }

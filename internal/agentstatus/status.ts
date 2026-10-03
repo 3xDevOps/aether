@@ -1,48 +1,19 @@
-// Aether's agent status reporter for pi and oh-my-pi (omp).
-//
-// The server writes this file into the run's coordination directory and
-// launches the harness with "-e <file>". Each lifecycle event below is
-// handed to the staged server binary mounted beside it, which maps it onto
-// "working" or "waiting" and reports it on the run's own socket
-// (internal/agentstatus, "aether-server report pi").
-//
-// Nothing is imported: pi and omp expose the same extension API but
-// publish its types under different package names, so the one file both
-// load has to name neither.
-
-// REPORTER is the staged server binary inside the run container
-// (internal/coordtransport.BinaryPath).
+// Shared native TUI status extension: pi 0.87.1 and oh-my-pi 18.3.1.
+// No vendor imports: the hosts publish their extension types under different names.
 const REPORTER = '/opt/aether/aether-server'
-
-// OWNER marks the process that reports: a child agent inherits its
-// parent's environment and must not report on its parent's run. It is
-// matched on the PID, so a second copy of this file inside the same agent
-// still registers - the shared chain below is what keeps two copies in one
-// order, rather than silencing one of them and losing the reports of a
-// reload.
 const OWNER = 'AETHER_STATUS_OWNER'
-
-// Re-checking idleness after a turn ends: modern pi can retry, compact or
-// follow up past agent_end, so the report waits for the agent to actually
-// go quiet. Legacy pi and omp are idle by then and answer on the first
-// check.
+const CHAIN = '__aetherStatusReports'
 const IDLE_RECHECK_MS = 25
 const IDLE_RECHECK_MAX_MS = 250
 
-// pi awaits extension handlers, so no handler here awaits a report: the
-// agent must never wait on a socket to keep working. The chain is what
-// keeps the reports in order all the same - a "working" that overtook a
-// "waiting" would leave the run reading Working with nothing left to
-// correct it.
-//
-// It belongs to the process, not to this module. pi loads a copy of an
-// extension for every path it finds it at, so a member who also keeps this
-// file in ~/.pi/agent/extensions has two copies of it inside one agent, and
-// a chain each would be two orders with nothing between them.
-const CHAIN = '__aetherStatusReports'
-
-const shared: { posts: Promise<void>; warned: boolean } =
-  globalThis[CHAIN] || (globalThis[CHAIN] = { posts: Promise.resolve(), warned: false })
+type InputRequest = { id: string; session_id: string; kind: string }
+const shared: {
+  posts: Promise<void>; warned: boolean; pending: Map<string, InputRequest>;
+  busy: Set<string>; state?: string; dispose?: () => void;
+} = globalThis[CHAIN] || (globalThis[CHAIN] = {
+  posts: Promise.resolve(), warned: false, pending: new Map(), busy: new Set(),
+})
+const key = (session: string, kind: string, id: string) => JSON.stringify([session, kind, id])
 
 function warnOnce(err: unknown): void {
   if (shared.warned) return
@@ -50,37 +21,30 @@ function warnOnce(err: unknown): void {
   console.warn('[aether] status report failed:', err)
 }
 
-function spawnReport(args: string[]): Promise<void> {
-  return new Promise((resolve) => {
-    try {
-      const { spawn } = require('child_process')
-      // The reporter exits 0 whatever happens - a callback that fails the
-      // agent's turn is worse than a run card that is briefly wrong - and
-      // says what went wrong on stderr instead. Nothing else reads that
-      // pipe, so the first line of it is the only trace a member has of a
-      // reporter that ran but could not reach the server.
-      const child = spawn(REPORTER, args, { stdio: ['ignore', 'ignore', 'pipe'] })
-      child.stderr?.setEncoding('utf8')
-      child.stderr?.on('data', (chunk: string) => {
-        const line = chunk.split('\n')[0].trim()
-        if (line) warnOnce(line)
-      })
-      child.on('error', (err: unknown) => {
-        warnOnce(err)
-        resolve()
-      })
-      child.on('close', () => resolve())
-    } catch (err) {
-      warnOnce(err)
-      resolve()
-    }
-  })
+function spawnReport(body: string): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  try {
+    const { spawn } = require('child_process')
+    const child = spawn(REPORTER, ['report', 'pi', '--json', body], { stdio: ['ignore', 'ignore', 'pipe'] })
+    child.stderr?.setEncoding('utf8')
+    child.stderr?.on('data', (chunk: string) => {
+      const line = chunk.split('\n')[0].trim()
+      if (line) warnOnce(line)
+    })
+    child.on('error', (err: unknown) => { warnOnce(err); resolve() })
+    child.on('close', () => resolve())
+  } catch (err) { warnOnce(err); resolve() }
+  return promise
 }
 
-function report(event: string, tool?: unknown): void {
-  const args = ['report', 'pi', '--event', event]
-  if (typeof tool === 'string' && tool) args.push('--tool', tool)
-  shared.posts = shared.posts.then(() => spawnReport(args)).catch(() => {})
+function report(): void {
+  const body = JSON.stringify({
+    ...(shared.state ? { state: shared.state } : {}),
+    ...(shared.state === 'waiting' ? { reason: 'agent idle' } : {}),
+    input_updates: [{ operation: 'replace', requests: [...shared.pending.values()] }],
+  })
+  // Identical Working reports are heartbeats even without terminal/file output.
+  shared.posts = shared.posts.then(() => spawnReport(body)).catch(warnOnce)
 }
 
 export default function (pi): void {
@@ -88,84 +52,136 @@ export default function (pi): void {
   const owner = process.env[OWNER]
   if (owner && owner !== self) return
   process.env[OWNER] = self
-
-  // ended is what the agent last said about this turn. It exists for
-  // message_end alone: pi finalizes the assistant's last message around the
-  // end of the turn, and a "working" landing after "waiting" would strand
-  // the run at Working until the stall threshold.
+  let disposed = false
+  let claimed = false
+  let session = `process:${self}`
   let ended = false
   let settledSupported = false
-  let recheck: ReturnType<typeof setTimeout> | null = null
-  let recheckDelay = IDLE_RECHECK_MS
+  let generation = 0
+  let recheck: NodeJS.Timeout | undefined
+  let detach: (() => void) | undefined
+  let mainSession
 
-  function clearRecheck(): void {
-    if (recheck !== null) clearTimeout(recheck)
-    recheck = null
+  function cancel(): void {
+    generation++
+    clearTimeout(recheck)
+    recheck = undefined
   }
-
-  function startTurn(event: string): void {
-    clearRecheck()
-    ended = false
-    report(event)
-  }
-
-  function endTurn(event: string): void {
-    if (ended) return
-    ended = true
-    clearRecheck()
-    report(event)
-  }
-
-  function recheckIdle(ctx, delay: number): void {
-    recheck = setTimeout(() => {
-      recheck = null
-      if (settledSupported || ended) return
-      let idle = false
-      try {
-        idle = ctx.isIdle()
-      } catch (err) {
-        warnOnce(err)
-        return
-      }
-      if (idle) {
-        endTurn('agent_end')
-        return
-      }
-      recheckIdle(ctx, recheckDelay)
-      recheckDelay = Math.min(recheckDelay * 2, IDLE_RECHECK_MAX_MS)
-    }, delay)
-    if (typeof recheck.unref === 'function') recheck.unref()
-  }
-
-  pi.on('before_agent_start', () => startTurn('before_agent_start'))
-  pi.on('agent_start', () => startTurn('agent_start'))
-  pi.on('tool_call', (event) => report('tool_call', event?.toolName))
-  pi.on('tool_execution_start', (event) => report('tool_execution_start', event?.toolName))
-  pi.on('tool_execution_end', (event) => report('tool_execution_end', event?.toolName))
-  pi.on('tool_approval_requested', (event) => report('tool_approval_requested', event?.toolName))
-  pi.on('tool_approval_resolved', (event) => report('tool_approval_resolved', event?.toolName))
-  pi.on('message_end', () => {
-    if (ended) return
-    report('message_end')
-  })
-
-  // Where the harness has agent_settled, that is the end of the turn and
-  // agent_end is only its first half.
-  pi.on('agent_settled', () => {
-    settledSupported = true
-    endTurn('agent_settled')
-  })
-
-  pi.on('agent_end', (event, ctx) => {
-    if (settledSupported) return
-    // omp says outright when more work follows this end.
-    if (event?.willContinue) return
-    if (!ctx || typeof ctx.isIdle !== 'function') {
-      endTurn('agent_end')
-      return
+  const dispose = () => { disposed = true; cancel(); detach?.() }
+  const on = (event: string, handler) => pi.on(event, (value, ctx) => {
+    if (disposed) return
+    const main = pi.pi?.AgentRegistry?.global()?.get(pi.pi.MAIN_AGENT_ID)?.session
+    if (main && main.sessionManager !== ctx?.sessionManager) return
+    if (!claimed) {
+      shared.dispose?.()
+      shared.dispose = dispose
+      claimed = true
     }
-    clearRecheck()
-    recheckDelay = IDLE_RECHECK_MS
-    recheckIdle(ctx, 0)
+    handler(value, ctx)
+  })
+  const sessionID = (event, ctx): string => event?.sessionId || ctx?.sessionManager?.getSessionId() || session
+
+  function clearSession(id: string): void {
+    shared.busy.delete(id)
+    for (const [identity, request] of shared.pending) if (request.session_id === id) shared.pending.delete(identity)
+  }
+  function update(operation: 'open' | 'close', kind: string, id: unknown, scope: string): void {
+    if (typeof id !== 'string' || !id || !scope) return
+    const identity = key(scope, kind, id)
+    if (operation === 'open') shared.pending.set(identity, { id, session_id: scope, kind })
+    else if (!shared.pending.delete(identity)) return
+    report()
+  }
+  function execution(active: boolean, scope = session): void {
+    if (active) shared.busy.add(scope)
+    else shared.busy.delete(scope)
+    shared.state = shared.busy.size ? 'working' : 'waiting'
+    report()
+  }
+  function start(_event, ctx): void {
+    cancel()
+    session = sessionID(undefined, ctx)
+    ended = false
+    execution(true)
+  }
+  function end(): void {
+    if (ended || disposed) return
+    ended = true
+    cancel()
+    execution(false)
+  }
+  function recheckIdle(ctx, delay: number, epoch: number): void {
+    recheck = setTimeout(() => {
+      recheck = undefined
+      if (disposed || generation !== epoch || settledSupported || ended) return
+      try {
+        if (ctx.isIdle()) end()
+        else recheckIdle(ctx, Math.min(delay ? delay * 2 : IDLE_RECHECK_MS, IDLE_RECHECK_MAX_MS), epoch)
+      } catch (error) { warnOnce(error) }
+    }, delay)
+    recheck.unref?.()
+  }
+  function bind(_event, ctx): void {
+    const next = sessionID(undefined, ctx)
+    if (next !== session) {
+      const changed = shared.busy.has(session) || [...shared.pending.values()].some(request => request.session_id === session)
+      clearSession(session)
+      session = next
+      ended = false
+      cancel()
+      if (changed) execution(false)
+    }
+    // OMP's public session event follows cleanup and waitForIdle includes
+    // agent-owned background work. Its extension agent_end fires earlier.
+    const main = pi.pi?.AgentRegistry?.global()?.get(pi.pi.MAIN_AGENT_ID)?.session
+    if (!main || main.sessionManager !== ctx?.sessionManager || main === mainSession) return
+    detach?.()
+    mainSession = main
+    detach = main.subscribe(event => {
+      if (disposed || event.type !== 'agent_end' || event.isTerminal === false) return
+      const epoch = generation
+      void main.waitForIdle().then(() => {
+        if (!disposed && generation === epoch && ctx.isIdle()) end()
+      }).catch(warnOnce)
+    })
+  }
+
+  on('session_start', bind)
+  on('session_switch', bind)
+  on('session_branch', bind)
+  on('session_shutdown', () => {
+    cancel()
+    shared.pending.clear()
+    shared.busy.clear()
+    execution(false)
+    ended = true
+    detach?.()
+  })
+  on('before_agent_start', start)
+  on('agent_start', start)
+  const toolStart = (event, ctx) => {
+    const scope = sessionID(event, ctx)
+    if (event?.toolName === 'ask' || event?.toolName === 'AskUserQuestion') {
+      update('open', 'question', event.toolCallId, scope)
+    } else if (!ended) execution(true, scope)
+  }
+  on('tool_call', toolStart)
+  on('tool_execution_start', toolStart)
+  on('tool_execution_end', (event, ctx) => {
+    update('close', 'question', event?.toolCallId, sessionID(event, ctx))
+  })
+  on('tool_approval_requested', (event, ctx) => update('open', 'permission', event?.toolCallId, sessionID(event, ctx)))
+  on('tool_approval_resolved', (event, ctx) => update('close', 'permission', event?.toolCallId, sessionID(event, ctx)))
+  // Only pi 0.87.1 emits this outermost blocking-UI pair. OMP 18.3.1 has
+  // no equivalent native TUI event; do not infer it from arbitrary ctx.ui calls.
+  on('ui_prompt_start', (_event, ctx) => update('open', 'extension_ui', `ui-prompt:${self}`, sessionID(undefined, ctx)))
+  on('ui_prompt_end', (_event, ctx) => update('close', 'extension_ui', `ui-prompt:${self}`, sessionID(undefined, ctx)))
+  on('message_end', () => { if (!ended) execution(true) })
+  on('agent_settled', () => { settledSupported = true; end() })
+  on('agent_end', (event, ctx) => {
+    if (mainSession || settledSupported || event?.willContinue) return
+    if (!ctx || typeof ctx.isIdle !== 'function') { end(); return }
+    cancel()
+    recheckIdle(ctx, 0, generation)
   })
 }

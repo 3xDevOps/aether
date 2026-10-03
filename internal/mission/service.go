@@ -35,6 +35,10 @@ type Canceller interface {
 	CancelMission(context.Context, domain.RunID) error
 }
 
+type Completer interface {
+	CompleteMission(context.Context, domain.RunID, domain.RunStatus) error
+}
+
 type MissionLaunchRequest struct {
 	WorkspaceID          domain.WorkspaceID
 	MissionID            domain.MissionID
@@ -75,10 +79,13 @@ type MissionRunObserver func(context.Context, domain.RunID) (MissionRunObservati
 type MissionControlResolver func() (sshd.MissionControl, error)
 
 func (o MissionRunObservation) Settled() bool {
-	return o.State == MissionRunStopped && o.RetentionSettled
+	return (o.State == MissionRunStopped || o.State == MissionRunRetained) && o.RetentionSettled
 }
 
 func (o MissionRunObservation) HoldsExecution() bool {
+	if o.Settled() {
+		return false
+	}
 	switch o.State {
 	case MissionRunActive, MissionRunPending, MissionRunDestroyPending, MissionRunRetained, MissionRunUnknown:
 		return true
@@ -92,6 +99,7 @@ type Config struct {
 	Missions            store.MissionStore
 	Runs                Launcher
 	Cancel              Canceller
+	Complete            Completer
 	AuthorizationMu     *sync.Mutex
 	Cost                Budget
 	Evidence            EvidenceReader
@@ -728,10 +736,10 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	return control.AdmitInput(s.operationContext(ctx), current.CurrentIntegratorRunID, attempt.RunID, current.IntegratorGeneration, func() error {
-		if s.cfg.Cancel == nil {
-			return errors.New("mission: scheduler cancel unavailable")
+		if s.cfg.Complete == nil {
+			return errors.New("mission: scheduler completion unavailable")
 		}
-		return s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID)
+		return s.cfg.Complete.CompleteMission(s.operationContext(ctx), attempt.RunID, domain.RunCompleted)
 	})
 }
 

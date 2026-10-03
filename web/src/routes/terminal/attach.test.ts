@@ -2430,9 +2430,23 @@ describe('connectAttach', () => {
     expect(metadata[metadata.length - 1]).toMatchObject({ has_control: true, control_generation: 4 })
     a.send('x')
     expect(socket.frames()[2]).toMatchObject({ type: 'input', control_generation: 4 })
+    a.setControl(false)
+    // Pending release is not acknowledged loss; a refusal must not remove input.
+    expect(metadata.at(-1)?.has_control).toBe(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 2, ok: true, has_control: false,
+        control_session_id: a.controlMetadata!().control_session_id,
+        control_generation: 4,
+      }),
+    })
+    expect(metadata.at(-1)).toMatchObject({ has_control: false, loss: 'release' })
+    const releasedFrames = socket.frames()
+    a.send('released')
+    expect(socket.frames()).toEqual(releasedFrames)
     a.close()
   })
-  it('clears authority on an unsolicited negative current-fence record', () => {
+  it.each(['takeover', 'permission', 'revoked', undefined])('fences input on %s revocation without treating other losses as takeovers', (reason) => {
     const metadata: ControlMetadata[] = []
     const a = connectAttach(() => '/ws/attach/run_1', {
       onAttached: () => {},
@@ -2465,19 +2479,34 @@ describe('connectAttach', () => {
         type: 'control',
         control_session_id: sessionID,
         control_generation: 4,
+        revocation_reason: 'takeover',
       }),
     })
     expect(a.controlMetadata!().has_control).toBe(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', control_session_id: 'another-tab',
+        control_generation: 5, revocation_reason: 'takeover',
+      }),
+    })
+    expect(a.controlMetadata!().has_control).toBe(true)
+    a.send('before')
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'input', data: 'before', control_generation: 5 })
 
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'control',
         control_session_id: sessionID,
         control_generation: 5,
+        revocation_reason: reason,
       }),
     })
     expect(metadata.at(-1)).toMatchObject({ control_generation: 5, has_control: false })
     expect(a.controlMetadata!().has_control).toBe(false)
+    expect(metadata.at(-1)?.loss).toBe(reason === 'takeover' ? 'takeover' : undefined)
+    const frames = socket.frames()
+    a.send('after')
+    expect(socket.frames()).toEqual(frames)
     a.close()
   })
 

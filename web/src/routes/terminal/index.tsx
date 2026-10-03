@@ -271,11 +271,13 @@ function TerminalRoute({ params }: RouteProps) {
       <div {...panelProps}>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
-            {liveWritable && <div aria-hidden="true" className="terminal-control-border" />}
             <TerminalPane
               key={runID}
               controller={controller}
               writable={state.write && !starting && !replaying}
+              controlAppearance={liveWritable ? 'active' :
+                state.connection !== 'live' || state.steerDenied || !steerable || replaying || readingHistory
+                  ? 'hidden' : controlMetadata?.loss ?? 'hidden'}
               readingSurface={readingHistory ? historyTools : undefined}
               surface={
                 <TerminalHistory

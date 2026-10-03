@@ -395,13 +395,11 @@ func (s *Server) revokeOnCurrentControlChange(ctx context.Context, revoke contex
 			if lease == nil {
 				continue
 			}
-			if err := s.cfg.Control.Validate(run, lease.sessionID, lease.generation); err == nil {
+			if err := s.cfg.Control.Validate(run, lease.SessionID, lease.Generation); err == nil {
 				continue
 			}
 			current, fence := currentLease()
-			if current == nil ||
-				current.sessionID != lease.sessionID ||
-				current.generation != lease.generation {
+			if current != lease {
 				continue
 			}
 			if fence != nil {

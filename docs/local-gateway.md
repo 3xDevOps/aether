@@ -356,6 +356,71 @@ them rather than choosing an arbitrary parent; repeated attempts within one
 mission retain that mission. These fields come from durable relationships,
 not task text, and confer no authorization.
 
+#### Independent execution and input state
+
+`run.get` and `run.list` always include `pending_inputs`, an array of
+`{"id":"request-1","session_id":"session-a","kind":"question"}` objects.
+An empty set is `[]`, never `null`. Execution remains in `status`: `running`
+means Working and `needs-attention` means Idle. A Working run can have pending
+input while another session continues working; an Idle run need not need input.
+The dashboard's separate **Needs input** indicator is not a new execution
+status and does not provide a new answer transport.
+
+Native reporters send `run.report` through their run-scoped coordination
+socket, not the member's gateway control endpoint. The socket supplies the run
+identity. The report accepts the existing `state` (`working` or `waiting`),
+optional `reason`, and optional `input_updates`:
+
+```json
+{
+  "state": "working",
+  "input_updates": [
+    {"operation":"open","session_id":"session-a","kind":"question","id":"request-1"}
+  ]
+}
+```
+
+`waiting` reports idle execution, not an unresolved question. `state` can be
+omitted only when `input_updates` is nonempty; an input-only report preserves
+execution, including when the last request closes. `reason` is execution
+metadata, not a prompt body or evidence of input.
+
+| Operation | Fields | Meaning |
+| --- | --- | --- |
+| `open` | `session_id`, `kind`, `id` | Add this exact unresolved request. |
+| `close` | `session_id`, `kind`, `id` | Remove only this identity; the same ID in another session or kind is unaffected. |
+| `clear` | `session_id` | Remove one session's requests when the adapter has evidence that the session terminated. |
+| `replace` | `requests` | Replace the adapter's complete pending set; `[]` clears it. Each entry has `session_id`, `kind`, `id`. |
+
+Kinds are `question`, `permission`, `form`, and `extension_ui`. IDs and session
+IDs must be valid UTF-8, nonblank, control-free strings of 1–256 bytes. There
+are at most 128 updates per report, 128 requests per replacement, and 128
+pending requests per run. Unknown operations/kinds, missing identities, and
+conflicting operation fields are rejected rather than normalized or truncated.
+`open`/`close` do not accept nonempty `requests`; `clear` accepts no request
+identity or request list; `replace` accepts no top-level request identity.
+Reports carry only correlation metadata, never prompts, answers, paths, or
+transcripts.
+
+Repeated opens, closes, and unchanged replacements are idempotent. Turn
+completion, silence, prose, and idle execution do not clear outstanding input.
+The pending set is persisted independently from the last execution report and
+survives server restart for still-live runs. Actual terminated or relaunched
+run lifetimes discard it; stale saved snapshots cannot restore a previous
+lifetime's requests. Persistence errors are returned to the reporter rather than
+announcing input state that was not saved.
+
+Each actual change publishes a durable `run.input` event with payload
+`{"pending_inputs":[...]}`; closing the last request publishes
+`{"pending_inputs":[]}`. This is a complete replacement snapshot, independent
+of `run.status`, and uses the existing event envelope and replay sequence on
+`/ws/events`. An unchanged set emits no event unless a previous publication
+failed: retrying the report or recovering the live run publishes the current
+set, including an empty set after the last close. Clients must preserve
+events received after a snapshot request began when merging that response,
+so an older `run.get`/`run.list` response cannot resurrect closed input.
+
+
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
 waits for supervision to publish the final branch before removing the
@@ -1469,9 +1534,13 @@ resize, control, geometry, and acknowledgements.
    `error`; it also reports the authoritative `has_control`,
    `control_session_id`, and `control_generation`. A lease revocation that
    was not requested is an unsolicited `type:"control"` frame with no
-   `request_id`; the displaced client remains a read-only observer. The
-   browser changes its input state only from this acknowledged metadata, not
-   from the requested `write` bit.
+   `request_id`; the displaced client remains a read-only observer.
+   `revocation_reason` identifies `takeover` by another control session,
+   `permission` loss (including protection), or generic `revoked` invalidation.
+   The browser applies it only to its exact control session and generation;
+   only `takeover` triggers the red control-border exit animation. Input is
+   disabled immediately, without waiting for that animation. The browser changes
+   its input state from acknowledged metadata, not the requested `write` bit.
 
 6. Server sends one **text** geometry frame whenever the runtime accepts a
    changed shared PTY size:
@@ -1487,8 +1556,9 @@ resize, control, geometry, and acknowledgements.
 
 7. The server re-checks authorization periodically. On an interactive attach,
    losing **steer** sends an unsolicited `type:"control"` notification on the
-   same WebSocket, with `ok:false`, `has_control:false`, the authoritative
-   `control_session_id`, and the exact `control_generation` that was revoked.
+   same WebSocket, with `ok:false`, `has_control:false`,
+   `revocation_reason:"permission"`, the authoritative `control_session_id`,
+   and the exact `control_generation` that was revoked.
    The socket stays open as a read-only mirror; the dashboard disables input
    without replaying or reconnecting. A raw legacy (non-interactive) attach
    keeps the named close behavior: **1008**, reason `steer permission

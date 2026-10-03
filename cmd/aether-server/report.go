@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -28,8 +29,8 @@ const maxHookPayload = 8 << 20
 
 const reportUsage = `report: usage: aether-server report claude   (hook JSON on stdin)
                      aether-server report codex <notify JSON>
-                     aether-server report pi --event <name> [--tool <name>]
-                     aether-server report opencode --event <name> [--status <type>]`
+                     aether-server report pi --json <report JSON>
+                     aether-server report opencode --json <report JSON>`
 
 // report tells the server what the agent is doing. Like mcp it is absent
 // from the usage text: no operator runs it. The server stages this binary
@@ -55,9 +56,7 @@ func report(args []string) {
 	fs := flag.NewFlagSet("report "+harness, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	socket := fs.String("socket", coordtransport.SocketPath, "coordination socket to report on")
-	event := fs.String("event", "", "the event being reported (opencode, pi, omp)")
-	status := fs.String("status", "", "the session status type the event carries (opencode session.status)")
-	tool := fs.String("tool", "", "the tool the event names, where it names one (pi, omp)")
+	body := fs.String("json", "", "execution and input report JSON (opencode, pi, omp)")
 	if err := fs.Parse(args); err != nil {
 		return
 	}
@@ -81,12 +80,16 @@ func report(args []string) {
 		rep, mapped = agentstatus.FromClaudeHook(hook)
 	case harness == "codex" && len(payload) == 1:
 		rep, mapped = agentstatus.FromCodexNotify(payload[0])
-	// One reporter name for both CLIs: they load the same extension, which
-	// names itself pi whichever of the two is running it.
-	case harness == "pi" && len(payload) == 0 && *event != "":
-		rep, mapped = agentstatus.FromPiEvent(*event, *tool)
-	case harness == "opencode" && len(payload) == 0 && *event != "":
-		rep, mapped = agentstatus.FromOpenCodeEvent(*event, *status)
+	case (harness == "pi" || harness == "opencode") && len(payload) == 0 && *body != "":
+		if len(*body) > maxHookPayload {
+			warn("report %s: report exceeds %d bytes", harness, maxHookPayload)
+			return
+		}
+		if err := json.Unmarshal([]byte(*body), &rep); err != nil {
+			warn("report %s: decode report: %v", harness, err)
+			return
+		}
+		mapped = true
 	default:
 		warn(reportUsage)
 		return
@@ -97,8 +100,9 @@ func report(args []string) {
 		return
 	}
 	err := coordtransport.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
-		State:  string(rep.State),
-		Reason: rep.Reason,
+		State:        string(rep.State),
+		Reason:       rep.Reason,
+		InputUpdates: rep.InputUpdates,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)

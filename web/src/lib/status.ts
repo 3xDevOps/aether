@@ -13,15 +13,8 @@ export type PresentationState =
   | 'done'
   | 'idle'
 
-/**
- * A plan or approval pause is invisible in the domain status - the run still
- * reads `running` while the agent sits on a pending request - so an active
- * run with one presents as needs-attention.
- */
-export function runState(status: RunStatus, pendingApproval = false): PresentationState {
-  // A question or approval remains actionable after execution stops. Attention
-  // is a presentation overlay; the domain lifecycle below stays untouched.
-  if (pendingApproval) return 'needs-attention'
+/** Execution only. Outstanding requests are shown independently. */
+export function runState(status: RunStatus): PresentationState {
   switch (status) {
     case 'queued':
     case 'provisioning':
@@ -93,7 +86,7 @@ export function rollup(states: PresentationState[]): PresentationState {
 }
 
 export const stateLabel: Record<PresentationState, string> = {
-  'needs-attention': 'Needs you',
+  'needs-attention': 'Idle',
   failed: 'Failed',
   working: 'Working',
   waiting: 'Waiting',

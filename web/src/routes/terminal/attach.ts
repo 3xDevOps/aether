@@ -124,6 +124,7 @@ interface AttachFrame {
   control_session_id?: string
   control_generation?: number
   has_control?: boolean
+  revocation_reason?: 'takeover' | 'permission' | 'revoked'
   terminal_id?: string
   incarnation?: string
   server_owned_responder?: boolean
@@ -135,6 +136,8 @@ export interface ControlMetadata {
   control_session_id: string
   control_generation: number
   has_control: boolean
+  /** Accepted ownership loss, not inferred from presence or transport state. */
+  loss?: 'release' | 'takeover'
   /** Server-issued terminal high-water carried atomically by this state. */
   position?: TerminalPosition
 }
@@ -473,6 +476,7 @@ export function connectAttach(
     generation: number,
     granted: boolean,
     position: TerminalPosition | null | undefined = undefined,
+    loss?: ControlMetadata['loss'],
   ) => {
     controlGeneration = generation
     hasControl = granted
@@ -483,6 +487,7 @@ export function connectAttach(
       control_generation: controlGeneration,
       has_control: hasControl,
     }
+    if (loss) metadata.loss = loss
     if (controlPosition !== null) metadata.position = controlPosition
     handlers.onControl?.(metadata)
   }
@@ -529,6 +534,14 @@ export function connectAttach(
       control_generation: generation,
       has_control: granted,
     }
+    if (hasControl && !granted) {
+      if (pending?.write === false && result.ok) result.loss = 'release'
+      else if (
+        requestID === undefined && frame.revocation_reason === 'takeover' &&
+        frame.control_session_id === controlSessionID &&
+        frame.control_generation === controlGeneration
+      ) result.loss = 'takeover'
+    }
     const framePosition = positionFromFrame(frame)
     if (framePosition !== null) adoptServerPosition(framePosition)
     const resultPosition = framePosition ?? controlPosition
@@ -537,9 +550,9 @@ export function connectAttach(
       // A released lease no longer needs its old fence. The next acquisition
       // starts from the server's unoccupied generation.
       result.control_generation = 0
-      publishControl(0, false, framePosition ?? undefined)
+      publishControl(0, false, framePosition ?? undefined, result.loss)
     } else if (frame.has_control !== undefined || frame.control_generation !== undefined) {
-      publishControl(result.control_generation, result.has_control, framePosition ?? undefined)
+      publishControl(result.control_generation, result.has_control, framePosition ?? undefined, result.loss)
     }
     handlers.onControlResult?.(result)
   }
@@ -1465,6 +1478,7 @@ export function connectAttach(
     },
     // A paste arrives as one string that can dwarf the gateway's 64KB frame
     send: (data) => {
+      if (handlers.interactive?.() === true && !hasControl) return
       for (let at = 0; at < data.length; ) {
         let end = Math.min(at + inputChunk, data.length)
         // Never split a surrogate pair across frames.

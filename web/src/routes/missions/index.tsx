@@ -36,11 +36,12 @@ import type {
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, usePendingApprovalRuns, useSelf } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
 import { StatusChip } from '@/components/run-list'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { runState } from '@/lib/status'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
@@ -342,7 +343,6 @@ function MissionDetailView({
   const integratorRun = useStore((state) => (integratorRunID ? state.runs[integratorRunID] : undefined))
   const hydrated = useStore((state) => state.hydrated)
   const upsertRun = useStore((state) => state.upsertRun)
-  const pending = usePendingApprovalRuns()
   // A run absent from the hydrated store is not proof it does not exist: a
   // create's response can outrun the run's first event. Only the server's
   // not-found marks it missing. Any other failure is asked again only on the
@@ -486,7 +486,8 @@ function MissionDetailView({
                   {integratorRun && (
                     <>
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <StatusChip state={runState(integratorRun.status, pending.has(integratorRun.id) || (integratorRun.unanswered_questions ?? 0) > 0)} />
+                        <StatusChip state={runState(integratorRun.status)} />
+                        <RunInputIndicator run={integratorRun} />
                         {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
                       </span>
                       <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRun.id })}>

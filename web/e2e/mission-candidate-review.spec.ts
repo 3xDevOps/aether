@@ -168,6 +168,12 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   const released = await inspectWorker()
   expect(released.takeover_active ?? false).toBe(false)
 
+  const workerContainerID = execFileSync(
+    'docker',
+    ['inspect', '--format', '{{.Id}}', runContainer(started.attempt.run_id)],
+    { encoding: 'utf8', timeout: 10_000 },
+  ).trim()
+
   // The real worker reports through its mounted CLI. Reconciliation creates
   // the proposed submission; the integrator fixture then accepts it with the
   // current mission set version.
@@ -186,6 +192,16 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
       { timeout: terminalTimeout, intervals: [250, 500, 1_000, 2_000] },
     )
     .toBe('proposed')
+  await expect
+    .poll(
+      () => execFileSync(
+        'docker',
+        ['inspect', '--format', '{{.Id}} {{.State.Paused}} {{.State.Running}}', runContainer(started.attempt.run_id)],
+        { encoding: 'utf8', timeout: 10_000 },
+      ).trim(),
+      { timeout: terminalTimeout, intervals: [250, 500, 1_000, 2_000] },
+    )
+    .toBe(`${workerContainerID} true true`)
   if (!submission) throw new Error('worker report did not create a mission submission')
   runCoordCLI<TaskMutation>(mission.current_integrator_run_id, [
     'task', 'accept-submission',

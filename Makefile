@@ -200,7 +200,7 @@ test-scripts:
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.
 test-native-hooks:
-	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
+	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v1_status_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
 
 vet:
 	go vet ./...

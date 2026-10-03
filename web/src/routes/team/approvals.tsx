@@ -1,6 +1,5 @@
 import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { ViewHeader } from '@/components/view-header'
@@ -12,7 +11,7 @@ import type { Approval } from '@/lib/types'
 import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
 import { useStore } from '@/store'
-import { approvalsForRun, pendingApprovals, sortByCreated } from '@/store/approvals'
+import { pendingApprovals, sortByCreated } from '@/store/approvals'
 /** The queue's size, in the status bar. Absent while nothing is waiting. */
 export function ApprovalStatus() {
   const inbox = useStore((s) => s.inbox)
@@ -60,41 +59,6 @@ export function ApprovalStatus() {
     </Tooltip>
   )
 }
-
-/** A run card's marker: this run is holding somebody up. */
-export function ApprovalBadge({ run }: CardSlotProps) {
-  const inbox = useStore((s) => s.inbox)
-  const navigate = useStore((s) => s.navigate)
-  const waiting = approvalsForRun(inbox, run.id).length
-  if (waiting === 0) return null
-
-  return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              navigate('approvals')
-            }}
-            className={cn(
-              focusRing,
-              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 py-0.5 hover:bg-state-needs-attention/20',
-            )}
-          >
-            <ShieldQuestion className="size-3.5 text-state-needs-attention" aria-hidden />
-            <Chip color="warning" variant="soft" size="sm">
-              <Chip.Label>{waiting}</Chip.Label>
-            </Chip>
-          </button>
-        )}
-      />
-      <Tooltip.Content>{`${waiting} waiting on a decision`}</Tooltip.Content>
-    </Tooltip>
-  )
-}
-
 
 /**
  * The shared inbox: every workspace's pending permission requests and plan

@@ -575,7 +575,7 @@ commit captured at launch.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with conflict warnings. Prints a notice when any run is waiting on a human; `--attention` lists only those. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
+| `aether runs` | Every run you can see, colored by owner, with conflict warnings. Prints a notice when any run is idle (`needs-attention`); `--attention` lists that execution status, not all runs needing input. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
@@ -597,6 +597,17 @@ commit captured at launch.
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admin-only source-mirror lifecycle. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
+
+The dashboard distinguishes execution from requests: **Idle** means the run
+is not currently working, not that someone must answer. **Needs input** marks
+correlated native questions, permission requests, forms or extension dialogs,
+pending Aether approvals, and unanswered Run Room questions. It can appear on
+a **Working** run. Its count falls as each request closes and disappears after
+the last one. Respond in the existing Terminal, Approvals, or Run Room surface
+named by its tooltip. Turn completion, output silence, and generic errors do
+not create input requests. Native coverage depends on the harness reporter;
+see [harnesses.md](harnesses.md). Desktop **Run idle** notifications and
+`aether runs --attention` still describe execution, not this input indicator.
 
 ### Handoff and finishing runs
 
@@ -640,8 +651,9 @@ silently. A handoff itself is not rolled back solely because its evidence
 packet could not be captured. Unresolved facts remain inspectable in the Run
 Room's evidence drawer. Use a fact's **Answer** action to open the composer
 with that fact prefilled, then edit and send a normal room comment. Evidence
-facts do not enter **Needs you**; only unanswered Run Room questions do. This
-is not a separate action inbox, blocker, or task model.
+facts do not create **Needs input**; unanswered Run Room questions do, without
+changing Working/Idle or a finished run's lifecycle group. This is not a
+separate action inbox, blocker, or task model.
 
 ### Task templates and schedules
 

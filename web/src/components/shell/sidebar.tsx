@@ -11,6 +11,7 @@ import {
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Button } from '@/components/ui/button'
 import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { Chip, Tooltip } from '@/components/ui/heroui'
@@ -35,6 +36,7 @@ import { isUnseen } from '@/store/board'
 import {
   useAttentionCount,
   useCapability,
+  useRunInput,
   useSelfRole,
   useSidebarGroups,
 } from '@/store/hooks'
@@ -423,18 +425,14 @@ function GroupByControl() {
   )
 }
 
-/**
- * How many runs are waiting on a human. The runs below are already sorted
- * worst-first, so this is not navigation - it is the count a member needs
- * when the sidebar is scrolled, or when a stall lands while they are
- * elsewhere in the app.
- */
+/** Count unresolved requests without changing execution grouping. */
 function AttentionBadge() {
   const count = useAttentionCount()
   if (count === 0) return null
   return (
     <span
-      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
+      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
+      title={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
       role="img"
       className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
@@ -704,10 +702,11 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
   const unseen = useStore((s) => isUnseen(s.acked, entry.run))
   const selected = isRunRoute(route, entry.run.id)
   const label = runLabel(entry.run)
+  const input = useRunInput(entry.run)
   const role = entry.run.mission_role === 'integrator'
     ? 'Integrator'
     : entry.run.mission_role === 'worker' ? 'Subsession' : undefined
-  const description = [label, role, entry.run.harness].filter(Boolean).join(' · ')
+  const description = [label, role, entry.run.harness, input.count > 0 && `Needs input: ${input.summary}`].filter(Boolean).join(' · ')
   return (
     <button
       type="button"
@@ -741,6 +740,7 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
         className={cn(entry.state === 'working' && 'state-pulse')}
       />
       <span className="min-w-0 truncate">{label}</span>
+      <RunInputIndicator run={entry.run} compact />
       {role && !branch && (
         <span className={cn(
           'shrink-0 rounded-sm border px-1 text-[10px] font-medium leading-4',

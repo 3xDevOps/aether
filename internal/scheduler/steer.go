@@ -600,12 +600,22 @@ func (s *Scheduler) persistRetainedSidecar(sc sidecar) error {
 	return nil
 }
 
-// CloseRun resolves a run's outcome on a human's say-so. A live TUI run is
-// detached, paused, committed, published, and retained in its exact
-// container; all other runs follow the immediate stop-and-destroy path.
+// CloseRun resolves a run's outcome on a human's say-so. Live TUI and assigned
+// mission runs are detached, paused, committed, published, and retained in
+// their exact container; ordinary headless runs stop immediately.
 func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
+	}
+	return s.closeRun(ctx, run, actor, outcome, false)
+}
+
+// closeRun shares exact-container retention between human Close and accepted
+// mission outcomes. Mission completion never makes a worker relaunchable.
+func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus, mission bool) error {
+	closeReason := retainedCloseReason
+	if mission {
+		closeReason = retainedCompletionReason
 	}
 
 	s.mu.Lock()
@@ -623,6 +633,9 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		r, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
 			return err
+		}
+		if mission && r.Status.Terminal() && r.Status != outcome {
+			return nil
 		}
 		if r.Status == domain.RunQueued {
 			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
@@ -709,11 +722,15 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		}
 		status, workspace = fresh.Status, fresh.WorkspaceID
 	}
+	if mission && (entry.killRequested || (status.Terminal() && status != outcome)) {
+		s.mu.Unlock()
+		return nil
+	}
 	if live && entry.destroyPending {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
 	}
-	if !live || entry.finalizing {
+	if !live || (entry.finalizing && !entry.retained) {
 		identity := entry.evidenceIdentity
 		if !status.Terminal() {
 			s.mu.Unlock()
@@ -747,29 +764,37 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
 	mode, retained, alreadyPaused := entry.launchMode, entry.retained, entry.paused
+	assigned := entry.missionAssigned
+	if assigned {
+		closeReason = retainedCompletionReason
+	}
 	if status == outcome {
-		pending := entry.evidencePending
-		identity := entry.evidenceIdentity
 		s.mu.Unlock()
-		if pending {
-			if err := s.resolveEvidencePending(ctx, run, outcome, identity); err != nil {
-				logEvidenceFailure(run, err)
-				return err
-			}
-		}
-		if !retained || s.cfg.RunContainerTTL >= 0 {
+		if !retained {
 			return nil
 		}
 	} else {
 		s.mu.Unlock()
 	}
 
+	if retained && status == outcome {
+		if err := s.settleRetainedCompletion(ctx, entry); err != nil {
+			return err
+		}
+		if s.cfg.RunContainerTTL < 0 {
+			return s.expireRetainedLocked(ctx, entry)
+		}
+		return nil
+	}
 	if retained {
 		// Re-labeling an already closed retained run keeps the same deadline
 		// and container; no agent or checkout operation is repeated. Verify
 		// the ownership marker is durable before changing the row again.
 		s.mu.Lock()
 		retainedSidecar := entry.sidecar()
+		if retainedSidecar.MissionAssigned {
+			closeReason = retainedCompletionReason
+		}
 		s.mu.Unlock()
 		if err := s.persistRetainedSidecar(retainedSidecar); err != nil {
 			return err
@@ -779,12 +804,12 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			s.mu.Unlock()
 			return retainedTransitionError()
 		}
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
+		err := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
 		s.mu.Unlock()
 		return err
 	}
 
-	if mode == domain.LaunchTUI && !status.Terminal() {
+	if (mode == domain.LaunchTUI || mission || assigned) && !status.Terminal() {
 		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 			return err
 		}
@@ -796,6 +821,11 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		paused := alreadyPaused
 		if !paused {
 			if err := s.cfg.Runtime.Pause(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+				if mission || assigned {
+					// An uncertain Pause is not a stopped worker. Keep the
+					// active owner and capacity until a later attempt confirms it.
+					return fmt.Errorf("scheduler: pause completed worker: %w", err)
+				}
 				slog.Warn("scheduler: pause closed TUI run", "run", run, "error", err)
 			} else if err == nil {
 				paused = true
@@ -803,7 +833,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		}
 		if paused {
 			msg := "wip: "
-			if outcome == domain.RunMerged {
+			if outcome == domain.RunMerged || outcome == domain.RunCompleted {
 				msg = "aether: "
 			}
 			committed, cerr := s.commitAll(ctx, run, msg+taskLine(entry.task))
@@ -822,9 +852,9 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			s.mu.Unlock()
 			ttl := s.cfg.RunContainerTTL
 			deadline := time.Now().UTC().Add(ttl)
-			closeReason := retainedCloseReason
+			retentionReason := closeReason
 			if ttl < 0 {
-				closeReason = "closed"
+				retentionReason = "closed"
 			}
 			s.mu.Lock()
 			if s.runs[run] != entry {
@@ -845,6 +875,8 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			retainedSidecar.Paused = true
 			retainedSidecar.Retained = true
 			retainedSidecar.RetainedUntil = &deadline
+			retainedSidecar.EvidencePending = true
+			retainedSidecar.MissionAssigned = preCloseSidecar.MissionAssigned || mission
 			persistErr := s.persistRetainedSidecar(retainedSidecar)
 			if persistErr != nil {
 				rollbackErr := s.persistRetainedSidecar(rollbackSidecar)
@@ -855,12 +887,14 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
+			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, retentionReason, actor)
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
 				entry.retained = true
 				entry.retainedUntil = &deadline
+				entry.evidencePending = true
+				entry.missionAssigned = retainedSidecar.MissionAssigned
 			}
 			s.mu.Unlock()
 			if transitionErr != nil {
@@ -872,28 +906,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return transitionErr
 			}
-			if captureErr := s.captureFinishEvidence(ctx, run, outcome, identity); captureErr != nil {
-				logEvidenceFailure(run, captureErr)
-				s.mu.Lock()
-				if s.runs[run] == entry {
-					now := time.Now().UTC()
-					entry.retained = true
-					entry.retainedUntil = &now
-					entry.evidencePending = true
-					if ttl < 0 {
-						if transitionErr := s.transitionLocked(ctx, run, workspace, outcome, outcome, retainedCloseReason, actor); transitionErr != nil {
-							slog.Warn("scheduler: retained close transition after evidence capture failure",
-								"run", run, "error", transitionErr)
-						}
-					}
-					if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
-						slog.Warn("scheduler: persist evidence-retained close", "run", run, "error", sidecarErr)
-					}
-				}
-				s.mu.Unlock()
-				return captureErr
-			}
-			if err := s.StopDevelopmentRun(ctx, run); err != nil {
+			if err := s.settleRetainedCompletion(ctx, entry); err != nil {
 				return err
 			}
 			if ttl < 0 {
@@ -931,6 +944,54 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		return err
 	}
 	s.stopCloseContainer(ctx, cid)
+	return nil
+}
+
+// settleRetainedCompletion leaves the pending bit set until evidence and
+// development-resource cleanup are both durable. Callers own lifecycleMu.
+func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervised) error {
+	s.mu.Lock()
+	if s.runs[entry.runID] != entry || !entry.retained || !entry.status.Terminal() {
+		s.mu.Unlock()
+		return retainedTransitionError()
+	}
+	pending, outcome, identity := entry.evidencePending, entry.status, entry.evidenceIdentity
+	paused := entry.paused
+	exited := entry.exitObserved
+	s.mu.Unlock()
+	if !pending {
+		return nil
+	}
+	if !paused && !exited {
+		if err := s.cfg.Runtime.Pause(ctx, entry.containerID); err != nil {
+			return fmt.Errorf("scheduler: quiesce retained worker: %w", err)
+		}
+		s.setPaused(entry, true)
+	}
+	if err := s.captureFinishEvidence(ctx, entry.runID, outcome, identity); err != nil {
+		logEvidenceFailure(entry.runID, err)
+		return err
+	}
+	if exited {
+		if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
+			return err
+		}
+	}
+	if err := s.StopDevelopmentRun(ctx, entry.runID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[entry.runID] != entry {
+		return retainedTransitionError()
+	}
+	sc := entry.sidecar()
+	sc.EvidencePending = false
+	if err := s.persistRetainedSidecar(sc); err != nil {
+		return err
+	}
+	entry.evidencePending = false
+	entry.finalizing = false
 	return nil
 }
 
@@ -1020,6 +1081,9 @@ func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised
 		return
 	}
 	if err := s.destroyDevelopmentContainer(ctx, entry.runID, entry.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		s.mu.Lock()
+		s.markRetainedDestroyDueLocked(entry)
+		s.mu.Unlock()
 		slog.Warn("scheduler: destroy container behind closed run", "run", entry.runID, "error", err)
 		return
 	}
