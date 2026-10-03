@@ -272,11 +272,13 @@ minimum, and maximum intervals.
 The kernel caps inotify instances and watches per user, and a root server
 shares that budget with every root process inside its run containers. Each
 live run's watcher holds one instance. When the kernel refuses the instance
-or the checkout's watches, the run still launches and its watcher polls: it
-takes a snapshot every maximum interval (60 seconds) for the rest of that
+or the checkout's root watch, the run still launches and its watcher polls:
+it takes a snapshot every maximum interval (60 seconds) for the rest of that
 watch, so diff snapshots, branch updates, and the file-change activity that
-stall detection reads all arrive up to that interval late. The server logs
-the kernel's error once per affected run:
+stall detection reads all arrive up to that interval late. When only a
+subdirectory's watch is refused, the rest of the checkout stays watched and
+the same poll covers that subtree. The server logs the kernel's error for
+each affected run or directory:
 
 ```
 gitengine: cannot watch checkout for file changes; polling for diff snapshots instead run=<run-id> interval=1m0s error="gitengine: start watcher: couldn't initialize inotify: too many open files"

@@ -41,8 +41,9 @@ type diffWatch struct {
 	checkout string
 	base     string
 	watcher  *fsnotify.Watcher
-	// polling is set when the kernel refused the watcher: watcher is nil
-	// and a snapshot is attempted every MaxInterval instead.
+	// polling is set when the kernel refused the watcher or a directory
+	// watch, and makes loop attempt a snapshot every MaxInterval. watcher is
+	// nil when the checkout root could not be watched at all.
 	polling bool
 
 	// gitIgnoredDirs is the repository-relative set of ignored directories
@@ -492,7 +493,8 @@ func (w *diffWatch) reconcileWatches() error {
 				return fmt.Errorf("gitengine: watch %s: %w", path, err)
 			}
 			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
+				w.polling = true
+				slog.Warn("gitengine: diff watch cannot observe subtree; polling for its changes",
 					"run", string(w.run), "dir", path, "error", err)
 			}
 		}
@@ -532,7 +534,8 @@ func (w *diffWatch) addRecursive(root string) error {
 				return fmt.Errorf("gitengine: watch %s: %w", path, err)
 			}
 			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
+				w.polling = true
+				slog.Warn("gitengine: diff watch cannot observe subtree; polling for its changes",
 					"run", string(w.run), "dir", path, "error", err)
 			}
 		}
@@ -547,16 +550,15 @@ func (w *diffWatch) loop() {
 	timer.Stop()
 	defer timer.Stop()
 
-	// While polling both channels stay nil and never deliver, leaving the
-	// timer as the only source of snapshots.
+	// Without a watcher both channels stay nil and never deliver, leaving
+	// the timer as the only source of snapshots.
 	var fsEvents chan fsnotify.Event
 	var fsErrors chan error
-	if w.polling {
-		w.arm(timer, time.Now())
-	} else {
+	if w.watcher != nil {
 		defer func() { _ = w.watcher.Close() }()
 		fsEvents, fsErrors = w.watcher.Events, w.watcher.Errors
 	}
+	w.arm(timer, time.Now())
 
 	for {
 		select {
@@ -603,7 +605,8 @@ func (w *diffWatch) loop() {
 				w.requestIgnoreRefresh(now)
 				if err := w.addWatch(ev.Name, false); err != nil &&
 					!errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-					slog.Warn("gitengine: diff watch cannot observe new directory",
+					w.polling = true
+					slog.Warn("gitengine: diff watch cannot observe new directory; polling for its changes",
 						"run", string(w.run), "dir", ev.Name, "error", err)
 				}
 				w.arm(timer, now)
@@ -643,7 +646,7 @@ func (w *diffWatch) loop() {
 			w.arm(timer, now)
 		case <-timer.C:
 			now := time.Now()
-			if w.polling {
+			if w.polling && !now.Before(w.lastSnap.Add(w.e.cfg.MaxInterval)) {
 				w.dirty = true
 			}
 			if w.ignoreRefreshPending && !w.ignoreRefreshAt.After(now) {
@@ -696,9 +699,7 @@ func (w *diffWatch) loop() {
 // gated by headEvent and does not affect the tree-change deadline.
 func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	var deadline time.Time
-	if w.polling {
-		deadline = w.lastSnap.Add(w.e.cfg.MaxInterval)
-	} else if w.dirty {
+	if w.dirty {
 		deadline = w.lastEvent.Add(w.e.cfg.QuietPeriod)
 		if floor := w.lastSnap.Add(w.e.cfg.MinInterval); deadline.Before(floor) {
 			deadline = floor
@@ -718,6 +719,9 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	}
 	if w.ignoreRefreshPending && (deadline.IsZero() || w.ignoreRefreshAt.Before(deadline)) {
 		deadline = w.ignoreRefreshAt
+	}
+	if poll := w.lastSnap.Add(w.e.cfg.MaxInterval); w.polling && (deadline.IsZero() || poll.Before(deadline)) {
+		deadline = poll
 	}
 	if !timer.Stop() {
 		select {

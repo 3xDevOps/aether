@@ -173,3 +173,43 @@ func TestDiffWatchPollsWhenTheKernelRefusesAWatcher(t *testing.T) {
 		})
 	}
 }
+
+// TestDiffWatchPollsForASubtreeItCannotWatch covers the kernel refusing one
+// directory watch while the rest of the checkout is watched: edits confined
+// to that subtree must still reach a snapshot.
+func TestDiffWatchPollsForASubtreeItCannotWatch(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	const run = "run-watch-subtree"
+	checkout, _, err := e.CreateRunCheckout(t.Context(), "ws1", run, "main", "watch subtree", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// inotify cannot watch a directory the server cannot read. Root can read
+	// everything, so there the subtree is simply watched.
+	blind := filepath.Join(checkout, "blind")
+	if err = os.Mkdir(blind, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	if err = e.StartDiffWatch(t.Context(), "ws1", run); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(blind, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(blind, "note.txt"), []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	awaitWatchPatch(t, e, diffs, run, "+first")
+	if err = os.WriteFile(filepath.Join(blind, "note.txt"), []byte("first\nunwatched edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	awaitWatchPatch(t, e, diffs, run, "+unwatched edit")
+}
