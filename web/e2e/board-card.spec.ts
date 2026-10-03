@@ -1,9 +1,5 @@
-// What a board card lets you do with a run's branch name. The card is one
-// click target, so an element that is not deliberately raised above the
-// overlay is unreachable: its text cannot be selected and its `title` never
-// resolves, because a native tooltip walks the ancestors of whatever the
-// pointer actually hit. Only a real browser hit-tests, so this cannot be
-// checked in jsdom.
+// Only a real browser hit-tests the card's navigation overlay against its
+// selectable branch text and copy control.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -32,22 +28,7 @@ test('a card gives up its branch name without opening the run', async ({ page, a
   const card = page.getByRole('article').filter({ hasText: 'long enough' })
   await expect(card).toBeVisible()
   await card.getByRole('button', { name: /^Show details for / }).click()
-  const name = card.getByTitle(run.branch)
-
-  // The tooltip chain, resolved the way the browser resolves it: from the
-  // element under the pointer upwards. Before the chip was raised this
-  // answered null, because the pointer landed on the card's click overlay.
-  const tooltip = await name.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    let node = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
-    while (node) {
-      const title = node.getAttribute('title')
-      if (title) return title
-      node = node.parentElement
-    }
-    return null
-  })
-  expect(tooltip).toBe(run.branch)
+  const name = card.getByText(run.branch, { exact: true })
 
   await name.dblclick({ position: { x: 4, y: 4 } })
   const selected = await page.evaluate(

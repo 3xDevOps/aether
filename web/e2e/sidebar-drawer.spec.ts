@@ -23,11 +23,12 @@ test('the drawer answers the key that opened it and gives the rest back', async 
   const palette = page.locator('[data-slot="command-input"]')
   const opener = page.getByRole('banner', { name: 'Aether' }).getByRole('button', { name: 'Expand sidebar' })
   await expect(opener).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Views' })).toBeHidden()
+  await expect(page.getByRole('navigation', { name: 'Surfaces' })).toBeHidden()
   await opener.focus()
 
   await page.keyboard.press('Control+b')
   await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole('navigation', { name: 'Surfaces' })).toBeVisible()
   await page.keyboard.press('Control+b')
   await expect(drawer).toBeHidden()
   await expect(opener).toBeFocused()

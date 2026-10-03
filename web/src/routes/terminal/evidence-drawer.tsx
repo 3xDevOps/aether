@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { belowMd, useMediaQuery } from '@/lib/hooks'
 import { api, type Api } from '@/lib/api'
 import type { DevArtifact, EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
-import { CandidateReview } from '@/routes/terminal/candidate-review'
+import { useCandidateReview } from '@/routes/terminal/candidate-review'
 import { useStore } from '@/store'
 const emptyPackets: EvidencePacket[] = []
 
@@ -30,7 +30,11 @@ export interface EvidenceDrawerProps {
   onAnswer?: (fact: string) => void
 }
 
-export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: EvidenceDrawerProps) {
+export function EvidenceDrawer(props: EvidenceDrawerProps) {
+  return <EvidenceDrawerSession key={`${props.workspaceID}:${props.runID}`} {...props} />
+}
+
+function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer }: EvidenceDrawerProps) {
   const packets = useStore((state) => state.evidencePackets[runID] ?? emptyPackets)
   const nextBefore = useStore((state) => state.evidenceNextBefore[runID])
   const pagination = useStore((state) => state.evidencePagination[runID])
@@ -120,6 +124,13 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
     setOpen(true)
   }
 
+  const candidateReview = useCandidateReview({ workspaceID, currentRunID: runID, client }, open)
+  const captureRetention = useCaptureRetention({
+    runID,
+    client,
+    onRetained: (id) => { void loadList(); openPacket(id) },
+  }, open)
+
   const answerFact = (fact: string) => {
     answering.current = true
     setOpen(false)
@@ -197,18 +208,13 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-3">
-              <CandidateReview workspaceID={workspaceID} currentRunID={runID} client={client} />
+              {candidateReview}
             </div>
             <div className="border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
               Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
               Retained copies use evidence access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
             </div>
-            <CaptureRetention
-              key={`${workspaceID}:${runID}`}
-              runID={runID}
-              client={client}
-              onRetained={(id) => { void loadList(); openPacket(id) }}
-            />
+            {captureRetention}
             {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry evidence</Button>}</div>}
             {!selectedID ? (
               <div className="p-3">
@@ -344,7 +350,8 @@ interface CaptureRetentionProps {
   onRetained: (packetID: string) => void
 }
 
-function CaptureRetention({ runID, client, onRetained }: CaptureRetentionProps) {
+function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProps, active: boolean) {
+  const [expanded, setExpanded] = useState(false)
   const [captures, setCaptures] = useState<DevArtifact[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [notes, setNotes] = useState('')
@@ -356,7 +363,7 @@ function CaptureRetention({ runID, client, onRetained }: CaptureRetentionProps) 
   const [retainError, setRetainError] = useState<string>()
   const [retainedID, setRetainedID] = useState<string>()
   const [idempotencyKey, setIdempotencyKey] = useState<string>()
-  const alive = useRef(true)
+  const generation = useRef(0)
   const listRequest = useRef(0)
   const pending = useRef(false)
   const attempt = useRef<{ fingerprint: string; key: string } | null>(null)
@@ -368,7 +375,7 @@ function CaptureRetention({ runID, client, onRetained }: CaptureRetentionProps) 
     setListError(undefined)
     try {
       const result = await client.devArtifactList({ run_id: runID, after, limit: 64 })
-      if (!alive.current || request !== listRequest.current) return
+      if (!active || request !== listRequest.current) return
       setCaptures((current) => after
         ? [...new Map([...current, ...result.artifacts].map((capture) => [capture.id, capture])).values()]
         : result.artifacts)
@@ -376,25 +383,42 @@ function CaptureRetention({ runID, client, onRetained }: CaptureRetentionProps) 
       setNext(result.next)
       setTruncated(result.truncated)
     } catch (cause) {
-      if (alive.current && request === listRequest.current) setListError(errorMessage(cause))
+      if (active && request === listRequest.current) setListError(errorMessage(cause))
     } finally {
-      if (alive.current && request === listRequest.current) setLoading(false)
+      if (active && request === listRequest.current) setLoading(false)
     }
   }
 
   useEffect(() => {
-    alive.current = true
-    void loadCaptures()
+    if (active) {
+      void loadCaptures()
+    } else {
+      setExpanded(false)
+      setCaptures([])
+      setSelected([])
+      setNotes('')
+      setNext(undefined)
+      setTruncated(false)
+      setLoading(false)
+      setRetaining(false)
+      setListError(undefined)
+      setRetainError(undefined)
+      setRetainedID(undefined)
+      setIdempotencyKey(undefined)
+      pending.current = false
+      attempt.current = null
+    }
     return () => {
-      alive.current = false
+      generation.current++
       listRequest.current++
     }
-    // The parent keys this component by workspace/run; reopening reads anew.
+    // State belongs to the open evidence session, not its responsive root.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, runID])
+  }, [active, client, runID])
 
   const retain = async () => {
-    if (pending.current || !selected.length || selected.length > 64 || noteBytes > 4096) return
+    if (!active || pending.current || !selected.length || selected.length > 64 || noteBytes > 4096) return
+    const requestGeneration = generation.current
     const artifactIDs = [...selected].sort()
     const fingerprint = JSON.stringify([artifactIDs, notes])
     if (attempt.current?.fingerprint !== fingerprint) {
@@ -413,23 +437,25 @@ function CaptureRetention({ runID, client, onRetained }: CaptureRetentionProps) 
         verification_notes: notes || undefined,
         idempotency_key: key,
       })
-      if (!alive.current) return
+      if (requestGeneration !== generation.current) return
       setRetainedID(result.packet_id)
       setSelected([])
       setNotes('')
       attempt.current = null
       onRetained(result.packet_id)
     } catch (cause) {
-      if (alive.current) setRetainError(errorMessage(cause))
+      if (requestGeneration === generation.current) setRetainError(errorMessage(cause))
     } finally {
-      pending.current = false
-      if (alive.current) setRetaining(false)
+      if (requestGeneration === generation.current) {
+        pending.current = false
+        setRetaining(false)
+      }
     }
   }
 
   return (
-    <details className="border-b border-border px-3 py-2">
-      <summary className="cursor-pointer text-[12px] font-medium">Select transient captures to retain</summary>
+    <details open={expanded} className="border-b border-border px-3 py-2">
+      <summary onClick={(event) => { event.preventDefault(); setExpanded((value) => !value) }} className="cursor-pointer text-[12px] font-medium">Select transient captures to retain</summary>
       <p className="mt-2 text-[11px] text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not durable evidence.</p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground">{selected.length}/64 selected</span>

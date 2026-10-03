@@ -5,7 +5,7 @@ import { RunRoom } from '@/routes/terminal/run-room'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { applyEvent } from '@/store/sync'
 import { useStore } from '@/store'
-import type { EvidencePatchResult, Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
+import type { DevArtifact, DevArtifactRetainResult, EvidencePatchResult, Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
 import { alice, bob, evidencePacket, fakeApi, roomMessage, run, workspace } from '@/test/fixtures'
 import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { atViewport } from '@/test/viewport'
@@ -777,6 +777,61 @@ describe('Run Room', () => {
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
     expect(post.mock.calls[1][0]).toMatchObject({ body: 'same note', attachments: ['/home/alice/.aether/uploads/image.png'] })
     expect(post.mock.calls[1][0].idempotency_key).not.toBe(post.mock.calls[0][0].idempotency_key)
+  })
+
+  it('keeps capture drafts and an uncertain retention attempt across the evidence breakpoint', async () => {
+    const resize = atViewport(768)
+    const capture: DevArtifact = {
+      id: 'capture-resize', path: '/capture.png', source: 'terminal', run_id: 'run_1',
+      incarnation: 'shell-1', captured_at: '2026-08-14T10:00:00Z',
+      content_type: 'image/png', bytes: 100, width: 80, height: 24, truncated: false,
+    }
+    const first = Promise.withResolvers<DevArtifactRetainResult>()
+    const retry = Promise.withResolvers<DevArtifactRetainResult>()
+    const retain = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(retry.promise)
+    const packet = evidencePacket({ id: 'retained-after-resize', objective: 'Retained after resize' })
+    const client = fakeApi({
+      devArtifactList: vi.fn(async () => ({ artifacts: [capture], truncated: false })),
+      devArtifactRetain: retain,
+      runEvidenceGet: vi.fn(async () => ({ packet })),
+    })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByText('Select transient captures to retain'))
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Select terminal capture/ }))
+    fireEvent.change(screen.getByLabelText('Verification notes'), { target: { value: 'Observed the rendered result' } })
+
+    resize(767)
+    expect(screen.getByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', true)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', 'Observed the rendered result')
+    fireEvent.click(screen.getByRole('button', { name: 'Retain selected captures' }))
+    resize(768)
+    expect(screen.getByRole('button', { name: 'Retaining…' })).toHaveProperty('disabled', true)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('disabled', true)
+    await act(async () => { first.reject(new Error('Retention outcome uncertain')) })
+    expect(await screen.findByText('Retention outcome uncertain')).toBeDefined()
+    const key = retain.mock.calls[0][0].idempotency_key
+
+    resize(767)
+    expect(screen.getByText(`Idempotency key: ${key}`)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Retain selected captures' }))
+    expect(retain).toHaveBeenCalledTimes(2)
+    expect(retain.mock.calls[1][0]).toEqual(retain.mock.calls[0][0])
+    resize(768)
+    expect(screen.getByRole('button', { name: 'Retaining…' })).toHaveProperty('disabled', true)
+    await act(async () => { retry.resolve({ packet_id: packet.id }) })
+    expect(await screen.findByText('Retained after resize')).toBeDefined()
+    expect(screen.getByText(/Use this packet ID with the existing report/).textContent).toContain(packet.id)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', '')
+    expect(screen.getByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', false)
+    expect(retain).toHaveBeenCalledTimes(2)
+
+    fireEvent.change(screen.getByLabelText('Verification notes'), { target: { value: 'discard on close' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByText('Select transient captures to retain'))
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', '')
+    expect(await screen.findByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', false)
   })
 
   it('does not render a stale patch after selecting another packet', async () => {

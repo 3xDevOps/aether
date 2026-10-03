@@ -1028,7 +1028,10 @@ archived run's own page still offers Restore.
 
 A `Command` carrying a `confirm` field—kill, delete and both close
 actions—opens the same run-naming confirmation dialog from the header or
-palette. Cancel is initially focused. The action bar locks while a verb is
+palette. Cancel is initially focused. Palette confirmations capture the
+authenticated identity with the run and command; an identity change dismisses
+pending or visible confirmation instead of applying it to another account.
+The action bar locks while a verb is
 in flight, showing a spinner on the running primary action or on **More**.
 This also prevents a second click from racing a branch pull over SSH.
 Primary buttons use the command's `short` label and its full sentence as a
@@ -1371,8 +1374,10 @@ The dashboard-specific state wiring is:
   The host owns one occupied-lease confirmation shared by the toolbar and
   Room. Ordinary Take control never forces transfer; confirmation is bound
   to the captured control metadata, occupied lease, generation and authority.
-  A changed identity or authority invalidates it. Shell and Browser control
-  remain independent leases, not authority over the agent terminal.
+  A changed identity or authority invalidates it. Dismissal restores the
+  invoking control, or the visible terminal/scrollback if that control is no
+  longer enabled. Shell and Browser control remain independent leases, not
+  authority over the agent terminal.
 - `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
   automatic write requests. Opening a subsession therefore starts as a mirror,
   not a human takeover. `useRunTerminalSession` still gives deliberate per-run
@@ -1404,6 +1409,10 @@ The Terminal tab's single **Evidence** trigger lives in the dock header through
 `Dock.persistentActions`, including when the shell is collapsed or has no
 tabs. Room does not duplicate it. On desktop Evidence is an anchored Popover
 bounded by the terminal tabpanel; on a phone it is a modal sheet.
+Capture selections, verification notes, candidate drafts and pending mutations
+belong to the open Evidence session, so crossing the phone breakpoint does not
+discard them or create a new retry key. Explicitly closing Evidence clears
+local drafts; it does not cancel a mutation already submitted to the server.
 **Answer with fact** closes Evidence and opens/focuses a Room comment draft.
 Each fresh request object is consumed once, preserves attachments and clears
 question correlation; it never sends automatically. Source availability,

@@ -103,6 +103,25 @@ it('hides and rejoins the same incarnation without stopping or restarting it', a
   view.unmount()
 })
 
+it('returns focus to More when hiding a running shell selects an exited sibling', async () => {
+  const ended: DevTerminal = {
+    ...process, terminal_id: 'command-ended', incarnation: 'process-ended',
+    name: 'Finished command', process: { state: 'exited', exit_code: 0 },
+  }
+  vi.mocked(api.devTerminalList).mockResolvedValue({ terminals: [process, ended] })
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
+  const socket = await attach()
+  await screen.findByRole('tab', { name: /Finished command.*exited/ })
+  fireEvent.click((await terminalActions()).getByRole('menuitem', { name: 'Hide terminal' }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More terminal actions' })))
+  expect(screen.getByRole('tab', { name: /Finished command.*exited/ }).getAttribute('aria-selected')).toBe('true')
+  expect(socket.closed).toBe(true)
+  expect(StubSocket.opened).toHaveLength(1)
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  expect(api.devTerminalStop).not.toHaveBeenCalled()
+  view.unmount()
+})
+
 it('requires confirmed authority before resizing or stopping a process', async () => {
   const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   await attach()

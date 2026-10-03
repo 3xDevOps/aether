@@ -18,6 +18,7 @@ const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
 beforeEach(() => {
   useStore.setState({
+    identityKey: 'identity-a',
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
@@ -269,6 +270,97 @@ describe('command palette', () => {
     expect(api.runKill).not.toHaveBeenCalled()
     expect(api.runDelete).not.toHaveBeenCalled()
   })
+
+  it.each(['Kill run', 'Delete run'])(
+    'discards a pending %s handoff when the identity changes',
+    async (label) => {
+      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      render(<CommandPalette />)
+      overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
+      const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
+      const newTerminal = screen.getByRole('textbox', { name: 'New terminal' })
+      oldTerminal.focus()
+      fireEvent.keyDown(oldTerminal, { key: 'k', ctrlKey: true })
+      const option = await screen.findByRole('option', { name: label })
+
+      // Hold the closing focus scope's deferred handoff, not the command itself.
+      vi.useFakeTimers()
+      onTestFinished(() => { vi.useRealTimers() })
+      fireEvent.click(option)
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      act(() => useStore.setState({
+        identityKey: 'identity-b',
+        runs: { [active.id]: toRecord(run({ id: active.id, task: 'Fresh scope task' })) },
+      }))
+      newTerminal.focus()
+      await act(() => vi.runOnlyPendingTimersAsync())
+      vi.useRealTimers()
+
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      expect(document.activeElement).toBe(newTerminal)
+      expect(api.runKill).not.toHaveBeenCalled()
+      expect(api.runDelete).not.toHaveBeenCalled()
+
+      fireEvent.keyDown(newTerminal, { key: 'k', ctrlKey: true })
+      fireEvent.click(await screen.findByRole('option', { name: label }))
+      const fresh = await screen.findByRole('alertdialog')
+      expect(within(fresh).getByText(/Fresh scope task/)).toBeTruthy()
+      fireEvent.click(within(fresh).getByRole('button', { name: label }))
+      await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
+      expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+      await waitFor(() => expect(document.activeElement).toBe(newTerminal))
+    },
+  )
+
+  it.each([
+    ['Kill run', false],
+    ['Delete run', false],
+    ['Kill run', true],
+    ['Delete run', true],
+  ] as const)(
+    'invalidates a visible %s confirmation on identity change (confirm before render: %s)',
+    async (label, confirmBeforeRender) => {
+      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      render(<CommandPalette />)
+      overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
+      const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
+      const newTerminal = screen.getByRole('textbox', { name: 'New terminal' })
+      oldTerminal.focus()
+      fireEvent.keyDown(oldTerminal, { key: 'k', ctrlKey: true })
+      fireEvent.click(await screen.findByRole('option', { name: label }))
+      const stale = await screen.findByRole('alertdialog')
+      const staleAction = within(stale).getByRole('button', { name: label })
+
+      act(() => {
+        useStore.setState({
+          identityKey: 'identity-b',
+          runs: { [active.id]: toRecord(run({ id: active.id, task: 'Fresh scope task' })) },
+        })
+        // A click can reach the old handler before React commits the new scope.
+        if (confirmBeforeRender) fireEvent.click(staleAction)
+      })
+      newTerminal.focus()
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+      // Let the removed dialog finish its deferred focus restoration.
+      await act(() => {
+        const { promise, resolve } = Promise.withResolvers<void>()
+        setTimeout(resolve, 0)
+        return promise
+      })
+      expect(document.activeElement).toBe(newTerminal)
+      expect(api.runKill).not.toHaveBeenCalled()
+      expect(api.runDelete).not.toHaveBeenCalled()
+
+      fireEvent.keyDown(newTerminal, { key: 'k', ctrlKey: true })
+      fireEvent.click(await screen.findByRole('option', { name: label }))
+      const fresh = await screen.findByRole('alertdialog')
+      expect(within(fresh).getByText(/Fresh scope task/)).toBeTruthy()
+      fireEvent.click(within(fresh).getByRole('button', { name: label }))
+      await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledExactlyOnceWith(active.id))
+      expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+      await waitFor(() => expect(document.activeElement).toBe(newTerminal))
+    },
+  )
 
   it('restores navigation order after clearing or backspacing a ranked search', async () => {
     open()

@@ -62,6 +62,7 @@ export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   const toggle = useStore((s) => s.togglePalette)
+  const identityKey = useStore((s) => s.identityKey)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const context = activeWorkspace
@@ -71,6 +72,7 @@ export function CommandPalette() {
   // state lives here with the other dialog hosts.
   const [templates, setTemplates] = useState(false)
   const [confirmation, setConfirmation] = useState<{
+    identityKey: string | null
     run: RunRecord
     command: Command & { confirm: NonNullable<Command['confirm']> }
   } | null>(null)
@@ -78,6 +80,14 @@ export function CommandPalette() {
   const perform = useCommandRunner()
   const restoreFocus = useRef(true)
   const invoker = useRef<HTMLElement | null>(null)
+  const invokerIdentity = useRef(identityKey)
+
+  useEffect(() => {
+    if (pendingConfirmation.current?.identityKey !== identityKey) {
+      pendingConfirmation.current = null
+    }
+    setConfirmation((current) => current?.identityKey === identityKey ? current : null)
+  }, [identityKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,6 +131,7 @@ export function CommandPalette() {
         }}
         onOpenAutoFocus={() => {
           const target = document.activeElement
+          invokerIdentity.current = useStore.getState().identityKey
           invoker.current =
             target instanceof HTMLElement && target !== document.body ? target : null
         }}
@@ -129,12 +140,22 @@ export function CommandPalette() {
           // Keep the original invoker for cancellation, including xterm.
           if (pendingConfirmation.current) {
             event.preventDefault()
-            setConfirmation(pendingConfirmation.current)
+            const pending = pendingConfirmation.current
             pendingConfirmation.current = null
+            if (pending.identityKey === useStore.getState().identityKey) {
+              setConfirmation(pending)
+            } else {
+              invoker.current = null
+              restoreFocus.current = true
+            }
             return
           }
           const destinationOpen = useStore.getState().paletteDialog !== null || templates
-          if (!restoreFocus.current || destinationOpen) {
+          if (
+            invokerIdentity.current !== useStore.getState().identityKey ||
+            !restoreFocus.current ||
+            destinationOpen
+          ) {
             event.preventDefault()
             restoreFocus.current = true
             invoker.current = null
@@ -158,19 +179,22 @@ export function CommandPalette() {
           }}
           onTemplates={() => setTemplates(true)}
           onConfirm={(run, command) => {
-            pendingConfirmation.current = { run, command }
+            // The item may still belong to the previous render during hydration.
+            if (identityKey !== useStore.getState().identityKey) return
+            pendingConfirmation.current = { identityKey, run, command }
             toggle(false)
           }}
         />
       </CommandDialog>
       {templates && <TemplateDialog onClose={() => setTemplates(false)} />}
-      {confirmation && (
+      {confirmation && confirmation.identityKey === identityKey && (
         <RunCommandConfirmation
           run={confirmation.run}
           confirmation={confirmation.command.confirm}
           onConfirm={() => {
             const command = confirmation.command
             setConfirmation(null)
+            if (confirmation.identityKey !== useStore.getState().identityKey) return
             void perform(command)
           }}
           onClose={() => setConfirmation(null)}
@@ -178,7 +202,10 @@ export function CommandPalette() {
             event.preventDefault()
             const target = invoker.current
             invoker.current = null
-            if (target?.isConnected) target.focus()
+            if (
+              confirmation.identityKey === useStore.getState().identityKey &&
+              target?.isConnected
+            ) target.focus()
           }}
         />
       )}

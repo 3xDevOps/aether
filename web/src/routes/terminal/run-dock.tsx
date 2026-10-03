@@ -655,7 +655,8 @@ export function RunDock({ runID, onEvidenceAnswer }: { runID: string; onEvidence
                 event.preventDefault()
                 if (target === 'terminal') {
                   if (placeholder.current) placeholder.current.focus()
-                  else controllerRef.current?.focusTerminal()
+                  else if (processRunning) controllerRef.current?.focusTerminal()
+                  else moreTrigger.current?.focus()
                 }
               }}>
                 <DropdownMenuItem disabled={busy || !incarnation} onSelect={() => void screenshot()}>Screenshot</DropdownMenuItem>

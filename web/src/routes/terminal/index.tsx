@@ -170,6 +170,7 @@ function TerminalRoute({ params }: RouteProps) {
     authorityKey: string
     lease: string
   } | null>(null)
+  const takeoverInvoker = useRef<HTMLElement | null>(null)
   const canConfirmTakeover = takeover !== null &&
     roomControl !== undefined && takeover.control === roomControl &&
     takeover.authorityKey === authorityKey && takeover.lease === occupiedLease &&
@@ -180,6 +181,7 @@ function TerminalRoute({ params }: RouteProps) {
   const takeControl = () => {
     if (!steerable || state.steerDenied) return
     if (occupiedLease && roomControl && !stalePresence && !state.write) {
+      takeoverInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setTakeover({ control: roomControl, authorityKey, lease: occupiedLease })
     } else {
       setTakeover(null)
@@ -347,7 +349,14 @@ function TerminalRoute({ params }: RouteProps) {
         />
       </div>
       <Dialog open={canConfirmTakeover} onOpenChange={(open) => { if (!open) setTakeover(null) }}>
-        <DialogContent>
+        <DialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          const target = takeoverInvoker.current
+          takeoverInvoker.current = null
+          if (target?.isConnected && target !== document.body && !target.matches(':disabled')) target.focus()
+          else if (readingHistory) historyTools.current?.focus()
+          else if (controller.terminal?.element?.isConnected) controller.focusTerminal()
+        }}>
           <DialogHeader>
             <DialogTitle>Take control of this run?</DialogTitle>
             <DialogDescription>

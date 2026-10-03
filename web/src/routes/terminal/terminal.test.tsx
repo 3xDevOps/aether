@@ -267,6 +267,7 @@ describe('terminal view', () => {
     const controlButton = source === 'phone Room'
       ? within(screen.getByRole('dialog', { name: 'Run Room' })).getByRole('button', { name: 'Take control' })
       : screen.getByRole('button', { name: 'Take control' })
+    controlButton.focus()
 
     fireEvent.click(controlButton)
     expect(socket.frames()).toEqual(frames)
@@ -274,6 +275,11 @@ describe('terminal view', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Take control of this run?' })).getByRole('button', { name: 'Cancel' }))
     expect(socket.frames()).toEqual(frames)
     expect(screen.queryByRole('dialog', { name: 'Take control of this run?' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(controlButton))
+
+    fireEvent.click(controlButton)
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Take control of this run?' }), { key: 'Escape' })
+    await waitFor(() => expect(document.activeElement).toBe(controlButton))
 
     fireEvent.click(controlButton)
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Take control of this run?' })).getByRole('button', { name: 'Take control' }))
@@ -296,7 +302,9 @@ describe('terminal view', () => {
       attached(undefined, undefined, { control_generation: 7 })
       await act(async () => {})
       const socket = StubSocket.last()
-      fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+      const controlButton = screen.getByRole('button', { name: 'Take control' })
+      controlButton.focus()
+      fireEvent.click(controlButton)
       const approval = within(screen.getByRole('dialog')).getByRole('button', { name: 'Take control' })
       act(() => {
         switch (change) {
@@ -327,6 +335,7 @@ describe('terminal view', () => {
         }
       })
       expect(screen.queryByRole('dialog')).toBeNull()
+      if (change === 'lease') await waitFor(() => expect(document.activeElement).toBe(controlButton))
       fireEvent.click(approval)
       expect(socket.frames()).not.toContainEqual(expect.objectContaining({ takeover: true }))
       expect(useStore.getState().terminals.run_1.write).toBe(false)
@@ -340,6 +349,34 @@ describe('terminal view', () => {
       view.unmount()
     },
   )
+
+  it('returns a stale takeover dialog to visible scrollback when its invoker becomes disabled', async () => {
+    vi.spyOn(presentation, 'captureTerminalPresentation').mockReturnValue({
+      rows: ['<span>retained output</span>', '<span>second row</span>'],
+      cols: 80, viewportY: 0, baseY: 0, cellWidth: 8, cellHeight: 16,
+      fontFamily: 'monospace', fontSize: 12, letterSpacing: 0,
+    })
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    const opened = vi.spyOn(Terminal.prototype, 'open')
+    const view = mount({}, { member_id: bob.id })
+    const terminal = opened.mock.contexts[0] as Terminal
+    attached(undefined, undefined, { control_generation: 7 })
+    const host = terminal.element!.parentElement!
+    await waitFor(() => expect(host.hasAttribute('inert')).toBe(false))
+    fireEvent.wheel(host, { deltaY: -80 })
+    const history = await screen.findByRole('region', { name: 'Terminal scrollback' })
+    const invoker = screen.getByRole('button', { name: 'Take control' })
+    invoker.focus()
+    fireEvent.click(invoker)
+    expect(screen.getByRole('dialog', { name: 'Take control of this run?' })).toBeDefined()
+
+    act(() => useStore.getState().upsertRun(run({ member_id: bob.id, status: 'completed' })))
+    await waitFor(() => expect(document.activeElement).toBe(history))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(host.hasAttribute('inert')).toBe(true)
+    expect(host.style.visibility).toBe('hidden')
+    view.unmount()
+  })
 
   it.each(['missing', 'unavailable'] as const)('never treats %s presence as permission for takeover', async (presence) => {
     const status = Promise.withResolvers<RoomStatusResult>()
