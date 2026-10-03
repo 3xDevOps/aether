@@ -378,10 +378,14 @@ its history in place.
 
 The hosted dashboard shows these choices with a local-client/CLI handoff; it
 cannot link a path on your laptop. A collaborator can link an existing
-workspace but must ask an admin to create a new one. If source ownership
-cannot be checked with your access, linking remains available but base-push
-controls and commands are withheld. Ask an admin to verify the source and
-accepted base before launching.
+workspace and push its base when source status confirms it is local-only.
+Creating a workspace or configuring, refreshing, adopting, or disabling a
+mirror still requires an admin. All admitted members can inspect source
+status.
+
+If source ownership cannot be checked, linking remains available but base-push
+controls and commands are withheld. Resolve the displayed error before
+pushing; a configured mirror's base remains server-owned.
 
 CLI equivalent below assumes the clone's intended base is `trunk`. Replace
 the path, workspace, and `trunk` with your actual values. Replace

@@ -38,10 +38,10 @@ function expectNoPush() {
 }
 
 describe('workspace repository ownership', () => {
-  it.each(['collaborator', 'missing capability'] as const)('allows linking without offering any base push for %s ownership that cannot be read', async (access) => {
+  it.each(['admin', 'collaborator'] as const)('allows %s linking without base pushes when source status is unavailable', async (role) => {
     const client = fakeApi()
-    seed({ onboardingRepo: null, ...(access === 'collaborator' ? { info: { ...serverInfo, member: bob } } : {}) })
-    const available = access === 'collaborator' ? caps : capability({ ...localCaps, methods: ['workspace.get'] })
+    seed({ onboardingRepo: null, info: { ...serverInfo, member: { ...bob, role } } })
+    const available = capability({ ...localCaps, methods: ['workspace.get'] })
     render(<WorkspaceRepository client={client} caps={available} workspace={workspace} initialLocal />)
     fireEvent.change(screen.getByLabelText('Repository path'), { target: { value: '/src/repo' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
@@ -52,14 +52,26 @@ describe('workspace repository ownership', () => {
     expect(client.localRepoPush).not.toHaveBeenCalled()
   })
 
-  it.each([false, true])('keeps pushes withheld until ownership resolves, then honors enabled=%s', async (enabled) => {
+  it.each([
+    { role: 'admin', enabled: false },
+    { role: 'admin', enabled: true },
+    { role: 'collaborator', enabled: false },
+    { role: 'collaborator', enabled: true },
+    { role: 'viewer', enabled: false },
+    { role: 'viewer', enabled: true },
+  ] as const)('withholds $role pushes until ownership resolves, then honors enabled=$enabled', async ({ role, enabled }) => {
     const pending = Promise.withResolvers<WorkspaceMirrorResult>()
     const client = fakeApi({ workspaceMirrorStatus: vi.fn(() => pending.promise) })
-    seed()
+    seed({ info: { ...serverInfo, member: { ...bob, role } } })
     render(<WorkspaceRepository client={client} caps={caps} workspace={workspace} initialLocal />)
     expectNoPush()
     await act(async () => pending.resolve(enabled ? mirrored : { enabled: false }))
-    if (enabled) {
+    expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id)
+    if (role !== 'admin') {
+      expect(screen.queryByRole('button', { name: /source mirror/ })).toBeNull()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    }
+    if (enabled || role === 'viewer') {
       expectNoPush()
       expect(screen.getByRole('button', { name: 'Use a different repository' })).toBeDefined()
       expect(client.localRepoPush).not.toHaveBeenCalled()
@@ -70,9 +82,9 @@ describe('workspace repository ownership', () => {
     }
   })
 
-  it('keeps pushes withheld when ownership lookup fails', async () => {
+  it.each(['admin', 'collaborator'] as const)('keeps %s pushes withheld when ownership lookup fails', async (role) => {
     const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => { throw new Error('source status unavailable') }) })
-    seed()
+    seed({ info: { ...serverInfo, member: { ...bob, role } } })
     render(<WorkspaceRepository client={client} caps={caps} workspace={workspace} initialLocal />)
     await screen.findByRole('alert')
     expectNoPush()
@@ -107,10 +119,17 @@ describe('workspace repository ownership', () => {
     expect(client.localRepoPush).not.toHaveBeenCalled()
   })
 
-  it.each(['workspace', 'identity', 'connection'] as const)('does not retain confirmed local ownership after a %s transition', async (transition) => {
+  it.each([
+    { role: 'admin', transition: 'workspace' },
+    { role: 'admin', transition: 'identity' },
+    { role: 'admin', transition: 'connection' },
+    { role: 'collaborator', transition: 'workspace' },
+    { role: 'collaborator', transition: 'identity' },
+    { role: 'collaborator', transition: 'connection' },
+  ] as const)('does not retain $role local ownership after a $transition transition', async ({ role, transition }) => {
     const pending = Promise.withResolvers<WorkspaceMirrorResult>()
     const client = fakeApi({ workspaceMirrorStatus: vi.fn().mockResolvedValueOnce({ enabled: false }).mockReturnValue(pending.promise) })
-    seed()
+    seed({ info: { ...serverInfo, member: { ...bob, role } } })
     const view = render(<WorkspaceRepository client={client} caps={caps} workspace={workspace} initialLocal />)
     await screen.findByRole('button', { name: 'Push now' })
     if (transition === 'workspace') {
@@ -186,19 +205,27 @@ describe('workspace repository ownership', () => {
     expect(client.localRepoPush).not.toHaveBeenCalled()
   })
 
-  it.each(['local', 'mirrored', 'unknown'] as const)('provides an explicit server and workspace in hosted %s clone instructions', async (ownership) => {
+  it.each([
+    { role: 'admin', ownership: 'local' },
+    { role: 'admin', ownership: 'mirrored' },
+    { role: 'admin', ownership: 'unknown' },
+    { role: 'collaborator', ownership: 'local' },
+    { role: 'collaborator', ownership: 'mirrored' },
+    { role: 'collaborator', ownership: 'unknown' },
+    { role: 'viewer', ownership: 'local' },
+  ] as const)('provides safe hosted $ownership clone instructions for $role', async ({ role, ownership }) => {
     const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => ownership === 'mirrored' ? mirrored : { enabled: false }) })
-    const hostedCaps = capability({ gateway: 'remote', methods: ['*'], ws: [] })
+    const hostedCaps = capability({ gateway: 'remote', methods: ownership === 'unknown' ? ['workspace.get'] : ['*'], ws: [] })
     const selected = { ...workspace, id: 'workspace with spaces', base_branch: 'release/trunk' }
-    seed({ linkStatus: null, info: ownership === 'unknown' ? { ...serverInfo, member: bob } : serverInfo })
+    seed({ linkStatus: null, info: { ...serverInfo, member: { ...bob, role } } })
     render(<WorkspaceRepository client={client} caps={hostedCaps} workspace={selected} initialLocal />)
     if (ownership !== 'unknown') await waitFor(() => expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(selected.id))
-    if (ownership === 'mirrored') await screen.findByRole('button', { name: 'Review source mirror' })
+    if (ownership === 'mirrored') await screen.findByText('Source mirror configured.')
     const instructions = screen.getByRole('region', { name: 'Local repository' })
     await waitFor(() => {
       const commands = instructions.querySelector('pre')!.textContent!
       expect(commands).toMatch(/^aether link '[^']+' --repo \/absolute\/path\/to\/clone --workspace 'workspace with spaces'/)
-      if (ownership === 'local') {
+      if (ownership === 'local' && role !== 'viewer') {
         expect(commands.split(' &&\n')).toHaveLength(2)
         expect(commands.split(' &&\n')[1]).toBe('git -C /absolute/path/to/clone push -u aether release/trunk')
       } else {

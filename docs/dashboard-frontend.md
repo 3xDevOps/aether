@@ -2691,11 +2691,12 @@ button, because a gateway that could not answer is not the same fact as an
 account with nothing installed.
 
 Before enabling **Launch**, the step checks the selected workspace's base
-through `files.tree` where available. An administrator's mirror status must
-also have a ready, accepted commit. Missing branches, pending authorization
-and source errors remain visible with **Review repository setup** and
-**Check source again**. Empty workspace creation is not source readiness.
-The server rechecks permission and source policy at launch.
+through `files.tree` where available and reads available mirror status for
+every role. A mirrored workspace must have a ready source and an accepted
+commit. Missing branches, pending authorization and source errors remain
+visible with **Review repository setup** and **Check source again**. Empty
+workspace creation is not source readiness. The server rechecks permission
+and source policy at launch.
 
 The step's "No agent subscription yet?" note points at the CLI and stays on
 screen once a workspace is chosen; "Prove the plumbing without an agent subscription" in

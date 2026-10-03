@@ -993,20 +993,53 @@ describe('onboarding wizard', () => {
     ).toBe('true')
   })
 
-  it('keeps source mirror setup admin-only', async () => {
+  it('lets a collaborator seed a confirmed local-only workspace without mirror management', async () => {
     const client = fakeApi()
     seed({
       onboardingStep: 'Repository',
       onboardingWorkspace: workspace.id,
-      onboardingRepo: settledRepo,
+      onboardingRepo: connectedRepo,
       info: { ...serverInfo, member: { ...alice, role: 'collaborator' } },
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
-    expect(
-      screen.queryByRole('status', { name: 'Source mirror status' }),
-    ).toBeNull()
-    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
+    await screen.findByText('Local-only workspace.')
+    expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id)
+    expect(screen.queryByRole('button', { name: /source mirror/ })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByLabelText<HTMLInputElement>('Push command').value).toBe('git push -u aether main')
+    fireEvent.click(await screen.findByRole('button', { name: 'Push now' }))
+    await waitFor(() => expect(client.localRepoPush).toHaveBeenCalledWith(workspace.id))
+    expect(await screen.findByText(/Pushed/)).toBeDefined()
+    expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+  })
+
+  it('lets a collaborator link and continue on a mirrored workspace without offering a base push', async () => {
+    const client = fakeApi({
+      workspaceMirrorStatus: vi.fn(async () => ({ enabled: true, status: 'pending' as const, source_url: checkoutOrigin, branch: 'main' })),
+    })
+    seed({
+      onboardingStep: 'Repository',
+      onboardingWorkspace: workspace.id,
+      info: { ...serverInfo, member: { ...alice, role: 'collaborator' } },
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    await screen.findByText('Source mirror configured.')
+    fireEvent.change(await screen.findByLabelText('Repository path'), { target: { value: '/src/repo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
+    await screen.findByRole('button', { name: 'Use a different repository' })
+    expect(client.localLinkRepo).toHaveBeenCalledWith('/src/repo', workspace.id)
+    expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
+    expect(screen.queryByLabelText('Push command')).toBeNull()
+    expect(screen.queryByRole('button', { name: /source mirror/ })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(client.localRepoPush).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
   })
 
   it('keeps source mirror setup behind its capability', async () => {
@@ -1254,23 +1287,50 @@ describe('onboarding wizard', () => {
     expect(screen.queryByRole('button', { name: 'Push now' })).toBeNull()
   })
 
-  it('keeps first-run launch disabled until an unaccepted source is repaired', async () => {
+  it.each(['admin', 'collaborator'] as const)('keeps %s first-run launch disabled until an unaccepted source is repaired', async (role) => {
     const client = fakeApi({
       workspaceMirrorStatus: vi.fn()
         .mockResolvedValueOnce({ enabled: true, status: 'pending', last_error: 'source key is not installed' })
         .mockResolvedValue({ enabled: true, status: 'ready', accepted_commit: workspaceTip }),
     })
     const review = vi.fn()
-    seed({ onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' } })
+    seed({ info: { ...serverInfo, member: { ...alice, role } }, onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' } })
     render(<FirstRunStep client={client} workspace={workspace} onBackToAgents={vi.fn()} onBackToRepository={review} />)
     await screen.findByText('source key is not installed')
     expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
+    expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id)
+    expect(client.runLaunch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Review repository setup' }))
     expect(review).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: 'Check source again' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(useStore.getState().route.params.runId).toBe('run_1'))
+  })
+
+  it('keeps collaborator launch disabled while source status is pending or fails, then allows a confirmed local-only source', async () => {
+    const pending = Promise.withResolvers<{ enabled: boolean }>()
+    const client = fakeApi({
+      workspaceMirrorStatus: vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue({ enabled: false }),
+    })
+    seed({
+      info: { ...serverInfo, member: { ...alice, role: 'collaborator' } },
+      onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' },
+    })
+    render(<FirstRunStep client={client} workspace={workspace} onBackToAgents={vi.fn()} />)
+
+    await waitFor(() => expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id))
+    expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
+    await act(async () => pending.reject(new Error('source status unavailable')))
+    await screen.findByText('source status unavailable')
+    expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
+    expect(client.runLaunch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Check source again' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    await waitFor(() => expect(client.runLaunch).toHaveBeenCalledWith({
+      workspace_id: workspace.id, task: 'Inspect the repository', harness: 'claude',
+    }))
   })
 
   it('drops a push answer that lands after the clone was re-pointed', async () => {

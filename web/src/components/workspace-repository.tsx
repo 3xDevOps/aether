@@ -24,8 +24,8 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
   const epoch = useStore((state) => state.connectionEpoch)
   const isAdmin = useIsAdmin()
   const [local, setLocal] = useState(initialLocal)
-  const canMirror = isAdmin && caps.hasMethod('workspace.mirror.status')
-  const context = JSON.stringify([identity, epoch, workspace.id, canMirror])
+  const canReadSource = caps.hasMethod('workspace.mirror.status')
+  const context = JSON.stringify([identity, epoch, workspace.id, canReadSource, isAdmin])
   const scope = useRef({ context, client, generation: 0 })
   if (scope.current.context !== context || scope.current.client !== client) {
     scope.current = { context, client, generation: scope.current.generation + 1 }
@@ -44,7 +44,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       <h2 className="text-base font-semibold">Repository for {workspace.name}</h2>
       <p className="text-sm text-muted-foreground">Workspace <code>{workspace.id}</code> · base branch <code>{workspace.base_branch}</code>. Runs need this branch on the server, not just an empty workspace.</p>
     </div>
-    {canMirror ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} onStatusChange={onStatusChange} /> : <p className="text-sm text-muted-foreground">Source ownership cannot be checked with your current access. Linking remains available, but base pushes are unavailable until local-only ownership is confirmed. An administrator manages remote sources and candidate adoption in Source control; ask them to verify the source and accepted base before launching.</p>}
+    {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-sm text-muted-foreground">Source ownership cannot be checked because this gateway does not offer source status. Linking remains available, but base pushes are unavailable until local-only ownership is confirmed. An administrator manages remote sources and candidate adoption in Source control; ask them to verify the source and accepted base before launching.</p>}
     <div className="space-y-2 border-t pt-3">
       <h3 className="text-sm font-semibold">Local clone</h3>
       <p className="text-xs leading-5 text-muted-foreground">Link or relink a clone to this workspace. Linking changes its aether remote, not its origin or history. A mirrored base stays server-owned.</p>

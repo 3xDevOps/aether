@@ -352,7 +352,7 @@ export function RepoStep({
             : 'Linking does not publish to the upstream or grant credentials.'}
         </p>
       </div>
-      {mirrored && <p className="text-sm text-muted-foreground">This workspace has a server-owned source. Link the clone to pull run branches; use Source control to verify or adopt the base instead of pushing it.</p>}
+      {mirrored && <p className="text-sm text-muted-foreground">This workspace has a server-owned source. Link the clone to pull run branches; {role === 'admin' ? 'use Source control to verify or adopt the base instead of pushing it.' : 'ask an administrator to verify or adopt the base in Source control instead of pushing it.'}</p>}
       {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
       {remembered && !connected && <p className="text-sm text-muted-foreground">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
       {!connected && (

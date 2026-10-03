@@ -613,7 +613,7 @@ commit captured at launch.
 | `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
 | `aether github connect` | Finish connecting GitHub after `gh auth login` in your environment terminal: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
 | `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the checkout Origin run checkouts use for pushing review branches. Needs the push capability. |
-| `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admin-only source-mirror lifecycle. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
+| `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
 

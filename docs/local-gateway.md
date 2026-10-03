@@ -594,7 +594,7 @@ unavailable owned source remains the server's protocol error.
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
-| `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` - whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
+| `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
 | `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key","known_hosts":"..."}`) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning |
 | `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
 | `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7}`) | `WorkspaceMirrorResult` after explicitly accepting the retained candidate |
@@ -1046,9 +1046,12 @@ the server snapshot from loading.
   authenticated identity. Closing that form or changing context invalidates
   late UI updates without replaying the mutation. After linking, the dashboard
   reads authoritative `link.status` before showing the connected clone.
-- `workspace.mirror.*` methods are admin-only. `configure` receives the
-  verified source URL, branch, auth mode, and (for generic SSH) the
-  `known_hosts` file contents; the server generates and stores any deploy key.
+- `workspace.mirror.status` requires read access; admitted collaborators and
+  viewers can inspect the existing public result without changing a mirror.
+  `configure`, `refresh`, `adopt`, and `disable` remain admin-only.
+  `configure` receives the verified source URL, branch, auth mode, and (for
+  generic SSH) the `known_hosts` file contents; the server generates and stores
+  any deploy key.
   Results expose source, branch, status, observed/accepted commits, check
   times, and the public key only. The dashboard's Workspace **Source control**
   panel calls these same methods.

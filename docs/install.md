@@ -1168,13 +1168,12 @@ aether workspace mirror refresh --workspace myproject
 aether workspace mirror status --workspace myproject
 ```
 
-In local dashboard onboarding, after Repository pushes or reconciles the base,
-administrators see an optional inline source-mirror entry when capability
-`workspace.mirror.status` exists. It opens the same **Workspace > Source
-control** flow and is prefilled from checkout **Origin** when available.
-Skipping it leaves the workspace's current source settings unchanged. If no
-source mirror is configured, it remains local-only; configure it later from
-**Workspace > Source control**.
+In **Onboarding → Repository** and repository settings, admitted members can
+read source status when the server advertises `workspace.mirror.status`.
+Collaborators can push a confirmed local-only base; mirrored or unconfirmed
+bases do not offer a push. Administrators can open the **Workspace > Source
+control** management flow, prefilled from checkout **Origin** when available.
+Skipping configuration leaves the current source settings unchanged.
 
 Use `--auth deploy-key` for a private GitHub HTTPS source; Aether generates a
 key and prints only its public half plus
