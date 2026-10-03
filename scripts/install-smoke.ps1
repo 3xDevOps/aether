@@ -74,6 +74,19 @@ function Wait-DesktopSidecar([Diagnostics.Process]$Process) {
     } while ($true)
 }
 
+function Write-ShellDiagnostics {
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    $explorers = @(Get-Process -Name explorer -ErrorAction SilentlyContinue)
+    $sameSession = @($explorers | Where-Object { $_.SessionId -eq $sessionId })
+    Write-Host "Shell session: PID=$PID; SessionId=$sessionId; SESSIONNAME=$env:SESSIONNAME; UserInteractive=$([Environment]::UserInteractive); ExplorerCount=$($explorers.Count); SameSessionExplorerCount=$($sameSession.Count)"
+    foreach ($explorer in ($explorers | Select-Object -First 8)) {
+        Write-Host "Explorer: PID=$($explorer.Id); SessionId=$($explorer.SessionId); MainWindowHandle=$($explorer.MainWindowHandle)"
+    }
+    Write-Host "Shell paths: LOCALAPPDATA=$env:LOCALAPPDATA; Programs=$programs; Target=$desktop; FixtureRoot=$root"
+    Write-Host "AppsFolder: Count=$catalogueCount; AetherCandidateCount=$candidateCount; Showing=$($candidates.Count)"
+    foreach ($candidate in $candidates) { Write-Host "AppsFolder candidate: $candidate" }
+}
+
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
     $hadShortcut = Test-Path -LiteralPath $shortcut
@@ -84,7 +97,6 @@ try {
     $shortcutCaptured = $true
     $shortcutRestored = $false
     if ($hadShortcut) { Remove-Item -LiteralPath $shortcut -Force }
-    $shell = New-Object -ComObject Shell.Application
     $shortcutShell = New-Object -ComObject WScript.Shell
     $mirror = Join-Path $root 'release'
     New-Item -ItemType Directory -Path $mirror | Out-Null
@@ -124,9 +136,9 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     $env:LOCALAPPDATA = Join-Path $root 'Local'
-    # Keep the native shell identity: Known Folder expansion uses USERPROFILE.
-    # APPDATA/HOME also stay real. These overrides isolate direct child processes;
-    # Explorer-mediated activation may instead use the disposable hosted profile.
+    # Only installation uses a redirected LOCALAPPDATA. Restore it before
+    # creating Shell.Application so shell caches use the real hosted profile.
+    # Keep USERPROFILE, APPDATA, and HOME real throughout.
     $env:AETHER_CONFIG_DIR = Join-Path $root 'config'
     $env:npm_config_cache = Join-Path $root 'npm-cache'
     $env:ELECTRON_CACHE = Join-Path $root 'electron-cache'
@@ -172,6 +184,9 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         throw 'The build did not provision its private Node runtime.'
     }
 
+    [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $saved['LOCALAPPDATA'], 'Process')
+    $shell = New-Object -ComObject Shell.Application
+
     # AppsFolder's open verb has no argument parameter. Persist only the data
     # isolation flag on the fixture shortcut before the shell catalogues it;
     # leave its installed executable target and working directory unchanged.
@@ -188,20 +203,31 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $discovered = $null
     do {
         $candidates = @()
+        $candidateCount = 0
+        $catalogueCount = 0
         $appsFolder = $shell.NameSpace('shell:AppsFolder')
-        if ($null -eq $appsFolder) { throw 'The shell AppsFolder catalogue is unavailable.' }
-        foreach ($item in $appsFolder.Items()) {
-            if ($item.Name -inotlike '*Aether*') { continue }
+        if ($null -eq $appsFolder) {
+            Write-ShellDiagnostics
+            throw 'The shell AppsFolder catalogue is unavailable.'
+        }
+        $items = $appsFolder.Items()
+        $catalogueCount = $items.Count
+        foreach ($item in $items) {
             $target = [string]$item.ExtendedProperty('System.Link.TargetParsingPath')
-            $candidates += "Name=$($item.Name); Path=$($item.Path); System.Link.TargetParsingPath=$target"
-            if ($item.Name -ieq 'Aether' -and [Environment]::ExpandEnvironmentVariables($target) -ieq $desktop) {
+            if ($item.Name -inotlike '*Aether*' -and $target -inotlike '*Aether*') { continue }
+            $candidateCount++
+            if ($candidates.Count -lt 10) {
+                $appId = [string]$item.ExtendedProperty('System.AppUserModel.ID')
+                $candidates += "Name=$($item.Name); Path=$($item.Path); AppUserModelID=$appId; System.Link.TargetParsingPath=$target"
+            }
+            if ($null -eq $discovered -and $item.Name -ieq 'Aether' -and [Environment]::ExpandEnvironmentVariables($target) -ieq $desktop) {
                 $discovered = $item
-                break
             }
         }
         if ($null -ne $discovered) { break }
         if ([DateTime]::UtcNow -ge $deadline) {
-            throw ("Aether was not discovered in the shell AppsFolder catalogue for target $desktop. Programs=$programs. Candidates: " + ($candidates -join ' | '))
+            Write-ShellDiagnostics
+            throw "Aether was not discovered in the shell AppsFolder catalogue for target $desktop."
         }
         Start-Sleep -Milliseconds 250
     } while ($true)
@@ -236,7 +262,10 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
             $catalogueApp = $launched[0]
             break
         }
-        if ([DateTime]::UtcNow -ge $deadline) { throw 'The AppsFolder open verb did not launch the installed desktop main window.' }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            Write-ShellDiagnostics
+            throw 'The AppsFolder open verb did not launch the installed desktop main window.'
+        }
         Start-Sleep -Milliseconds 200
     } while ($true)
     $catalogueChild = Wait-DesktopSidecar $catalogueApp

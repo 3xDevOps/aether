@@ -137,15 +137,6 @@ foreach ($name in $names) {
         $failures += "${name}: scan failed: $_"
     }
 }
-if ($failures.Count -gt 0) {
-    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'MpCmdRun.log'
-    Write-Host "MpCmdRun diagnostics: $logPath (last 200 lines)"
-    try {
-        Get-Content -LiteralPath $logPath -Tail 200 | ForEach-Object { Write-Host $_ }
-    } catch {
-        Write-Host "Could not read MpCmdRun diagnostics at ${logPath}: $_"
-    }
-}
 # A successful native exit code can mean that remediation succeeded. It does
 # not clear a detection, and both files must still match their original bytes.
 foreach ($name in $names) {
@@ -166,6 +157,15 @@ $newDetections = @(Get-MpThreatDetection | Where-Object { [string]$_.DetectionID
 if ($newDetections.Count -gt 0) {
     Write-Evidence ('```json' + "`n" + ($newDetections | ConvertTo-Json -Depth 6) + "`n" + '```')
     $failures += "Defender recorded $($newDetections.Count) new detection(s), including any already remediated."
+}
+if ($failures.Count -gt 0) {
+    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'MpCmdRun.log'
+    Write-Host "MpCmdRun diagnostics: $logPath (last 200 lines)"
+    try {
+        Get-Content -LiteralPath $logPath -Tail 200 | ForEach-Object { Write-Host $_ }
+    } catch {
+        Write-Host "Could not read MpCmdRun diagnostics at ${logPath}: $_"
+    }
 }
 Assert-Protection
 if ($failures.Count -gt 0) {

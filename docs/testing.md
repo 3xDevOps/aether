@@ -155,8 +155,12 @@ The smoke refuses to run unless both `GITHUB_ACTIONS=true` and
 `RUNNER_ENVIRONMENT=github-hosted`, before changing files or registry state.
 It installs and reinstalls into an isolated app/config tree and verifies the
 unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
-`APPDATA` so child-process Known Folder expansion matches the shell; only
-`LOCALAPPDATA`, Aether configuration, and npm/Electron build caches are redirected.
+`APPDATA` so child-process Known Folder expansion matches the shell.
+`LOCALAPPDATA` is redirected only through installation and the private-Node
+check, then restored before creating `Shell.Application`, querying AppsFolder,
+or activating either launch. The captured installed paths, Aether configuration,
+npm/Electron build caches, and explicit Electron user-data directory remain
+isolated; restoring the environment does not move the installed executables.
 Unlike the unit test's injected destination, it resolves the real current-user
 Programs Known Folder through `Environment.SpecialFolder.Programs`, backs up any
 existing `Aether.lnk`, and restores it in `finally` before deleting the temporary
@@ -166,9 +170,13 @@ For each install, the smoke inspects the real shortcut's executable target and
 working directory. It then waits up to 90 seconds for `Shell.Application`'s
 `shell:AppsFolder` catalogue to enumerate Aether with the installed executable
 as its link target, rather than accepting a filename or display-name match.
-Timeout diagnostics include the Programs path and candidate shell item names,
-paths, and targets. There are then two launches, with the caller's pre-install
-`PATH` and no `AETHER_BIN` override:
+Discovery and activation timeout diagnostics include the catalogue item count,
+the total number of Aether candidates, and at most ten candidate names, paths,
+AppUserModelIDs, and targets. They also report the real `LOCALAPPDATA`, Programs
+and fixture paths, the caller's session and interactive status, and at most eight
+Explorer process IDs/session IDs with same-session and total Explorer counts.
+There are then two launches, with the caller's pre-install `PATH` and no
+`AETHER_BIN` override:
 
 1. The smoke invokes `InvokeVerb('open')` on the exact discovered AppsFolder item.
    Because this verb has no argument parameter, the fixture shortcut temporarily
