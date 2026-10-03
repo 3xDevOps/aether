@@ -184,6 +184,10 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 	} else if !errors.Is(findErr, runtime.ErrNotFound) {
 		return "", "", findErr
 	}
+	// Resolve /proc/self/exe before another process interprets the mount source.
+	if err = checkCoordinationMounts(spec.Mounts[1:]); err != nil {
+		return "", "", fmt.Errorf("resolve updater helper: %w", err)
+	}
 	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
 		return "", "", err
