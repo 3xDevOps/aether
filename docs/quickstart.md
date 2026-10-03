@@ -1,18 +1,29 @@
 # Quickstart
 
-Zero to a finished agent run in about ten minutes, solo.
+Aether runs coding agents on a **headless Ubuntu server** with Docker and git.
+Repository fetches, builds, and run tools execute there; the server needs no
+desktop session.
 
-The standard deployment is a **headless Ubuntu server** with Docker and git.
-Agents, repository fetches, builds, and run tools execute there; the server
-does not need a desktop session.
+Choose where your code comes from:
 
-You can use its authenticated hosted dashboard/API from another machine with
-no local project clone or toolchain. Administrators can seed a repository with
-[remote import](#remote-only-import-no-local-clone) instead of a local push.
-The local-client path below is also available on Linux, macOS, or Windows.
-That path needs git for local linking/pushing. How your machine reaches the
-server is [step 3](#3-link-from-your-machine): through an edge with a GitHub
-sign-in, over a tailnet, or by SSH address with a key.
+| Starting point | Onboarding path |
+| --- | --- |
+| Public remote repository | [Import public HTTPS](#public-remote-repository); no local clone needed. |
+| Private remote repository | [Import with a read-only deploy key](#private-remote-repository); a repository administrator must install the key. |
+| Existing local clone | [Create or link a workspace](#local-clone) from the desktop app, `aether gui`, or CLI on the computer holding the clone. |
+
+A **workspace** holds one repository, its base branch, and its runs. A **run**
+is one agent execution with its own container, git worktree, and branch.
+Creating a workspace or managing a remote source requires an Aether admin.
+Collaborators can link a clone to an existing workspace, push a local-only
+base, configure their own agents, and launch runs; viewers cannot.
+
+If a server is already available, open its authenticated dashboard and start
+with [workspace onboarding](#4-create-a-workspace). Otherwise install and link
+below. A local client works on Linux, macOS, or Windows and needs git for
+clone linking and pushing. The hosted dashboard can import remote repositories
+and browser-selected configuration, but cannot read an arbitrary path on your
+computer or use its Git/SSH identity.
 
 ---
 
@@ -48,10 +59,19 @@ Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevO
 ```
 
 It installs the CLI and desktop app by default, without administrator access.
-Use `-Role none` for the CLI alone. Desktop setup requires a release containing
-the Windows installer fixes (`v0.4.0-alpha.6` or newer); the installer refuses
-older desktop builds. See [install.md](install.md#windows-install-script)
-for script-policy requirements, version selection, upgrades, and manual installation.
+Use `-Role none` for the CLI alone; that does not create a desktop shortcut.
+Desktop setup requires `v0.5.1-alpha.4` or newer for the Windows build and
+recorded-CLI fixes; older desktop builds are refused. The desktop stays in
+`%LOCALAPPDATA%\Programs\Aether Desktop`, separate from the CLI. **Aether** is
+registered in the current user's Windows Programs known folder, including
+folder redirection, not a guessed path under `%APPDATA%`. See
+[install.md](install.md#windows-install-script) for fresh installs, reinstalls,
+script policy and version selection, and
+[shortcut diagnosis](install.md#windows-start-menu-shortcut-diagnosis) to
+inspect the real `Aether.lnk` and repair it with the explicit installed CLI.
+Unsigned downloads and locally built desktops can still trigger SmartScreen
+or Defender; inspect the actual warning/publisher and organization policy
+rather than bypassing protection.
 
 ## 2. Start the server
 
@@ -177,275 +197,258 @@ Then tell Aether who to put on your commits:
 aether member git --name "Ada Lovelace" --email ada@example.com
 ```
 
-Every commit an agent makes in your runs, and every commit Aether makes for
-them, is authored as that name and address, so branches you merge upstream
-credit your account. Without it the fallback is your display name at
-`<member-id>@aether.local`, which maps nowhere. The local dashboard's onboarding
-wizard asks for the same two fields in its **Git identity** step, right after
-Link, prefilled from this machine's `git config user.name` and `user.email`.
-`aether member git` with no flags shows what is set.
+Commits Aether makes for your runs use that name and address. Without it, the
+fallback is your display name at `<member-id>@aether.local`. Both dashboards
+ask for these fields in onboarding's **Git identity** step; only the local
+gateway can prefill them from this computer's `git config`. Change them later
+at **Agents → Git commit identity**, or inspect them with `aether member git`.
+Author identity is not repository authentication.
 
 ## 4. Create a workspace
 
-A **workspace** is the repo plus a server-owned scope for runs and shells.
-Creating one is an admin operation. Every container for a member starts from
-that member's saved image, or the server's standard image when none is saved:
+In the dashboard, open **Onboarding**. After **Git identity**, the **Workspace**
+step offers **Import repository** and **Create from local clone** under
+**Add a workspace**, or lets you choose an existing workspace. The local
+dashboard starts with **Link**. The authenticated hosted dashboard opens
+onboarding for new members even when shared workspaces already exist, and
+skips that machine-local step.
+
+For another workspace, open **Manage workspaces** from the navigation,
+workspace selector, or command palette (**Ctrl/Cmd+K**). The same public,
+private, and local choices remain available. On an existing **Workspace**
+page, use **Repository settings** or **Link local repository**; admins can
+also reach **Repository settings** from **Workspace settings**. **Add another workspace**
+returns to management, and **Set up agents / first run** resumes onboarding
+for the selected workspace.
+
+The **base branch** is the branch new runs start from. Use the repository's
+actual branch, not `main` merely because the form defaults to it. Creating an
+empty workspace does not upload code.
+
+Keep these settings separate:
+
+- **Source authentication** lets the server read an upstream branch into its
+  **source mirror**. A deploy key is read-only and is not your Git/`gh` login.
+- **Checkout Origin** is the publishing destination placed in new run
+  checkouts. Remote import never infers it from the source URL; supply a
+  writable repository or fork, or leave it blank.
+- **Native Git/`gh` credentials** and upstream write permission let a run push
+  and open a PR. Set them up in your environment terminal
+  ([Connect GitHub](#connect-github)). Git author identity and agent vendor
+  login are separate again.
+
+### Public remote repository
+
+In **Onboarding → Workspace** or **Manage workspaces**:
+
+1. Choose **Import repository** under **Public or private remote repository**.
+2. Fill **Workspace name**, a credential-free HTTPS **Source URL**, and the
+   actual **Source / base branch**. Set **Checkout Origin (optional)**
+   separately if runs should publish upstream.
+3. Choose **Public HTTPS** under **Source authentication**, then **Import
+   repository**. The server creates the workspace and fetches the source.
+4. Read **Import outcome**, then **Continue to Source control**. Review the
+   observed commit and generation, choose **Adopt candidate**, and confirm.
+   The first fetched candidate is not automatically accepted.
+
+CLI alternative for a new workspace; replace the repository and branch:
 
 ```sh
-aether workspace init myproject
-```
-
-Use `--base <branch>` when runs should branch from something other than
-`main`. The dashboard's create-workspace form uses the same command. Install
-tools in the environment terminal, then press **Save environment** so runs get
-them too; see [environments.md](environments.md).
-
-Now point your local clone at it and seed the repo:
-
-```sh
-aether link <server-host>:2222 --repo ~/code/myproject   # or: aether link <server id> --repo ...
-cd ~/code/myproject
-git push -u aether main
-```
-
-`link --repo` adds an `aether` git remote - a normal git remote over the same
-SSH port, no separate credentials. With multiple workspaces, add
-`--workspace <name-or-id>` (`aether workspace list` shows them). The push
-sends the workspace's base branch; replace `main` if you created the
-workspace with `--base`.
-
-The first `link --repo` also reads your clone's own `origin` URL and records
-it as the workspace's **checkout Origin**, printing `workspace origin ->
-<url>`. Every run checkout created afterwards gets an `origin` remote pointing
-there, so an agent in a run can `git push origin <branch>` and open a pull
-request once you have connected GitHub ([step 5](#5-set-up-your-agent)). The
-local dashboard's Repository step does the same. Recording happens only when
-you may push - a viewer may not - and your clone's origin is one the server
-accepts; otherwise the link still succeeds, prints no `workspace origin ->`
-line, and records nothing. `aether workspace origin` shows what was recorded
-and takes a URL or `--clear` to change it. A `github.com` origin you cloned
-over SSH is recorded in its `https://github.com/...` form, because that is the
-form a run can push to; [teams.md](teams.md#workspaces) has the rule for other
-hosts.
-
-This checkout Origin is a push destination, not the source used to refresh a
-workspace base. A workspace is local-only by default. To have Aether fetch a
-protected base from an upstream repository, configure the optional source
-mirror below.
-
-In the local dashboard's onboarding wizard, the Repository step does both for
-you. Point it at your clone: type the absolute path, or, in the desktop app,
-pick it with **Choose folder**. The step adds the remote, then its
-**Push now** button compares your clone
-with the workspace and pushes when there is something to push, keeping git's
-own output on the page. It runs the same push with `--no-follow-tags`, so the
-command above also sends your tags if you have `push.followTags` set. The step
-remembers the repository it connected, so walking back to it shows the
-connected clone and its push result with **Use a different repository** to
-re-point, not an empty form.
-
-A fresh workspace has no branch there yet, so the button pushes. A member
-joining a workspace someone else already seeded gets a report instead of a
-failed push: the same commit on both sides; the workspace ahead of the clone,
-where a **Fast-forward my clone** button catches the clone up, fast-forward
-only; or the two diverged, where the wizard prints the git commands to resolve
-it by hand. A fast-forward writes no merge commit and never rewrites your own
-commits, and nothing here force-pushes. See
-[teams.md](teams.md#workspaces) for that case.
-
-For optional source-mirror setup, see [the detailed instructions](#optional-configure-source-control).
-
-### Remote-only import (no local clone)
-
-In the authenticated dashboard, open the command palette (**Ctrl/Cmd+K**),
-choose **Manage workspaces**, then **Import repository** as an administrator.
-Enter **Workspace name**, **Source URL** and **Source / base branch**.
-Set **Checkout Origin (optional)** to your writable repository
-or leave it blank; it is never inferred from the source. Choose **Public HTTPS**
-or **Read-only deploy key** under **Source authentication**. Generic SSH sources
-also need verified **Pinned known_hosts** contents.
-
-Click **Import repository**, then inspect **Import outcome**: the retained
-workspace ID, source state, observed candidate, generation and accepted base.
-Click **Continue to Source control** to use the existing **Workspace Source**
-dialog. For deploy-key sources, copy the generated key, install it read-only
-at the source, then **Verify** / **Refresh**; do not reconfigure after installing
-the key. Review the observed SHA and generation, click **Adopt candidate**,
-and confirm the adoption. A fetched initial candidate is not automatically
-accepted. The same flow remains available under **Workspace → Source control**.
-
-If import creates the workspace but configuration or fetch fails, the dialog
-keeps **Created: yes**, the workspace ID and the real error. Repair or refresh
-that retained workspace in Source control rather than importing a duplicate.
-If the response is lost, close the dialog and inspect the refreshed workspace
-list before considering another import.
-
-The administrator endpoint is also `workspace.import`, available through the
-SSH control channel or `POST /api/v1/workspace.import` on either authenticated
-gateway. Collaborators cannot import workspaces. The commands below use the
-server-hosted HTTPS gateway from the administrator's tailnet device; set
-`AETHER_URL` to the dashboard URL printed by server setup. Authentication is
-the existing Tailscale identity, not a GitHub token.
-
-```sh
-export AETHER_URL='https://your-server.your-tailnet.ts.net:8443'
-curl --fail-with-body "$AETHER_URL/api/v1/workspace.import" \
-  -H 'Content-Type: application/json' \
-  --data '{"name":"myproject","environment":{},"source_url":"https://github.com/acme/myproject.git","base_branch":"main","origin":"https://github.com/my-account/myproject.git","auth":"public"}'
-```
-
-The server creates the workspace and its bare repository, configures the
-existing read-only mirror, and fetches immediately. No client clone, hidden
-push, or server restart is needed. In the response, retain `workspace.id`
-and inspect `mirror.observed_commit`, `mirror.generation`, and `mirror.status`.
-The first candidate remains **pending** with no `accepted_commit`: fetching
-is not approval. After reviewing the candidate, explicitly adopt the returned
-generation on that same workspace:
-
-```sh
-curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.adopt" \
-  -H 'Content-Type: application/json' \
-  --data '{"workspace_id":"<returned-workspace-id>","generation":1}'
-```
-
-Replace `1` with the actual returned generation. Adoption supplies the base
-for new runs. Later upstream rewrites never silently replace an accepted base;
-they require another explicit adoption through the existing mirror flow.
-
-For a private repository, send `"auth":"deploy-key"` instead. Import returns
-**pending** and `mirror.public_key` without attempting a fetch before you have
-installed that key. Add it to the source repository as a **read-only deploy
-key** (on GitHub: **Settings > Deploy keys > Add deploy key**, leave **Allow
-write access** off). Generic SSH sources also require pinned `known_hosts`
-contents in the request, as described below. Then verify and inspect the
-candidate before adopting:
-
-```sh
-curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.refresh" \
-  -H 'Content-Type: application/json' \
-  --data '{"workspace_id":"<returned-workspace-id>"}'
-curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.status" \
-  -H 'Content-Type: application/json' \
-  --data '{"workspace_id":"<returned-workspace-id>"}'
-```
-
-Use refresh, not configure, after installing the key; reconfiguration rotates
-the key and generation. Public authentication only accepts credential-free
-HTTPS; deploy-key authentication follows the same source and host-trust rules
-as ordinary mirror configuration.
-
-**Partial success matters:** after workspace creation the import response
-keeps `created:true`, `workspace.id`, the available mirror/key state, and an
-`error` string if configuration or fetch failed. An HTTP success alone does
-not mean the source fetched. Missing branches and empty upstream repositories
-return fetch failures, not an invented initial commit. Keep the workspace and
-repair its mirror with `workspace.mirror.configure` or
-`workspace.mirror.refresh`; do not submit another import. If the connection
-drops before the response arrives, inspect `workspace.list` before deciding
-whether creation is needed.
-
-The explicit `origin` is the checkout's push destination; it is **not** derived
-from `source_url`. Set it to `""` to leave the workspace without an external
-push destination. GitHub SSH origins are normalized to HTTPS just as with
-`workspace.origin`. Mirror deploy keys only read source: they neither grant
-push permission nor configure a run's GitHub authentication. Publishing uses
-the native Git/`gh` credentials in the home the run's container mounts (its
-launcher's, also on a shared agent account and after a handoff), independently of the mirror and of local repository linking.
-
-### Optional: configure source control
-
-An administrator can make the workspace's base a read-only mirror of an
-upstream branch. Configure it from the CLI or local dashboard after a local
-push, or on a fresh workspace without one. A fresh repository's first fetched
-candidate needs explicit adoption as in [remote import](#remote-only-import-no-local-clone):
-
-```sh
-# Public GitHub or any public HTTPS repository:
+aether workspace init myproject --base main
 aether workspace mirror configure --workspace myproject \
   --source https://github.com/acme/myproject.git --branch main --auth public
-
-# Private GitHub: Aether generates a read-only deploy key.
-aether workspace mirror configure --workspace myproject \
-  --source https://github.com/acme/private.git --branch main --auth deploy-key
-
-# Generic SSH: provide a known_hosts file; do not use unverified TOFU.
-aether workspace mirror configure --workspace myproject \
-  --source ssh://git.example.com/acme/myproject.git \
-  --branch main --auth deploy-key --known-hosts-file ~/.ssh/known_hosts
-```
-
-`--branch` defaults to the workspace base branch. Public mode accepts
-credential-free HTTPS. Deploy-key mode accepts a GitHub HTTPS URL or a generic
-`ssh://` URL. For GitHub, configure prints the public key and:
-`GitHub deploy-key settings: https://github.com/<owner>/<repo>/settings/keys/new`
-and `Open Settings > Deploy keys > Add deploy key`. Follow that URL, paste the
-public key as a repository deploy key, leave **Allow write access** off, and
-then verify it. The private key never appears in CLI output or the dashboard.
-
-Configuration is initially **pending** and does not fetch. Verify it with:
-
-```sh
 aether workspace mirror refresh --workspace myproject
 aether workspace mirror status --workspace myproject
 ```
 
-Forward-only upstream changes become **ready** and advance the mirrored base.
-Rewrites or a base that diverged locally retain an **observed candidate** and
-leave the accepted base alone; review the candidate and explicitly adopt it:
+Unlike dashboard import, CLI `configure` does not fetch until `refresh`.
+After reviewing the returned candidate, adopt its actual generation:
 
 ```sh
 aether workspace mirror adopt --workspace myproject --generation <n> --yes
-aether workspace mirror disable --workspace myproject --yes
 ```
 
-The local dashboard's onboarding wizard offers this same setup inline only to
-administrators and only when capability `workspace.mirror.status` exists. The
-entry is prefilled from checkout **Origin** when available and opens this
-existing **Source control** flow for public HTTPS or deploy-key setup and
-verification. Choosing
-it configures the server-owned read-only upstream; new runs refresh it before
-launch. Skipping it leaves the workspace's current source settings unchanged.
-If no source mirror is configured, it remains local-only; configure it later
-from **Workspace > Source control**. On the dashboard's Workspace page, the flow is
-admin-only: its one-time Configure form is prefilled from `Workspace.Origin`;
-choose public or deploy-key authentication, copy the public key and follow the
-GitHub link, then use **Verify** or **Refresh**. **Adopt candidate** and
-**Disable** both ask for explicit confirmation. Disable returns the workspace
-to local-only mode; it does not revoke a deploy key at GitHub, so remove that
-key there.
+### Private remote repository
 
-Every launch refreshes a configured mirror before creating the run. An
-authentication, network, missing-source, rewrite, divergence, or other
-refresh failure creates no run and never silently uses a stale base. If the
-failure reports an accepted commit, the CLI offers an explicit retry:
+Use the same **Import repository** form, choosing **Read-only deploy key**.
+Use a GitHub HTTPS source or a generic `ssh://` source. For generic SSH,
+**Pinned known_hosts (required for generic SSH)** must contain the host key
+verified with the host administrator; do not blindly trust `ssh-keyscan`.
+GitHub uses Aether's pinned host key.
+
+1. Import creates the workspace and a public deploy key, without fetching.
+   Open **Continue to Source control**, then **Copy public key**.
+2. For GitHub, follow **Install this key in GitHub deploy keys**, or open the
+   repository's **Settings → Deploy keys → Add deploy key**. Paste the key and
+   leave **Allow write access** off. Other hosts need their corresponding
+   read-only repository access setup.
+3. Return to **Workspace Source** and click **Verify** (or **Refresh** once
+   ready). Review **Observed SHA** and **Accepted SHA**, then **Adopt
+   candidate** and confirm the initial candidate.
+
+An Aether admin role does not grant permission to install keys at the source.
+Your repository administrator must approve the key and any enterprise policy;
+the Aether server must be able to reach that Git host.
+
+CLI alternative for a new private workspace:
 
 ```sh
-aether run "add a health check endpoint" --agent claude \
+aether workspace init myproject --base main
+aether workspace mirror configure --workspace myproject \
+  --source https://github.com/acme/private.git --branch main --auth deploy-key
+```
+
+For generic SSH, use this `configure` command instead, with a verified file:
+
+```sh
+aether workspace mirror configure --workspace myproject \
+  --source ssh://git@git.example.com/acme/myproject.git \
+  --branch main --auth deploy-key --known-hosts-file ~/.ssh/known_hosts
+```
+
+Install the public key printed by `configure`, then:
+
+```sh
+aether workspace mirror refresh --workspace myproject
+aether workspace mirror status --workspace myproject
+aether workspace mirror adopt --workspace myproject --generation <n> --yes
+```
+
+Replace `<n>` with the reviewed generation from `status`. After installing a
+key, use **Verify** / **Refresh**, not **Save source** or `configure`:
+reconfiguration rotates the key and generation. To recover a misplaced public
+key, reopen **Source control** or run `mirror status` on the same workspace.
+
+### Remote import and source recovery
+
+**Created: yes** means the workspace exists even if configuration or fetch
+failed. Keep its name/ID and repair it in **Workspace → Source control**;
+do not import a duplicate. If the response was lost, inspect **Manage
+workspaces** or `aether workspace list` before trying creation again.
+Switching members or servers, or closing the import dialog, does not cancel
+a pending import on the original server. Its late result cannot update the
+new dashboard context; return to the original server and check its workspaces
+before importing again.
+
+For a source branch named `main`, failures include:
+
+| Error | Recovery |
+| --- | --- |
+| `gitengine: mirror auth-failed for branch "main": upstream authentication failed; check source access and the mirror deploy key` | Install or restore the current public key at the source, then **Verify**. |
+| `gitengine: mirror source-missing for branch "main": upstream branch was not found; verify the configured branch` | Check the repository and branch. Restore the branch or deliberately correct the source configuration; reconfiguration rotates a deploy key. |
+| `gitengine: mirror auth-failed for branch "main": host key verification failed; verify the mirror's pinned host key` | Verify the host identity with its administrator. Do not disable host checking. Restore the trusted endpoint or deliberately reconfigure the verified pin and install the newly generated deploy key. |
+
+A failed authenticated fetch or host-pin check reports the failure while
+retaining known accepted/observed commit metadata. That is not a successful
+refresh: new launches do not silently use the retained base. Restoring source
+access and refreshing the unchanged configuration keeps the same workspace,
+key, and generation.
+
+After initial adoption, forward-only source updates advance the mirrored
+base. Rewrites or divergence require another reviewed **Adopt candidate**.
+Every launch refreshes a configured source. If a refusal reports an accepted
+commit, an explicit one-request override is available:
+
+```sh
+aether run "add a health check endpoint" --workspace myproject --agent claude \
   --cached-base <accepted-commit>
 ```
 
-The `--cached-base` override is request-scoped: it applies only to the launch
-request where it is supplied and is never inherited by later launches.
-Repeating the same override is accepted while the SHA still matches the
-accepted commit and the workspace base has not moved; a mismatched SHA or
-moved base is rejected.
+The SHA must still match the accepted commit and unmoved workspace base.
+Later launches do not inherit the override. **Disable source** returns the
+workspace to local-only mode; it does not revoke the key at the Git host.
+See [workspace source operations](teams.md#workspaces) and the
+[gateway API](local-gateway.md#control-channel-methods-this-gateway-calls).
+
+### Local clone
+
+On the computer holding the clone, open the desktop app or run `aether gui`
+after [linking to the server](#3-link-from-your-machine).
+
+1. In **Onboarding → Workspace** or **Manage workspaces**, choose **Create from
+   local clone**. Enter **Workspace name** and the clone's existing **Base
+   branch**, then **Create workspace**.
+2. The repository screen names the workspace ID and base branch. Enter the
+   absolute **Repository path**, or use the desktop app's **Choose folder**,
+   then **Add remote**.
+3. Check the connected path and destination, then **Push now**. **What git
+   did** retains Git's output. A fresh workspace receives the base branch; an
+   existing one reports whether it is current, ahead, or diverged.
+4. If offered, **Fast-forward my clone** catches up without a merge commit.
+   Divergence shows commands to resolve it yourself; the dashboard never
+   force-pushes. Continue to agent setup after the base is available.
+
+For an existing workspace, choose **Link local repository** in **Manage
+workspaces**, or **Workspace → Repository settings → Link local repository**.
+Use **Use a different repository** to relink. Each local server profile keeps
+one current clone, not one per workspace; check the displayed workspace and
+path before pushing after a switch. Relinking leaves the previous clone and
+its history in place.
+
+The hosted dashboard shows these choices with a local-client/CLI handoff; it
+cannot link a path on your laptop. A collaborator can link an existing
+workspace and push its base when source status confirms it is local-only.
+Creating a workspace or configuring, refreshing, adopting, or disabling a
+mirror still requires an admin. All admitted members can inspect source
+status.
+
+If source ownership cannot be checked, linking remains available but base-push
+controls and commands are withheld. Resolve the displayed error before
+pushing; a configured mirror's base remains server-owned.
+
+CLI equivalent below assumes the clone's intended base is `trunk`. Replace
+the path, workspace, and `trunk` with your actual values. Replace
+`<server-address-or-id>` with the server's SSH address, including its SSH port,
+or its server ID, not the hosted dashboard's HTTP address:
+
+```sh
+server='<server-address-or-id>'
+git -C "$HOME/code/myproject" branch --list &&
+aether link "$server" &&
+aether workspace add myproject --base trunk &&
+aether link "$server" --workspace myproject --repo "$HOME/code/myproject" &&
+git -C "$HOME/code/myproject" push --no-follow-tags aether trunk:trunk
+```
+
+For an existing workspace, omit `workspace add` and use the base branch
+shown in its settings. `link` requires the server argument even if the client
+is already linked. With `--repo`, it adds or updates the clone's `aether`
+remote; it does not change its `origin`.
+The push is non-force and does not send tags. Do not push a mirrored base:
+linking a clone there is for pulling run branches; use **Source control** to
+refresh or adopt the server-owned base.
+
+On the first eligible link, Aether records the clone's `origin` as the
+workspace's checkout Origin if none is set, printing `workspace origin ->
+<url>`. A later link does not overwrite it. GitHub SSH URLs are normalized to
+HTTPS. Inspect or change it deliberately for new run checkouts:
+
+```sh
+aether workspace origin --workspace myproject
+aether workspace origin --workspace myproject https://github.com/my-account/myproject.git
+```
+
+Neither linking nor recording Origin supplies upstream credentials. See
+[workspaces](teams.md#workspaces) for local push conflicts and source policy,
+and [member environments](environments.md) for installing tools and saving
+the image new containers use.
 
 ## 5. Set up your agent
 
-Choose an agent once:
+In **Onboarding → Agents**, choose **Set up** beside an agent. Return later
+through **Workspace → Set up agents / first run** or the **Agents** page.
+Setup belongs to your member account, not to one workspace. CLI registration:
 
 ```sh
 aether agent add claude
 ```
 
-For a shipped agent, the local dashboard's Agents step opens the live
-environment terminal dock and types its vendor install script. The dock says
-**Starting your environment container** while Docker starts it, then the
-shell appears. When you press **I've installed and logged in**, the wizard
-checks the executable is on the server and runs `env save` for you, naming
-the saved image. It cannot check the vendor login; the agent does that when
-it starts. From the CLI, open the terminal, run the script, install into
-`~/.local/bin`, and complete the vendor login there:
+The setup screen opens your environment terminal and supplies the vendor
+install command when one is known; otherwise it shows manual instructions.
+Install the executable into `~/.local/bin` and complete its vendor login
+there. **I've installed and logged in** checks the executable and saves the
+environment image. It does not verify vendor login; the agent checks that
+when it starts. To open the environment terminal from the CLI:
 
 ```sh
 aether terminal
@@ -460,47 +463,75 @@ The member home persists the executable and vendor login state across
 containers. Import configuration from the browser and edit it in **Files**.
 See [the environment terminal guide](terminal.md) for tab and stop behavior.
 
-Your own configuration is separate from vendor login and image setup. Open
-**Agents → Configuration** in either dashboard and choose one directory such
-as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`. Review the preview, select a
-destination when the basename is unknown or ambiguous, and click **Import
-configuration**. You can return to import updated files. There is no local
-directory watcher or automatic configuration synchronization.
+### Import configuration
 
-Known credential names in any path component and runtime/history defaults are
-skipped in the browser before upload. Remaining bytes are uploaded and
-server-scanned, so never assume all secret content stays on your machine.
-Empty files and arbitrary binary regular files are preserved. The directory
-has no file-count or total-size ceiling: Aether transfers it in bounded batches
-and reports progress or the real failure. Individual files support up to
-64 MiB. New files use mode `0644`; overwrites retain remote permissions.
-The browser cannot preserve local executable mode or symlinks, so a new script
-may need `chmod` in the remote terminal.
+Configuration import is separate from installing an agent or logging in.
+Use **Bring your configuration** in **Onboarding → Agents**, or open
+**Agents → Configuration** (also in navigation and the command palette).
+It works through either gateway, without a workspace, for members with
+launch permission.
 
-The imported files go into your authenticated member's persistent home, which
-is mounted read-write in the environment terminal and in runs using that
-account. Changes are immediately visible, including to active runs; the agent
-may need to reload. This is a shared home, not an isolated per-run profile.
-The snapshot pin records launch provenance, not an isolated writable copy or a
-promise that home edits wait for later runs. Importing or editing configuration
-does not rebuild the installed-agent image.
+1. Click **Choose directory** and select the configuration root, such as
+   `~/.claude`, `~/.codex`, `~/.pi`, `~/.omp`, or `~/.config/opencode`.
+   The browser can read only the directory you explicitly select, including
+   on a hosted dashboard; this does not grant local repository access.
+2. Check **Configuration destination** and its remote path. A known basename
+   selects one automatically; renamed or ambiguous directories need a choice.
+   You can change it before import; that resets the file selection.
+3. Under **Select files**, uncheck anything unwanted. Review **Left out before
+   upload**. Known credential and runtime paths are excluded before reading
+   their bytes and cannot be re-enabled.
+4. Click **Import configuration**, then inspect the imported count, bytes,
+   paths, and omissions. **Import finished with omissions** is not a claim
+   that every file was copied. Use **Open remote files** to inspect the
+   destination, or **Import another directory** to explicitly repeat import.
 
-Open **Files** to browse your own configuration beside workspace base and
-live-run files. The editor supports JSON, JavaScript, TypeScript, Markdown,
-Python, and TOML syntax highlighting, plus find/replace. Save explicitly with
-**Save**, **Commit to <branch>**, or Ctrl/Cmd-S. Dirty tabs remain in memory
-across routes, the browser warns before unloading them, and there is no
-autosave or force-save. A failed or stale save keeps the draft; **Reload from
-server** replaces it with current server content.
+For OMP, root-level `stats.db`, `stats.db-wal`, and `stats.db-shm` are runtime
+exclusions, even when larger than 64 MiB. History, caches, and known login
+files are also excluded; settings, MCP configuration, skills, and extensions
+remain eligible. This is not a blanket exclusion of databases or dependency
+directories. See the [exact OMP exclusions](harnesses.md#agent-configuration-import-and-files).
 
-Configuration editing accepts complete UTF-8 text up to 64 MiB. Binary and
-oversized files are read-only. New configuration files accept nested relative
-paths and refuse overwrites.
-`config.*` methods require `Launch` and target only your authenticated member
-home; there is no admin/member selector. For
-workspace files, **Commit to <branch>** creates one commit on the base branch
-but does not push upstream; live-run writes modify the uncommitted checkout.
-Base saves require **Push** and run saves require **Steer**.
+An eligible file over **64 MiB (67,108,864 bytes)** stays visible and blocks
+import until you uncheck it or click **Exclude unsupported files**. Review
+the remainder before confirming. Directories have no total-size or file-count
+ceiling; transfer uses bounded batches. To install a required larger asset,
+use `aether terminal` and install or download it into the displayed remote
+destination. **Files** is a text editor, not a large-file uploader.
+
+Remaining selected bytes are uploaded and server-scanned; do not assume
+all secret content stays local. Empty and binary regular files are preserved.
+New files use mode `0644`; overwrites keep remote permissions. Local
+executable bits and symlinks are not preserved, so a new script may need
+`chmod` in the remote terminal.
+
+**Import incomplete** preserves the actual error and separates **Imported
+paths**, **Paths with unknown outcome**, and **Failed or unattempted paths**.
+Copied files remain; there is no rollback or automatic retry. Use **Review
+remaining files** to continue only failed/unattempted paths. After fixing a
+local read failure, choose **Retry reading on import**, or uncheck that file.
+Recovery does not resend confirmed or unknown-outcome paths: inspect **Files**
+before deliberately reselecting uncertain files. Keep the browser window
+open; navigating within the dashboard preserves the result, but reloading
+loses the in-memory review.
+
+Imports overwrite matching files in your authenticated member's persistent
+home. They immediately affect that home in your environment terminal and
+active/future runs using that home; a running agent may need to reload. They do not
+rebuild the environment image, create an isolated per-run profile, or watch
+the local directory. A snapshot pin records launch provenance, not an
+isolated copy. An already-open **Files** editor keeps its draft after import;
+**Reload from server** discards that draft and reads the new remote bytes.
+See [configuration import and Files](harnesses.md#agent-configuration-import-and-files)
+for permissions, interruption handling, and manual snapshot commands.
+
+**OpenCode recovery:** its configuration destination is `~/.config/opencode`,
+not `~/.local/share/opencode`. If you imported with an older destination,
+explicitly choose your local `~/.config/opencode` directory again, select the
+OpenCode destination, review, and re-import. Inspect the files under the new
+root and reload/restart OpenCode as needed. Old imports are not automatically
+moved. Leave login credentials at `~/.local/share/opencode/auth.json`;
+do not move the data directory or import credentials to repair configuration.
 
 ### Agent coordination hooks
 
@@ -526,13 +557,13 @@ a new daemon or terminal fallback.
 
 ### Connect GitHub
 
-Optional, and worth doing before the first run: connect GitHub once and your
-runs can push their branch to the `origin` recorded in step 4, open a pull
-request, and sign their commits as you.
+If runs should publish to GitHub, connect an account with write permission
+to the checkout Origin from step 4. Source deploy keys do not grant that
+permission, and enterprise policy may require additional authorization.
 
-In the dashboard, the Agents step has a **Connect GitHub** button. It opens
-the same terminal dock, types the login command, and its **I've logged in**
-button runs the rest, reporting the account and the registered key.
+In **Onboarding → Agents** or **Agents**, **Connect GitHub** opens the
+environment terminal with the login command. **I've logged in** finishes
+setup and reports the account and registered signing key.
 
 From the CLI it is two commands. In the environment terminal:
 
@@ -553,8 +584,14 @@ What each step writes, how to re-run it, and how to revoke are in
 
 ## 6. Launch a run
 
+The dashboard's **First run** step names the workspace/base and checks source
+readiness. If no agent is installed, use **Set up an agent**. For an empty or
+unaccepted base, use **Review repository setup**, finish the push or source
+adoption, then **Check source again**. Installation readiness does not prove
+vendor login or upstream publishing permission.
+
 ```sh
-aether run "add a health check endpoint" --agent claude
+aether run "add a health check endpoint" --workspace myproject --agent claude
 ```
 
 The run gets its own container and checkout while using your persistent home.
@@ -563,9 +600,8 @@ The run gets its own container and checkout while using your persistent home.
 run 01m04mhf114eap4k85n2mgcped running
 ```
 
-A **run** is one agent execution with its own container, git worktree, and
-branch; `aether runs` lists them. Scoped commands default to the only
-workspace when there is exactly one, which is why nothing above named it.
+`aether runs` lists your visible runs. Scoped commands can omit `--workspace`
+only when exactly one workspace exists; keep it explicit when adding projects.
 To hand one objective to a team of agents instead, see
 [Launching a swarm](teams.md#launching-a-swarm).
 
@@ -585,9 +621,10 @@ browser. See [local-gateway.md](local-gateway.md).
 On a tailnet, the server can host the dashboard instead, so a phone or any
 other tailnet device opens `https://<the server's MagicDNS name>/` with
 nothing installed and no token. Set `web-port` and restart the server; see
-[networking.md](networking.md#the-dashboard). This server-hosted dashboard has
-no machine-local verbs or onboarding wizard, but its authenticated **Files**
-view can edit the shared member home.
+[networking.md](networking.md#the-dashboard). Hosted onboarding supports remote
+repository import, Git identity, agent setup, and configuration import/editing.
+It has no machine-local link, clone, push, or pull operations; those require
+the desktop app or `aether gui` on the computer holding the clone.
 
 ### Prefer a native window?
 
@@ -710,11 +747,13 @@ Branch aether/run-add-a-health-check-endpoint-mgcped is ready. Switch with: git 
 
 The branch name is `aether/run-<slug>-<short-id>`: the task slugified, then the
 last six characters of the run ID. Aether never switches branches or merges
-the run into your base branch. Review it, diff it, then merge it by hand:
+the run into your base branch. These examples use `trunk`, as in the local
+clone setup above; substitute your workspace's actual base branch. Review
+and diff the run branch:
 
 ```sh
 git log --oneline aether/run-add-a-health-check-endpoint-mgcped
-git diff main...aether/run-add-a-health-check-endpoint-mgcped
+git diff trunk...aether/run-add-a-health-check-endpoint-mgcped
 ```
 
 If the local checkout has uncommitted changes, the pull still fetches the run
@@ -725,16 +764,16 @@ When the review is complete, merge locally. In a local-only workspace, push
 the reviewed base back to Aether:
 
 ```sh
-git switch main
+git switch trunk
 git merge aether/run-add-a-health-check-endpoint-mgcped
-git push aether main
+git push --no-follow-tags aether trunk:trunk
 ```
 
 In a mirrored workspace, the Aether base is protected. Push the reviewed
 result to the configured source branch using credentials for that upstream:
 
 ```sh
-git push <source-remote> main:<configured-source-branch>
+git push <source-remote> trunk:<configured-source-branch>
 ```
 
 Here `<source-remote>` is a local remote (or URL) for the configured source;
@@ -770,7 +809,7 @@ closed ordinary TUI runs, completed workers cannot be relaunched.
 The local daemon is optional. It fetches server-owned run branches as agents
 commit and can push your local base branch in **local-only** workspaces. It
 does not watch agent configuration directories; configuration is imported
-explicitly in the local dashboard (`aether gui`) and edited in **Files**. It
+explicitly in either dashboard and edited in **Files**. It
 does not fetch a mirror source or forward a checkout's `origin` into the
 workspace. In a mirrored workspace, a base push attempt is rejected because
 the mirror owns that branch; use `aether workspace mirror refresh` and, when
@@ -834,10 +873,10 @@ deployment pins, so `fake` never appears in either.
 
 ```sh
 aether link <server-host>:2222
-aether workspace init demo
-aether link <server-host>:2222 --repo "$PWD"
-git push -u aether main
-aether run "write a result file" --agent fake
+aether workspace init demo --base main
+aether link <server-host>:2222 --workspace demo --repo "$PWD"
+git push --no-follow-tags aether main:main
+aether run "write a result file" --workspace demo --agent fake
 aether runs
 aether pull <run-id>
 ```
@@ -867,7 +906,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
-| `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
+| `no workspace yet; skip git remote` | Run `aether workspace add myproject --base main`, then `aether link '<server-address-or-id>' --repo /absolute/path/to/clone --workspace myproject` with your server and clone path. |
 | `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether link` or another command that accepts a workspace selector. Agent setup is member-scoped. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |

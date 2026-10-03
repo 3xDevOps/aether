@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -71,6 +72,32 @@ func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 	}
 	if got := git(t, repo, "remote", "get-url", "aether"); got != url2 {
 		t.Fatalf("remote url after relink = %q, want %q", got, url2)
+	}
+}
+
+func TestLinkRepoRefusesChangedNamedProfileBeforeWritingRemote(t *testing.T) {
+	requireGit(t)
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("changed=%v", changed), func(t *testing.T) {
+			useTempConfigDir(t)
+			repo := t.TempDir()
+			git(t, repo, "init")
+			git(t, repo, "remote", "add", "aether", "ssh://alice@original:2222/ws_original.git")
+			selected := cli.Config{Addr: "prod:2222", User: "alice", Active: "prod"}
+			saved := cli.Config{Addr: "default:2222"}
+			if changed {
+				saved.Links = []cli.NamedLink{{Name: "prod", Addr: "replacement:2222", User: "alice"}}
+			}
+			if err := cli.Save(saved); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := LinkRepo(selected, repo, "ws_new"); err == nil {
+				t.Fatal("link accepted a removed or changed profile")
+			}
+			if got := git(t, repo, "remote", "get-url", "aether"); got != "ssh://alice@original:2222/ws_original.git" {
+				t.Fatalf("remote changed on refusal: %s", got)
+			}
+		})
 	}
 }
 

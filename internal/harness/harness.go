@@ -491,7 +491,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
-		LocalRoot:       ".local/share/opencode",
+		LocalRoot:       ".config/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
 		// The TUI accepts steered text into its editor on the first
 		// Enter and sends on the second.

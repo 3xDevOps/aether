@@ -22,6 +22,7 @@ describe('Files cache request boundaries', () => {
           harness: 'claude',
           path: '~/.claude',
           runtime_ignores: ['projects/'],
+          credential_names: ['auth.json', '.credentials.json'],
         }],
       })),
       configTree: vi.fn(() => tree.promise),

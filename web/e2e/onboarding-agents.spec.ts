@@ -18,7 +18,7 @@ test('setting an agent up saves the environment', async ({ page, aether }) => {
   await wizard.link.continue().click()
   // The git identity is optional and this scenario is not about it.
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.expectStep('Agents')

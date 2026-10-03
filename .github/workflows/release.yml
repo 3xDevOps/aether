@@ -417,6 +417,32 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  # Scan the exact bytes produced for this tag, not the differently versioned
+  # main-CI build. Both architectures are required before release publication.
+  windows-defender:
+    needs: [release-policy, release-binaries]
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-policy.outputs.sha }}
+          persist-credentials: false
+      - name: Arm Defender before downloading release binaries
+        shell: powershell
+        run: ./scripts/windows-defender.ps1 -Mode Prepare
+      # No run-id or token: only this release run's immutable artifacts.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-go-windows-*
+          merge-multiple: true
+          path: dist
+      - name: Scan both final Windows clients
+        shell: powershell
+        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist
+
   android:
     needs: release-policy
     permissions:
@@ -602,7 +628,7 @@ jobs:
   # No producer may be skipped/failed: the complete run-specific asset set and
   # every tested image must be ready before updating the published release.
   release:
-    needs: [release-policy, release-binaries, android, browser-manifest, edge-manifest, standard-manifest]
+    needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -622,7 +648,7 @@ jobs:
         with:
           name: binaries-android
           path: dist
-      - name: Require all twelve signed-release assets and write checksums
+      - name: Require all twelve release assets and write checksums
         working-directory: dist
         run: |
           assets=(

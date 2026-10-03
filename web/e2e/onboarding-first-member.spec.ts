@@ -36,7 +36,7 @@ test('the first member links, creates a workspace and seeds it', async ({
   await wizard.gitIdentity.save('Alice Lovelace', 'alice@example.com')
 
   await wizard.expectStep('Workspace')
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
 
   await wizard.expectStep('Repository')
   await wizard.repository.addRemote(repo)

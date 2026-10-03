@@ -148,10 +148,14 @@ func walkRoot(ctx context.Context, root string, prof harness.Profile, allowed ma
 	return readCandidates(ctx, prof.Name, candidates, allowed, visit)
 }
 
-// rootMatcher compiles the harness defaults followed by the user's own
-// .aether-profile-ignore, so the user's file has the last word.
+// rootMatcher anchors shared defaults at the profile root. User gitignore
+// patterns retain their own anchoring and have the last word.
 func rootMatcher(root, harnessName string) (*ignoreMatcher, error) {
-	lines := append([]string(nil), profilesvc.DefaultIgnores(harnessName)...)
+	defaults := profilesvc.DefaultIgnores(harnessName)
+	lines := make([]string, len(defaults))
+	for i, pattern := range defaults {
+		lines[i] = "/" + pattern
+	}
 	data, err := os.ReadFile(filepath.Join(root, IgnoreFileName))
 	switch {
 	case err == nil:

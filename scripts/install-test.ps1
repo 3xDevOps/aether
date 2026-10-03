@@ -316,7 +316,7 @@ func main() {
     [IO.File]::WriteAllText($requestLog, '')
     $server = Start-AetherFixtureServer $releaseRoot $readyPath $stopPath $requestLog
     $baseUrl = $server.BaseUrl
-    $version = 'v0.4.0-alpha.6'
+    $version = 'v0.5.1-alpha.4'
 
     # A poisoned checksum must not replace an existing executable, append PATH,
     # or execute the downloaded fixture.
@@ -412,12 +412,12 @@ func main() {
     $normalizedBin = Get-AetherNormalizedPathEntry $freshBin
     Assert-AetherEqual 1 (@($normalizedEntries | Where-Object { $_ -eq $normalizedBin }).Count) 'reinstall duplicated the install directory in PATH'
 
-    # -Role none is a CLI-only opt out and must not invoke the fixture/build.
+    # -Role none permits historical releases without invoking the fixture/build.
     $noneBin = Join-Path $root 'none-bin'
     $noneLog = Join-Path $root 'none.log'
     New-Item -ItemType Directory -Path $noneBin -Force | Out-Null
     Write-AetherRelease $releaseRoot $fixture $fixture
-    $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', $noneBin) @{
+    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.4.0-alpha.6', '-Role', 'none', '-BinDir', $noneBin) @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $noneLog
     }
@@ -467,15 +467,34 @@ catch {
     [IO.File]::WriteAllText($unsafeCli, 'old unsafe CLI')
     $unsafeLog = Join-Path $root 'unsafe.log'
     $unsafeBeforePath = '%SystemRoot%\System32;C:\safe-tools'
-    Set-AetherUserPath $unsafeBeforePath
-    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.4.0-alpha.5', '-Role', 'client', '-BinDir', $unsafeBin) @{
-        AETHER_BASE_URL = $baseUrl
-        AETHER_FIXTURE_LOG = $unsafeLog
+    foreach ($oldVersion in @('v0.4.0-alpha.5', 'v0.4.0-alpha.6', 'v0.5.0-alpha.1', 'v0.5.1-alpha.3')) {
+        Set-AetherUserPath $unsafeBeforePath
+        [IO.File]::WriteAllText($requestLog, '')
+        $result = Invoke-AetherPowerShellFile $installer @('-Version', $oldVersion, '-Role', 'client', '-BinDir', $unsafeBin) @{
+            AETHER_BASE_URL = $baseUrl
+            AETHER_FIXTURE_LOG = $unsafeLog
+        }
+        Assert-AetherTest ($result.ExitCode -ne 0) ("unsafe old client release was accepted: " + $oldVersion)
+        Assert-AetherEqual 'old unsafe CLI' ([IO.File]::ReadAllText($unsafeCli)) 'unsafe release mutated the CLI'
+        Assert-AetherEqual $unsafeBeforePath (Get-AetherTestUserPath) 'unsafe release changed user PATH'
+        Assert-AetherEqual '' ([IO.File]::ReadAllText($requestLog)) 'unsafe release requested a download'
+        Assert-AetherTest (-not (Test-Path -LiteralPath $unsafeLog)) 'unsafe release executed the fixture'
     }
-    Assert-AetherTest ($result.ExitCode -ne 0) 'unsafe old client release was accepted'
-    Assert-AetherEqual 'old unsafe CLI' ([IO.File]::ReadAllText($unsafeCli)) 'unsafe release mutated the CLI'
-    Assert-AetherEqual $unsafeBeforePath (Get-AetherTestUserPath) 'unsafe release changed user PATH'
-    Assert-AetherTest (-not (Test-Path -LiteralPath $unsafeLog)) 'unsafe release executed the fixture'
+
+    # The exact floor is exercised by the fresh install above; later numeric
+    # prereleases and stable releases must also install and build successfully.
+    foreach ($supportedVersion in @('v0.5.1-alpha.10', 'v0.5.1')) {
+        $supportedBin = Join-Path $root $supportedVersion
+        $supportedLog = Join-Path $supportedBin 'build.log'
+        New-Item -ItemType Directory -Path $supportedBin -Force | Out-Null
+        $result = Invoke-AetherPowerShellFile $installer @('-Version', $supportedVersion, '-Role', 'client', '-BinDir', $supportedBin) @{
+            AETHER_BASE_URL = $baseUrl
+            AETHER_FIXTURE_LOG = $supportedLog
+        }
+        Assert-AetherEqual 0 $result.ExitCode ("supported release install failed: " + $result.Output)
+        Assert-AetherTest (Get-AetherTestBytesEqual $fixture (Join-Path $supportedBin 'aether.exe')) 'supported release did not install the CLI'
+        Assert-AetherTest (Test-Path -LiteralPath $supportedLog -PathType Leaf) 'supported release did not invoke GUI build'
+    }
 
     # Simulate 32-bit PowerShell on a 64-bit ARM host.  The native override is
     # authoritative and only the arm64 asset may be requested/installed.

@@ -42,6 +42,7 @@ describe('onboarding source option', () => {
       <OnboardingSourceOption
         client={client}
         workspaceID={workspace.id}
+        canManageSource
         suggestedSource={suggestedSource}
       />,
     )
@@ -61,7 +62,7 @@ describe('onboarding source option', () => {
     const client = fakeApi({
       workspaceMirrorStatus: vi.fn(async () => current),
     })
-    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource suggestedSource={suggestedSource} />)
 
     const status = await screen.findByRole('status', { name: 'Source mirror status' })
     expect(status.textContent).toContain('Source mirror configured.')
@@ -82,7 +83,7 @@ describe('onboarding source option', () => {
         branch: params.branch,
       })),
     })
-    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource suggestedSource={suggestedSource} />)
 
     await screen.findByText('Local-only workspace.')
     fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
@@ -111,7 +112,7 @@ describe('onboarding source option', () => {
         .mockResolvedValueOnce({ enabled: false }),
       workspaceMirrorConfigure: vi.fn(async () => current),
     })
-    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource suggestedSource={suggestedSource} />)
 
     await waitFor(() => expect(client.workspaceMirrorStatus).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
@@ -146,7 +147,7 @@ describe('onboarding source option', () => {
         .mockResolvedValueOnce({ enabled: false }),
       workspaceMirrorConfigure: vi.fn(async () => current),
     })
-    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource suggestedSource={suggestedSource} />)
 
     await waitFor(() => expect(client.workspaceMirrorStatus).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
@@ -178,7 +179,7 @@ describe('onboarding source option', () => {
         throw new Error('workspace.mirror.status: unavailable')
       }),
     })
-    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource suggestedSource={suggestedSource} />)
 
     const status = await screen.findByRole('status', { name: 'Source mirror status' })
     await waitFor(() => expect(status.textContent).toContain('workspace.mirror.status: unavailable'))
@@ -187,5 +188,36 @@ describe('onboarding source option', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(dialog.getByLabelText<HTMLInputElement>('Source URL').value).toBe(suggestedSource)
+  })
+  it.each([false, true])('publishes enabled=%s status without exposing management to nonadmins', async (enabled) => {
+    seed()
+    const current = enabled ? configured({ status: 'pending', accepted_commit: undefined }) : { enabled: false }
+    const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => current) })
+    const onStatusChange = vi.fn()
+    render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource={false} onStatusChange={onStatusChange} />)
+
+    await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith(current))
+    expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id)
+    expect(screen.getByRole('status', { name: 'Source mirror status' }).textContent).toContain(enabled ? 'Source mirror configured.' : 'Local-only workspace.')
+    expect(screen.queryByRole('button', { name: /source mirror/ })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorRefresh).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorAdopt).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorDisable).not.toHaveBeenCalled()
+  })
+
+  it('hides an open management dialog when permission is revoked', async () => {
+    seed()
+    const client = fakeApi()
+    const view = render(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource />)
+    await screen.findByText('Local-only workspace.')
+    fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
+    await screen.findByRole('dialog')
+
+    view.rerender(<OnboardingSourceOption client={client} workspaceID={workspace.id} canManageSource={false} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: /source mirror/ })).toBeNull()
+    expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
   })
 })

@@ -405,9 +405,13 @@ func TestLocalSnapshotRefreshesNamedOverlayAfterMtimeChange(t *testing.T) {
 func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
 	useTempConfigDir(t)
 	initial := cli.Config{
-		Addr:  "default:2222",
-		User:  "alice",
-		Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/old"}},
+		Addr: "default:2222",
+		User: "alice",
+		Repo: "/default",
+		Links: []cli.NamedLink{
+			{Name: "prod", Addr: "prod:2222", Repo: "/old"},
+			{Name: "staging", Addr: "staging:2222", Repo: "/staging"},
+		},
 	}
 	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
 	selected, ok := initial.Named("prod")
@@ -434,6 +438,21 @@ func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
 	}
 	if got.Repo != abs {
 		t.Fatalf("snapshot repo = %q, want newly linked %q", got.Repo, abs)
+	}
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.User != initial.User || reloaded.Repo != initial.Repo {
+		t.Fatalf("default link changed: %+v", reloaded)
+	}
+	prod, ok := reloaded.Named("prod")
+	if !ok || prod.Repo != abs || prod.Addr != "prod:2222" {
+		t.Fatalf("reloaded named link = %+v, present %v", prod, ok)
+	}
+	staging, ok := reloaded.Named("staging")
+	if !ok || staging.Repo != "/staging" || staging.Addr != "staging:2222" {
+		t.Fatalf("sibling named link changed: %+v, present %v", staging, ok)
 	}
 }
 

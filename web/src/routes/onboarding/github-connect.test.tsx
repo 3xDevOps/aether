@@ -121,6 +121,7 @@ async function toAgentsStep() {
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
+  fireEvent.click(await screen.findByRole('button', { name: 'Link local repository' }))
   fireEvent.change(await screen.findByLabelText('Repository path'), {
     target: { value: '/home/alice/code/myproject' },
   })

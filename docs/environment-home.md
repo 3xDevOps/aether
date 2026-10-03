@@ -254,24 +254,45 @@ rm ~/.local/bin/gh
 
 ## Importing and editing configuration
 
-Open **Agents → Configuration** in either dashboard and choose a local directory
-with the browser picker. Import is explicit and repeatable. The picker compares
-the selected basename with `config.roots`: a known unique basename is selected
-automatically; an unknown or ambiguous basename requires an explicit destination.
-The browser waits for that metadata before previewing paths, and reads file
-bytes only when importing. Changing the destination recomputes the preview
-from retained handles. There is no directory watcher or AI-generated inventory.
+Open **Agents → Configuration** in either dashboard and use **Choose
+directory**. Import is explicit and repeatable. A known unique basename
+automatically selects its **Configuration destination**; an unknown or
+ambiguous basename requires a choice. Any destination can be changed before
+import. The browser waits for root metadata, then previews paths without
+reading file bytes. Changing the destination resets file checkboxes and
+recomputes policy from retained handles.
 
-Known credential names in any path component and `*.pem` files are always
-skipped locally. Runtime/history paths come from the selected root's
-`runtime_ignores` metadata and are skipped with exact, case-sensitive
-root-relative component-prefix matching. Remaining bytes are uploaded and
-scanned by the server, so secret content is not guaranteed to stay on the
-browser machine. Empty files and arbitrary binary assets are preserved.
-Directories have no file-count or aggregate-size ceiling; the browser transfers
-bounded batches and reports cumulative progress. Individual files support up to
-64 MiB. Failures stop further requests and report already committed work; a
-lost response leaves that request's outcome unknown rather than claiming success.
+Under **Select files**, uncheck unwanted configuration. **Left out before
+upload** shows every local omission and its reason. The server advertises
+effective `credential_names` and `runtime_ignores` for each destination.
+Credential names match any path component case-insensitively, and `*.pem`
+files are always excluded. Runtime paths use exact, case-sensitive,
+root-relative component-prefix matching. These exclusions cannot be
+re-enabled. `.aether-profile-ignore` is also excluded; its CLI rules do not
+apply to browser imports.
+
+Directories have no file-count or aggregate-size ceiling; the browser
+transfers bounded batches. Eligible files larger than **64 MiB (67,108,864
+bytes)** block confirmation, not the rest of the directory: uncheck them or
+choose **Exclude unsupported files**, then **Import configuration**. Known
+runtime files are excluded before their size can block import, including
+OMP's statistics database and SQLite sidecars. See the
+[runtime policy](harnesses.md#agent-configuration-import-and-files).
+For a required larger asset, run `aether terminal` and install or download it
+directly into the displayed destination in your persistent home. Neither
+**Files** nor `aether profile push` is a large-file upload alternative.
+
+Remaining bytes are uploaded and scanned by the server, so secret content is
+not guaranteed to stay on the browser machine. Empty files and binary assets
+are preserved. The result lists server and local exclusions and explicitly
+reports completion with omissions. Failures preserve the original error and
+separate confirmed writes, unknown-outcome paths, and failed or unattempted
+paths. **Review remaining files** lets you retry a read or explicitly omit a
+failure before continuing; it does not replay confirmed or unknown paths.
+Inspect **Files** before deliberately reimporting unknown paths.
+Navigation preserves the operation and review, but a page reload loses this
+in-memory state. Changing members or servers discards the review and stops
+further batches; an in-flight request can still finish for its original owner.
 New browser-imported files use mode `0644`; existing files retain their current
 modes, including restrictive server-side umask modes. Executable mode and
 symlinks cannot be represented by the browser. Server-side validation rejects
@@ -293,7 +314,8 @@ oversized files are read-only. New configuration files accept nested relative
 paths and refuse to overwrite an existing file. Save explicitly with **Save** or
 Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
 before unloading them. There is no autosave or force-save. A failed or stale
-save keeps the draft; **Reload from server** deliberately discards it.
+save keeps the draft. Repeat imports also leave open buffers intact;
+**Reload from server** deliberately discards the draft and loads remote bytes.
 All `config.*` methods require `Launch` and target only the authenticated
 member's own home; there is no admin/member selector.
 

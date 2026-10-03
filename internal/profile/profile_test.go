@@ -107,6 +107,8 @@ func TestPutRejects(t *testing.T) {
 		{"empty", "claude", File{Path: "", Mode: 0o644, Content: []byte("x")}},
 		{"deny credentials", "claude", File{Path: ".credentials.json", Mode: 0o644, Content: []byte("{}")}},
 		{"deny auth.json", "claude", File{Path: "auth.json", Mode: 0o644, Content: []byte("{}")}},
+		{"deny opencode config auth", "opencode", File{Path: ".config/opencode/auth.json", Mode: 0o644, Content: []byte("{}")}},
+		{"deny opencode data auth", "opencode", File{Path: ".local/share/opencode/auth.json", Mode: 0o644, Content: []byte("{}")}},
 		{"deny pem", "claude", File{Path: "id.pem", Mode: 0o644, Content: []byte("k")}},
 		{"deny claude.json", "claude", File{Path: ".claude.json", Mode: 0o644, Content: []byte("{}")}},
 		{"symlink mode", "claude", File{Path: "link", Mode: uint32(os.ModeSymlink | 0o644), Content: []byte("x")}},
@@ -314,19 +316,31 @@ func TestGoldenPut(t *testing.T) {
 }
 
 func TestLocalRootPrefixedPath(t *testing.T) {
-	svc, _, m := testService(t)
-	ctx := context.Background()
-	files := []File{{Path: ".claude/settings.json", Mode: 0o644, Content: []byte("{}\n")}}
-	snap, err := svc.Put(ctx, string(m.ID), "claude", files)
-	if err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	_, got, err := svc.Get(ctx, snap.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if len(got) != 1 || got[0].Path != "settings.json" {
-		t.Fatalf("stored path = %+v, want settings.json", got)
+	for _, tc := range []struct {
+		harness string
+		root    string
+		path    string
+	}{
+		{"claude", ".claude", "settings.json"},
+		{"opencode", ".config/opencode", "opencode.json"},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			svc, _, m := testService(t)
+			ctx := context.Background()
+			content := []byte("{}\n")
+			files := []File{{Path: tc.root + "/" + tc.path, Mode: 0o644, Content: content}}
+			snap, err := svc.Put(ctx, string(m.ID), tc.harness, files)
+			if err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+			_, got, err := svc.Get(ctx, snap.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if len(got) != 1 || got[0].Path != tc.path || !bytes.Equal(got[0].Content, content) {
+				t.Fatalf("stored files = %+v, want %s with original bytes", got, tc.path)
+			}
+		})
 	}
 }
 

@@ -48,3 +48,58 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
   await wizard.link.continue().tap()
   await wizard.expectStep('Git identity')
 })
+
+test('repository settings keep their content inside the phone after a Git push', async ({
+  page,
+  aether,
+}) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await alice.api.local('link.apply', { addr: aether.server.addr, name: alice.name })
+  await alice.api.rpc('workspace.add', {
+    name: 'project',
+    base_branch: 'main',
+    environment: {},
+  })
+  await page.setViewportSize({ width: 390, height: 600 })
+  await page.goto(alice.url)
+  await page.getByRole('button', { name: 'Search runs and commands', exact: true }).tap()
+  await page.getByPlaceholder('Search commands, runs, workspaces...').fill('Manage workspaces')
+  await page.getByRole('option', { name: 'Manage workspaces' }).tap()
+  await page.getByRole('button', { name: 'Link local repository', exact: true }).tap()
+
+  const dialog = page.getByRole('dialog', { name: 'Workspace repository', exact: true })
+  await dialog.getByLabel('Repository path').fill(repo)
+  await dialog.getByRole('button', { name: 'Add remote', exact: true }).tap()
+  await dialog.getByRole('button', { name: 'Push now', exact: true }).tap()
+  await expect(dialog).toContainText('Pushed main to aether')
+
+  await expect
+    .poll(() => dialog.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBe(0)
+  const bounds = await dialog.evaluate((element) => {
+    const { left, right } = element.getBoundingClientRect()
+    return { left, right, viewport: window.innerWidth }
+  })
+  expect(bounds.left).toBeGreaterThanOrEqual(0)
+  expect(bounds.right).toBeLessThanOrEqual(bounds.viewport)
+
+  const repository = dialog.getByRole('region', { name: 'Workspace repository', exact: true })
+  for (const text of [
+    dialog.getByRole('heading', { name: 'Workspace repository', exact: true }),
+    dialog.locator('[data-slot="dialog-description"]'),
+    repository.locator('p').first(),
+  ]) {
+    await text.scrollIntoViewIfNeeded()
+    await expect(text).toBeInViewport({ ratio: 1 })
+    const fits = await text.evaluate((element) => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const { left, right } = element.closest('[role="dialog"]')!.getBoundingClientRect()
+      return Array.from(range.getClientRects()).every(
+        (rect) => rect.left >= left && rect.right <= right,
+      )
+    })
+    expect(fits).toBe(true)
+  }
+})

@@ -691,16 +691,20 @@ identify its callers.
 
 ### Browser configuration imports
 
-The shared Configuration importer reads a user-selected directory only after
-`config.roots` returns and a destination is known. Credential names and `*.pem`
-files are filtered before any browser read, while runtime/history paths use
-the selected root's `runtime_ignores`; the server remains authoritative and
-scans the accepted bytes that are uploaded. Unknown or ambiguous directory
-basenames must be assigned explicitly, and changing the destination re-reads
-the retained browser `File` handles. Generation guards discard stale reads and
-prevent a preview prepared for one destination from being submitted to another.
-Both local and server-hosted dashboards can read a directory explicitly chosen
-through the browser picker; neither can read arbitrary local paths.
+The shared Configuration importer prepares user-selected file metadata only
+after `config.roots` returns and a destination is known. The root's
+`credential_names` combines shared denials and the harness's `DenyNames`;
+names match any component case-insensitively. Those names and `*.pem` files
+are filtered before browser reads. A missing credential list fails closed.
+Runtime/history paths use the selected root's `runtime_ignores`. Neither list
+can be overridden by file checkboxes or `.aether-profile-ignore`, which is
+itself excluded. The server independently enforces policy and scans the
+remaining uploaded bytes.
+Unknown or ambiguous basenames require a destination choice. Changing any
+destination recomputes metadata from retained `File` handles without reading
+bytes and resets checkboxes. Generation guards prevent a preview for one
+destination from being submitted to another. Both dashboards can read a
+directory explicitly chosen through the browser picker, not arbitrary paths.
 
 ### Terminal image uploads
 
@@ -746,13 +750,14 @@ always skipped before upload. Runtime/history paths come from the selected
 root's `runtime_ignores` metadata and match exact, root-relative paths or
 component prefixes case-sensitively after trailing slashes are trimmed.
 Changing the destination recomputes the preview from retained browser `File`
-handles without reading their bytes. The preview lists eligible paths and
-policy exclusions. No directory-wide count or byte ceiling discards files.
-The browser reads and encodes one bounded batch at a time, targeting 20 MiB
-decoded and at most 2,000 files; a larger individual file travels alone.
-Requests permit 64 MiB decoded and individual files have the existing 64 MiB
-configuration-file ceiling. Invalid or oversized files fail explicitly rather
-than enabling an incomplete-selection override.
+handles without reading their bytes. Users can uncheck eligible paths; the
+preview lists every local omission and its reason. No directory-wide count or
+byte ceiling silently discards files. The browser reads and encodes one
+bounded batch at a time, targeting 20 MiB decoded and at most 2,000 files;
+a larger individual file travels alone. Requests permit 64 MiB decoded and
+each file has a 64 MiB ceiling. Oversized eligible files block confirmation
+until explicitly omitted; invalid paths and destination collisions fail
+before any upload. None of these controls bypasses server validation.
 Owner-scoped progress and results survive dashboard navigation. Identity changes
 discard preparation and prevent subsequent batches, including after an awaited
 file read. An already submitted request may finish for its original owner;
@@ -762,8 +767,15 @@ configuration synchronization, or automatic import retry.
 The browser reads accepted regular-file bytes and sends them to the server,
 where they are scanned before writing; a secret finding is therefore not proof
 that the content stayed local. Empty files and arbitrary binary regular bytes
-are preserved. A failed or interrupted batch stops the import and reports
-earlier confirmed writes; a lost response leaves that request's outcome unknown.
+are preserved. Server exclusions remain visible alongside local omissions.
+A failed or interrupted batch stops further requests. The result separates
+confirmed writes, failed/unattempted paths, and a submitted batch whose
+outcome is unknown. The server reports exact committed paths and exclusions
+even when a preflight failure confirms zero writes. Recovery reviews only
+failed/unattempted paths; it never automatically replays confirmed or
+unknown-outcome paths. A read failure can be retried or explicitly omitted.
+Original errors remain available after recovery. A page reload loses the
+in-memory review and result; inspect Files before a new explicit import.
 The shared HTTP gateway permits a 96 MiB request for `config.import`,
 385 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
 Decoded file and import-request limits remain authoritative. The authenticated
@@ -773,6 +785,11 @@ Before reading an import body, each HTTP gateway admits at most two imports;
 admission lasts through backend processing and the response. Excess requests
 receive HTTP 503 without their bodies being read. Body reads expire after
 30 seconds without progress or 15 minutes total and return HTTP 408.
+HTTP admission, body, and JSON-validation refusals carry
+`error.data.config_import_not_started: true` before backend dispatch,
+so the importer can report failed/unattempted paths rather than unknown writes.
+A status code or message alone is not no-write evidence: backend or transport
+errors, including HTTP 503 without that marker, retain an unknown outcome.
 SSH control frames that grow beyond 64 KiB require admission: at most two
 globally and one per member, held through dispatch and the response. Small
 control requests do not consume those slots. Partial-frame reads have a
@@ -809,7 +826,8 @@ Binary and oversized files are read-only. Run and configuration saves recheck
 SHA-256 revisions immediately before atomic rename under Aether's root lock;
 base-branch commits compare-and-swap the branch head. These locks do not
 exclude arbitrary live-agent filesystem writers. A stale or failed save leaves
-the browser draft available.
+the browser draft available. Repeat imports do not replace open editor buffers;
+**Reload from server** explicitly discards a draft and reads remote content.
 
 ## SSH port forwarding
 

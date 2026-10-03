@@ -91,8 +91,10 @@ The shipped phone path is the server-hosted gateway: set `web-port`, then open
 the server's MagicDNS name on a phone joined to the tailnet
 ([Testing on a real phone](#testing-on-a-real-phone)). The connection is
 HTTPS and carries no browser token; Tailscale WhoIs identifies the phone's
-source address on every request. The server-hosted dashboard opens at the
-board and does not offer machine-local onboarding, linking or update actions.
+source address on every request. New members enter hosted onboarding even
+when the server already has workspaces: Git identity, workspace selection or
+repository import, agents and the first run. Machine-local linking, folder
+picking and updates still require the desktop app or `aether gui`.
 
 For a contributor's loop against a dashboard build that is not embedded in a
 server yet, use the development server as a LAN-facing proxy to a local
@@ -2314,9 +2316,33 @@ it with its code.
 
 ## Manage workspaces
 
-`src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
-shows its name, creation time, base branch, steering policy and an **Open**
-button.
+`src/routes/workspaces/` lists workspaces and offers **Add a workspace** even
+when others already exist. Open it from the workspace selector, shared
+navigation, the command palette, or **Add another workspace** on a workspace
+page. Each row shows its name, creation time, base branch and steering policy,
+with **Open** and **Link local repository** actions.
+
+The same creation choices appear in onboarding:
+
+- **Public or private remote repository** opens **Import repository**.
+  Public sources use credential-free HTTPS. Private sources use a server-held,
+  read-only deploy key, installed by an administrator of the upstream
+  repository. Generic SSH sources also require independently verified
+  `known_hosts` entries. Import retains the new workspace even if fetching
+  fails; continue to **Source control** on that workspace rather than creating
+  it again. Verify the key, review the observed commit, and explicitly adopt
+  its generation. Reconfiguring rotates the key; verifying does not.
+- **Local clone** opens **Create from local clone** on a local gateway.
+  Name the workspace and the base branch that exists in the clone, then link
+  its absolute path and push that branch. A hosted gateway instead gives the
+  desktop/CLI path; it neither creates an unusable local workspace nor pretends
+  to browse the member's filesystem.
+
+Creation and remote source administration require an administrator. A
+collaborator can link a clone to an existing workspace; a viewer cannot push
+its base. **Repository settings** on the workspace page, also reachable from
+**Workspace settings**, reopens source setup and local linking without restarting
+onboarding. It names the workspace ID, base branch and checkout Origin.
 
 Admins also get **Delete**. The confirmation lists what is permanently
 removed; **Cancel** leaves the workspace untouched. The server refuses active
@@ -2346,26 +2372,26 @@ requires `daemon.status` or `sync.status`; within it, the local link requires
 your repository** requires `sync.status`. The latter starts and stops a live
 run's sync overlay. The server-hosted dashboard omits these machine-local
 controls, not Appearance.
-Workspace base freshness and Source control live on the workspace page. A
-configured mirror is refreshed there with **Verify/Refresh**; a local-only
-workspace uses its local base. There is no recurring base-refresh button.
+The local link section points to **Manage repositories and workspaces**.
+Workspace repository settings, base freshness and Source control live on the
+workspace page on either gateway. A configured mirror is refreshed there with
+**Verify/Refresh**; a local-only workspace uses its pushed base. There is no
+recurring base-refresh button.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the local-gateway guided first-run path, six
-steps: Link, Git identity, Workspace, Repository, Agents, First run. It
-renders only where the gateway serves the client-machine verbs (the capability
-descriptor lists `link.status`); a gateway without them gets an explanatory
-empty state instead of a broken wizard. That copy names the gateway and what it
-cannot reach - an SSH identity, a repository on the member's own computer -
-rather than guessing at the device in the member's hand, which the app has no
-way to know. The server-hosted dashboard has no machine-local onboarding
-wizard: it starts at the board, while shared runs, terminal, Files and
-configuration surfaces remain available through the server gateway. Link,
-Workspace and First run live in `steps.tsx`; Repository is `repo-step.tsx`, Git
-identity is `git-identity-step.tsx`, and Agents is `agents-step.tsx` with its
-GitHub part in `github-connect.tsx` and its configuration import in
-`profile-import.tsx`.
+`src/routes/onboarding/` is the guided first-run path. A local gateway offers
+Link, Git identity, Workspace, Repository, Agents and First run. A hosted
+gateway starts at Git identity: remote import, server-side agent setup and
+configuration do not require a clone or SSH identity on the browser's machine.
+Only the local clone controls require local capabilities, and their hosted
+replacement names the exact desktop/CLI handoff.
+
+Link, Workspace and First run live in `steps.tsx`. The shared
+`workspace-create.tsx` and `workspace-repository.tsx` components keep initial
+and subsequent workspace setup on the same paths. Local linking is
+`repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
+`agents-step.tsx`, using `github-connect.tsx` and `profile-import.tsx`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
 whichever step has sub-screens. The Agents step owns both of today's - a
@@ -2375,13 +2401,10 @@ sub-screen first and leaves the step only from the step's own screen. A step
 with sub-screens takes them as `setup` and `onSetup` rather than keeping them
 in its own state.
 
-The wizard owns that Back button but passes it down as a `back` node, and each
-step puts it in its own action row, beside Create workspace, Skip for now or
-Launch. Those rows stick to the bottom of the wizard's scroller, so a step as
-tall as Agents with the terminal dock open cannot push the way on and the way
-back off screen. The exception is the Repository step before a clone is
-connected, where Back sits in the path form beside **Add remote**; that screen
-is one field long.
+The wizard passes a **Back** action to each step. Repository setup also has
+**Back to repository choices** while a local clone is open. Returning from
+Agents preserves the selected workspace and repository state; changing
+workspaces never applies the previous workspace's link or Git result.
 
 In the step header, every step the member has already reached carries a check
 and is a button that jumps to it, forwards as well as back, so walking
@@ -2396,12 +2419,11 @@ over both. **Skip** moves on and leaves the server's fallback in place, so the
 step never blocks the wizard. See [teams.md](teams.md) for what the identity
 does once it is set.
 
-The Repository step asks for a clone on this machine, and the path must be
-absolute - a leading `/`, a drive letter, or a UNC prefix, all three accepted
-whatever the machine is, because the check only catches a plainly relative
-path and a Windows dialog answers `C:\...`. The field always offers the
-folders `link.status` already knows - the linked clone and every named
-profile's - as a `datalist`. In the desktop shell it also gets a **Choose
+The Repository step offers remote source setup before any local clone is
+linked. **Link local repository** opens the local path form; its path must be
+absolute, accepting a leading `/`, a drive letter or a UNC prefix. The field
+offers folders `link.status` already knows: the current clone and named
+profiles as a `datalist`. In the desktop shell it also gets a **Choose
 folder** button, which opens the native directory dialog through
 `window.aetherDesktop.chooseFolder`, writes the answer into the field and
 clears any error the last attempt left; cancelling leaves both alone, a
@@ -2422,9 +2444,10 @@ workspace reads what happened instead of git's `! [rejected] main -> main
 
 Local-only workspaces retain **Push now**, **Fast-forward my clone**, daemon
 base pushes and direct base writes. A mirrored workspace owns its base on the
-server and rejects direct base writes; run branches can still be pulled. After
-repository linking, onboarding may link to the
-workspace's Source control, but it never silently authorizes a source.
+server and rejects direct base writes; run branches can still be pulled.
+The dashboard withholds base push controls while an administrator's source
+status is unresolved or identifies a mirror. Configuring or fetching a source
+never silently authorizes its candidate.
 
 When `link.repo` answers an `origin`, the connected line adds `Runs push to
 <origin>`: the upstream a run pushes to, the same one `aether link --repo`
@@ -2459,6 +2482,12 @@ The branch is the workspace's base branch, so a workspace created with
 `--base` seeds the branch its runs fork from. When `repo.push` is unavailable,
 the step shows only the copyable command.
 
+Link, push and fast-forward always carry the selected workspace ID. Each
+server profile has one current clone, not a clone per workspace. The UI
+rechecks `link.status` on entry, focus and before Git mutations; a remembered
+connection for a different current clone must be linked again. The gateway
+also checks that the clone's `aether` remote names the requested workspace.
+
 What the step settled - the clone path, the remote the gateway wrote,
 git's push answer, and the fast-forward once one has run - lives on the UI
 slice as `onboardingRepo`, not in the component. Each answer is written onto
@@ -2476,10 +2505,10 @@ repo with **Use a different repository** to go back to the form, prefilled
 with the old path; a blank form there would ask again for a remote that
 already exists.
 
-The UI slice persists the resume point, the furthest step reached, the selected
-workspace, the connected repository and the First run draft; finishing the
-wizard or navigating away from it clears all five. The step is stored by name
-rather than by position, so inserting a step - as "Git identity" was - never
+The UI slice persists the resume point, furthest step reached, selected
+workspace, source choice, connected repository and First run draft. Finishing
+the wizard or navigating away clears these fields. Steps are stored by name
+rather than position, so inserting a step never
 relocates someone who is mid-wizard. The persisted state is versioned, and one
 migration in `web/src/store/index.ts` covers every older shape: versions 0
 through 2 stored the resume point as an index, so those numbers are read back
@@ -2492,12 +2521,14 @@ place starts over. Repository is where the workspace first becomes
 load-bearing, so resuming onto it or any later step without one falls back to
 the workspace picker; the steps before it resume where they were.
 
-Hydration reads `link.status` first for a local gateway: a linked machine is
-marked onboarded before the redirect decision, so it never re-enters
-onboarding after a fresh GUI launch. An unlinked local gateway still routes
-here when `onboarded` is false. The server-hosted gateway has no local link
-state and opens at the board. Completing the final step or navigating
-elsewhere marks the UI onboarded and clears that wizard state.
+Hydration reads `link.status` first for a local gateway. A linked machine with
+no in-progress workspace is marked onboarded on initial hydration. An
+unlinked local gateway routes here when `onboarded` is false. Hosted onboarding
+also resumes after reload when its saved workspace still exists, even after
+the first import. A linked clone must not erase a resumed wizard's workspace
+or draft, and a reconnect must not redirect navigation.
+Authorized run deep links take precedence. Completing the final step or
+navigating elsewhere marks the UI onboarded and clears wizard state.
 
 The Link step first offers signing in to an edge
 (`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
@@ -2522,14 +2553,13 @@ The Agents step has three optional parts and never blocks: **Skip for now**
 is reachable from every state, including an open setup shell and a failed
 configuration import.
 
-Part A lists the setup-capable harnesses from `env.harnesses` against
-`agent.list`, saying for each whether it is installed on this machine and
-whether the server lists that name. The copy states what those two signals
-actually mean - `agent.list` includes shipped harnesses even when the server
-account has not installed them, so the list is not a "set up" badge - and **Set
-up** embeds the same `AgentWizard` the Agents page uses, driven with the
-harness and workspace already known so it opens the `agent-setup` shell
-without a form. Setup confirmation checks `agent.list` for an installed
+Part A lists the server's `agent.list` inventory on either gateway. An
+installed executable is reported as installed in the member's server
+environment, not on the browser's computer and not as proof of vendor login.
+**Set up** embeds the same `AgentWizard` as the Agents page; the harness is
+already selected, so it opens the `agent-setup` shell without another form.
+An empty inventory offers the custom-agent form. Setup confirmation checks
+`agent.list` for an installed
 executable, then runs `env.save` - the call the dock's **Save environment**
 button makes - before handing that agent to the First run step, which
 preselects it. The save is the point: an executable that exists only in the
@@ -2537,6 +2567,17 @@ running container is not in the image runs start from. The done screen names
 the saved image. A missing executable, a failed check or a failed save keeps
 setup open for retry with the real error. The vendor login is not checkable
 from here, and the copy says so.
+Reopening setup for an existing member-defined agent does not register it
+again or replace its launch arguments, profile root or credential policy.
+Custom agents without an installer command use their vendor's installation
+instructions; the dashboard does not type a fabricated command.
+
+The permanent **Agents** page also exposes **Set up / log in** per agent,
+**Git commit identity**, **Connect GitHub** and configuration import, so
+returning members do not have to reopen the wizard. Git identity records
+commit attribution; vendor login and native Git publishing credentials are
+separate. GitHub controls use server RPC and work on hosted gateways that
+advertise those methods.
 
 Between the two, `github-connect.tsx` connects the member's GitHub account.
 The closed `<section aria-label="Connect GitHub">` says what a connection
@@ -2649,6 +2690,14 @@ the server's refusal only after the run had launched. A failed `agent.list`
 shows the server's error with **Retry** as the primary action and no setup
 button, because a gateway that could not answer is not the same fact as an
 account with nothing installed.
+
+Before enabling **Launch**, the step checks the selected workspace's base
+through `files.tree` where available and reads available mirror status for
+every role. A mirrored workspace must have a ready source and an accepted
+commit. Missing branches, pending authorization and source errors remain
+visible with **Review repository setup** and **Check source again**. Empty
+workspace creation is not source readiness. The server rechecks permission
+and source policy at launch.
 
 The step's "No agent subscription yet?" note points at the CLI and stays on
 screen once a workspace is chosen; "Prove the plumbing without an agent subscription" in
@@ -3002,11 +3051,14 @@ sudo systemctl restart aether-server
 ```
 
 Then open `https://<the server's MagicDNS name>/` on a phone joined to the
-same tailnet. Expect the board as the first screen, already identified by
-WhoIs: no onboarding wizard, link chip, update banner, pull, forward or sync
-controls, because the descriptor carries no `local` verbs. Settings remains
-available for Appearance. Files and configuration editing also remain
-available through the server-hosted gateway.
+same tailnet. Expect hosted onboarding for a member who has not completed
+setup, even when other members have created workspaces; completed members
+start on the board. WhoIs already identifies the member. The machine-local
+Link step, link chip, update banner, pull, forward and sync controls are absent
+because the descriptor carries no `local` verbs. Repository linking instead
+shows a local-client/CLI handoff. Settings remains available for Appearance.
+Files and configuration editing also remain available through the
+server-hosted gateway.
 
 The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,

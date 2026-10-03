@@ -25,7 +25,7 @@ one entry to the `profiles` map:
 | `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `InstallPaths` | Home-relative directories the CLI's `~/.local/bin` launcher links into, outside `~/.local/bin` and `~/.local/lib`; `claude` names `.local/share/claude`, where its native installer puts the versions it links to. A recipient's run that borrows the owner's installation mounts each read-only from the owner's home at the same path. Leave empty for an npm install (under `~/.local/lib`) or a single binary in `~/.local/bin`. |
 | `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Configuration** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
-| `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
+| `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so the browser excludes them before reads and upload. The server and manual profile path enforce the same names; `*.pem` is always denied. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
 
@@ -34,6 +34,11 @@ Rules that are easy to get wrong:
 - **Apply the agent's full-permission flag in both modes.** Auto-permission is
   the default stance: the container is the isolation boundary, and an agent
   stopping to ask for approval in a headless fleet is a hang, not a safeguard.
+- **`LocalRoot` names native configuration, not login storage.** OpenCode uses
+  `.config/opencode` for configuration and `.local/share/opencode/auth.json`
+  for account sharing. Registry roots are home-relative defaults, not
+  environment-expanded paths; native configuration overrides do not relocate
+  browser import or manual profile commands.
 - **`CredentialPaths` and `DenyNames` are two different lists.** The first says
   what an account share *mounts* into another member's run; the second says
   what configuration import and explicit profile commands must never
@@ -51,12 +56,15 @@ Rules that are easy to get wrong:
   are advertised, without a workspace or onboarding prerequisite. Onboarding
   optionally uses the same importer. No daemon watches `LocalRoot` or
   automatically synchronizes configuration.
-- **Directory size does not truncate imports.** The browser previews file
-  metadata and transfers the full eligible selection in bounded requests.
-  Request budgets do not exclude settings or dependencies. Individual files
-  share configuration editing's 64 MiB ceiling; an oversized or unreadable
-  file fails explicitly. Interrupted imports report confirmed work and stop,
-  without automatic retries.
+- **Directory size does not truncate imports.** The browser previews metadata
+  and transfers the explicitly selected files in bounded requests. Runtime
+  and credential policy applies before the 64 MiB per-file size check.
+  An oversized eligible file remains visible until the user explicitly omits
+  it; a read failure can be retried or omitted from the remaining review.
+  Every omission is reported. Interrupted imports distinguish confirmed,
+  failed/unattempted, and unknown outcomes without automatically replaying
+  submitted files. Required larger assets can be installed or downloaded in
+  the persistent home through `aether terminal`, outside the browser importer.
 - **Browser file metadata is limited.** New files use `0644`; overwrites retain
   existing remote modes. The browser cannot preserve source executable bits
   or symlinks.

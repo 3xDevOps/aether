@@ -99,6 +99,76 @@ func TestRefreshFailuresPersistSanitizedTypedState(t *testing.T) {
 	}
 }
 
+func TestRefreshFailurePreservesPersistedCommits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		observed string
+		accepted string
+	}{
+		{name: "unknown"},
+		{name: "pending candidate", observed: testSHA},
+		{name: "accepted", observed: testSHA, accepted: testSHA},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := store.Open(filepath.Join(t.TempDir(), "mirror.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			workspace := &domain.Workspace{Name: "refresh-failure", BaseBranch: "main"}
+			if err = db.CreateWorkspace(t.Context(), workspace); err != nil {
+				t.Fatal(err)
+			}
+			git := &mirrorTestGit{}
+			now := time.Date(2026, time.October, 3, 0, 0, 0, 0, time.UTC)
+			svc, err := New(Config{Root: t.TempDir(), Store: db, Git: git, Now: func() time.Time { return now }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = svc.Configure(t.Context(), workspace.ID, ConfigureRequest{
+				SourceURL: "https://example.test/acme/repo", Branch: "main", Auth: domain.MirrorAuthPublic,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var lastSuccess time.Time
+			if tc.observed != "" {
+				git.refreshResult = gitengine.MirrorResult{
+					Status: domain.MirrorStatusPending, ObservedCommit: tc.observed, AcceptedCommit: tc.accepted,
+				}
+				if tc.accepted != "" {
+					git.refreshResult.Status = domain.MirrorStatusReady
+				}
+				if _, err = svc.Refresh(t.Context(), workspace.ID); err != nil {
+					t.Fatal(err)
+				}
+				lastSuccess = now
+			}
+			now = now.Add(time.Hour)
+			cause := errors.New("host key verification failed")
+			git.refreshErr = &gitengine.MirrorError{Kind: gitengine.MirrorErrorAuthFailed, Cause: cause}
+			_, err = svc.Refresh(t.Context(), workspace.ID)
+			var typed *gitengine.MirrorError
+			if !errors.As(err, &typed) || typed.Kind != gitengine.MirrorErrorAuthFailed || !errors.Is(err, cause) {
+				t.Fatalf("refresh error = %v, want retained auth failure", err)
+			}
+			status, statusErr := svc.Status(t.Context(), workspace.ID)
+			if statusErr != nil {
+				t.Fatal(statusErr)
+			}
+			if status.Mirror.ObservedCommit != tc.observed || status.Mirror.AcceptedCommit != tc.accepted {
+				t.Fatalf("persisted commits = observed %q, accepted %q; want %q, %q",
+					status.Mirror.ObservedCommit, status.Mirror.AcceptedCommit, tc.observed, tc.accepted)
+			}
+			if status.Mirror.Status != domain.MirrorStatusAuthFailed || status.Mirror.LastError != err.Error() {
+				t.Fatalf("persisted failure = %+v, want %v", status.Mirror, err)
+			}
+			if !status.Mirror.LastAttemptAt.Equal(now) || !status.Mirror.LastSuccessAt.Equal(lastSuccess) {
+				t.Fatalf("failure changed freshness incorrectly: %+v", status.Mirror)
+			}
+		})
+	}
+}
+
 func TestCapturePreservesFetchAndPersistenceFailures(t *testing.T) {
 	st := newMirrorTestStore()
 	upstream := errors.New("upstream failure")
@@ -252,6 +322,10 @@ func TestCaptureFailureRetainsAcceptedCommit(t *testing.T) {
 			got, err := svc.Capture(context.Background(), "w", tc.cachedCommit)
 			if err == nil || got.Commit != tc.wantCommit {
 				t.Fatalf("capture = %+v, %v; want retained commit %q", got, err, tc.wantCommit)
+			}
+			status, statusErr := svc.Status(context.Background(), "w")
+			if statusErr != nil || status.Mirror.AcceptedCommit != tc.wantCommit {
+				t.Fatalf("persisted capture state = %+v, %v; want retained commit %q", status, statusErr, tc.wantCommit)
 			}
 		})
 	}

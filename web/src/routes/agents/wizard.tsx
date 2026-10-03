@@ -54,6 +54,7 @@ export function AgentWizard({
   const [headless, setHeadless] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [saved, setSaved] = useState('')
+  const [registeredName, setRegisteredName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const caps = useCapability()
   const setEnvStatus = useStore((s) => s.setEnvTerminalStatus)
@@ -61,9 +62,8 @@ export function AgentWizard({
 
   const trimmed = name.trim()
   const selected = agents.find((a) => a.name === trimmed)
-  const shipped = selected?.source === 'shipped'
-  const installScript =
-    selected?.install_script || `install ${trimmed || 'the agent'} into ~/.local/bin`
+  const existing = !!harness || !!selected
+  const installScript = selected?.install_script
   // The CLI's argv template defaults: `{task}` is the placeholder the server
   // substitutes at launch.
   const hasTerminal = caps.hasWS('terminal')
@@ -82,13 +82,14 @@ export function AgentWizard({
     setPhase('checking')
     setError(null)
     try {
-      if (!shipped) {
+      if (!existing && registeredName !== trimmed) {
         await client.agentRegister({
           name: trimmed,
           executable: trimmed,
           tui_args: splitArgv(tuiValue),
           headless_args: splitArgv(headlessValue),
         })
+        setRegisteredName(trimmed)
       }
       const listed = await client.agentList()
       if (!listed.some((agent) => agent.name === trimmed && agent.installed === true)) {
@@ -120,7 +121,7 @@ export function AgentWizard({
             3
           </span>
           <p className="text-base font-semibold">
-            {shipped ? 'Agent installed' : 'Agent registered'}
+            {registeredName === trimmed ? 'Agent registered' : 'Agent installed'}
           </p>
         </div>
         <p className="text-sm leading-6 text-muted-foreground">
@@ -154,32 +155,33 @@ export function AgentWizard({
         {hasTerminal ? (
           <>
             <p className="text-sm leading-6 text-muted-foreground">
-              The install command is ready in your environment terminal:
+              {installScript ? 'The install command is ready in your environment terminal:' : 'Install the configured executable using its vendor instructions in your environment terminal. No installer command is supplied for this custom agent.'}
             </p>
             <TerminalDock client={client} openOnMount initialLine={installScript} />
             <p className="text-sm leading-6 text-muted-foreground">
               Complete the vendor login in that terminal, then return here.
             </p>
-            <code className="block min-w-0 overflow-x-auto rounded-[2px] border bg-muted px-3 py-2 font-mono text-xs">
+            {installScript && <code className="block min-w-0 overflow-x-auto rounded-[2px] border bg-muted px-3 py-2 font-mono text-xs">
               {installScript}
-            </code>
+            </code>}
           </>
         ) : (
           <>
             <p className="text-sm leading-6 text-muted-foreground">
-              Open your environment terminal and run the install command there:
+              Open your environment terminal and install the configured executable using its vendor instructions:
             </p>
             <code className="block min-w-0 overflow-x-auto rounded-[2px] border bg-muted px-3 py-2 font-mono text-xs">
               aether terminal
             </code>
-            <pre className="min-w-0 overflow-x-auto rounded-[2px] border bg-muted p-3 font-mono text-xs">
+            {installScript && <pre className="min-w-0 overflow-x-auto rounded-[2px] border bg-muted p-3 font-mono text-xs">
               {installScript}
-            </pre>
+            </pre>}
             <p className="text-sm leading-6 text-muted-foreground">
               Complete the vendor login in that terminal, then return here.
             </p>
           </>
         )}
+        {existing && <p className="text-xs text-muted-foreground">Setup preserves this agent's existing launch definition, profile root and credential policy.</p>}
         {error && (
           <p className="border-y border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed">
             {error}
@@ -232,7 +234,7 @@ export function AgentWizard({
           onChange={(e) => setName(e.target.value)}
         />
       </Label>
-      {!shipped && (
+      {!existing && (
         <div className="space-y-4">
           <Label className="block min-w-0 space-y-1">
             TUI command

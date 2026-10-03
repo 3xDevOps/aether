@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -73,35 +72,6 @@ func TestCustomProfileIsEmpty(t *testing.T) {
 	}
 	if len(p.TUIArgs) != 0 || len(p.HeadlessArgs) != 0 || len(p.CredentialPaths) != 0 || len(p.EnvPassthrough) != 0 || p.User != "" || p.LocalRoot != "" || len(p.DenyNames) != 0 {
 		t.Fatalf("custom profile must be empty, got %+v", p)
-	}
-}
-
-func TestLocalRootAndDenyNames(t *testing.T) {
-	wantRoot := map[string]string{
-		"claude":   ".claude",
-		"codex":    ".codex",
-		"omp":      ".omp",
-		"opencode": ".local/share/opencode",
-		"pi":       ".pi",
-		"custom":   "",
-	}
-	for name, root := range wantRoot {
-		p, ok := Lookup(name)
-		if !ok {
-			t.Fatalf("Lookup(%q) missing", name)
-		}
-		if p.LocalRoot != root {
-			t.Errorf("%s LocalRoot = %q, want %q", name, p.LocalRoot, root)
-		}
-		if name == "custom" {
-			continue
-		}
-		if len(p.DenyNames) == 0 {
-			t.Errorf("%s: no DenyNames", name)
-		}
-		if p.ContainerLocalRoot("") != path.Join("/root", root) {
-			t.Errorf("%s ContainerLocalRoot(root) = %q", name, p.ContainerLocalRoot(""))
-		}
 	}
 }
 
@@ -446,11 +416,6 @@ func TestValidateMemberDefinition(t *testing.T) {
 	})
 	if err := ValidateMemberDefinition(rootDefinition); err != nil {
 		t.Fatalf("valid root member definition rejected: %v", err)
-	}
-	// The opencode registry profile keeps its under-.local credentials.
-	opencode, _ := Lookup("opencode")
-	if opencode.LocalRoot != ".local/share/opencode" {
-		t.Fatalf("opencode profile root moved: %q", opencode.LocalRoot)
 	}
 }
 

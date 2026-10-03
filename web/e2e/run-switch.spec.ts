@@ -193,7 +193,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText('Pushed main to aether')

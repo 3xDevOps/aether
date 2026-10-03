@@ -698,8 +698,15 @@ func TestInventoryPiRuntimeIgnored(t *testing.T) {
 // configuration the member actually wanted on the server.
 func TestInventoryOmpRuntimeIgnored(t *testing.T) {
 	root := setupHarnessRoot(t, "omp")
-	mustWrite(t, filepath.Join(root, "agent", "config.yml"), "model: sonnet\n")
-	mustWrite(t, filepath.Join(root, "agent", "extensions", "mine.ts"), "export default () => {}\n")
+	want := map[string]string{
+		"agent/config.yml":                              "model: sonnet\n",
+		"agent/extensions/mine.ts":                      "export default () => {}\n",
+		"agent/extensions/stats.db":                     "extension settings\n",
+		"agent/extensions/stats.db-wal":                 "extension WAL\n",
+		"agent/extensions/stats.db-shm":                 "extension SHM\n",
+		"agent/npm/node_modules/puppeteer/package.json": "{}\n",
+	}
+	writeAll(t, root, want)
 	mustWrite(t, filepath.Join(root, "agent", "sessions", "-code", "01.jsonl"), "{}\n")
 	mustWrite(t, filepath.Join(root, "agent", "terminal-sessions", "01.json"), "{}\n")
 	mustWrite(t, filepath.Join(root, "agent", "history.db"), "sqlite\n")
@@ -708,13 +715,17 @@ func TestInventoryOmpRuntimeIgnored(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "natives", "18.1.4", "node"), "binary\n")
 	mustWrite(t, filepath.Join(root, "collab", "abc.jsonl"), "{}\n")
 	mustWrite(t, filepath.Join(root, "logs", "omp.log"), "hello\n")
+	for _, name := range []string{"stats.db", "stats.db-wal", "stats.db-shm"} {
+		mustWrite(t, filepath.Join(root, name), "runtime\n")
+	}
+	mustWrite(t, filepath.Join(root, "puppeteer", "browser"), "binary\n")
 
 	preview, err := Inventory(t.Context(), "omp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Files != 2 {
-		t.Fatalf("files = %d, want config.yml and the extension; categories %v",
+	if preview.Files != len(want) {
+		t.Fatalf("files = %d, want settings, extension databases, and dependency; categories %v",
 			preview.Files, preview.CategoryNames())
 	}
 	for _, e := range preview.Excluded {
@@ -722,6 +733,25 @@ func TestInventoryOmpRuntimeIgnored(t *testing.T) {
 			t.Errorf("%s excluded as %s, want the default ignore", e.Path, e.Reason)
 		}
 	}
+	checkPaths := func() {
+		t.Helper()
+		files, err := Discover(t.Context(), "omp", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotPaths := slices.Sorted(maps.Keys(names(files)))
+		wantPaths := slices.Sorted(maps.Keys(want))
+		if !slices.Equal(gotPaths, wantPaths) {
+			t.Fatalf("discovered paths = %v, want %v", gotPaths, wantPaths)
+		}
+	}
+	checkPaths()
+
+	mustWrite(t, filepath.Join(root, IgnoreFileName), "stats.db\n!/stats.db\n!/puppeteer/\n")
+	delete(want, "agent/extensions/stats.db")
+	want["stats.db"] = "runtime\n"
+	want["puppeteer/browser"] = "binary\n"
+	checkPaths()
 }
 
 // TestIrregularKindNamesFileTypes covers the naming behind the

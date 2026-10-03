@@ -33,10 +33,12 @@ export function WorkspaceSettingsDialog({
   workspaceID,
   client = api,
   onClose,
+  onRepository,
 }: {
   workspaceID: string
   client?: Api
   onClose: () => void
+  onRepository?: () => void
 }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const upsertWorkspace = useStore((s) => s.upsertWorkspace)
@@ -87,6 +89,10 @@ export function WorkspaceSettingsDialog({
               New runs fork from this branch.
             </p>
           </div>
+          {onRepository && <section className="space-y-2 border-b pb-3 text-xs">
+            <p>Manage the public/private read source, or link and relink a local clone. Deploy-key read access is separate from checkout Origin and your native Git/gh publishing credentials.</p>
+            <Button type="button" size="sm" variant="outline" onClick={onRepository}>Repository settings</Button>
+          </section>}
           <div className="min-w-0 space-y-1 text-[13px]">
             <Label htmlFor="workspace-steer">Who may steer others&apos; runs</Label>
             <Select

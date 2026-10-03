@@ -28,16 +28,15 @@ var defaultIgnores = map[string][]string{
 	// configuration, agent/npm/ included: that one holds the extension
 	// packages the member installed.
 	"pi": {"agent/sessions/", "agent/tmp/"},
-	// omp is a fork of pi with its own runtime output around that layout:
-	// terminal-sessions/ is the scratch tree behind its terminal tool,
-	// history.db the prompt history the CLI rewrites on every prompt,
-	// natives/ a per-version download that dwarfs everything a member
-	// configured, and collab/ another transcript archive. None of it is
-	// configuration.
+	// Keep exact database names: extension-owned databases may be configuration.
+	// OMP's stats and model discovery caches use SQLite WAL sidecars.
 	"omp": {
 		"agent/sessions/", "agent/terminal-sessions/", "agent/cache/",
 		"agent/history.db", "agent/history.db-shm", "agent/history.db-wal",
-		"agent/models.db", "natives/", "cache/", "logs/", "run/", "collab/",
+		"agent/models.db", "agent/models.db-shm", "agent/models.db-wal",
+		"stats.db", "stats.db-shm", "stats.db-wal",
+		"natives/", "cache/", "logs/", "run/", "collab/",
+		"puppeteer/", "webcache/",
 	},
 }
 

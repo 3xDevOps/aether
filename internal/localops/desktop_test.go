@@ -3,6 +3,7 @@ package localops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -79,7 +80,12 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 	home := t.TempDir()
 	local := filepath.Join(home, "AppData", "Local")
 	t.Setenv("LOCALAPPDATA", local)
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	roaming := filepath.Join(home, "AppData", "Roaming")
+	t.Setenv("APPDATA", roaming)
+	programs := filepath.Join(home, "redirected Start & 日本", "Programs")
+	setWindowsProgramsResolver(t, func() (string, error) { return programs, nil })
+	launcher := filepath.Join(programs, "Aether.lnk")
+	guessedLauncher := filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Aether.lnk")
 	cliDir := filepath.Join(local, "Programs", "Aether")
 	if err := os.MkdirAll(cliDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -105,6 +111,15 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if want := filepath.Join(local, "Programs", "Aether Desktop"); app.App != want {
+			t.Fatalf("desktop location = %q, want %q", app.App, want)
+		}
+		if app.Launcher != launcher {
+			t.Fatalf("launcher = %q, want resolved Programs path %q", app.Launcher, launcher)
+		}
+		if _, statErr := os.Stat(guessedLauncher); !os.IsNotExist(statErr) {
+			t.Fatalf("APPDATA-derived shortcut must remain absent: %v", statErr)
+		}
 		if got, readErr := os.ReadFile(cli); readErr != nil || string(got) != "installed CLI" {
 			t.Fatalf("desktop install replaced the CLI: %q, %v", got, readErr)
 		}
@@ -121,6 +136,94 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 		if got, ok := InstalledDesktopApp("windows", RealUser{Home: home}); !ok || got != app.App {
 			t.Fatalf("installed desktop not found: %q, %v", got, ok)
 		}
+		// Reinstall must recreate the resolved shortcut, not merely leave the
+		// first installation's shortcut in place.
+		if err := os.Remove(launcher); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func setWindowsProgramsResolver(t *testing.T, resolve func() (string, error)) {
+	t.Helper()
+	previous := resolveWindowsPrograms
+	resolveWindowsPrograms = resolve
+	t.Cleanup(func() { resolveWindowsPrograms = previous })
+}
+
+func TestDesktopLayoutWindowsUsesProgramsKnownFolder(t *testing.T) {
+	home := t.TempDir()
+	local := filepath.Join(home, "AppData", "Local")
+	roaming := filepath.Join(home, "AppData", "Roaming")
+	t.Setenv("LOCALAPPDATA", local)
+	for _, tc := range []struct {
+		name     string
+		appdata  string
+		programs string
+	}{
+		{"standard", roaming, filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs")},
+		{"redirected", roaming, filepath.Join(home, "redirected Start", "Programs")},
+		{"unset APPDATA", "", filepath.Join(home, "redirected Start", "Programs")},
+		{"relative APPDATA", "relative", filepath.Join(home, "redirected Start", "Programs")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("APPDATA", tc.appdata)
+			setWindowsProgramsResolver(t, func() (string, error) { return tc.programs, nil })
+			app, err := desktopLayout("windows", home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := filepath.Join(local, "Programs", "Aether Desktop"); app.App != want {
+				t.Fatalf("desktop location = %q, want %q", app.App, want)
+			}
+			if want := filepath.Join(tc.programs, "Aether.lnk"); app.Launcher != want {
+				t.Fatalf("launcher = %q, want %q", app.Launcher, want)
+			}
+		})
+	}
+}
+
+func TestInstallDesktopWindowsProgramsLookupFailurePreservesInstall(t *testing.T) {
+	home := t.TempDir()
+	local := filepath.Join(home, "AppData", "Local")
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	parent := filepath.Join(local, "Programs")
+	files := map[string]string{
+		filepath.Join(parent, "Aether Desktop", "aether-desktop.exe"):     "working desktop",
+		filepath.Join(parent, "Aether", "aether.exe"):                     "installed CLI",
+		filepath.Join(parent, "Aether", "user-file"):                      "keep",
+		filepath.Join(parent, installStagingPrefix+"existing", "keep"):    "do not sweep",
+		filepath.Join(home, "redirected Start", "Programs", "Aether.lnk"): "working shortcut",
+	}
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lookupErr := errors.New("Programs Known Folder unavailable")
+	setWindowsProgramsResolver(t, func() (string, error) { return "", lookupErr })
+	built := t.TempDir()
+	if err := os.WriteFile(filepath.Join(built, "aether-desktop.exe"), []byte("replacement"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallDesktop("windows", home, built, nil); !errors.Is(err, lookupErr) {
+		t.Fatalf("install error = %v, want Programs lookup failure", err)
+	}
+	for path, want := range files {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Fatalf("lookup failure changed %s: %q, %v", path, got, err)
+		}
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("lookup failure changed application parent entries: %v", entries)
 	}
 }
 
@@ -280,9 +383,12 @@ func TestDesktopLayoutIgnoresRelativeXDGDataHome(t *testing.T) {
 	}
 }
 
-func TestDesktopLayoutWindowsRejectsRelativeAppData(t *testing.T) {
+func TestDesktopLayoutWindowsRejectsRelativeLocalAppData(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", "Programs")
-	t.Setenv("APPDATA", `C:\Users\u\AppData\Roaming`)
+	setWindowsProgramsResolver(t, func() (string, error) {
+		t.Fatal("invalid LOCALAPPDATA must fail before resolving Programs")
+		return "", nil
+	})
 	if _, err := desktopLayout("windows", `C:\Users\u`); err == nil {
 		t.Fatal("relative LOCALAPPDATA accepted")
 	}

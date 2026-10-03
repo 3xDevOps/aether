@@ -922,6 +922,7 @@ export interface ConfigRoot {
   harness: string
   path: string
   runtime_ignores: string[]
+  credential_names: string[]
 }
 
 export interface ConfigFile {
@@ -946,7 +947,7 @@ export interface ConfigImportResult {
   files: number
   bytes: number
   excluded: ConfigExclusion[]
-  /** Set only when the import stopped after installing one or more files. */
+  /** The import stopped; files and imported_paths identify confirmed writes, possibly none. */
   error?: string
   /** Canonical paths successfully installed before an incomplete import. */
   imported_paths?: string[]

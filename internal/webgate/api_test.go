@@ -210,7 +210,7 @@ func importTestConn(t *testing.T, server *httptest.Server) (net.Conn, *bufio.Rea
 	return conn, bufio.NewReader(conn)
 }
 
-func importTestResponse(t *testing.T, reader *bufio.Reader, want int) {
+func importTestResponse(t *testing.T, reader *bufio.Reader, want int) []byte {
 	t.Helper()
 	res, err := http.ReadResponse(reader, nil)
 	if err != nil {
@@ -224,6 +224,7 @@ func importTestResponse(t *testing.T, reader *bufio.Reader, want int) {
 	if res.StatusCode != want {
 		t.Fatalf("status = %d, want %d: %s", res.StatusCode, want, body)
 	}
+	return body
 }
 
 func importTestPost(t *testing.T, server *httptest.Server, method, body string) int {
@@ -274,7 +275,17 @@ func TestConfigImportAdmissionCoversBodyAndBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A 100 response here would mean the rejected body was read.
-		importTestResponse(t, reader, http.StatusServiceUnavailable)
+		body := importTestResponse(t, reader, http.StatusServiceUnavailable)
+		var response struct {
+			Error struct {
+				Data struct {
+					NotStarted bool `json:"config_import_not_started"`
+				} `json:"data"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil || !response.Error.Data.NotStarted {
+			t.Fatalf("admission refusal lacks no-write evidence: %s, %v", body, err)
+		}
 	}
 	reject()
 	if status := importTestPost(t, server, "run.list", "{}"); status != http.StatusOK {
@@ -301,6 +312,50 @@ func TestConfigImportAdmissionCoversBodyAndBackend(t *testing.T) {
 	release <- struct{}{}
 	if status := importTestPost(t, server, "config.import", "{}"); status != http.StatusOK {
 		t.Fatalf("import after completion = %d", status)
+	}
+}
+
+func TestConfigImportRefusalDoesNotMarkBackendFailuresUnstarted(t *testing.T) {
+	calls := make(chan struct{}, 1)
+	server := importTestServer(t, &importTestBackend{call: func(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, *protocol.Error) {
+		calls <- struct{}{}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "lost acknowledgement"}
+	}}, time.Second, time.Minute)
+	for _, body := range []string{"{", "{}"} {
+		response, err := server.Client().Post(server.URL+"/api/v1/config.import", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Error protocol.Error `json:"error"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&result)
+		_ = response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body == "{" {
+			var data struct {
+				NotStarted bool `json:"config_import_not_started"`
+			}
+			if err := json.Unmarshal(result.Error.Data, &data); err != nil || !data.NotStarted {
+				t.Fatalf("invalid body outcome = %+v, err=%v", result, err)
+			}
+			select {
+			case <-calls:
+				t.Fatal("invalid body reached backend")
+			default:
+			}
+		} else {
+			select {
+			case <-calls:
+			default:
+				t.Fatal("valid body did not reach backend")
+			}
+			if len(result.Error.Data) != 0 || result.Error.Message != "lost acknowledgement" {
+				t.Fatalf("backend failure lost uncertainty: %+v", result)
+			}
+		}
 	}
 }
 

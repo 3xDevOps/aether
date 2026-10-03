@@ -52,9 +52,9 @@ export function surfaces(cap: Capability): Surface[] {
     list.push({ name: 'members', label: 'Members', Icon: Users, group: 'Admin' })
   if (cap.hasMethod('member.device.list'))
     list.push({ name: 'devices', label: 'Devices', Icon: MonitorSmartphone, group: 'Admin' })
-  if (cap.hasMethod('workspace.add'))
+  if (cap.hasMethod('workspace.list'))
     list.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2, group: 'Admin' })
-  if (cap.hasLocal('link.status'))
+  if (cap.hasLocal('link.status') || (cap.hasMethod('member.git') && cap.hasMethod('agent.list')))
     list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass, group: 'Admin' })
   list.push({ name: 'settings', label: 'Settings', Icon: Settings, group: 'Settings' })
   return list
