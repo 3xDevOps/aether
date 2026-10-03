@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { WorkspaceMirrorDialog } from '@/components/workspace-mirror-dialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -22,6 +22,37 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
   const [error, setError] = useState<string | null>(null)
   const [uncertain, setUncertain] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
+  const generation = useRef(0)
+
+  useLayoutEffect(() => {
+    const reset = () => {
+      setName('')
+      setSource('')
+      setBase('main')
+      setOrigin('')
+      setAuth('public')
+      setKnownHosts('')
+      setResult(null)
+      setBusy(false)
+      setError(null)
+      setUncertain(false)
+      setSourceOpen(false)
+    }
+    reset()
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (state.identityKey === previous.identityKey && state.connectionEpoch === previous.connectionEpoch) return
+      generation.current += 1
+      reset()
+    })
+    return () => { generation.current += 1; unsubscribe() }
+  }, [client])
+
+  const version = generation.current
+  const { identityKey, connectionEpoch } = useStore.getState()
+  const isCurrent = () => {
+    const state = useStore.getState()
+    return version === generation.current && identityKey === state.identityKey && connectionEpoch === state.connectionEpoch
+  }
 
   async function submit() {
     if (busy || result?.created || uncertain) return
@@ -33,20 +64,24 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
         base_branch: base.trim(), origin: origin.trim(), auth,
         ...(auth === 'deploy-key' && knownHosts.trim() ? { known_hosts: knownHosts } : {}),
       })
+      if (!isCurrent()) return
       setResult(current)
       if (current.created) {
         useStore.getState().upsertWorkspace(current.workspace)
-        onImported(current.workspace)
+        if (isCurrent()) onImported(current.workspace)
       }
     } catch (cause) {
+      if (!isCurrent()) return
       setError(message(cause))
       setUncertain(!(cause instanceof ApiError && (cause.code === -32602 || cause.code === -32001)))
       onImported()
-    } finally { setBusy(false) }
+    } finally {
+      if (isCurrent()) setBusy(false)
+    }
   }
 
   if (sourceOpen && result?.created) {
-    return <WorkspaceMirrorDialog workspaceID={result.workspace.id} client={client} suggestedSource={source.trim()} onClose={() => { onImported(result.workspace); onClose() }} />
+    return <WorkspaceMirrorDialog workspaceID={result.workspace.id} client={client} suggestedSource={source.trim()} onClose={() => { if (!isCurrent()) return; onImported(result.workspace); if (isCurrent()) onClose() }} />
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>

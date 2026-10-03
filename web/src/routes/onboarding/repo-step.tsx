@@ -71,7 +71,7 @@ export function RepoStep({
   back,
   onNext,
   mirrored = false,
-  sourcePending = false,
+  sourcePending = true,
 }: {
   client: Api
   caps: Capability
@@ -173,6 +173,8 @@ export function RepoStep({
   const pushCmd = `git push -u aether ${shellQuote(branch)}`
   const canWrite = role === 'admin' || role === 'collaborator'
   const canPush = caps.hasLocal('repo.push') && canWrite && !mirrored && !sourcePending
+  const pushAllowed = useRef(canPush)
+  pushAllowed.current = canPush
   const absolute = rooted(repo.trim())
   const pushed = connected?.push ?? null
   const forwarded = connected?.fastForward ?? null
@@ -235,7 +237,7 @@ export function RepoStep({
   }
 
   const push = async () => {
-    if (!connected) return
+    if (!connected || !pushAllowed.current) return
     const origin = connected
     const version = linkVersion.current
     setPushing(true)
@@ -245,7 +247,7 @@ export function RepoStep({
       // "Everything up-to-date" and "[new branch]" mean different things,
       // and only git can tell them apart.
       await verifyConnection(origin, version)
-      if (version !== linkVersion.current || !stillLinked(origin)) return
+      if (version !== linkVersion.current || !stillLinked(origin) || !pushAllowed.current) return
       const result = await client.localRepoPush(origin.workspace)
       const current = stillLinked(origin)
       if (version === linkVersion.current && current) setConnected({ ...current, push: result })
@@ -328,7 +330,9 @@ export function RepoStep({
     return <section aria-label="Local repository" className="space-y-3 border-t py-3 text-sm">
       <h3 className="font-semibold">Link from the computer holding your clone</h3>
       <p>This hosted gateway cannot read your filesystem or use your SSH identity. Open the desktop app or run <code>aether gui</code> on that computer, connected to this server, then open this workspace's repository settings.</p>
-      {workspace && <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link --repo /absolute/path/to/clone --workspace ${shellQuote(workspace.id)}\n${mirrored ? '# The mirrored base is server-owned; do not push it.' : canWrite && !sourcePending ? `git -C /absolute/path/to/clone push -u aether ${shellQuote(branch)}` : '# Base pushes require write access and a local-only workspace.'}`}</pre>}
+      <p className="text-xs text-muted-foreground">Replace <code>&lt;server-address-or-id&gt;</code> with this server's SSH address (including its SSH port) or server ID from your administrator, not this page's HTTP address. This hosted gateway does not expose that connection target. Replace the absolute clone path below.</p>
+      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
+      {workspace && <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace ${shellQuote(workspace.id)}${canWrite && !mirrored && !sourcePending ? ` &&\ngit -C /absolute/path/to/clone push -u aether ${shellQuote(branch)}` : `\n${mirrored ? '# The mirrored base is server-owned; do not push it.' : '# Base pushes require write access and confirmed local-only ownership.'}`}`}</pre>}
       {back}
     </section>
   }
@@ -349,7 +353,7 @@ export function RepoStep({
         </p>
       </div>
       {mirrored && <p className="text-sm text-muted-foreground">This workspace has a server-owned source. Link the clone to pull run branches; use Source control to verify or adopt the base instead of pushing it.</p>}
-      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is not confirmed yet. Linking is available, but base pushes wait for source status.</p>}
+      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
       {remembered && !connected && <p className="text-sm text-muted-foreground">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
       {!connected && (
         <>
@@ -445,7 +449,7 @@ export function RepoStep({
                 . Nothing to push.
               </>
             )}
-            {!pushed && !mirrored && (
+            {!pushed && !mirrored && !sourcePending && canWrite && (
               <>
                 Seed the workspace with{' '}
                 <span className="font-mono">{branch}</span>:
@@ -488,7 +492,7 @@ export function RepoStep({
               </p>
             </div>
           )}
-          {pushed?.state === 'diverged' && (
+          {pushed?.state === 'diverged' && !mirrored && !sourcePending && canWrite && (
             <div className="space-y-3 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/5 px-3 py-2" aria-live="polite">
               <p className="text-sm">
                 Your clone and the workspace have both moved on:{' '}

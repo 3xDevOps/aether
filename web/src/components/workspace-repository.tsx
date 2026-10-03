@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
@@ -6,9 +6,10 @@ import { shellQuote } from '@/lib/shell'
 import type { Workspace, WorkspaceMirrorResult } from '@/lib/types'
 import { RepoStep } from '@/routes/onboarding/repo-step'
 import { OnboardingSourceOption } from '@/routes/onboarding/source-option'
+import { useStore } from '@/store'
 import { useCapability, useIsAdmin, type Capability } from '@/store/hooks'
 
-export function WorkspaceRepository({ client = api, caps, workspace, initialLocal = false, onLocalChange, back, onNext }: {
+type WorkspaceRepositoryProps = {
   client?: Api
   caps: Capability
   workspace: Workspace
@@ -16,23 +17,39 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
   onLocalChange?: (local: boolean) => void
   back?: ReactNode
   onNext?: () => void
-}) {
+}
+
+export function WorkspaceRepository({ client = api, caps, workspace, initialLocal = false, onLocalChange, back, onNext }: WorkspaceRepositoryProps) {
+  const identity = useStore((state) => state.identityKey)
+  const epoch = useStore((state) => state.connectionEpoch)
   const isAdmin = useIsAdmin()
   const [local, setLocal] = useState(initialLocal)
-  const [source, setSource] = useState<WorkspaceMirrorResult | null>(null)
   const canMirror = isAdmin && caps.hasMethod('workspace.mirror.status')
+  const context = JSON.stringify([identity, epoch, workspace.id, canMirror])
+  const scope = useRef({ context, client, generation: 0 })
+  if (scope.current.context !== context || scope.current.client !== client) {
+    scope.current = { context, client, generation: scope.current.generation + 1 }
+  }
+  const generation = scope.current.generation
+  const [ownership, setOwnership] = useState<{ generation: number; status: WorkspaceMirrorResult } | null>(null)
+  const source = ownership?.generation === generation ? ownership.status : null
+  const onStatusChange = useCallback((status: WorkspaceMirrorResult) => {
+    if (scope.current.generation === generation) setOwnership({ generation, status })
+  }, [generation])
+  // Reset only source requests and dialogs. RepoStep retains its connection
+  // guards; remounting it here would issue a new old-client link.status read.
 
   return <section aria-label="Workspace repository" className="space-y-4 py-4">
     <div className="space-y-1">
       <h2 className="text-base font-semibold">Repository for {workspace.name}</h2>
       <p className="text-sm text-muted-foreground">Workspace <code>{workspace.id}</code> · base branch <code>{workspace.base_branch}</code>. Runs need this branch on the server, not just an empty workspace.</p>
     </div>
-    {canMirror ? <OnboardingSourceOption client={client} workspaceID={workspace.id} onStatusChange={setSource} /> : <p className="text-sm text-muted-foreground">An administrator manages public/private remote sources and candidate adoption in Source control. Ask them to verify the source and accepted base before launching.</p>}
+    {canMirror ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} onStatusChange={onStatusChange} /> : <p className="text-sm text-muted-foreground">Source ownership cannot be checked with your current access. Linking remains available, but base pushes are unavailable until local-only ownership is confirmed. An administrator manages remote sources and candidate adoption in Source control; ask them to verify the source and accepted base before launching.</p>}
     <div className="space-y-2 border-t pt-3">
       <h3 className="text-sm font-semibold">Local clone</h3>
       <p className="text-xs leading-5 text-muted-foreground">Link or relink a clone to this workspace. Linking changes its aether remote, not its origin or history. A mirrored base stays server-owned.</p>
       {!local && <Button size="sm" variant="outline" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
-      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={canMirror && source === null} back={<>{back}<Button size="sm" variant="outline" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Back to repository choices</Button></>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
+      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={<>{back}<Button size="sm" variant="outline" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Back to repository choices</Button></>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
     </div>
     <div className="space-y-2 border-t pt-3 text-sm">
       <h3 className="font-semibold">Checkout Origin</h3>

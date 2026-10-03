@@ -91,9 +91,10 @@ The shipped phone path is the server-hosted gateway: set `web-port`, then open
 the server's MagicDNS name on a phone joined to the tailnet
 ([Testing on a real phone](#testing-on-a-real-phone)). The connection is
 HTTPS and carries no browser token; Tailscale WhoIs identifies the phone's
-source address on every request. A fresh server opens hosted onboarding for
-Git identity, repository import, agents and the first run. Machine-local
-linking, folder picking and updates still require the desktop app or `aether gui`.
+source address on every request. New members enter hosted onboarding even
+when the server already has workspaces: Git identity, workspace selection or
+repository import, agents and the first run. Machine-local linking, folder
+picking and updates still require the desktop app or `aether gui`.
 
 For a contributor's loop against a dashboard build that is not embedded in a
 server yet, use the development server as a LAN-facing proxy to a local
@@ -3048,11 +3049,14 @@ sudo systemctl restart aether-server
 ```
 
 Then open `https://<the server's MagicDNS name>/` on a phone joined to the
-same tailnet. Expect the board as the first screen, already identified by
-WhoIs: no onboarding wizard, link chip, update banner, pull, forward or sync
-controls, because the descriptor carries no `local` verbs. Settings remains
-available for Appearance. Files and configuration editing also remain
-available through the server-hosted gateway.
+same tailnet. Expect hosted onboarding for a member who has not completed
+setup, even when other members have created workspaces; completed members
+start on the board. WhoIs already identifies the member. The machine-local
+Link step, link chip, update banner, pull, forward and sync controls are absent
+because the descriptor carries no `local` verbs. Repository linking instead
+shows a local-client/CLI handoff. Settings remains available for Appearance.
+Files and configuration editing also remain available through the
+server-hosted gateway.
 
 The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,

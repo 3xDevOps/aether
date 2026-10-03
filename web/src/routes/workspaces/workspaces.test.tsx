@@ -62,6 +62,14 @@ describe('workspaces view', () => {
     expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull()
     expect(client.workspaceAdd).not.toHaveBeenCalled()
     expect(client.localLinkRepo).not.toHaveBeenCalled()
+    const commands = screen.getByRole('region', { name: 'Add workspace' }).querySelector('pre')!.textContent!.split(' &&\n')
+    expect(commands).toHaveLength(4)
+    const target = commands[0].match(/^aether link ('[^']+'|\S+)$/)?.[1]
+    expect(target).toBeDefined()
+    expect(target).not.toMatch(/^--/)
+    expect(commands[1]).toBe('aether workspace add myproject --base main')
+    expect(commands[2]).toBe(`aether link ${target} --repo /absolute/path/to/clone --workspace myproject`)
+    expect(commands[3]).toBe('git -C /absolute/path/to/clone push -u aether main')
   })
 
   it.each(['unmount', 'identity', 'connection'] as const)(

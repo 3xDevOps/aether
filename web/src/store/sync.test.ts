@@ -210,9 +210,10 @@ describe('hydrate', () => {
       expect(window.location.search).toBe('')
     })
 
-    it('stays on the board for a run the member cannot see', async () => {
+    it('stays on the board for a completed member requesting a run they cannot see', async () => {
       window.history.replaceState({}, '', '/?run=run_someone_elses')
       const store = createRootStore()
+      store.getState().setOnboarded(true)
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
@@ -228,6 +229,24 @@ describe('hydrate', () => {
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    })
+
+    it.each(['run_1', 'run_someone_elses'])('resolves hosted onboarding before opening %s', async (requested) => {
+      window.history.replaceState({}, '', `/?run=${requested}`)
+      const store = createRootStore()
+      await hydrate(store, fakeApi({
+        workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+        capabilities: vi.fn(async () => ({
+          gateway: 'server',
+          methods: ['member.git', 'agent.list'],
+          ws: ['events', 'attach'],
+        })),
+      }))
+
+      expect(store.getState().route).toEqual(requested === 'run_1'
+        ? { name: 'terminal', params: { runId: requested } }
+        : { name: 'onboarding', params: {} })
+      expect(window.location.search).toBe('')
     })
 
     it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
@@ -512,12 +531,12 @@ describe('hydrate', () => {
     expect(c.hasWS('events')).toBe(true)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
-  it('routes to onboarding only for an unboarded local gateway', async () => {
+  it('routes capable gateways to onboarding unless completed or already linked locally', async () => {
     const cases = [
       { onboarded: false, local: true, linked: false, onboarding: true },
       { onboarded: false, local: true, linked: true, onboarding: false },
       { onboarded: true, local: true, linked: false, onboarding: false },
-      { onboarded: false, local: false, linked: false, onboarding: false },
+      { onboarded: false, local: false, linked: false, onboarding: true },
     ]
 
     for (const tc of cases) {
@@ -544,6 +563,70 @@ describe('hydrate', () => {
       expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
       if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
+  })
+
+  it.each([
+    { methods: ['*'] },
+    { methods: ['member.git', 'agent.list'] },
+  ])('onboards a fresh hosted member with shared workspaces and $methods capabilities', async ({ methods }) => {
+    const store = createRootStore()
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(false)
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods, ws: ['events'] })),
+    }))
+
+    expect(Object.keys(store.getState().workspaces)).toHaveLength(2)
+    expect(store.getState().route).toEqual({ name: 'onboarding', params: {} })
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(false)
+  })
+
+  it('keeps completed hosted members on the board without a saved onboarding workspace', async () => {
+    const store = createRootStore()
+    store.getState().setOnboarded(true)
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'server', methods: ['member.git', 'agent.list'], ws: ['events'],
+      })),
+    }))
+
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(true)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it.each([
+    { methods: ['member.git'] },
+    { methods: ['agent.list'] },
+  ])('does not onboard a hosted member with only $methods capabilities', async ({ methods }) => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods, ws: ['events'] })),
+    }))
+
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('preserves navigation away and back to the board during hosted hydration and reconnect', async () => {
+    const store = createRootStore()
+    const info = Promise.withResolvers<typeof serverInfoFixture>()
+    const client = fakeApi({
+      serverInfo: vi.fn(() => info.promise),
+      capabilities: vi.fn(async () => ({
+        gateway: 'server', methods: ['member.git', 'agent.list'], ws: ['events'],
+      })),
+    })
+    const pending = hydrate(store, client)
+    store.getState().navigate('agents')
+    store.getState().navigate('board')
+    info.resolve(serverInfoFixture)
+    await pending
+
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
   })
 
   it('opens onboarding on a fresh hosted server and preserves a repository draft through reconnect', async () => {

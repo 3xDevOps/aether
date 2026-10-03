@@ -1228,6 +1228,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(await screen.findByLabelText('Repository path'), { target: { value: '/clone-a' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
     await waitFor(() => expect(client.localLinkRepo).toHaveBeenCalledTimes(1))
+    const statusReads = vi.mocked(client.localLinkStatus).mock.calls.length
     const currentStatus = { server_configured: true, linked: true, addr: 'another:2222', user: 'bob', repo: '/other-owner' }
     act(() => useStore.setState({
       ...(transition === 'identity' ? { identityKey: 'server:bob' } : { connectionEpoch: 1 }),
@@ -1236,6 +1237,7 @@ describe('onboarding wizard', () => {
     await act(async () => pending.resolve({ repo: '/clone-a', remote: 'aether', url: `ssh://alice@host:2222/${workspace.id}` }))
     expect(useStore.getState().onboardingRepo).toBeNull()
     expect(useStore.getState().linkStatus).toEqual(currentStatus)
+    expect(client.localLinkStatus).toHaveBeenCalledTimes(statusReads)
     expect(screen.queryByText('/clone-a')).toBeNull()
   })
 

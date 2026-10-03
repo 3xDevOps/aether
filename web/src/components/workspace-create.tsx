@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { shellQuote } from '@/lib/shell'
 import type { Workspace } from '@/lib/types'
 import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository-dialog'
 import { useStore } from '@/store'
@@ -89,8 +90,8 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
       <Button type="submit" size="sm" disabled={busy || uncertain || !name.trim() || !base.trim()}>{busy ? 'Creating...' : 'Create workspace'}</Button>
     </form> : <div className="space-y-2 border-t pt-3 text-sm">
       <p>This hosted gateway cannot access your clone. On the computer holding it, open the desktop app or run <code>aether gui</code>, connected to this server, then choose <strong>Create from local clone</strong>.</p>
-      <p className="text-xs text-muted-foreground">CLI alternative after linking to this server: replace the name, branch and absolute path below. Workspace creation requires an admin.</p>
-      <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{'aether workspace add myproject --base main\naether link --repo /absolute/path/to/clone --workspace myproject\ngit -C /absolute/path/to/clone push -u aether main'}</pre>
+      <p className="text-xs text-muted-foreground">CLI alternative: replace <code>&lt;server-address-or-id&gt;</code> with this server's SSH address (including its SSH port) or server ID from your administrator, not this page's HTTP address. This hosted gateway does not expose that connection target. Replace the name, branch and absolute path below. Workspace creation requires an admin.</p>
+      <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link ${shellQuote('<server-address-or-id>')} &&\naether workspace add myproject --base main &&\naether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace myproject &&\ngit -C /absolute/path/to/clone push -u aether main`}</pre>
     </div>)}
     {choice === 'remote' && <ImportRepositoryDialog client={client} onImported={(workspace) => { if (workspace) setImported(workspace); onRefresh() }} onClose={() => { setChoice(null); if (imported) onCreated(imported, 'remote') }} />}
   </section>

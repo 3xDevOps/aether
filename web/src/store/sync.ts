@@ -183,7 +183,9 @@ export async function hydrate(
       current.route === s.route &&
       !current.onboarded &&
       (capabilities?.local?.includes('link.status') === true ||
-        ((workspaces.length === 0 || !!current.workspaces[current.onboardingWorkspace]) &&
+        ((!current.onboardingWorkspace ||
+          workspaces.length === 0 ||
+          !!current.workspaces[current.onboardingWorkspace]) &&
           (capabilities?.methods.includes('*') ||
             (capabilities?.methods.includes('member.git') && capabilities.methods.includes('agent.list')))))
     ) {

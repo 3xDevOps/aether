@@ -200,8 +200,9 @@ Author identity is not repository authentication.
 In the dashboard, open **Onboarding**. After **Git identity**, the **Workspace**
 step offers **Import repository** and **Create from local clone** under
 **Add a workspace**, or lets you choose an existing workspace. The local
-dashboard starts with **Link**; the authenticated hosted dashboard skips that
-machine-local step.
+dashboard starts with **Link**. The authenticated hosted dashboard opens
+onboarding for new members even when shared workspaces already exist, and
+skips that machine-local step.
 
 For another workspace, open **Manage workspaces** from the navigation,
 workspace selector, or command palette (**Ctrl/Cmd+K**). The same public,
@@ -315,6 +316,10 @@ key, reopen **Source control** or run `mirror status` on the same workspace.
 failed. Keep its name/ID and repair it in **Workspace → Source control**;
 do not import a duplicate. If the response was lost, inspect **Manage
 workspaces** or `aether workspace list` before trying creation again.
+Switching members or servers, or closing the import dialog, does not cancel
+a pending import on the original server. Its late result cannot update the
+new dashboard context; return to the original server and check its workspaces
+before importing again.
 
 For a source branch named `main`, failures include:
 
@@ -373,22 +378,29 @@ its history in place.
 
 The hosted dashboard shows these choices with a local-client/CLI handoff; it
 cannot link a path on your laptop. A collaborator can link an existing
-workspace but must ask an admin to create a new one.
+workspace but must ask an admin to create a new one. If source ownership
+cannot be checked with your access, linking remains available but base-push
+controls and commands are withheld. Ask an admin to verify the source and
+accepted base before launching.
 
 CLI equivalent below assumes the clone's intended base is `trunk`. Replace
-the path, workspace, and `trunk` with your actual values; inspect the local
-branches first. The client must already be linked to the intended server:
+the path, workspace, and `trunk` with your actual values. Replace
+`<server-address-or-id>` with the server's SSH address, including its SSH port,
+or its server ID, not the hosted dashboard's HTTP address:
 
 ```sh
-git -C "$HOME/code/myproject" branch --list
-aether workspace init myproject --base trunk
-aether link --workspace myproject --repo "$HOME/code/myproject"
+server='<server-address-or-id>'
+git -C "$HOME/code/myproject" branch --list &&
+aether link "$server" &&
+aether workspace add myproject --base trunk &&
+aether link "$server" --workspace myproject --repo "$HOME/code/myproject" &&
 git -C "$HOME/code/myproject" push --no-follow-tags aether trunk:trunk
 ```
 
-For an existing workspace, omit `workspace init` and use the base branch
-shown in its settings. `link --repo` adds or updates the clone's `aether`
-remote using the saved server connection; it does not change its `origin`.
+For an existing workspace, omit `workspace add` and use the base branch
+shown in its settings. `link` requires the server argument even if the client
+is already linked. With `--repo`, it adds or updates the clone's `aether`
+remote; it does not change its `origin`.
 The push is non-force and does not send tags. Do not push a mirrored base:
 linking a clone there is for pulling run branches; use **Source control** to
 refresh or adopt the server-owned base.
@@ -881,7 +893,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
-| `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |
+| `no workspace yet; skip git remote` | Run `aether workspace add myproject --base main`, then `aether link '<server-address-or-id>' --repo /absolute/path/to/clone --workspace myproject` with your server and clone path. |
 | `multiple workspaces available; specify --workspace` | Pass `--workspace <name>` to `aether link` or another command that accepts a workspace selector. Agent setup is member-scoped. |
 | Run reaches `failed` immediately | The agent started and exited. `aether timeline --run <run-id>` shows the exit code; `aether attach` only works while a run is alive. |
 | `self-update is not supported on Windows` | Expected. Re-download the release binary: [install.md](install.md#manual-install). |
