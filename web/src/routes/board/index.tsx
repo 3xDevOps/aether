@@ -1,5 +1,5 @@
 import { Archive, CheckCheck, Rocket } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -79,6 +79,15 @@ export function Board() {
     onToggle: setShowArchived,
   }
   const clearDone = showArchived ? undefined : { plan: donePlan, onRun: runClear }
+  const mapHeader = (controls?: ReactNode) => (
+    <ColumnHeader
+      label={showArchived ? 'Runs · archived' : 'Runs'}
+      count={visibleColumns.reduce((count, column) => count + column.cards.length, 0)}
+      archived={archivedToggle}
+      clearDone={clearDone}
+      controls={controls}
+    />
+  )
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -116,7 +125,6 @@ export function Board() {
         }
         actions={
           <>
-            <NewRunButton />
             <Tooltip>
               <Tooltip.Trigger<'button'>
                 render={(triggerProps) => (
@@ -159,26 +167,24 @@ export function Board() {
             <EmptyNotice />
           ) : boardView === 'map' ? (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <ColumnHeader
-                label={showArchived ? 'Runs · archived' : 'Runs'}
-                count={visibleColumns.reduce((count, column) => count + column.cards.length, 0)}
-                archived={archivedToggle}
-                clearDone={clearDone}
-              />
               {loading ? (
-                <div role="status" aria-label="Loading runs" className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
-                  <Skeleton className="h-48 w-80 max-w-full shrink-0 rounded-none" />
-                  <Skeleton className="h-48 w-80 shrink-0 rounded-none" />
-                </div>
+                <>
+                  {mapHeader()}
+                  <div role="status" aria-label="Loading runs" className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
+                    <Skeleton className="h-48 w-80 max-w-full shrink-0 rounded-none" />
+                    <Skeleton className="h-48 w-80 shrink-0 rounded-none" />
+                  </div>
+                </>
               ) : (
                 <RunMap
                   cards={visibleColumns.flatMap((column) => column.cards)}
                   scope={activeWorkspace || 'all'}
+                  renderHeader={mapHeader}
                 />
               )}
             </div>
           ) : (
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden">
               {visibleColumns.map((column) =>
                 column.key === 'done' ? (
                   <Column
@@ -201,18 +207,8 @@ export function Board() {
   )
 }
 
-/**
- * The way in, wherever a member is looking. The launch form is hosted
- * app-wide, so asking the store to open it is the whole of it; a member who
- * cannot start a run is not offered the button.
- */
-function NewRunButton({
-  variant = 'ghost',
-  size = 'sm',
-}: {
-  variant?: 'ghost' | 'default'
-  size?: 'sm' | 'default'
-}) {
+/** The empty-board CTA opens the app-wide launch form when permitted. */
+function NewRunButton() {
   const openDialog = useStore((s) => s.openPaletteDialog)
   const cap = useCapability()
   const role = useSelfRole()
@@ -223,8 +219,8 @@ function NewRunButton({
         render={(triggerProps) => (
           <Button
             {...triggerProps}
-            variant={variant}
-            size={size}
+            variant="default"
+            size="default"
             onClick={() => {
               openDialog('launch')
             }}
@@ -256,7 +252,7 @@ function EmptyNotice() {
           own container.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {workspace && <NewRunButton variant="default" size="default" />}
+          {workspace && <NewRunButton />}
           {caps.hasMethod('workspace.list') && <Button variant="outline" onClick={() => navigate('workspaces')}>Add or manage workspaces</Button>}
           {caps.hasMethod('agent.list') && <Button variant="outline" onClick={() => navigate('onboarding')}>Set up repository and agents</Button>}
         </div>
@@ -291,7 +287,7 @@ function Column({
 }) {
   return (
     <section
-      className="flex min-w-0 flex-col border-b border-border bg-sidebar/35 last:border-b-0 lg:min-h-0 lg:border-b-0 lg:border-r lg:last:border-r-0"
+      className="flex min-w-0 flex-col border-b border-border bg-sidebar/35 last:border-b-0 lg:row-span-2 lg:grid lg:min-h-0 lg:grid-rows-subgrid lg:border-b-0 lg:border-r lg:last:border-r-0"
       aria-label={column.label}
     >
       <ColumnHeader
@@ -325,11 +321,13 @@ function ColumnHeader({
   count,
   archived,
   clearDone,
+  controls,
 }: {
   label: string
   count: number
   archived?: ArchivedToggle
   clearDone?: ClearDoneAction
+  controls?: ReactNode
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
   const actions = useRef<HTMLDivElement>(null)
@@ -346,7 +344,7 @@ function ColumnHeader({
   }
 
   return (
-    <header className="flex min-h-[35px] shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-border px-3 py-1">
+    <header className="flex min-h-[35px] shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-border px-3 py-1 coarse:min-h-[53px]">
       <h2
         ref={heading}
         tabIndex={-1}
@@ -354,6 +352,7 @@ function ColumnHeader({
       >
         {label}
       </h2>
+      {controls}
       <div ref={actions} className="flex max-w-full flex-wrap items-center gap-1.5">
         {clearDone && <ClearDoneButton {...clearDone} onClosed={takeFocus} />}
         {archived && archived.count > 0 && (

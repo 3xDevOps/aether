@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Bot, MessageSquare, Shield, Users, X } from 'lucide-react'
+import { Dialog as DialogPrimitive } from 'radix-ui'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
 import { Textarea } from '@/components/ui/textarea'
+import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { inModal } from '@/lib/keys'
@@ -13,7 +15,6 @@ import { ControlButton } from '@/routes/terminal/control-button'
 import type { TakeoverInteraction } from '@/routes/terminal/use-takeover'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { RoomMessage, RoomMessageKind, Run } from '@/lib/types'
-import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
 const emptyMessages: RoomMessage[] = []
@@ -44,6 +45,7 @@ export interface RunRoomProps {
   control?: ControlMetadata
   onTakeControl: () => void
   onReleaseControl: () => void
+  evidenceAnswer?: { fact: string }
   controlUnavailable?: boolean
   takeover?: TakeoverInteraction
 }
@@ -67,7 +69,7 @@ function overlapsCached(messages: RoomMessage[], cached: RoomMessage[]): boolean
   return messages.some((message) => cachedIDs.has(message.id))
 }
 
-export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl, controlUnavailable = false, takeover }: RunRoomProps) {
+export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl, evidenceAnswer, controlUnavailable = false, takeover }: RunRoomProps) {
   const runID = run.id
   const workspaceID = run.workspace_id
   const isPhone = useMediaQuery(phoneScreen)
@@ -105,6 +107,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   const opener = useRef<HTMLButtonElement>(null)
   const invoker = useRef<HTMLElement | null>(null)
   const focusComposer = useRef(false)
+  const consumedEvidenceAnswer = useRef<RunRoomProps['evidenceAnswer']>(undefined)
   const restoreFocus = useRef(false)
   const roomID = useId()
   const hintID = useId()
@@ -136,6 +139,20 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   }, [])
 
   useEffect(() => {
+    if (!evidenceAnswer || consumedEvidenceAnswer.current === evidenceAnswer) return
+    consumedEvidenceAnswer.current = evidenceAnswer
+    draftVersion.current += 1
+    setMode('comment')
+    setCorrelationID(undefined)
+    setBody(evidenceAnswer.fact)
+    if (!composer.current) {
+      invoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    }
+    focusComposer.current = true
+    setOpen(true)
+  }, [evidenceAnswer])
+
+  useEffect(() => {
     if (open && focusComposer.current) {
       focusComposer.current = false
       composer.current?.focus()
@@ -145,12 +162,14 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
       if (target?.isConnected && target !== document.body) target.focus()
       else opener.current?.focus()
     }
-  }, [open])
+  }, [open, evidenceAnswer])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== 'm' || !event.shiftKey || !(event.ctrlKey || event.metaKey) || event.altKey) return
-      if (event.defaultPrevented || event.isComposing || inModal(event.target)) return
+      const ownDialog = isPhone && event.target instanceof Element &&
+        event.target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')?.id === roomID
+      if (event.defaultPrevented || event.isComposing || (inModal(event.target) && !ownDialog)) return
       const state = useStore.getState()
       if (state.paletteOpen || state.paletteDialog) return
       // Claim the chord before xterm's target handler can turn it into bytes.
@@ -166,7 +185,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [open, closeRoom])
+  }, [open, closeRoom, isPhone, roomID])
 
   const load = async () => {
     const current = scope.current
@@ -437,16 +456,13 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     }
   }
 
-  const answerFact = (fact: string) => {
-    markDraftEdited()
-    setMode('comment')
-    setCorrelationID(undefined)
-    setBody(fact)
-    composer.current?.focus()
-  }
+
+  const RoomPortal = isPhone ? DialogPortal : Fragment
+  const RoomPanel = isPhone ? DialogPrimitive.Content : 'aside'
+  const RoomTitle = isPhone ? DialogPrimitive.Title : 'h2'
 
   return (
-    <>
+    <DialogPrimitive.Root open={isPhone && open} onOpenChange={(next) => { if (!next) closeRoom() }}>
       {!open && (
         <Tooltip>
           <Tooltip.Trigger<'button'> render={(triggerProps) => (
@@ -465,7 +481,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               aria-expanded={false}
               aria-controls={roomID}
               aria-keyshortcuts="Control+Shift+M Meta+Shift+M"
-              className="absolute inset-y-0 right-0 z-30 flex w-8 items-center justify-center border-l border-border bg-toolbar text-[12px] font-medium text-muted-foreground hover:bg-toolbar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:w-11"
+              className="flex w-8 shrink-0 items-center justify-center border-l border-border bg-toolbar text-[12px] font-medium text-muted-foreground hover:bg-toolbar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:w-11"
               onClick={() => { invoker.current = opener.current; setOpen(true) }}
             >
               <span className="flex items-center gap-2 [writing-mode:vertical-rl]">
@@ -477,25 +493,40 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
           <Tooltip.Content placement="left">Toggle Run Room · {shortcutLabel('Shift+M')}</Tooltip.Content>
         </Tooltip>
       )}
+      <RoomPortal>
+      {isPhone && <DialogOverlay />}
       {open && (
-        <aside
+        <RoomPanel
+          {...(isPhone ? {
+            'aria-describedby': undefined,
+            onOpenAutoFocus: (event: Event) => {
+              if (!focusComposer.current) return
+              event.preventDefault()
+              focusComposer.current = false
+              composer.current?.focus()
+            },
+            onCloseAutoFocus: (event: Event) => {
+              event.preventDefault()
+              composer.current?.focus()
+            },
+          } : undefined)}
           id={roomID}
           aria-label="Run Room"
           className={isPhone
-            ? 'fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-40 flex min-h-0 w-full flex-col overflow-y-auto bg-background'
-            : 'absolute inset-y-0 right-0 z-40 flex min-h-0 w-[min(420px,calc(100vw-2rem))] flex-col overflow-y-auto border-l border-border bg-background'}
+            ? 'fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-50 flex min-h-0 w-full flex-col overflow-y-auto bg-background'
+            : 'flex min-h-0 w-[min(420px,40%)] shrink-0 flex-col overflow-y-auto border-l border-border bg-background'}
         >
           <header className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-toolbar px-3 py-1.5">
-            <h2 className="flex items-center gap-1.5 text-[13px] font-semibold">
+            <RoomTitle className="flex items-center gap-1.5 text-[13px] font-semibold">
               <MessageSquare className="size-3.5 text-[var(--accent-soft-foreground)]" aria-hidden />
               Run Room
-            </h2>
+            </RoomTitle>
             <div className="flex items-center gap-2">
               <kbd className="text-[11px] text-muted-foreground">{shortcutLabel('Shift+M')}</kbd>
               <Button type="button" size="icon" variant="ghost" aria-label="Close Run Room" onClick={closeRoom}><X className="size-4" aria-hidden /></Button>
             </div>
           </header>
-          <div className="shrink-0 space-y-2 border-b border-border px-3 py-2 text-[12px]">
+          {isPhone && <div className="shrink-0 space-y-2 border-b border-border px-3 py-2 text-[12px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-1.5">
                 {controllerID && <MemberAvatar member={members[controllerID]} fallback={controllerName ?? controllerID} className="size-5 shrink-0 text-[9px]" />}
@@ -509,11 +540,10 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               <span className="min-w-0 break-words">{watchers.length ? `Viewing: ${watchers.map((id) => memberLabel(id, members)).join(', ')}` : status ? 'No viewers reported' : 'Viewers not yet available'}</span>
             </div>
             {statusError && <p role="status" className="break-words text-warning-soft-foreground">{status ? 'Presence is stale' : 'Presence unavailable'}: {statusError}</p>}
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-[12px] text-muted-foreground">
+          </div>}
+          {isPhone && <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-[12px] text-muted-foreground">
             <span className={cn('flex items-center gap-1', (status?.protected || run.protected) && 'text-warning-soft-foreground')}><Shield className="size-3.5" aria-hidden />{status?.protected || run.protected ? 'Protected' : 'Unprotected'}</span>
-            <EvidenceDrawer runID={runID} workspaceID={workspaceID} client={client} onAnswer={answerFact} />
-          </div>
+          </div>}
           <div className="min-h-20 flex-1 overflow-y-auto px-3 py-2">
             {error && (
               <div role="alert" aria-label="Room history error" className="mb-2 flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-1 py-2 text-[12px] text-state-failed">
@@ -611,9 +641,10 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               <Button type="button" size="sm" disabled={!body.trim() || busy || uploading || (mode === 'steer_request' && Boolean(status?.protected || run.protected))} onClick={() => void submit()}>{busy ? 'Sending…' : pending ? 'Retry' : mode === 'steer_request' ? 'Queue steer' : 'Send'}</Button>
             </div>
           </footer>
-        </aside>
+        </RoomPanel>
       )}
-    </>
+      </RoomPortal>
+    </DialogPrimitive.Root>
   )
 }
 

@@ -148,6 +148,7 @@ export interface UiSlice {
   theme: Theme
   sidebarWidth: number
   sidebarCollapsed: boolean
+  sidebarDrawerOpen: boolean
   terminalDockHeight: number
   runDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
@@ -200,6 +201,7 @@ export interface UiSlice {
   dismissedUpdates: Record<UpdateKind, string>
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
+  setSidebarDrawerOpen: (open: boolean) => void
   setTerminalDockHeight: (height: number) => void
   setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
@@ -226,6 +228,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   theme: 'system',
   sidebarWidth: minSidebarWidth,
   sidebarCollapsed: false,
+  sidebarDrawerOpen: false,
   terminalDockHeight: 280,
   runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
@@ -256,6 +259,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  setSidebarDrawerOpen: (sidebarDrawerOpen) => set({ sidebarDrawerOpen }),
   setOnboarded: (onboarded) =>
     set(
       onboarded ? { onboarded: true, ...wizardReset } : { onboarded: false },

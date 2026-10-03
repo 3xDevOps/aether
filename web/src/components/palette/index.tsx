@@ -7,12 +7,16 @@ import { SearchIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
+import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
 import { Tooltip } from '@/components/ui/heroui'
+import { useCommandRunner, type Command } from '@/lib/commands'
+import { paletteFilter } from '@/lib/palette-filter'
 import { inModal } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
 
 const shortcut = 'k'
 const alternateShortcut = 'p'
@@ -34,21 +38,23 @@ export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean
             type="button"
             disabled={disabled}
             onClick={() => toggle(true)}
-            aria-label="Commands"
+            aria-label="Search runs and commands"
             className={cn(
               focusRing,
               'flex h-[26px] min-w-0 w-full max-w-[600px] items-center justify-start gap-2 rounded-sm border border-border/70 coarse:h-10 bg-background/50 px-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-toolbar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60',
             )}
           >
             <SearchIcon aria-hidden className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-left">{context}</span>
+            <span className="min-w-0 flex-1 truncate text-left">
+              Search runs and commands <span className="text-muted-foreground/80">· {context}</span>
+            </span>
             <span className="hidden shrink-0 font-mono text-[11px] sm:inline">
-              {shortcutLabel('Shift+P')}
+              {shortcutLabel('K')}
             </span>
           </button>
         )}
       />
-      <Tooltip.Content>Command palette</Tooltip.Content>
+      <Tooltip.Content>Search runs and commands · {context}</Tooltip.Content>
     </Tooltip>
   )
 }
@@ -56,6 +62,7 @@ export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
   const toggle = useStore((s) => s.togglePalette)
+  const identityKey = useStore((s) => s.identityKey)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore((s) => s.workspaces)
   const context = activeWorkspace
@@ -64,8 +71,23 @@ export function CommandPalette() {
   // The template form is not one of the store's palette dialogs; its open
   // state lives here with the other dialog hosts.
   const [templates, setTemplates] = useState(false)
+  const [confirmation, setConfirmation] = useState<{
+    identityKey: string | null
+    run: RunRecord
+    command: Command & { confirm: NonNullable<Command['confirm']> }
+  } | null>(null)
+  const pendingConfirmation = useRef<typeof confirmation>(null)
+  const perform = useCommandRunner()
   const restoreFocus = useRef(true)
   const invoker = useRef<HTMLElement | null>(null)
+  const invokerIdentity = useRef(identityKey)
+
+  useEffect(() => {
+    if (pendingConfirmation.current?.identityKey !== identityKey) {
+      pendingConfirmation.current = null
+    }
+    setConfirmation((current) => current?.identityKey === identityKey ? current : null)
+  }, [identityKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -85,7 +107,7 @@ export function CommandPalette() {
       // closes it. A terminal is not a modal, so its hidden textarea can
       // invoke the palette and receive focus back when it is dismissed.
       const s = useStore.getState()
-      if (s.paletteDialog || templates) return
+      if (s.paletteDialog || templates || confirmation || pendingConfirmation.current) return
       if (!s.paletteOpen && inModal(e.target)) return
       // Capture the chord before xterm's target handler and keep it from
       // becoming terminal input. Guarded modal events deliberately continue
@@ -95,12 +117,13 @@ export function CommandPalette() {
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [toggle, templates])
+  }, [toggle, templates, confirmation])
 
   return (
     <>
       <CommandDialog
         open={open}
+        filter={paletteFilter}
         showCloseButton={false}
         onOpenChange={(next: boolean) => {
           if (!next) restoreFocus.current = true
@@ -108,12 +131,31 @@ export function CommandPalette() {
         }}
         onOpenAutoFocus={() => {
           const target = document.activeElement
+          invokerIdentity.current = useStore.getState().identityKey
           invoker.current =
             target instanceof HTMLElement && target !== document.body ? target : null
         }}
         onCloseAutoFocus={(event) => {
+          // Finish unmounting the palette before giving a second modal focus.
+          // Keep the original invoker for cancellation, including xterm.
+          if (pendingConfirmation.current) {
+            event.preventDefault()
+            const pending = pendingConfirmation.current
+            pendingConfirmation.current = null
+            if (pending.identityKey === useStore.getState().identityKey) {
+              setConfirmation(pending)
+            } else {
+              invoker.current = null
+              restoreFocus.current = true
+            }
+            return
+          }
           const destinationOpen = useStore.getState().paletteDialog !== null || templates
-          if (!restoreFocus.current || destinationOpen) {
+          if (
+            invokerIdentity.current !== useStore.getState().identityKey ||
+            !restoreFocus.current ||
+            destinationOpen
+          ) {
             event.preventDefault()
             restoreFocus.current = true
             invoker.current = null
@@ -136,9 +178,37 @@ export function CommandPalette() {
             toggle(false)
           }}
           onTemplates={() => setTemplates(true)}
+          onConfirm={(run, command) => {
+            // The item may still belong to the previous render during hydration.
+            if (identityKey !== useStore.getState().identityKey) return
+            pendingConfirmation.current = { identityKey, run, command }
+            toggle(false)
+          }}
         />
       </CommandDialog>
       {templates && <TemplateDialog onClose={() => setTemplates(false)} />}
+      {confirmation && confirmation.identityKey === identityKey && (
+        <RunCommandConfirmation
+          run={confirmation.run}
+          confirmation={confirmation.command.confirm}
+          onConfirm={() => {
+            const command = confirmation.command
+            setConfirmation(null)
+            if (confirmation.identityKey !== useStore.getState().identityKey) return
+            void perform(command)
+          }}
+          onClose={() => setConfirmation(null)}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const target = invoker.current
+            invoker.current = null
+            if (
+              confirmation.identityKey === useStore.getState().identityKey &&
+              target?.isConnected
+            ) target.focus()
+          }}
+        />
+      )}
     </>
   )
 }

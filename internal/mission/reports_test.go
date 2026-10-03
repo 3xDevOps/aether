@@ -78,6 +78,11 @@ func setupReconcileReport(t *testing.T, outcome store.CoordOutcome) (reconcileRe
 // integrator run of the given mode.
 func setupReconcileReportFor(t *testing.T, outcome store.CoordOutcome, integratorMode domain.LaunchMode) (reconcileReportFixture, *store.CoordReport) {
 	t.Helper()
+	return setupReconcileReportRequirements(t, outcome, integratorMode, []domain.EvidenceRequirement{{Kind: "test"}})
+}
+
+func setupReconcileReportRequirements(t *testing.T, outcome store.CoordOutcome, integratorMode domain.LaunchMode, requirements []domain.EvidenceRequirement) (reconcileReportFixture, *store.CoordReport) {
+	t.Helper()
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
 	workspace := regressionWorkspace(t, db)
@@ -93,7 +98,7 @@ func setupReconcileReportFor(t *testing.T, outcome store.CoordOutcome, integrato
 		MissionID: mission.ID,
 		Revision: &domain.TaskRevision{
 			Title: "report task", Objective: "report task", Status: domain.TaskRevisionProposed,
-			EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "test"}},
+			EvidenceRequirements: requirements,
 		},
 	}
 	if err := db.CreateTask(ctx, task); err != nil {

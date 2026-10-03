@@ -1,7 +1,7 @@
 // Finish evidence is a retained, inspectable record rather than a status
 // decoration. This scenario lets the real fake harness exit, waits for the
 // server's terminal lifecycle and durable packet, then reads every source
-// through the Run Room after ordinary runtime cleanup has had a chance to run.
+// through the terminal dock after ordinary runtime cleanup has had a chance to run.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -74,6 +74,7 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
   // Use the same tokened dashboard deep link as the desktop shell. Opening it
   // only after the lifecycle settles means the assertions exercise retained
   // sources, not the live checkout or PTY session.
+  await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
@@ -81,8 +82,16 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
   const room = page.getByRole('complementary', { name: 'Run Room' })
   await expect(room).toBeVisible()
 
-  const evidence = room.getByRole('region', { name: 'Run evidence' })
-  await evidence.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).click()
+  const trigger = page.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ })
+  await expect(trigger).toHaveCount(1)
+  await trigger.click()
+  const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
+  await expect(evidence).toBeVisible()
+  await expect.poll(async () => {
+    const panel = await page.getByRole('tabpanel', { name: 'Terminal', exact: true }).boundingBox()
+    const popup = await evidence.boundingBox()
+    return panel !== null && popup !== null && popup.y >= panel.y && popup.y + popup.height <= panel.y + panel.height
+  }).toBe(true)
   await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible({
     timeout: terminalTimeout,
   })
@@ -108,8 +117,7 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
   await expect(evidence.getByText('+hello-from-agent', { exact: false })).toBeVisible()
   await expect(evidence).not.toContainText('Patch unavailable')
 
-  // Keep the drawer wider than the room on a short desktop. Its source controls
-  // must remain clickable outside the room's scroll boundary.
+  // A short desktop still keeps source controls reachable in the bounded popup.
   await page.setViewportSize({ width: 800, height: 480 })
   // Transcript bytes are a separately retained source and must still expose
   // the fake agent's real terminal output.
@@ -119,6 +127,12 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
 
   await evidence.getByRole('button', { name: 'Close evidence', exact: true }).click()
   await expect(evidence.getByRole('heading', { name: 'Retained evidence', exact: true })).toBeHidden()
+  await expect(trigger).toBeFocused()
+  await trigger.press('Enter')
+  await expect(evidence).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(evidence).toBeHidden()
+  await expect(trigger).toBeFocused()
   await room.getByRole('button', { name: 'Close Run Room', exact: true }).click()
   await expect(room).toBeHidden()
 })

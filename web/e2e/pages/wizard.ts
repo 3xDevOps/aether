@@ -281,14 +281,21 @@ export class OnboardingWizard {
   /**
    * Opens the dashboard on the member's tokened URL. An unlinked gateway
    * routes itself to the wizard; a linked one is already past it, so the
-   * sidebar entry is the way back in.
+   * Admin menu is the way back in.
    */
   static async open(page: Page, url: string): Promise<OnboardingWizard> {
     const wizard = new OnboardingWizard(page)
     await page.goto(url)
     const heading = page.getByRole('heading', { name: 'Onboarding', exact: true })
+    const live = page.getByRole('contentinfo').getByText('Live', { exact: true })
+    await expect(heading.or(live).first()).toBeVisible()
     if (!(await heading.isVisible())) {
-      await page.getByRole('button', { name: 'Onboarding', exact: true }).click()
+      const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+      if (!(await surfaces.isVisible())) {
+        await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
+      }
+      await surfaces.getByRole('button', { name: /^Admin(?:,|$)/ }).click()
+      await page.getByRole('menuitem', { name: 'Onboarding', exact: true }).click()
     }
     await expect(heading).toBeVisible()
     return wizard

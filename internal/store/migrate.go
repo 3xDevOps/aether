@@ -1372,11 +1372,57 @@ CREATE INDEX idx_member_devices_approval_code
 	`
 ALTER TABLE runs ADD COLUMN home_member_id TEXT REFERENCES members(id);
 `,
+	// v47: a run keeps one active terminal report instead of one report.
+	// Blocked reports no longer use the slot, and a relaunch supersedes the
+	// terminal report so the reopened agent can report again. SQLite cannot
+	// drop the inline UNIQUE (run_id), so the table is rebuilt; publications
+	// reference it ON DELETE CASCADE, so this version runs with foreign keys
+	// off (see foreignKeysOffMigrations).
+	`
+CREATE TABLE coord_reports_migrate AS
+	SELECT id, workspace_id, run_id, outcome, summary, next_action, evidence_refs,
+	       input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at
+	FROM coord_reports;
+DROP TABLE coord_reports;
+CREATE TABLE coord_reports (
+	id              TEXT PRIMARY KEY,
+	workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	outcome         TEXT NOT NULL CHECK (outcome IN ('success', 'failure', 'blocked')),
+	summary         TEXT NOT NULL,
+	next_action     TEXT NOT NULL DEFAULT '',
+	evidence_refs   TEXT NOT NULL DEFAULT '[]',
+	input_evidence_refs TEXT NOT NULL DEFAULT '[]',
+	idempotency_key TEXT NOT NULL,
+	state           TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'finalized')),
+	created_at      INTEGER NOT NULL,
+	finalized_at    INTEGER,
+	published_at    INTEGER,
+	superseded_at   INTEGER,
+	UNIQUE (run_id, idempotency_key)
+);
+INSERT INTO coord_reports (id, workspace_id, run_id, outcome, summary, next_action, evidence_refs,
+                           input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at)
+	SELECT id, workspace_id, run_id, outcome, summary, next_action, evidence_refs,
+	       input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at
+	FROM coord_reports_migrate;
+DROP TABLE coord_reports_migrate;
+CREATE INDEX idx_coord_reports_run
+	ON coord_reports(workspace_id, run_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX idx_coord_reports_active_terminal
+	ON coord_reports(run_id)
+	WHERE outcome IN ('success', 'failure') AND superseded_at IS NULL;
+`,
+	// v48: outcome_unseen marks a run an agent's report finished that its
+	// owner has not opened yet.
+	`
+ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
-var foreignKeysOffMigrations = map[int]bool{45: true}
+var foreignKeysOffMigrations = map[int]bool{45: true, 47: true}
 
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so

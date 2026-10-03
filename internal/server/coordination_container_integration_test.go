@@ -173,6 +173,16 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 		att.waitOutput(t, "cli-reported:")
 		assertNoAgentError(t, att)
 	}
+	// An ordinary run's success report finishes it once the turn ends:
+	// committed, published, and retained in Done rather than parked in
+	// needs-attention.
+	for _, run := range []protocol.Run{runA, runB} {
+		waitEvent(t, sub, &seen, "run "+run.ID+" finished by its report", func(e events.Event) bool {
+			p, ok := e.Payload.(events.RunStatusPayload)
+			return ok && string(e.RunID) == run.ID && p.To == domain.RunCompleted &&
+				p.Reason == "agent reported success; retained container"
+		})
+	}
 }
 
 // assertRealizedMounts reads the three coordination binds back off the live
@@ -481,6 +491,9 @@ case "$report" in
 	*'"ok":true'*) echo "cli-reported:$AETHER_RUN_ID" ;;
 	*) fail "report not acknowledged:$report" ;;
 esac
+# End the turn the way a harness Stop hook does, so the reported success
+# finishes the run.
+printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
 `)
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid == 0 {

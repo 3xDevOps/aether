@@ -63,7 +63,8 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
   await expect(header).toContainText('Working')
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await header.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Close run...', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
@@ -227,9 +228,9 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   const tabs = page.getByRole('tablist', { name: 'Run tabs' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
-  const overview = tabs.getByRole('tab', { name: 'Overview' })
-  await expect(overview).toBeFocused()
-  expectVisibleFocus('the run tab', await indicator(overview))
+  const events = tabs.getByRole('tab', { name: 'Events' })
+  await expect(events).toBeFocused()
+  expectVisibleFocus('the run tab', await indicator(events))
   // Keep the live run on screen while checking its sidebar row. The Working
   // group is expanded by default; closing first would move the row under the
   // collapsed Done group and leave nothing for focus() to target.
@@ -246,9 +247,9 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
   await board.focus()
   await page.keyboard.press('Tab')
-  const allRuns = surfaces.getByRole('button', { name: 'All runs', exact: true })
-  await expect(allRuns).toBeFocused()
-  expectVisibleFocus('the All runs activity-rail button', await indicator(allRuns))
+  const missions = surfaces.getByRole('button', { name: 'Missions', exact: true })
+  await expect(missions).toBeFocused()
+  expectVisibleFocus('the Missions activity-rail button', await indicator(missions))
 
   // Close only after the live run and all focus targets have been exercised.
   await closeFirstRun(page)
@@ -308,33 +309,25 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   const firstGroup = sidebar.getByRole('heading').first()
   const groupBy = sidebar.getByRole('group', { name: 'Group runs by' })
   const member = groupBy.getByRole('button', { name: 'Member', exact: true })
-  const launch = sidebar.getByRole('button', { name: 'New run', exact: true })
   await expect(member).toBeVisible()
-  await expect(launch).toBeVisible()
 
   const toolbarBox = await toolbar.boundingBox()
   const firstGroupBox = await firstGroup.boundingBox()
   const groupBox = await groupBy.boundingBox()
   const memberBox = await member.boundingBox()
-  const launchBox = await launch.boundingBox()
   const minimum = await sidebar.boundingBox()
   if (
     !toolbarBox ||
     !firstGroupBox ||
     !groupBox ||
     !memberBox ||
-    !launchBox ||
     !minimum
   ) {
     throw new Error('minimum-width sidebar controls did not render')
   }
 
-  expect(Math.abs(groupBox.y + groupBox.height / 2 - launchBox.y - launchBox.height / 2)).toBeLessThanOrEqual(1)
-  const runsBox = await runs.boundingBox()
-  if (!runsBox) throw new Error('runs label did not render')
-  expect(Math.abs(runsBox.y + runsBox.height / 2 - launchBox.y - launchBox.height / 2)).toBeLessThanOrEqual(1)
   expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
-  for (const control of [groupBox, memberBox, launchBox]) {
+  for (const control of [groupBox, memberBox]) {
     expect(control.x).toBeGreaterThanOrEqual(minimum.x)
     expect(control.x + control.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   }

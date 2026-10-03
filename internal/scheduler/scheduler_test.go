@@ -457,12 +457,15 @@ func TestHappyPath(t *testing.T) {
 
 	c.exitNow(0)
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("completed reason = %q", p.Reason)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" || p.OutcomeUnseen {
+		t.Fatalf("completed event = %+v, want an unreported exit with outcome_unseen clear", p)
 	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if fresh.FinishedAt == nil {
 		t.Fatal("completed run must set FinishedAt")
+	}
+	if fresh.OutcomeUnseen {
+		t.Fatal("an unreported clean exit must not mark the outcome unseen")
 	}
 	completedAt := *fresh.FinishedAt
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: fix the auth bug" {

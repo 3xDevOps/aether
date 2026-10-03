@@ -98,7 +98,7 @@ Layers, per the design spec's testing strategy:
   `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
   `make test-e2e` remains unsharded and still builds the embedded dashboard
   and binaries first. The four shards partition the desktop and mobile cases
-  once each.
+  once each. File boundaries can make shard sizes unequal.
   The `chromium` project excludes `**/*.mobile.spec.ts`; only the `mobile`
   project owns those specs. The opt-in real-GitHub case keeps its existing
   credential gate; listing or sharding it does not prove it ran.
@@ -812,11 +812,47 @@ containers by name, along with the `aether/member-<member-id>` images an
 environment save commits. A failed test keeps its scratch directory and
 attaches the server's output to the report.
 
+### Command palette performance
+
+From `web/`, build the ordinary static export with `bun run build`. Use
+`bun run build --profile` for a separate React production-profiling export;
+do not substitute a development-server measurement for either.
+
+Compare the same browser, viewport, pointer mode and datasets on both revisions:
+50 and 500 runs, with short tasks and varied natural-prose tasks around 1,600
+characters. Preserve complete task bodies, branch names, harnesses, workspace
+names and IDs. Record synthetic fixtures separately from live workspace data,
+and keep fixtures and raw traces outside the source tree.
+
+Measure the first opening separately from at least 20 warm reopens. Use trusted
+keyboard and titlebar input, repeated queries, backspacing and clearing.
+Report scorer time separately from input-to-results and opening latency, plus
+result counts, long tasks, requests and focus/selection behavior. An
+event-to-`requestAnimationFrame`-plus-timer measurement is a paint-opportunity
+proxy, not compositor latency. Compare ordinary and profiling builds separately.
+
+Check full-text membership and ranking against cmdk's scorer, live run updates,
+offscreen keyboard selection, modal focus and Escape restoration. Filtering
+must not issue a search RPC. Score-disabled or hidden-Board ablations can locate
+a bottleneck; they do not prove the shipped behavior or its speed.
+
 ### Scenarios
+
+This inventory describes authored scenarios and their report attachments, not
+evidence that they have been executed or passed on a particular checkout.
+
+The committed visual references use a production export in Chromium with a
+read-only synthetic API, not a real PTY, agent or browser companion:
+[wide Board](media/dashboard-board-wide.png),
+[phone Board](media/dashboard-board-phone.png),
+[docked Room](media/dashboard-room-docked.png) and
+[phone Room](media/dashboard-room-phone.png). They show layout and focus
+surfaces; the server-backed scenarios below verify interaction with real
+runtime state.
 
 | Spec | Scenario |
 | --- | --- |
-| `board-card` | What a board card gives up without opening the run: the branch name's `title` resolving under the card's click overlay, the name selectable, and the copy control copying rather than navigating - all of which only a browser that hit-tests can check |
+| `board-card` | Opening a card's Details without opening the run, then selecting the visible full branch name and using its copy control without navigating - all of which require real browser hit testing |
 | `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
@@ -828,20 +864,26 @@ attaches the server's output to the report.
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration, the query is gone from the address bar afterwards, and a reload lands back on the board |
-| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
+| `run-room.spec.ts` | Two members on separate gateways share comments, queued steering, moderation and explicit occupied-control transfer. Desktop Room is a bounded sibling beside the terminal, not an overlay: header/attachment/tools controls remain hit-testable, controller and viewers stay in the toolbar, and Evidence has one trigger outside Room. Opening and closing Room changes terminal columns, preserves the draft and restores terminal focus; More supports keyboard dismissal/focus return. The scenario attaches `desktop-run-room-docked` and `desktop-run-room-observer` screenshots |
+| `run-evidence.spec.ts` | Retained finish evidence after run cleanup: one dock trigger even with Room open, a desktop popover bounded by the Terminal tabpanel, retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape restoring trigger focus |
+| `terminal-tools` | The Board's terminal dock opens on request with a real environment container. Wide fine-pointer panes expose inline tools; narrow panes use a keyboard-accessible Terminal tools popover, and even a wide touch viewport keeps the popover. The scenario searches through both presentations, checks `Ctrl+=` zoom across reload, native `Ctrl+Shift+V` paste, `Ctrl+Shift+F` search and new shell output after collapsing and reopening |
 | `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: shared-grid growth, the same pinned row and relative pixel offset through shared font zoom, return-live in mirror mode and reattach; a large redraw archive opens at a bounded current screen rather than replaying older output |
 | `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
-| `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport; the phone behavior is covered by `status-bar.mobile.spec.ts` below |
+| `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: status details opens at wide and compact desktop widths, secondary readouts remain keyboard-reachable, long member/error rows wrap without overlap, and the bounded popup scrolls to Usage without pushing the shell off-screen; touch behavior is covered by `status-bar.mobile.spec.ts` below |
 | `files-browser.mobile.spec.ts` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
-| `sidebar-drawer.spec.ts` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
-| `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
+| `sidebar-drawer.spec.ts` | In a 600px desktop window, the titlebar-opened sidebar drawer answers `Mod+B` itself and hands the palette back once it closes |
+| `keyboard-focus` | Escape closes a dialog or the status popup on a run without leaving the run; focused shell controls paint the app's outline with computed style and contrast against the actual background |
+| `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. Browser tools owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-deep-link`, `run-provisioning`, `run-switch`, `run-views.mobile.spec.ts`,
-`shell-drawer.mobile.spec.ts`, `terminal-geometry`, `terminal-images` and `terminal-tools` need a
+`run-deep-link`, `run-provisioning`, `run-switch`, `run-room.spec.ts`,
+`run-evidence.spec.ts`, `run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
+`run-evidence.mobile.spec.ts`, `shell-drawer.mobile.spec.ts`,
+`development-browser/browser.spec.ts`, `terminal-geometry`, `terminal-images`
+and `terminal-tools` need a
 reachable Docker daemon and skip without one. That skip is specific to the
 dashboard suite: `make test-integration` requires its real Docker setup and
 fails when Docker is unavailable. The rest need only git, except
@@ -879,14 +921,16 @@ covered - WebKit is not installed.
 
 | Spec | Scenario |
 | --- | --- |
-| `files-browser.mobile.spec.ts` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
+| `files-browser.mobile.spec.ts` | On a phone, opening Files through the titlebar's sidebar drawer, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
 | `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px, repository settings has no whole-dialog horizontal overflow and its title, description and introductory text remain readable |
-| `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
-| `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
+| `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: status details opens on a tap and keeps the controls, long member name and unreachable notice inside the viewport; a short-screen popup scrolls to Usage rather than cutting it off. After closing it, Keyboard shortcuts remains independently tappable |
+| `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the titlebar, its rows are finger-sized, and tapping a run closes the drawer onto that run without page overflow; the status-details trigger remains touch-sized |
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
-| `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
-| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: tap through Patch and Summary, keep retained file content readable, and close both Evidence and Run Room; the report includes the open evidence sheet |
+| `run-views.mobile.spec.ts` | On a phone, protecting a real run through the header's More menu, keeping the selected Browser, Events and Diff tabs fully visible after touch navigation, then reading the diff: menu items are finger-sized, protection shows in the header, and a file section wider than the screen scrolls sideways only once wrap is off |
+| `run-room.mobile.spec.ts` | A full-width modal Room below the titlebar leaves the desktop-controlled PTY geometry unchanged, contains keyboard focus, restores opener focus and preserves the draft. A short tap does not request occupied control. Separate scenarios read retained evidence and use two real sessions to deny incoming control over Room and Evidence: the decision remains visible and keyboard/pointer-operable at 390×524 and across Evidence's 700→960 layout breakpoint, then restores the interrupted focus and draft without transferring control. Screenshots: `phone-run-room`, `phone-retained-evidence`, and `holder-over-{room,evidence}-{390,700}` for the exercised combinations |
+| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: use the sole dock trigger without opening Room, tap through Patch and Summary, read retained file content, and close Evidence with focus returned to its trigger. The scenario attaches `short phone evidence sheet` |
+| `development-browser/browser.mobile.spec.ts` | Shared login and live app update on a phone viewport, control handoff, cancellation of Reset session from Browser tools without losing the login, expanded browser input, Chromium composition and multi-touch without horizontal page overflow. The scenario attaches `phone shared app`; viewport and CDP input do not prove a physical phone keyboard |
 | `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
 | `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
 
@@ -918,8 +962,10 @@ way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
 The phone specs need git; `shell-drawer.mobile.spec.ts`,
-`run-views.mobile.spec.ts`, `run-evidence.mobile.spec.ts` and
-`terminal-phone.mobile.spec.ts` also need Docker, because they open a real run,
+`run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
+`run-evidence.mobile.spec.ts`, `terminal-phone.mobile.spec.ts` and
+`development-browser/browser.mobile.spec.ts` also need Docker,
+because they open a real run,
 and skip without it. Run them alone
 against the binaries `make build` produced:
 

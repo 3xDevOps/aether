@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -104,5 +106,37 @@ func TestRunArchiveWireShape(t *testing.T) {
 	}
 	if restored.Run.ArchivedAt != nil || restored.Run.DeletesAt != nil {
 		t.Fatalf("restored run wire fields = %+v, want both nil", restored.Run)
+	}
+}
+
+// run.seen forwards the caller as the actor and answers with the run; the
+// scheduler's owner-only refusal surfaces as CodeDenied, and a missing run
+// is refused by the guard before the scheduler is called.
+func TestRunSeenAuthorization(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	owner := controlClient(t, e)
+	r := createRunWithStatus(t, e, domain.RunCompleted)
+
+	var res protocol.RunResult
+	if err := owner.Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: string(r.ID)}, &res); err != nil {
+		t.Fatalf("owner run.seen: %v", err)
+	}
+	if res.Run.ID != string(r.ID) || res.Run.OutcomeUnseen {
+		t.Fatalf("run.seen result = %+v, want run %s with outcome_unseen clear", res.Run, r.ID)
+	}
+	if got, want := e.runs.Calls(), []string{fmt.Sprintf("seen:%s:%s", r.ID, e.member.ID)}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v", got, want)
+	}
+
+	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	e.runs.setErr(fmt.Errorf("%w: only the run's owner can mark its outcome seen", permissions.ErrDenied))
+	wantDenied(t, controlAs(t, e, collab).Call(protocol.MethodRunSeen,
+		protocol.RunSeenParams{RunID: string(r.ID)}, nil), "collaborator run.seen")
+
+	var pe *protocol.Error
+	err := owner.Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: "run_missing"}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("run.seen on a missing run = %v, want CodeNotFound", err)
 	}
 }

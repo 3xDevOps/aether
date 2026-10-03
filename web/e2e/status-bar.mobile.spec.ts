@@ -1,18 +1,11 @@
-// The status bar on a phone. The readouts that do not fit are behind one
-// popup the member taps open, and every control it carries has to stay
-// inside the viewport - including the theme toggle on the bottom edge, which
-// a tap must land on without the document growing under the finger.
-//
-// The state that makes the bar too wide is a server that has gone away: the
-// notice explaining it is the longest thing the bar ever carries, and it
-// needs a real server to leave. `status-bar-sizing.spec.ts` owns the same
-// bar at desktop widths.
+// A real server shutdown exercises complete diagnostics and touch scrolling
+// in the phone's bounded status popup.
 
 import { expect, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'
 
 /** The controls the bar always offers, wherever the layout puts them. */
-const controls = ['Commands', 'Keyboard shortcuts', 'Theme: system']
+const controls = ['Search runs and commands', 'Keyboard shortcuts', 'Show status details']
 const unreachableNotice =
   'server unreachable over SSH - check the server and network; retrying'
 // Long enough to overflow the bar's left group, which is what took the
@@ -80,9 +73,6 @@ test('the phone status bar keeps every control inside the viewport', async ({
   expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width)
   expect(popupBox.y + popupBox.height).toBeLessThanOrEqual(viewport.height)
 
-  // A clipped popup scrolls exactly like a scrollable one, so the rule that
-  // separates `hidden` from `auto` is worth asserting on its own.
-  await expect(popup).toHaveCSS('overflow-y', 'auto')
 
   // Nothing the popup carries may push the page sideways or downwards: the
   // shell owns the whole screen and the member has no window to widen.
@@ -108,17 +98,34 @@ test('the phone status bar keeps every control inside the viewport', async ({
   expect(shortBox.y).toBeGreaterThanOrEqual(0)
   expect(shortBox.y + shortBox.height).toBeLessThanOrEqual(shortScreen.height)
 
-  const scrolled = await popup.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-    return {
-      reached: element.scrollTop,
-      below: element.scrollHeight - element.clientHeight,
+  const below = await popup.evaluate((element) => element.scrollHeight - element.clientHeight)
+  expect(below).toBeGreaterThan(0)
+  const usage = footer.getByRole('button', { name: 'Usage', exact: true })
+  await expect(usage).not.toBeInViewport()
+  const input = await page.context().newCDPSession(page)
+  // Dispatch real, frame-paced touch moves inside the resized popup. Chromium's
+  // synthesized touch scroll can deliver only touchstart/touchend under mobile
+  // emulation, leaving native scrolling unexercised.
+  const distance = shortBox.height - 32
+  try {
+    for (let swipe = 0; swipe < Math.ceil(below / (distance / 2)); swipe++) {
+      const x = shortBox.x + shortBox.width / 2
+      const y = shortBox.y + shortBox.height - 16
+      await input.send('Input.dispatchTouchEvent', {
+        type: 'touchStart', touchPoints: [{ x, y, id: 1 }],
+      })
+      for (let step = 1; step <= 10; step++) {
+        await input.send('Input.dispatchTouchEvent', {
+          type: 'touchMove', touchPoints: [{ x, y: y - distance * step / 10, id: 1 }],
+        })
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+      }
+      await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
-  })
-  expect(scrolled.below).toBeGreaterThan(0)
-  expect(scrolled.reached).toBe(scrolled.below)
-  // The status actions are the popup's last row, so scrolling to the end is
-  // what puts them on screen at this height.
+  } finally {
+    await input.detach()
+  }
+  await expect(usage).toBeInViewport({ ratio: 1 })
   for (const name of controls) {
     await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
   }
@@ -130,11 +137,10 @@ test('the phone status bar keeps every control inside the viewport', async ({
   )
   expect(shortOverflow).toBe(0)
 
-  // Back on the whole screen: the same tap closes the popup again, and the
-  // theme toggle beside it answers a finger on the bottom edge.
+  // Closing details leaves the global keyboard help independently reachable.
   await page.setViewportSize(viewport)
   await trigger.tap()
   await expect(notice).toBeHidden()
-  await page.getByRole('button', { name: 'Theme: system' }).tap()
-  await expect(page.getByRole('button', { name: 'Theme: light' })).toBeVisible()
+  await page.getByRole('button', { name: 'Keyboard shortcuts' }).tap()
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
 })

@@ -234,7 +234,7 @@ func TestMissionAcceptanceRequiresExactEvidenceAndRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitAttempt: %v", err)
 	}
-	if _, acceptErr := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept-submission"); !errors.Is(acceptErr, ErrMissionNotReady) {
+	if _, acceptErr := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept-submission", &SubmissionEvidenceValidation{Ref: submission.Ref, Evidence: submission.Evidence}); !errors.Is(acceptErr, ErrMissionNotReady) {
 		t.Fatalf("accept missing evidence = %v, want ErrMissionNotReady", acceptErr)
 	}
 	projected, err := db.ProjectTask(context.Background(), task.ID)
@@ -389,7 +389,7 @@ func mustSubmitMissionAttempt(t *testing.T, db *DB, mission *domain.Mission, tas
 
 func mustAcceptMissionSubmission(t *testing.T, db *DB, mission *domain.Mission, submission *domain.Submission, key string) *domain.Acceptance {
 	t.Helper()
-	accepted, err := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", key)
+	accepted, err := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", key, &SubmissionEvidenceValidation{Ref: submission.Ref, Evidence: submission.Evidence})
 	if err != nil {
 		t.Fatalf("AcceptSubmission: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestMissionAcceptedSetVersionRejectsStaleAcceptanceAfterCurrentOutputRemova
 
 	secondTask := mustCreateMissionTask(t, db, mission.ID, "second output")
 	secondSubmission := mustSubmitMissionAttempt(t, db, current, secondTask, "second-output")
-	if _, staleErr := db.AcceptSubmission(context.Background(), secondSubmission.ID, current.CurrentIntegratorRunID, current.IntegratorGeneration, oldSetVersion, "", "accept-stale-output"); !errors.Is(staleErr, ErrMissionStale) {
+	if _, staleErr := db.AcceptSubmission(context.Background(), secondSubmission.ID, current.CurrentIntegratorRunID, current.IntegratorGeneration, oldSetVersion, "", "accept-stale-output", &SubmissionEvidenceValidation{Ref: secondSubmission.Ref, Evidence: secondSubmission.Evidence}); !errors.Is(staleErr, ErrMissionStale) {
 		t.Fatalf("stale accepted set = %v, want ErrMissionStale", staleErr)
 	}
 }

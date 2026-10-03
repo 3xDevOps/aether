@@ -1025,12 +1025,64 @@ before returning the receipt; ordinary lock contention is not a report conflict.
 The receipt is not task acceptance: a success report without required user
 evidence leaves the task in **Review**.
 
-A worker's **success or failure** report is one-shot and terminal. Success
-submits the attempt and the server then pauses and retains that worker's exact
-container. Failure does the same without treating the attempt as a task result.
-Capacity is released only after execution has stopped and retention/evidence
-cleanup has settled. **Blocked is nonterminal**: it is a durable observation and
-does not stop the worker or submit the task.
+**Success and failure are terminal**: a run holds one terminal report. After
+it, a report under any new idempotency key, `blocked` included, fails with
+`CodeConflict` (`-32003`); the same key and inputs replay the original
+report. Relaunching the run (**Relaunch** on its card, or `aether relaunch
+<run>`) supersedes the terminal report, including one whose evidence capture
+failed and was never accepted, so the reopened agent can report again under a
+new idempotency key; the superseded report's key then fails with
+`CodeConflict`, as does a report whose evidence capture was still running
+when the relaunch landed. **Blocked is nonterminal**: a run may file any
+number of blocked reports, before or after one another.
+
+What a report does depends on the run:
+
+- **Ordinary run** (no mission assignment). Success or failure finishes the
+  run once the agent's turn ends: Aether commits the work (`aether:` for
+  success, `wip:` for failure), publishes the run branch, and records
+  `completed` or `failed`, which moves the run out of **Working**. The turn
+  ends when the agent reports itself **Idle** with no **Needs input**
+  request open; a permission or question prompt is not the end of the turn,
+  and the run finishes once it is answered. A report that reaches the server
+  after the turn already ended finishes the run at once. A harness without a
+  status reporter never says its turn ended, so there the first
+  `--poll-interval` check two minutes after the report finishes the run; a
+  harness with one is finished by the turn end alone, however long the agent
+  keeps working, unless the run stalled into **Idle** by that check, which
+  then finishes it. A run with a **Needs input** request open is never
+  finished by the check; it waits for the owner's answer. A finish that fails
+  is retried by the same check two minutes later. If the agent process exits
+  first, the run takes the reported status, whatever its exit code, even when
+  the report reaches the server after the exit or was made while the run was
+  still starting; a report a relaunch superseded never changes the run. The
+  commit the exit already published keeps the exit's `aether:` or `wip:`
+  prefix, and the run's status and report are the record. A TUI run keeps its
+  paused container for relaunch, exactly like a closed run, with the reason
+  `agent reported success; retained container` or
+  `agent reported failure; retained container`; a headless run, or a TUI run
+  with a negative `--run-container-ttl`, records `agent reported success` or
+  `agent reported failure`. The finished run carries `outcome_unseen: true`
+  until its owner opens it (`run.seen`) or a status change such as Close or
+  relaunch clears it. A Close or Kill that lands first wins, and Close still
+  re-labels a finished run as merged or abandoned. Blocked moves the run to
+  **Idle** with the reason `blocked: <summary>` the next time its turn ends
+  (or it stalls, on a harness without a status reporter), until the agent
+  resumes; a **Needs input** request does not show it. The newest blocked
+  report decides the reason: an older one the server retries delivering after
+  it changes nothing.
+- **Mission worker.** Success submits the attempt and the server then pauses
+  and retains that worker's exact container with the reason
+  `worker finished; retained container`. Failure does the same without
+  treating the attempt as a task result. A finished worker is never
+  relaunched, and its outcome is left for the integrator to review rather
+  than marked unseen. Capacity is released only after execution has stopped
+  and retention/evidence cleanup has settled. Blocked is a durable
+  observation: it does not stop the worker or submit the task. A worker may
+  file several blocked reports and still report success or failure after
+  them.
+- **Mission integrator.** The report is recorded; it does not end the run.
+
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
@@ -1053,6 +1105,26 @@ truncated sources are recorded explicitly. The capture is not an atomic
 environment snapshot and does not claim that the reported work was verified.
 If capture or durable storage fails, the outcome is not accepted, and the
 runtime resources remain recoverable.
+
+Mission submission acceptance distinguishes source availability from
+completeness. A readable retained transcript satisfies a `transcript`
+requirement even when it reaches the 16 MiB cap. `mission.show` exposes that
+source as `available: true, truncated: true`; it is partial evidence, not a
+complete transcript or proof that verification passed. Acceptance checks the
+packet's workspace, run, retained revision, expiry, and retained bytes.
+Missing or unreadable required sources remain unavailable.
+
+An older server may have recorded a capped transcript as unavailable on a
+still-proposed submission. After upgrading, the next authorized
+`task accept-submission` revalidates the retained packet and updates those
+facts atomically with acceptance. It does not infer availability from the
+detail text or repair an expired or missing packet. Retrying an accepted
+operation preserves its receipt even after later evidence expiry, while
+still enforcing current authorization.
+
+Candidate integration has a separate completeness policy: a truncated source
+listed in `required_sources` remains refused. See
+[candidate source validation](integration.md#candidate-identity-and-assembly).
 
 Finalization and event publication are crash-safe. Finalization writes a
 durable pending publication row and a deterministic evidence-event ID. The
@@ -1081,6 +1153,17 @@ running `/opt/aether/aether-server report <harness>` over the same run socket.
 It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
+
+The two meet on an ordinary run. After a success or failure `coord.report`,
+the next `waiting` (idle) hook with no input request open is the end of the
+turn that reported, so it finishes the run instead of parking it. A hook that
+only opens or closes an input request is not a turn end, but closing the last
+open request on a reported run that is already idle finishes it. After a
+blocked `coord.report`, the next idle hook parks the run with the
+`blocked: <summary>` reason instead of `agent idle`; the first `working` hook
+after that park clears it.
+The scheduler applies a report as part of its durable publication, so a
+server restart or a temporarily unreachable run is retried, not lost.
 
 Coordination also does not provide a universal inbound terminal hook. When a
 human steers a run, Aether delivers the request through the harness's

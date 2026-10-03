@@ -34,6 +34,14 @@ func (r *mutableEvidenceReader) Get(_ context.Context, _ domain.WorkspaceID, id 
 	return r.packet, nil
 }
 
+func (r *mutableEvidenceReader) WithSubmissionSources(ctx context.Context, workspace domain.WorkspaceID, ids []string, consume func([]protocol.EvidencePacket) error) error {
+	packets := make([]protocol.EvidencePacket, len(ids))
+	for i, id := range ids {
+		packets[i], _ = r.Get(ctx, workspace, id)
+	}
+	return consume(packets)
+}
+
 func openMissionRegressionDB(t *testing.T) *store.DB {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "mission.db"))
@@ -216,6 +224,7 @@ func setupSubmissionRegression(t *testing.T) (*store.DB, *domain.Mission, *domai
 	expires := clock.Add(time.Hour).Format(time.RFC3339Nano)
 	packet := protocol.EvidencePacket{
 		ID: "packet-1", WorkspaceID: string(workspace.ID), RunID: string(attempt.RunID),
+		Origin:       protocol.EvidenceOrigin{Kind: protocol.EvidenceOriginRun, ID: string(attempt.RunID)},
 		Availability: protocol.EvidenceAvailable, RetainedRevision: "revision-1", ExpiresAt: &expires,
 		Sources: []protocol.EvidenceSourceFact{{Name: "test", Available: true}},
 	}

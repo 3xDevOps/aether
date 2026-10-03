@@ -131,6 +131,9 @@ type Config struct {
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
 	Reports ReportSink
+	// Outcomes is where an ordinary run's published coord.report lands: the
+	// scheduler. Nil leaves the run's status to its process and hooks.
+	Outcomes OutcomeSink
 	// Evidence captures and durably retains the run state before coord.report
 	// accepts an outcome. It is required for coord.report.
 	Evidence EvidenceCapture

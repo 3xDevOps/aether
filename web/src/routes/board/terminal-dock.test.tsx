@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { api } from '@/lib/api'
 import { TerminalDock } from '@/routes/board/terminal-dock'
@@ -89,6 +90,19 @@ vi.mock('@/lib/api', async (importOriginal) => {
     },
   }
 })
+
+async function openEnvironmentActions() {
+  const trigger = await screen.findByRole('button', { name: 'Environment actions' })
+  trigger.focus()
+  await userEvent.keyboard('{Enter}')
+  return within(await screen.findByRole('menu'))
+}
+
+async function selectEnvironmentAction(name: string) {
+  const menu = await openEnvironmentActions()
+  menu.getByRole('menuitem', { name }).focus()
+  await userEvent.keyboard('{Enter}')
+}
 
 
 
@@ -224,10 +238,22 @@ describe('environment terminal dock', () => {
     })
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Forward port' }))
+    await selectEnvironmentAction('Forward port')
 
     expect(useStore.getState().paletteDialog).toBe('forward')
     expect(useStore.getState().paletteForwardTarget).toBe('terminal')
+  })
+  it.each(['local', 'remote'] as const)('hides forwarding without local permission on a %s gateway', async (gateway) => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ capabilities: { gateway, methods: ['*'], ws: [], local: [] } })
+    render(<TerminalDock />)
+
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Forward port' })).toBeNull()
+    expect(menu.getByRole('menuitem', { name: 'Stop environment' })).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    expect(useStore.getState().paletteDialog).toBeNull()
   })
   it('mutes input and hides replay until xterm parsing completes', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
@@ -405,16 +431,17 @@ describe('environment terminal dock', () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
-    expect(screen.getByRole('alertdialog')).toBeDefined()
-    const stopButtons = screen.getAllByRole('button', { name: 'Stop environment' })
-    fireEvent.click(stopButtons[stopButtons.length - 1])
+    await selectEnvironmentAction('Stop environment')
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(api.terminalStop).not.toHaveBeenCalled()
+    fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
 
-    await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
+    await waitFor(() => expect(api.terminalStop).toHaveBeenCalledTimes(1))
     expect(useStore.getState().envTerminal.tabs).toEqual([])
     // Whether the dock is open is the member's choice, not part of the
     // environment's state, so stopping must not close it under them.
     expect(useStore.getState().envTerminal.collapsed).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
   })
   it('saves the running environment and hides the unsaved hint', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
@@ -454,7 +481,7 @@ describe('environment terminal dock', () => {
     })
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
+    await selectEnvironmentAction('Stop environment')
     const dialog = within(screen.getByRole('alertdialog'))
     expect(dialog.queryByRole('button', { name: 'Reset to standard' })).toBeNull()
   })
@@ -465,19 +492,18 @@ describe('environment terminal dock', () => {
 
     await screen.findByText('Your environment starts on first open')
     expect(screen.queryByRole('button', { name: 'Save environment' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Stop environment' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Reset to standard' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Environment actions' })).toBeNull()
   })
 
   it('does not offer a reset when no image is saved', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)
 
-    await screen.findByRole('button', { name: 'Stop environment' })
-    expect(screen.queryByRole('button', { name: 'Reset to standard' })).toBeNull()
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Reset to standard' })).toBeNull()
   })
 
-  it('keeps the saved image after a stop, and promises no second stop', async () => {
+  it('keeps the saved image after a stop and leaves only reset available', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({
       running: true,
       tabs: ['main'],
@@ -485,23 +511,23 @@ describe('environment terminal dock', () => {
     })
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
+    await selectEnvironmentAction('Stop environment')
     const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
     await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
     expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
 
-    // Throwing the image away must not mean starting the container it deletes.
-    fireEvent.click(await screen.findByRole('button', { name: 'Reset to standard' }))
-    expect(screen.queryByRole('button', { name: 'Stop environment' })).toBeNull()
-
-    // The container is already stopped, so the confirmation must not promise
-    // a stop that will not happen.
-    const resetDialog = within(screen.getByRole('alertdialog'))
-    expect(
-      resetDialog.getByText(/aether\/member-1:123 is deleted\. Your home files remain/),
-    ).toBeDefined()
-    expect(resetDialog.queryByText(/environment container stops/)).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Stop environment' })).toBeNull()
+    expect(menu.queryByRole('menuitem', { name: 'Forward port' })).toBeNull()
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Reset to standard' }))
+    const resetDialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(resetDialog.getByRole('button', { name: 'Reset to standard' }))
+    await waitFor(() => expect(api.envReset).toHaveBeenCalledTimes(1))
+    expect(api.terminalStop).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().envTerminal.status).toEqual({ running: false, tabs: [], saved_image: '' })
   })
 
   it('keeps the stop dialog open while the stop is in flight', async () => {
@@ -510,7 +536,7 @@ describe('environment terminal dock', () => {
     vi.mocked(api.terminalStop).mockReturnValue(stop.promise)
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
+    await selectEnvironmentAction('Stop environment')
     const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
     await screen.findByRole('button', { name: 'Stopping...' })
@@ -539,7 +565,8 @@ describe('environment terminal dock', () => {
       tabs: [],
       saved_image: 'aether/member-1:123',
     })
-    expect(await screen.findByRole('button', { name: 'Reset to standard' })).toBeDefined()
+    const menu = await openEnvironmentActions()
+    expect(menu.getByRole('menuitem', { name: 'Reset to standard' })).toBeDefined()
   })
 
   it('shows a failed stop inside the stop dialog', async () => {
@@ -547,7 +574,7 @@ describe('environment terminal dock', () => {
     vi.mocked(api.terminalStop).mockRejectedValueOnce(new Error('stop container: daemon is down'))
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stop environment' }))
+    await selectEnvironmentAction('Stop environment')
     const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
 
@@ -564,7 +591,7 @@ describe('environment terminal dock', () => {
     vi.mocked(api.envReset).mockRejectedValueOnce(new Error('remove image: image is in use'))
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Reset to standard' }))
+    await selectEnvironmentAction('Reset to standard')
     const dialog = within(screen.getByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
 
@@ -572,7 +599,7 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.statusError).toBeNull()
   })
 
-  it('names the saved image in its own reset confirmation', async () => {
+  it('resets the running environment and discards its saved image only after confirmation', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({
       running: true,
       tabs: ['main'],
@@ -580,11 +607,9 @@ describe('environment terminal dock', () => {
     })
     render(<TerminalDock />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Reset to standard' }))
+    await selectEnvironmentAction('Reset to standard')
     const dialog = within(screen.getByRole('alertdialog'))
-    expect(
-      dialog.getByText(/aether\/member-1:123 is deleted and the environment container stops\./),
-    ).toBeDefined()
+    expect(api.envReset).not.toHaveBeenCalled()
     expect(dialog.queryByRole('button', { name: 'Stop environment' })).toBeNull()
     fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
 
@@ -596,6 +621,49 @@ describe('environment terminal dock', () => {
       tabs: [],
       saved_image: '',
     })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
+  })
+
+  it.each(['Stop environment', 'Reset to standard'])('cancels %s without changing the environment', async (name) => {
+    const status = { running: true, tabs: ['main'], saved_image: 'aether/member-1:123' }
+    vi.mocked(api.terminalStatus).mockResolvedValue(status)
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction(name)
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    expect(api.terminalStop).not.toHaveBeenCalled()
+    expect(api.envReset).not.toHaveBeenCalled()
+    expect(useStore.getState().envTerminal.status).toEqual(status)
+    expect(useStore.getState().envTerminal.tabs).toEqual(['main'])
+  })
+
+  it('keeps reset locked until the request settles', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    const reset = Promise.withResolvers<unknown>()
+    vi.mocked(api.envReset).mockReturnValue(reset.promise)
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Reset to standard')
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
+    const pending = await dialog.findByRole('button', { name: 'Resetting...' })
+    expect((pending as HTMLButtonElement).disabled).toBe(true)
+    expect((dialog.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(pending)
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+    expect(api.envReset).toHaveBeenCalledTimes(1)
+
+    reset.resolve({})
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(useStore.getState().envTerminal.status).toEqual({ running: false, tabs: [], saved_image: '' })
   })
 
   it('does not show the unsaved hint when an image is saved', async () => {

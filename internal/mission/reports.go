@@ -12,11 +12,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// EvidenceReader is the narrow durable lookup used when a report refers to
-// another retained packet. A report must never infer availability from an
-// opaque caller-provided string.
+// EvidenceReader resolves retained metadata and revalidates submission sources
+// under the evidence locks. The callback must finish acceptance before returning
+// so expiry cleanup cannot remove a source between validation and persistence.
 type EvidenceReader interface {
 	Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error)
+	WithSubmissionSources(context.Context, domain.WorkspaceID, []string, func([]protocol.EvidencePacket) error) error
 }
 
 // ValidateReport performs the authority check before coord.report reserves a
@@ -196,26 +197,7 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 }
 
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
-	available, detail := packetEvidenceState(s.cfg.Now, packet)
-	facts := make([]domain.SubmissionEvidence, 0, len(packet.Sources)+len(report.InputEvidenceRefs)+1)
-	facts = append(facts, domain.SubmissionEvidence{Kind: "retained_packet", Ref: packet.ID, Available: available, Detail: detail})
-	for _, source := range packet.Sources {
-		kind := strings.TrimSpace(source.Name)
-		if kind == "" {
-			kind = "source"
-		}
-		ref := packet.ID
-		sourceAvailable := available && source.Available && !source.Truncated
-		sourceDetail := source.Reason
-		if source.Truncated && sourceDetail == "" {
-			sourceDetail = "source is truncated"
-		} else if !source.Available && sourceDetail == "" {
-			sourceDetail = "source is unavailable"
-		} else if !available && sourceDetail == "" {
-			sourceDetail = detail
-		}
-		facts = append(facts, domain.SubmissionEvidence{Kind: kind, Ref: ref, Available: sourceAvailable, Detail: sourceDetail})
-	}
+	facts := packetSubmissionEvidence(s.cfg.Now, packet)
 	for _, ref := range report.InputEvidenceRefs {
 		ref = strings.TrimSpace(ref)
 		if ref == "" {
@@ -232,6 +214,31 @@ func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport,
 			}
 		}
 		facts = append(facts, fact)
+	}
+	return facts
+}
+
+func packetSubmissionEvidence(now func() time.Time, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
+	available, detail := packetEvidenceState(now, packet)
+	facts := make([]domain.SubmissionEvidence, 0, len(packet.Sources)+1)
+	facts = append(facts, domain.SubmissionEvidence{Kind: "retained_packet", Ref: packet.ID, Available: available, Detail: detail})
+	for _, source := range packet.Sources {
+		kind := strings.TrimSpace(source.Name)
+		if kind == "" {
+			kind = "source"
+		}
+		sourceDetail := source.Reason
+		if source.Truncated && sourceDetail == "" {
+			sourceDetail = "source is truncated"
+		} else if !source.Available && sourceDetail == "" {
+			sourceDetail = "source is unavailable"
+		} else if !available && sourceDetail == "" {
+			sourceDetail = detail
+		}
+		facts = append(facts, domain.SubmissionEvidence{
+			Kind: kind, Ref: packet.ID, Available: available && source.Available,
+			Truncated: source.Truncated, Detail: sourceDetail,
+		})
 	}
 	return facts
 }
@@ -291,7 +298,7 @@ func submissionWire(s *domain.Submission) protocol.Submission {
 	}
 	out.Evidence = make([]protocol.SubmissionEvidence, 0, len(s.Evidence))
 	for _, e := range s.Evidence {
-		out.Evidence = append(out.Evidence, protocol.SubmissionEvidence{Kind: e.Kind, Ref: e.Ref, Available: e.Available, Detail: e.Detail})
+		out.Evidence = append(out.Evidence, protocol.SubmissionEvidence{Kind: e.Kind, Ref: e.Ref, Available: e.Available, Truncated: e.Truncated, Detail: e.Detail})
 	}
 	if s.Acceptance != nil {
 		a := s.Acceptance

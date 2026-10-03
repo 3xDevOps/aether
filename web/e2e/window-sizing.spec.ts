@@ -209,7 +209,7 @@ test('the update prompt offers its button where the prompt starts', async ({
   // is the last row of the shell, and its right-hand group is the part that
   // used to be squeezed off the edge.
   await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
-  await expect(page.getByRole('button', { name: 'Commands' })).toBeInViewport({
+  await expect(page.getByRole('button', { name: 'Search runs and commands' })).toBeInViewport({
     ratio: 1,
   })
   await expect(page.getByRole('button', { name: 'Keyboard shortcuts' })).toBeInViewport({

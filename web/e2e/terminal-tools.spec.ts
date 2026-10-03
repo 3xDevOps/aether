@@ -8,7 +8,9 @@ import { OnboardingWizard } from './pages/wizard'
 
 test.skip(!dockerReachable(), 'the environment terminal needs a reachable Docker daemon')
 
-test('the terminal dock opens on request, zooms and finds', async ({ page, aether }) => {
+test.use({ viewport: { width: 1600, height: 1000 }, hasTouch: false })
+
+test('the terminal dock opens on request, zooms and finds', async ({ page, browser, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
 
@@ -31,6 +33,12 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
   await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
+
+  const tools = dock.getByRole('toolbar', { name: 'Terminal controls' })
+  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
+  await expect(tools.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
+  await expect(tools.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
+  await expect(dock.getByRole('button', { name: 'Terminal tools', exact: true })).toBeHidden()
 
   const screen = dock.locator('.xterm-screen')
   await screen.click()
@@ -85,6 +93,50 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
 
   await find.press('Escape')
   await expect(dock.getByLabel('Find in terminal')).toBeHidden()
+
+  // A narrow pane uses the same tools through a keyboard-accessible popover.
+  await page.setViewportSize({ width: 640, height: 800 })
+  const compactTools = dock.getByRole('button', { name: 'Terminal tools', exact: true })
+  await expect(compactTools).toBeVisible()
+  await expect(dock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
+  await compactTools.focus()
+  await page.keyboard.press('Enter')
+  const compactControls = page.getByRole('toolbar', { name: 'Terminal controls' })
+  await expect(compactControls.getByRole('button', { name: 'Copy last screen' })).toBeVisible()
+  await compactControls.getByRole('button', { name: 'Open terminal search' }).click()
+  await find.fill('aether-found-me')
+  await find.press('Enter')
+  await expect(dock.locator('.xterm-selection div').first()).toBeVisible()
+  await find.press('Escape')
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
+
+  // Touch keeps the compact menu even when the viewport is wide.
+  const touchContext = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 1600, height: 1000 },
+    storageState: await page.context().storageState(),
+  })
+  try {
+    const touchPage = await touchContext.newPage()
+    await touchPage.goto(alice.url)
+    const touchDock = touchPage.getByRole('region', { name: 'Terminal dock' })
+    await touchDock.getByRole('button', { name: 'Expand terminal dock' }).click()
+    await expect(touchDock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
+    await expect(touchDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
+    await touchDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+    const touchControls = touchPage.getByRole('toolbar', { name: 'Terminal controls' })
+    await expect(touchControls.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
+    await expect(touchControls.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
+    await touchControls.getByRole('button', { name: 'Open terminal search' }).click()
+    const touchFind = touchDock.getByLabel('Find in terminal')
+    await touchFind.fill('aether-found-me')
+    await touchFind.press('Enter')
+    await expect(touchDock.locator('.xterm-selection div').first()).toBeVisible()
+    await touchFind.press('Escape')
+  } finally {
+    await touchContext.close()
+  }
 
   await dock.getByRole('button', { name: 'Collapse terminal dock' }).click()
   await dock.getByRole('button', { name: 'Expand terminal dock' }).click()

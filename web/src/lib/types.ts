@@ -57,6 +57,8 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** An agent report finished the run and its owner has not opened it yet. */
+  outcome_unseen?: boolean
   base_commit?: string
   base_branch?: string
   base_source?: string
@@ -273,6 +275,7 @@ export interface MissionSubmissionEvidence {
   kind: string
   ref: string
   available: boolean
+  truncated?: boolean
   detail?: string
 }
 
@@ -664,6 +667,8 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+  /** The run's flag after this transition; absent means false. */
+  outcome_unseen?: boolean
 }
 
 export interface GitBranchPayload {

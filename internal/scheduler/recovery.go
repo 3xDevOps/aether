@@ -36,7 +36,8 @@ func retainedTransitionError() error {
 }
 
 // Relaunch reopens the exact retained TUI run and container. It never creates
-// a run row, checkout, branch, or replacement container.
+// a run row, checkout, branch, or replacement container. The run's terminal
+// report is superseded, so the reopened agent can report again.
 func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	old, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
@@ -49,9 +50,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	if old.Mode != domain.LaunchTUI ||
-		(old.Status != domain.RunMerged && old.Status != domain.RunAbandoned) ||
-		old.Reason != retainedCloseReason {
+	if old.Mode != domain.LaunchTUI || !retainedReason(old.Status, old.Reason) {
 		return nil, retainedTransitionError()
 	}
 
@@ -116,9 +115,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, ferr
 	}
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
-		fresh.Mode == domain.LaunchTUI && !entry.missionAssigned &&
-		(fresh.Status == domain.RunMerged || fresh.Status == domain.RunAbandoned) &&
-		fresh.Reason == retainedCloseReason && deadline != nil && time.Now().UTC().Before(*deadline)
+		fresh.Mode == domain.LaunchTUI && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
+		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
 	if !valid {
@@ -139,11 +137,29 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 
 	// Re-read under the lifecycle admission before promoting so title or
 	// other metadata updates are not clobbered by a stale terminal snapshot.
+	// The retained sidecar still carries the report that closed the run and
+	// the turn end it finished on. Both are cleared on disk before the row
+	// reopens, with the new launch generation, so a crash after the
+	// promotion cannot re-arm the reopened run with that report, and the
+	// reopened agent's own report does not finish it on the old turn end.
+	// On the terminal row this clears, the arm is already spent.
+	now := time.Now().UTC()
 	s.mu.Lock()
 	sameEntry := s.runs[run] == entry
+	var clearErr error
+	if sameEntry {
+		entry.reported = ""
+		entry.blockedReason, entry.blockedShown = "", false
+		entry.agentReport, entry.parkedAt = agentstatus.Report{}, time.Time{}
+		entry.relaunchedAt = now
+		clearErr = s.writeSidecar(entry.sidecar())
+	}
 	s.mu.Unlock()
 	if !sameEntry {
 		return nil, retainedTransitionError()
+	}
+	if clearErr != nil {
+		return nil, fmt.Errorf("scheduler: relaunch: clear the reported outcome: %w", clearErr)
 	}
 	// archiveMu serializes this re-read-then-promote against SetArchived
 	// so the two can never interleave.
@@ -153,9 +169,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.archiveMu.Unlock()
 		return nil, err
 	}
-	if latest.Mode != domain.LaunchTUI ||
-		(latest.Status != domain.RunMerged && latest.Status != domain.RunAbandoned) ||
-		latest.Reason != retainedCloseReason {
+	if latest.Mode != domain.LaunchTUI || !retainedReason(latest.Status, latest.Reason) {
 		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}
@@ -164,7 +178,6 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	// StartedAt is persisted on the run row before the container is thawed.
 	// The sidecar carries the same launch generation so a crash at either
 	// write boundary can resume one finish-capture identity.
-	now := time.Now().UTC()
 	relaunchIdentity := fmt.Sprintf("launch:%d", now.UnixNano())
 	terminalRow := *fresh
 	runningRow := *fresh
@@ -286,6 +299,14 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			}
 			return joinRollback(fmt.Errorf("scheduler: relaunch rollback row: %w", rowErr), restoreErr)
 		}
+		// UpdateRun cleared outcome_unseen with the status change; an
+		// outcome the owner had not seen is still unseen.
+		var unseenErr error
+		if terminalRow.OutcomeUnseen {
+			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, nil, nil); flagErr != nil {
+				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
+			}
+		}
 
 		s.mu.Lock()
 		if s.runs[run] == entry {
@@ -296,7 +317,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			entry.destroyPending = false
 		}
 		s.mu.Unlock()
-		return joinRollback()
+		return joinRollback(unseenErr)
 	}
 
 	if paused {
@@ -325,6 +346,17 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if s.runs[run] != entry {
 		s.mu.Unlock()
 		return nil, rollback(retainedTransitionError())
+	}
+	// The terminal report is superseded only once nothing can roll the
+	// relaunch back, so a failed relaunch leaves the run's report standing.
+	// A late hand-off of the old report is older than relaunchedAt, and
+	// once the reopened run exits, overrideExitLocked finds it superseded;
+	// both rely on this write happening under s.mu.
+	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
+		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
+			s.mu.Unlock()
+			return nil, rollback(fmt.Errorf("scheduler: relaunch: %w", supersedeErr))
+		}
 	}
 	entry.status = domain.RunRunning
 	entry.startedAt = now
@@ -606,9 +638,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 			mode = r.Mode
 		}
 		retained := sc.Retained || sc.RetainedUntil != nil
-		validRetention := (mode == domain.LaunchTUI && r.Reason == retainedCloseReason) ||
-			(sc.MissionAssigned && r.Reason == retainedCompletionReason)
-		if !retained || !validRetention {
+		if !retained || !retentionValid(mode, sc.MissionAssigned, r.Status, r.Reason) {
 			// Invalid terminal markers are not relaunchable, but their
 			// container may still be live. Keep durable ownership while
 			// the first cleanup Destroy is uncertain, then let the normal
@@ -685,8 +715,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 				slog.Warn("scheduler: reload retained run after probe", "run", run, "error", ferr)
 				continue
 			}
-			if !fresh.Status.Terminal() ||
-				(fresh.Reason != retainedCloseReason && (!sc.MissionAssigned || fresh.Reason != retainedCompletionReason)) {
+			if !fresh.Status.Terminal() || !retentionValid(mode, sc.MissionAssigned, fresh.Status, fresh.Reason) {
 				s.mu.Unlock()
 				continue
 			}
@@ -782,9 +811,13 @@ func (s *Scheduler) cleanupTerminalCreationKeyContainers(ctx context.Context) {
 }
 
 func (s *Scheduler) markRetainedReason(ctx context.Context, r *domain.Run, reason string) {
+	released, ok := releasedReason(r.Status, r.Reason, reason)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.transitionLocked(ctx, r.ID, r.WorkspaceID, r.Status, r.Status, reason, ""); err != nil {
+	if err := s.relabelLocked(ctx, r.ID, r.WorkspaceID, r.Status, released, ""); err != nil {
 		slog.Warn("scheduler: update retained close reason", "run", r.ID, "error", err)
 	}
 }
@@ -916,9 +949,8 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		return err
 	}
 	if fresh.Status.Terminal() {
-		if entry.retained && (fresh.Status == domain.RunMerged || fresh.Status == domain.RunAbandoned) {
-			if err := s.transitionLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, fresh.Status,
-				retainedExpiredReason, ""); err != nil {
+		if released, ok := releasedReason(fresh.Status, fresh.Reason, retainedExpiredReason); entry.retained && ok {
+			if err := s.relabelLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, released, ""); err != nil {
 				s.mu.Unlock()
 				return err
 			}
@@ -1113,7 +1145,11 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	}
 	// A successful relaunch persists RunRunning before clearing its retained
 	// marker. On reboot, the active durable row wins: stale terminal-retention
-	// metadata must not make the sweep destroy this live container.
+	// metadata must not make the sweep destroy this live container. A close
+	// that died between its retained marker and its row transition leaves
+	// the same pair, and its arm still stands: Relaunch clears the arm on
+	// disk before it promotes the row, so an armed marker on an active row
+	// is never a reopened run's.
 	if sc.Retained || sc.RetainedUntil != nil {
 		sc.Retained = false
 		sc.RetainedUntil = nil
@@ -1484,9 +1520,25 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	// The sidecar does not carry when the report parked the run, and it
 	// does not need to: nothing has been observed on the terminal since the
 	// restart, so the park effectively begins again here.
-	var parked time.Time
+	var parked, reportedAt time.Time
 	if sc.agentReport().State == agentstatus.Idle {
 		parked = time.Now().UTC()
+	}
+	// The finish deadline restarts with the server, like the park above.
+	// An armed run whose turn already ended is due at once: no further
+	// turn-end wait will come to finish it.
+	if sc.ReportedOutcome != "" {
+		reportedAt = time.Now().UTC()
+		if turnEnd(sc.agentReport()) && len(pendingInputs) == 0 {
+			reportedAt = reportedAt.Add(-reportFinishDeadline)
+		}
+	}
+	var relaunched, blockedAt time.Time
+	if sc.RelaunchedAt != nil {
+		relaunched = *sc.RelaunchedAt
+	}
+	if sc.BlockedReportAt != nil {
+		blockedAt = *sc.BlockedReportAt
 	}
 	mode := sc.Mode
 	if mode == "" {
@@ -1514,10 +1566,17 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		pendingInputs:       pendingInputs,
 		inputPublishPending: inputPublishPending,
 		parkedAt:            parked,
+		reported:            sc.ReportedOutcome,
+		reportedAt:          reportedAt,
+		blockedReason:       sc.BlockedReason,
+		blockedShown:        sc.BlockedShown,
+		blockedReportID:     sc.BlockedReportID,
+		blockedReportAt:     blockedAt,
 		launchMode:          mode,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		startedAt:           started,
+		relaunchedAt:        relaunched,
 		paused:              sc.Paused,
 		killRequested:       sc.KillRequested,
 		retained:            sc.Retained,

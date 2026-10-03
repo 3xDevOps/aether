@@ -216,6 +216,10 @@ func TestMissionNegativeTTLAndCancellationRemainDestructive(t *testing.T) {
 			}
 			waitFor(t, "destroyed worker", func() bool { return e.rt.byName(string(run.ID)) == nil })
 			if operation == "cancel" {
+				waitFor(t, "settled cancellation", func() bool {
+					obs, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+					return err == nil && obs.State == MissionRunStopped && obs.RetentionSettled
+				})
 				if err := e.sched.CompleteMission(t.Context(), run.ID, domain.RunCompleted); err != nil {
 					t.Fatal(err)
 				}
@@ -242,5 +246,29 @@ func TestMissionNegativeTTLFailedDestroyHoldsCapacityUntilCleanup(t *testing.T) 
 	obs, err = e.sched.ObserveMissionRun(t.Context(), run.ID)
 	if err != nil || obs.State != MissionRunStopped || !obs.RetentionSettled || e.rt.byName(string(run.ID)) != nil {
 		t.Fatalf("cleanup did not settle: %+v, %v", obs, err)
+	}
+}
+
+// TestWorkerReportLeavesCompletionToTheMission: a worker's terminal report
+// never arms the ordinary reported finish, so CompleteMission alone finishes
+// it, with the mission reason, and leaves no unseen outcome for the owner.
+func TestWorkerReportLeavesCompletionToTheMission(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
+	if err := e.sched.FinishReported(t.Context(), run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	armed := e.sched.runs[run.ID].reported
+	e.sched.mu.Unlock()
+	if armed != "" {
+		t.Fatalf("worker armed for a reported finish: %q", armed)
+	}
+	if err := e.sched.CompleteMission(t.Context(), run.ID, domain.RunCompleted); err != nil {
+		t.Fatal(err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if row.Reason != retainedCompletionReason || row.OutcomeUnseen {
+		t.Fatalf("completed worker = %q, unseen %v; want %q and seen", row.Reason, row.OutcomeUnseen, retainedCompletionReason)
 	}
 }

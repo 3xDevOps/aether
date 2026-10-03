@@ -21,11 +21,13 @@ import { surfaces } from '@/lib/surfaces'
 import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
+import type { RunRecord } from '@/store/runs'
 
 const destinationCommandIDs: Record<string, true> = {
   board: true,
   overview: true,
   launch: true,
+  swarm: true,
   template: true,
   inject: true,
   forward: true,
@@ -41,11 +43,13 @@ const destinationCommandIDs: Record<string, true> = {
 export function PaletteBody({
   onDone,
   onTemplates,
+  onConfirm,
 }: {
   onDone: (restoreFocus?: boolean) => void
   // The template form's open state lives with the dialog host, not the
   // store: store dialogs know the launch, inject and forward forms.
   onTemplates: () => void
+  onConfirm: (run: RunRecord, command: Command & { confirm: NonNullable<Command['confirm']> }) => void
 }) {
   const runs = useAttentionRuns()
   const runMap = useStore((s) => s.runs)
@@ -77,7 +81,22 @@ export function PaletteBody({
   // attention excludes archived runs once they are also final.
   const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
-  const goTo = surfaces(cap)
+  const goTo = surfaces(cap).map((surface) => ({
+    ...surface,
+    value: `${surface.label} ${surface.name}`,
+  }))
+  const board = boardCommands({ cap, self, doneCandidates })
+  const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')
+  const boardActions = board.filter((command) => command.id !== 'board' && command.id !== 'overview')
+  const runItems = runs.map(({ run, state }) => ({
+    run,
+    state,
+    value: `${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}${run.title ? ` ${run.title}` : ''}`,
+  }))
+  const workspaceItems = Object.values(workspaces).map((workspace) => ({
+    workspace,
+    value: `${workspace.name} ${workspace.base_branch} ${workspace.id}`,
+  }))
 
   const go = (name: string, params?: Record<string, string>) => {
     onDone(false)
@@ -87,9 +106,13 @@ export function PaletteBody({
   const item = (command: Command) => (
     <CommandItem
       key={command.id}
-      value={command.value}
+      value={command.value ?? command.label}
       disabled={command.disabled}
       onSelect={() => {
+        if (command.confirm && focused) {
+          onConfirm(focused, { ...command, confirm: command.confirm })
+          return
+        }
         selected.current = command
         void perform(command)
       }}
@@ -110,47 +133,43 @@ export function PaletteBody({
     self,
     steerOthers: workspaces[focused.workspace_id]?.steer_others,
   }
+  const focusedCommands = focusedContext
+    ? [...runCommands(focusedContext), ...handoffCommands(focusedContext)]
+    : []
+  const browseOrder = [
+    ...navigationCommands.map((command) => command.value ?? command.label),
+    ...goTo.map(({ value }) => value),
+    ...runItems.map(({ value }) => value),
+    ...workspaceItems.map(({ value }) => value),
+    ...focusedCommands.map((command) => command.value ?? command.label),
+    ...boardActions.map((command) => command.value ?? command.label),
+  ]
 
   return (
     <>
       <CommandInput placeholder="Search commands, runs, workspaces..." />
-      <CommandList className="min-h-0 px-1 pb-1">
+      <CommandList browseOrder={browseOrder} className="min-h-0 px-1 pb-1">
         <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>
 
-        {focusedContext && (
-          <>
-            <CommandGroup heading={`Focused run · ${runLabel(focusedContext.run)}`}>
-              {runCommands(focusedContext).map(item)}
-              {handoffCommands(focusedContext).map(item)}
-            </CommandGroup>
-            <CommandSeparator />
-          </>
-        )}
-
-        <CommandGroup heading="Board actions">
-          {boardCommands({ cap, self, doneCandidates }).map(item)}
+        <CommandGroup heading="Navigate">
+          {navigationCommands.map(item)}
+          {goTo.map(({ name, label, Icon, value }) => (
+            <CommandItem
+              key={name}
+              value={value}
+              onSelect={() => go(name)}
+            >
+              <Icon />
+              <span className="min-w-0 truncate">{label}</span>
+            </CommandItem>
+          ))}
         </CommandGroup>
 
-        {goTo.length > 0 && (
-          <CommandGroup heading="Navigate">
-            {goTo.map(({ name, label, Icon }) => (
-              <CommandItem
-                key={name}
-                value={`${label} ${name}`}
-                onSelect={() => go(name)}
-              >
-                <Icon />
-                <span className="min-w-0 truncate">{label}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-
-        <CommandGroup heading="Attention runs">
-          {runs.map(({ run, state }) => (
+        <CommandGroup heading="Runs">
+          {runItems.map(({ run, state, value }) => (
             <CommandItem
               key={run.id}
-              value={`${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`}
+              value={value}
               onSelect={() => go('terminal', { runId: run.id })}
               className="items-start py-1"
             >
@@ -169,10 +188,10 @@ export function PaletteBody({
         </CommandGroup>
 
         <CommandGroup heading="Workspaces">
-          {Object.values(workspaces).map((w) => (
+          {workspaceItems.map(({ workspace: w, value }) => (
             <CommandItem
               key={w.id}
-              value={`${w.name} ${w.base_branch} ${w.id}`}
+              value={value}
               onSelect={() => go('workspace', { workspaceId: w.id })}
             >
               <FolderGit2 />
@@ -180,6 +199,18 @@ export function PaletteBody({
               <span className="max-w-32 truncate text-xs text-muted-foreground">{w.base_branch}</span>
             </CommandItem>
           ))}
+        </CommandGroup>
+
+        {focusedContext && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={`Focused run · ${runLabel(focusedContext.run)}`}>
+              {focusedCommands.map(item)}
+            </CommandGroup>
+          </>
+        )}
+        <CommandGroup heading="Board actions">
+          {boardActions.map(item)}
         </CommandGroup>
       </CommandList>
     </>

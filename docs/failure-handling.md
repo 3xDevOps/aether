@@ -18,7 +18,7 @@ immediate cleanup.
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run or completed mission run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed mission run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
@@ -284,7 +284,8 @@ deleted by an older cleanup.
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
 to run. On the next boot the scheduler reconciles every non-terminal run and
-every retained closed TUI or completed mission run against the runtime's actual containers:
+every retained TUI or completed mission run against the runtime's actual
+containers:
 
 - **An active container survived** (the server died, the container did not):
   supervision reattaches to it, the PTY session is re-adopted, the diff watch
@@ -296,7 +297,11 @@ every retained closed TUI or completed mission run against the runtime's actual 
   reattaching - which resizes the terminal and makes a full-screen agent
   repaint - does not read as the turn resuming. Its correlated pending-input
   set is recovered separately; restart neither clears unanswered requests
-  nor replays old input-update deltas.
+  nor replays old input-update deltas. A run its agent already reported
+  success or failure on still finishes: right after recovery when its turn
+  had already ended with no input request open, otherwise at the next end of
+  turn, or two minutes after the restart on a harness without a status
+  reporter or once the run is in needs-attention with no input request open.
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run is not relaunchable.
@@ -305,18 +310,25 @@ every retained closed TUI or completed mission run against the runtime's actual 
   in the narrow window before the sidecar exists, by the run ID the runtime
   persists as the container's creation key - and then the same wip-commit and
   interrupt applies.
-- **A retained container survived**: its terminal row, checkout, member account,
-  and coordination surfaces remain owned by that exact container. Boot
-  reconciliation preserves paused mission workers and already-exited mission
-  containers until expiry. Only explicitly closed ordinary TUI runs are
-  eligible for relaunch; completion never revives an assigned worker.
+- **A retained container survived**: its terminal row (merged or abandoned
+  after a Close, completed or failed after an ordinary run's agent report or
+  a mission worker's completion), checkout, member account, and coordination
+  surfaces remain owned by that exact container. Boot reconciliation
+  preserves paused mission workers and already-exited mission containers
+  until expiry. Only ordinary TUI runs that were closed or finished by their
+  agent's report are eligible for relaunch; completion never revives an
+  assigned worker.
 - **A retained container is gone or expired**: boot cleanup destroys any
   remaining runtime object, removes its retention metadata, and leaves the
   row unavailable for relaunch. It never creates a replacement.
 
 Ordinary headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
-`failed` for an error, and destroys the container immediately. A `completed`
+`failed` for an error - or the outcome the agent reported, whatever the exit
+code - and destroys the container immediately. A report that reaches the
+server after the exit still sets the run's status; the commit the exit
+already published keeps the exit's `aether:` or `wip:` prefix, and the
+status and report are the record. A `completed`
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
@@ -345,9 +357,31 @@ Saved missions and attempt reservations are not deleted.
 For `--mode tui`, container PID 1 supervises the harness. After any normal
 harness exit, PID 1 opens a login shell; when that shell exits, another login
 shell opens. The run and its container therefore remain `running` until an
-explicit Close, Kill, or Delete. A harness terminated by a signal or other
-non-normal error does not get a replacement shell; supervision records the
-failure and cleans up the container.
+explicit Close, Kill, or Delete, or until the agent reports its own outcome.
+A harness terminated by a signal or other non-normal error does not get a
+replacement shell; supervision records the failure and cleans up the
+container.
+
+An agent finishes its own run with a terminal report from inside the
+container:
+
+```sh
+aether-internal report --outcome success --summary 'Implemented and tested the change.'
+```
+
+When that turn ends - not at a permission or question prompt within it -
+Aether does what Close does, with the agent's outcome. A report that reaches
+the server after the turn already ended acts at once. Two minutes after the
+report, a run on a harness that never reports the end of a turn, or one
+parked in needs-attention, is finished the same way, and a finish that
+failed is retried. The finish
+pauses the container, commits (`aether:` for success, `wip:` for
+`--outcome failure`), publishes the branch, records `completed` or `failed`
+with the reason `agent reported success; retained container` or
+`agent reported failure; retained container`, and retains the container
+under the same `--run-container-ttl`. Close or Kill before that moment wins;
+Close after it re-labels the run as merged or abandoned. See
+[Report an outcome](coordination.md#report-an-outcome).
 
 Close is explicit and records one of the two outcomes:
 
@@ -368,20 +402,24 @@ survives inside its workspace's and its member's spend totals - the numbers
 [`aether cost` and `aether budget`](teams.md#budgets) report, and a workspace
 budget checks - so deleting a run over budget cannot reopen the cap.
 
-Relaunch is available only for an explicitly closed, retained TUI run whose
-retention deadline has not passed:
+Relaunch is available only for a retained TUI run - closed, or finished by its
+agent's report - whose retention deadline has not passed:
 
 ```sh
 aether relaunch <run>
 ```
 
 It resumes the same run row, container, checkout, member account, and
-coordination surfaces. It does not create a run, checkout, branch, or
-replacement container, and it performs no new launch or disk-floor admission.
+coordination surfaces, and frees the run's terminal report so the agent can
+report again. It does not create a run, checkout, branch, or replacement
+container, and it performs no new launch or disk-floor admission.
 An expired, unavailable, interrupted, killed, deleted, or headless run cannot
 be relaunched. The expiry sweep runs within at most one minute; boot
 reconciliation also sweeps expired or unavailable retained runs, so a failed
-relaunch never falls back to a new run.
+relaunch never falls back to a new run. When retention ends, a closed run's
+reason becomes `retained container expired` or `retained container
+unavailable`; a run its agent finished keeps `completed` or `failed` and its
+reason drops `; retained container`.
 
 ### Disk pressure
 
@@ -553,8 +591,11 @@ which.
 **The harness reported idle or turn completion.** A harness that reports
 its own state parks the run when it has no active work. The `waiting` wire
 state means idle; generic turn completion, interruption, silence, and prose
-do not create **Needs input**. The execution report is recovered through a
-server restart.
+do not create **Needs input**. An agent that ran
+`aether-internal report --outcome blocked --summary '<summary>'` during the
+turn parks at its end with `blocked: <summary>` instead of `agent idle`,
+until it resumes. The execution report is recovered through a server
+restart.
 
 How such a run comes back depends on how much its harness can say. Where the
 agent reports both ends of a turn (`claude`, `pi`, `omp`), the run returns

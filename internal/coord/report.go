@@ -2,12 +2,16 @@ package coord
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // maxReportReason bounds the user-visible reason a report carries. It is
@@ -20,6 +24,56 @@ const maxReportReason = 256
 // budget and is not authorized against the radar.
 type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
+}
+
+// OutcomeSink receives an ordinary run's published coord.report. A success
+// or failure asks the scheduler to finish the run; a blocked summary becomes
+// its needs-attention reason. reportedAt is when the report was finalized,
+// which lets the scheduler ignore a report older than the run's current
+// launch. reportID lets it ignore a replayed blocked report, and re-read a
+// terminal report it applies after the run exited, when no launch is left
+// to compare against. A run that
+// is already terminal or gone is not an error; any error leaves the
+// publication pending for retry.
+type OutcomeSink interface {
+	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
+	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
+}
+
+// applyRunOutcome hands an ordinary run's report to the scheduler before the
+// publication is marked done, so the outbox retries a failed hand-off. A
+// mission worker or integrator keeps its mission lifecycle, and a report a
+// relaunch superseded no longer speaks for the run.
+func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
+	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
+		return nil
+	}
+	if s.cfg.Mission != nil {
+		assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrMissionStale) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("report outcome assignment: %w", err)
+		}
+		if assignment.MissionID != "" {
+			return nil
+		}
+	}
+	reportedAt := *report.FinalizedAt
+	var err error
+	switch report.Outcome {
+	case store.CoordOutcomeSuccess:
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, report.ID, domain.RunCompleted, reportedAt)
+	case store.CoordOutcomeFailure:
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, report.ID, domain.RunFailed, reportedAt)
+	case store.CoordOutcomeBlocked:
+		err = s.cfg.Outcomes.ReportBlocked(ctx, report.RunID, report.ID, reportReason(report.Summary), reportedAt)
+	}
+	if err != nil {
+		return fmt.Errorf("report outcome: %w", err)
+	}
+	return nil
 }
 
 // Report answers run.report for run with independent execution and input updates.

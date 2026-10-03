@@ -140,6 +140,9 @@ additionally reject duplicate or reordered identities against its authoritative
 accepted submission list.
 A requested source is required, not advisory. The default source policy
 requires Git; the prepare call can request additional named sources.
+This completeness requirement is stricter than mission submission acceptance,
+which can accept a readable capped transcript as explicitly partial evidence.
+Accepting that submission does not bypass `required_sources` during preparation.
 
 Preparation first persists a `preparing` aggregate, then copies each source
 under the evidence service's candidate-source lock. Candidate-owned Git refs

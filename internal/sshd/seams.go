@@ -85,6 +85,9 @@ type RunController interface {
 	// restores it (false); see the scheduler implementation's doc comment
 	// for the exact refusal and idempotency rules.
 	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)
+	// Seen clears the run's outcome_unseen flag for its owner; anyone
+	// else is denied. Clearing a clear flag returns the run unchanged.
+	Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the
 	// run row already names the new owner.

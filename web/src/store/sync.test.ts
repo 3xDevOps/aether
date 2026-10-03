@@ -792,12 +792,65 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.pending_inputs).toEqual([question])
   })
 
+  it.each(['completed', 'failed'] as const)(
+    'invalidates native requests on %s even without an input-clearing event',
+    async (status) => {
+      const request = { id: 'q1', session_id: 'foreground', kind: 'question' as const }
+      const stale = run({ pending_inputs: [request], unanswered_questions: 1 })
+      const store = createRootStore()
+      const client = fakeApi({ runList: vi.fn(async () => [stale]) })
+      await hydrate(store, client)
+
+      await applyEvent(store, statusEvent({ seq: 1 }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([request])
+      await applyEvent(store, statusEvent({ seq: 2, payload: { to: status } }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+      expect(store.getState().runs.run_1.unanswered_questions).toBe(1)
+
+      store.getState().upsertRun({ ...stale, status })
+      await applyEvent(store, statusEvent({
+        seq: 3,
+        type: 'run.input',
+        payload: { pending_inputs: [request] },
+      }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+    },
+  )
+
   it('stamps finished_at on a terminal transition', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
     await applyEvent(store, statusEvent({ payload: { to: 'completed' } }), fakeApi())
 
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
+  })
+
+  it('flags an agent-reported outcome, and clears it on run.outcome_seen or the next transition', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    const reported = { from: 'running', to: 'completed', reason: 'agent reported success', outcome_unseen: true }
+    await applyEvent(store, statusEvent({ payload: reported }), fakeApi())
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(true)
+
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_seen', seq: 6, type: 'run.outcome_seen', payload: {} }),
+      fakeApi(),
+    )
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(false)
+    expect(store.getState().runs.run_1.status).toBe('completed')
+
+    await applyEvent(store, statusEvent({ id: 'evt_again', seq: 7, payload: reported }), fakeApi())
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(true)
+    // A status event without the field - a close, a relaunch, an older
+    // gateway - clears it.
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_closed', seq: 8, payload: { from: 'completed', to: 'merged' } }),
+      fakeApi(),
+    )
+    expect(store.getState().runs.run_1.outcome_unseen).toBe(false)
   })
 
   it('updates a run protection flag from run.protected events', async () => {

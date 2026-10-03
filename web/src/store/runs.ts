@@ -43,7 +43,10 @@ export interface RunsSlice {
     to: RunStatus,
     reason: string | undefined,
     time: string,
+    outcomeUnseen?: boolean,
   ) => void
+  /** Clears `outcome_unseen`: the owner has opened the run. */
+  applyOutcomeSeen: (runID: string) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
@@ -71,10 +74,9 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   upsertRun: (run) =>
     set((s) => {
       const current = s.runs[run.id]
-      // Only hydration and run.input replace this independent stream state.
       // A late route/launch snapshot must not resurrect a resolved request.
       const next = toRecord(run, current)
-      next.pending_inputs = current?.pending_inputs ?? run.pending_inputs
+      next.pending_inputs = isTerminal(next.status) ? [] : current?.pending_inputs ?? run.pending_inputs
       return { runs: { ...s.runs, [run.id]: next } }
     }),
   removeRun: (runID) =>
@@ -86,20 +88,35 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
       }
     }),
-  applyRunStatus: (runID, to, reason, time) =>
+  applyRunStatus: (runID, to, reason, time, outcomeUnseen = false) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
-      const next: RunRecord = { ...current, status: to, reason, stateChangedAt: time }
+      const next: RunRecord = {
+        ...current,
+        status: to,
+        reason,
+        stateChangedAt: time,
+        outcome_unseen: outcomeUnseen,
+      }
       if (to === 'running' && !next.started_at) next.started_at = time
-      if (isTerminal(to)) next.finished_at = time
+      if (isTerminal(to)) {
+        next.finished_at = time
+        next.pending_inputs = []
+      }
       return { runs: { ...s.runs, [runID]: next } }
+    }),
+  applyOutcomeSeen: (runID) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current?.outcome_unseen) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, outcome_unseen: false } } }
     }),
 
   applyRunInput: (runID, requests) =>
     set((s) => {
       const current = s.runs[runID]
-      if (!current) return {}
+      if (!current || isTerminal(current.status)) return {}
       return { runs: { ...s.runs, [runID]: { ...current, pending_inputs: requests } } }
     }),
 

@@ -233,11 +233,13 @@ func TestSnapshotRepairIsPromptAndSingleflight(t *testing.T) {
 	original := reconstructSnapshot
 	started := make(chan struct{})
 	release := make(chan struct{})
+	finished := make(chan struct{})
 	var calls atomic.Int32
 	reconstructSnapshot = func(path string) (recordedScreen, error) {
 		calls.Add(1)
 		close(started)
 		<-release
+		defer close(finished)
 		return original(path)
 	}
 	defer func() { reconstructSnapshot = original }()
@@ -259,6 +261,7 @@ func TestSnapshotRepairIsPromptAndSingleflight(t *testing.T) {
 		t.Fatalf("repair calls = %d, want 1", got)
 	}
 	close(release)
+	<-finished
 	waitFor(t, "snapshot repair", func() bool {
 		_, err := h.Snapshot("slow-repair")
 		return err == nil

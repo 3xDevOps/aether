@@ -124,7 +124,9 @@ described under [managed loading](#managed-native-loading).
 
 - **TUI.** Container PID 1 supervises the harness and opens a login shell after
   any normal harness exit. Exiting that shell opens another, so the run and
-  container remain `running` until an explicit Close, Kill, or Delete.
+  container remain `running` until an explicit Close, Kill, or Delete, or until
+  the agent's own success or failure report finishes the run (see
+  [Report an outcome](coordination.md#report-an-outcome)).
 - **Headless.** The harness is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
@@ -143,8 +145,8 @@ default is `168h` (7 days); `0` uses that default. A negative value
 disables retention and cleans up immediately. Kill and Delete remain immediate
 cleanup operations.
 
-Relaunch is available only for an explicitly closed, retained TUI run while
-its retention deadline has not passed:
+Relaunch is available only for a retained TUI run - closed, or finished by its
+agent's report - while its retention deadline has not passed:
 
 ```sh
 aether relaunch <run>
@@ -635,6 +637,14 @@ does not invent a new busy session. An unresolved request survives ordinary
 settlement; matching completion, authoritative native reconciliation, or
 actual session/run termination clears it.
 
+Failed or invalid OpenCode request-list reads retain the observed requests
+and schedule retries with a one-second delay. Successful reconciliation
+stops retrying that snapshot, even if some requests remain live. Matching
+replies, session deletion and plugin shutdown cancel obsolete work; an older
+read cannot clear a newly opened request. Both versions use a four-second
+query timeout. V1 serializes retries with lifecycle events; V2 allows one
+query or delay per affected session.
+
 The public CLI surfaces have limits:
 
 - Claude `PermissionRequest` explicitly omits `tool_use_id`, and
@@ -649,9 +659,9 @@ The public CLI surfaces have limits:
 - V1 reconciliation uses the public plugin `serverUrl`, the `directory`
   query, and documented HTTP Basic authentication from
   `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` (default username
-  `opencode`). Each query is bounded to four seconds. Unreachable or
-  rejected native APIs retain the last-known requests and report the real
-  error through OpenCode's log; they do not guess that input was resolved.
+  `opencode`). Unreachable or rejected native APIs retain the last-known
+  requests and report the real error through OpenCode's log; they do not
+  guess that input was resolved.
 - The released V2 2.0.18 plugin context has `permission.list` but **does not
   expose `session.form.list`**. Forms rely on their native reply/cancel and
   session-deletion events; dropped form events cannot be reconstructed by

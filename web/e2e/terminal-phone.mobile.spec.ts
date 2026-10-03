@@ -176,11 +176,13 @@ done`)
 
   // The raw desktop attach still owns the controller lease. Hold through
   // Run Room, then let its unanswered decision window grant the phone control.
-  const room = page.getByRole('complementary', { name: 'Run Room' })
+  const room = page.getByRole('dialog', { name: 'Run Room' })
   await page.getByRole('button', { name: 'Open Run Room' }).tap()
   await expect(room.getByText(/Controller: /)).toBeVisible()
   await takeControlFromRawHolder(page, room)
   await room.getByRole('button', { name: 'Close Run Room' }).tap()
+  await expect(room).toBeHidden()
+  await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
   await expect(rows).toHaveCount(desktopRows)
@@ -383,10 +385,15 @@ done`)
     expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
 
     // Browsing while steering must not focus xterm's keyboard or emit input.
-    const room = page.getByRole('complementary', { name: 'Run Room' })
+    const room = page.getByRole('dialog', { name: 'Run Room' })
     await page.getByRole('button', { name: 'Open Run Room' }).tap()
+    await expect(room.getByText(/Controller: /)).toBeVisible()
     await takeControlFromRawHolder(page, room)
     await room.getByRole('button', { name: 'Close Run Room' }).tap()
+    // CDP touch has no actionability check: the fading modal must stop covering
+    // the live screen before the first contact starts its continuous gesture.
+    await expect(room).toBeHidden()
+    await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {
       document.documentElement.dataset.phoneHistoryInputFocus = ''

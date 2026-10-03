@@ -74,6 +74,28 @@ describe('sidebarRuns', () => {
   })
 })
 
+describe('an agent outcome awaiting review', () => {
+  for (const status of ['completed', 'failed'] as const) {
+    it(`groups a ${status} run with Idle and keeps its own state`, () => {
+      const reported = record({
+        id: 'reported',
+        status,
+        outcome_unseen: true,
+        finished_at: '2026-08-14T10:20:00Z',
+      })
+      const scoped = { ...input, runs: { ...input.runs, [reported.id]: reported } }
+
+      const entry = sidebarRuns(scoped).find((e) => e.run.id === reported.id)
+      expect(entry?.state).toBe(status === 'failed' ? 'failed' : 'done')
+      expect(entry?.waitsOnHuman).toBe(true)
+      expect(sidebarRuns(scoped).map((e) => e.run.id).slice(0, 2)).toEqual(['reported', 'attention'])
+      const [idle] = sidebarGroups(scoped)
+      expect(idle.label).toBe('Idle')
+      expect(idle.runs.map((r) => r.run.id)).toEqual(['reported', 'attention'])
+    })
+  }
+})
+
 describe('sidebarGroups', () => {
   it('groups by state, worst group first', () => {
     const groups = sidebarGroups(input)

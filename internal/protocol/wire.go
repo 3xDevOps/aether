@@ -40,8 +40,11 @@ type Run struct {
 	// ArchivedAt is when the run was hidden from the board; absent means
 	// it is not archived. DeletesAt is ArchivedAt + domain.ArchiveRetention,
 	// computed here so no client hardcodes the retention window.
-	ArchivedAt        *string `json:"archived_at,omitempty"`
-	DeletesAt         *string `json:"deletes_at,omitempty"`
+	ArchivedAt *string `json:"archived_at,omitempty"`
+	DeletesAt  *string `json:"deletes_at,omitempty"`
+	// OutcomeUnseen is true while a run an agent's report finished has not
+	// been opened by its owner; run.seen clears it.
+	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
@@ -161,6 +164,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Protected:           r.Protected,
 		ArchivedAt:          rfc3339Ptr(r.ArchivedAt),
 		DeletesAt:           runDeletesAt(r.ArchivedAt),
+		OutcomeUnseen:       r.OutcomeUnseen,
 		CreatedAt:           rfc3339(r.CreatedAt),
 		StartedAt:           rfc3339Ptr(r.StartedAt),
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
@@ -394,6 +398,12 @@ type RunProtectParams struct {
 type RunArchiveParams struct {
 	RunID    string `json:"run_id"`
 	Archived bool   `json:"archived"`
+}
+
+// RunSeenParams are the params of run.seen (owner only): the owner has
+// opened a run an agent's report finished.
+type RunSeenParams struct {
+	RunID string `json:"run_id"`
 }
 
 // WorkspaceSettingsParams are the params of workspace.settings (admin

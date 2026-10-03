@@ -2,7 +2,7 @@ import type { Member } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 
 export const mapCardWidth = 320
-export const mapCardHeight = 192
+export const mapCardHeight = 140
 const cardGap = 32
 const rowGap = 52
 const unitGap = cardGap

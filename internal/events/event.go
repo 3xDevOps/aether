@@ -36,6 +36,9 @@ const (
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
+	// TypeRunOutcomeSeen signals that a run's owner opened it after an
+	// agent's report finished it, clearing outcome_unseen.
+	TypeRunOutcomeSeen Type = "run.outcome_seen"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -109,6 +112,8 @@ type RunStatusPayload struct {
 	To   domain.RunStatus `json:"to"`
 	// Reason is an optional human-readable cause, e.g. "agent exited 1".
 	Reason string `json:"reason,omitempty"`
+	// OutcomeUnseen is the run's outcome_unseen flag after this transition.
+	OutcomeUnseen bool `json:"outcome_unseen,omitempty"`
 }
 
 // RunInputPayload carries the complete pending set, including [] on last close.
@@ -158,6 +163,14 @@ type RunArchivedPayload struct {
 func (RunArchivedPayload) EventType() Type { return TypeRunArchived }
 
 func init() { registerPayload[RunArchivedPayload](TypeRunArchived) }
+
+// RunOutcomeSeenPayload signals that run.seen cleared the run's
+// outcome_unseen flag; the run is on the envelope.
+type RunOutcomeSeenPayload struct{}
+
+func (RunOutcomeSeenPayload) EventType() Type { return TypeRunOutcomeSeen }
+
+func init() { registerPayload[RunOutcomeSeenPayload](TypeRunOutcomeSeen) }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 

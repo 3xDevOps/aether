@@ -110,6 +110,9 @@ const (
 	// MethodRunArchive hides a finished run from the board, or restores
 	// it; the run's data is untouched (same gate as run.delete: Kill).
 	MethodRunArchive = "run.archive"
+	// MethodRunSeen clears a run's outcome_unseen flag once its owner has
+	// opened it (owner only).
+	MethodRunSeen = "run.seen"
 	// MethodSyncConflict reports a live-overlay sync conflict so both
 	// affected members are notified via the event feed (Steer-gated,
 	// like the sync bridge itself).
