@@ -3,9 +3,11 @@
 package gitengine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -114,4 +116,60 @@ func TestDiffWatchFollowsRecreatedDirectoryInodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitWatchPatch(t, e, diffs, run, "+new inode observed")
+}
+
+// TestDiffWatchPollsWhenTheKernelRefusesAWatcher covers a host whose inotify
+// budget is spent: the watch must start anyway, because a failed
+// StartDiffWatch fails the whole launch, and snapshots and file activity
+// must keep arriving. The kernel can refuse the instance itself or, once the
+// instance exists, the checkout's watches.
+func TestDiffWatchPollsWhenTheKernelRefusesAWatcher(t *testing.T) {
+	refusals := map[string]func() (*fsnotify.Watcher, error){
+		"instance": func() (*fsnotify.Watcher, error) {
+			return nil, fmt.Errorf("couldn't initialize inotify: %w", syscall.EMFILE)
+		},
+		"watches": func() (*fsnotify.Watcher, error) {
+			watcher, err := fsnotify.NewWatcher()
+			if err != nil {
+				return nil, err
+			}
+			return watcher, watcher.Close()
+		},
+	}
+	for name, refuse := range refusals {
+		t.Run(name, func(t *testing.T) {
+			newWatcher = refuse
+			t.Cleanup(func() { newWatcher = fsnotify.NewWatcher })
+
+			bus, err := events.NewInProc(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = bus.Close() })
+			e := newTestEngine(t, bus)
+			url := serveTransport(t, e)
+			seedWorkspace(t, e, url, "ws1")
+			const run = "run-watch-polling"
+			checkout, _, err := e.CreateRunCheckout(t.Context(), "ws1", run, "main", "watch polling", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+			if err = e.StartDiffWatch(t.Context(), "ws1", run); err != nil {
+				t.Fatalf("StartDiffWatch without a kernel watcher: %v", err)
+			}
+			if err = os.WriteFile(filepath.Join(checkout, "polled.txt"), []byte("first poll\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			awaitWatchPatch(t, e, diffs, run, "+first poll")
+			if _, ok := e.LastFileChange(run); !ok {
+				t.Error("a polled change was not recorded as file activity")
+			}
+			if err = os.WriteFile(filepath.Join(checkout, "polled.txt"), []byte("first poll\nsecond poll\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			awaitWatchPatch(t, e, diffs, run, "+second poll")
+			e.StopDiffWatch(run)
+		})
+	}
 }

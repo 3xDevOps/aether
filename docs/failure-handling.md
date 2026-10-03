@@ -269,6 +269,42 @@ Git refreshes and reconciliation still do work proportional to the paths they
 must inspect, and snapshot timing remains governed by the watcher's quiet,
 minimum, and maximum intervals.
 
+The kernel caps inotify instances and watches per user, and a root server
+shares that budget with every root process inside its run containers. Each
+live run's watcher holds one instance. When the kernel refuses the instance
+or the checkout's watches, the run still launches and its watcher polls: it
+takes a snapshot every maximum interval (60 seconds) for the rest of that
+watch, so diff snapshots, branch updates, and the file-change activity that
+stall detection reads all arrive up to that interval late. The server logs
+the kernel's error once per affected run:
+
+```
+gitengine: cannot watch checkout for file changes; polling for diff snapshots instead run=<run-id> interval=1m0s error="gitengine: start watcher: couldn't initialize inotify: too many open files"
+```
+
+`no space left on device` means the per-user watch cap is spent.
+`too many open files` means either the per-user instance cap is spent or the
+server process is out of file descriptors. Compare the server's descriptor
+count with its limit first:
+
+```sh
+pid=$(systemctl show aether-server -p MainPID --value)
+sudo sh -c "ls /proc/$pid/fd | wc -l; grep 'open files' /proc/$pid/limits"
+```
+
+If the count is at the limit, raise `LimitNOFILE` in the unit. Otherwise read
+the inotify caps and raise the one that is spent:
+
+```sh
+cat /proc/sys/fs/inotify/max_user_instances /proc/sys/fs/inotify/max_user_watches
+printf 'fs.inotify.max_user_instances = 1024\nfs.inotify.max_user_watches = 1048576\n' |
+  sudo tee /etc/sysctl.d/90-aether-inotify.conf
+sudo sysctl --system
+```
+
+Runs launched after the change get a kernel watcher again; a run that is
+already polling keeps polling until it is relaunched.
+
 ### Environment terminal exit
 
 When the main shell of an environment terminal exits, Aether stops its

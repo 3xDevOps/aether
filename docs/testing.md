@@ -1061,6 +1061,7 @@ layer that owns them.
 | Docker init and orphan reaping | `TestDockerInitReapsOrphanedDescendants` in `internal/runtime` against a real Docker daemon |
 | SSH port forwarding disconnect | `TestDirectTCPIPOwnerEchoAndHalfClose`, `TestDirectTCPIPFullDisconnectReleasesBackend`, and `TestDirectTCPIPDisconnectCancelsAddressResolution` |
 | Git ignored-tree watch pressure | `TestDiffWatchPrunesGitIgnoredTrees`, live-rule/tracked/negated-path regressions, `TestDiffWatchIgnoresDirectoryCreatedAfterStart`, and `TestDiffWatchPrunesExistingTreeAfterIgnoreUpdate` against real git; kernel watch counts are checked on Linux |
+| Kernel refuses a file watcher | `TestDiffWatchPollsWhenTheKernelRefusesAWatcher`: the watch starts and keeps publishing snapshots by polling, against real git |
 | Git pack cancellation | `TestUploadPackReturnsOnCtxCancelWithBlockedOutputAfterReap` (Linux process-exit boundary) and `TestUploadPackReturnsOnCtxCancel` |
 | tailscaled down | Multi-member E2E (key members connect, tailnet-only refused with banner) |
 
