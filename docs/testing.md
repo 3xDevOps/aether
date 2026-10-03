@@ -97,9 +97,8 @@ Layers, per the design spec's testing strategy:
   browser and standard images and runs `make test-e2e` with
   `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
   `make test-e2e` remains unsharded and still builds the embedded dashboard
-  and binaries first. The four shards partition the same 66 registered cases
-  once each: 50 desktop and 16 mobile. File boundaries can make shard sizes
-  unequal.
+  and binaries first. The four shards partition the desktop and mobile cases
+  once each. File boundaries can make shard sizes unequal.
   The `chromium` project excludes `**/*.mobile.spec.ts`; only the `mobile`
   project owns those specs. The opt-in real-GitHub case keeps its existing
   credential gate; listing or sharding it does not prove it ran.
@@ -923,7 +922,7 @@ covered - WebKit is not installed.
 | Spec | Scenario |
 | --- | --- |
 | `files-browser.mobile.spec.ts` | On a phone, opening Files through the titlebar's sidebar drawer, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
-| `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
+| `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px, repository settings has no whole-dialog horizontal overflow and its title, description and introductory text remain readable |
 | `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: status details opens on a tap and keeps the controls, long member name and unreachable notice inside the viewport; a short-screen popup scrolls to Usage rather than cutting it off. After closing it, Keyboard shortcuts remains independently tappable |
 | `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the titlebar, its rows are finger-sized, and tapping a run closes the drawer onto that run without page overflow; the status-details trigger remains touch-sized |
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |

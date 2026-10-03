@@ -37,13 +37,36 @@ func LinkRepo(cfg cli.Config, repo, workspaceID string) (cli.Config, string, err
 	if out, gerr := exec.Command("git", "-C", abs, "rev-parse", "--git-dir").CombinedOutput(); gerr != nil {
 		return cfg, "", fmt.Errorf("localops: %s is not a git repository: %s", abs, strings.TrimSpace(string(out)))
 	}
+	saved := cfg
+	profile := -1
+	if cfg.Active != "" {
+		saved, err = cli.Load()
+		if err != nil {
+			return cfg, "", fmt.Errorf("localops: load named server %q: %w", cfg.Active, err)
+		}
+		profile = slices.IndexFunc(saved.Links, func(link cli.NamedLink) bool { return link.Name == cfg.Active })
+		if profile < 0 {
+			return cfg, "", fmt.Errorf("localops: named server %q no longer exists; restart aether gui", cfg.Active)
+		}
+		current, _ := saved.Named(cfg.Active)
+		if current.Addr != cfg.Addr || current.User != cfg.User || current.Key != cfg.Key ||
+			current.KnownHosts != cfg.KnownHosts || current.EdgeURL != cfg.EdgeURL || current.ServerID != cfg.ServerID {
+			return cfg, "", fmt.Errorf("localops: named server %q changed; restart aether gui before linking a repository", cfg.Active)
+		}
+	}
 	url := cli.GitURL(cfg.User, cfg.GitHost(), workspaceID)
 	var buf bytes.Buffer
 	if err := GitRemote(abs, url, &buf, &buf); err != nil {
 		return cfg, "", fmt.Errorf("localops: set git remote: %w: %s", err, strings.TrimSpace(buf.String()))
 	}
 	cfg.Repo = abs
-	if err := cli.Save(cfg); err != nil {
+	if profile >= 0 {
+		saved.Links[profile].Repo = abs
+		cfg.Links = saved.Links
+	} else {
+		saved = cfg
+	}
+	if err := cli.Save(saved); err != nil {
 		return cfg, "", err
 	}
 	return cfg, url, nil

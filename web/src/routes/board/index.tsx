@@ -237,19 +237,24 @@ function NewRunButton() {
 
 /** What an empty workspace says, in place of the columns. */
 function EmptyNotice() {
+  const navigate = useStore((s) => s.navigate)
+  const caps = useCapability()
+  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   return (
     <div className="flex min-h-0 flex-1 items-start p-4 sm:p-6">
       <div className="w-full max-w-2xl border-y border-border px-4 py-5">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Ready for a task
+          {workspace ? 'Workspace setup and runs' : 'Add your repository'}
         </p>
-        <h2 className="mt-1.5 text-[16px] font-semibold leading-5">No runs yet</h2>
+        <h2 className="mt-1.5 text-[16px] font-semibold leading-5">{workspace ? 'No runs yet' : 'No workspace selected'}</h2>
         <p className="mt-1.5 max-w-prose text-[13px] leading-5 text-muted-foreground">
           A run is one agent working on its own branch of this workspace, in its
           own container.
         </p>
-        <div className="mt-4">
-          <NewRunButton />
+        <div className="mt-4 flex flex-wrap gap-2">
+          {workspace && <NewRunButton />}
+          {caps.hasMethod('workspace.list') && <Button variant="outline" onClick={() => navigate('workspaces')}>Add or manage workspaces</Button>}
+          {caps.hasMethod('agent.list') && <Button variant="outline" onClick={() => navigate('onboarding')}>Set up repository and agents</Button>}
         </div>
       </div>
     </div>

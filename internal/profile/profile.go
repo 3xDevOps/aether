@@ -51,10 +51,9 @@ var (
 // extraDeniedNames are token/credential basenames the server always
 // refuses, even if a harness DenyNames list omitted them. Not a scanner.
 var extraDeniedNames = []string{
-	".credentials.json",
-	"credentials.json",
-	"auth.json",
-	"keychain",
+	".credentials.json", "credentials.json", "credentials", ".claude.json",
+	"auth.json", "keychain", "token.json", "tokens.json", "oauth.json",
+	"agent.db", "agent.db-wal", "agent.db-shm",
 }
 
 // File is one path in a profile snapshot. Path is slash-separated and
@@ -575,31 +574,37 @@ func rejectMode(mode uint32) error {
 	}
 }
 
-// DeniedBasename reports whether rel's basename is a credential or token
-// name the profile service always refuses: harness DenyNames, extra
-// credential names, or *.pem. Used by the client denylist so it matches
-// the server.
+// CredentialNames returns the effective credential basenames for import previews.
+// Matching is case-insensitive in every path component; *.pem is always denied.
+func CredentialNames(harnessDeny []string) []string {
+	names := make([]string, 0, len(extraDeniedNames)+len(harnessDeny))
+	names = append(names, extraDeniedNames...)
+	return append(names, harnessDeny...)
+}
+
+// DeniedBasename reports whether any component names credentials.
 func DeniedBasename(rel string, harnessDeny []string) bool {
 	return deniedBasename(rel, harnessDeny)
 }
 
 func deniedBasename(rel string, harnessDeny []string) bool {
-	base := path.Base(rel)
-	if base == "." || base == "/" {
-		return true
-	}
-	lower := strings.ToLower(base)
-	if strings.HasSuffix(lower, ".pem") {
-		return true
-	}
-	for _, n := range extraDeniedNames {
-		if base == n || lower == strings.ToLower(n) {
+	for base := range strings.SplitSeq(rel, "/") {
+		if base == "." || base == "" {
 			return true
 		}
-	}
-	for _, n := range harnessDeny {
-		if base == n || lower == strings.ToLower(n) {
+		lower := strings.ToLower(base)
+		if strings.HasSuffix(lower, ".pem") {
 			return true
+		}
+		for _, n := range extraDeniedNames {
+			if lower == n {
+				return true
+			}
+		}
+		for _, n := range harnessDeny {
+			if strings.EqualFold(base, n) {
+				return true
+			}
 		}
 	}
 	return false

@@ -207,7 +207,7 @@ export function WorkspaceMirrorDialog({
 
   return (
     <>
-      <Dialog open onOpenChange={onClose}>
+      <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(640px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Workspace Source</DialogTitle>
@@ -313,7 +313,7 @@ export function WorkspaceMirrorDialog({
                     required
                   />
                   <p className="text-xs text-muted-foreground">
-                    This source is fetched by the server and owns the workspace base branch.
+                    Use a credential-free URL. This source is fetched by the server and owns the workspace base branch; it does not set checkout Origin or grant publishing access.
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -334,7 +334,7 @@ export function WorkspaceMirrorDialog({
                     onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}
                   >
                     <option value="public">Public HTTPS</option>
-                    <option value="deploy-key">Deploy key</option>
+                    <option value="deploy-key">Private repository — read-only deploy key</option>
                   </select>
                 </div>
                 {auth === 'deploy-key' && (
@@ -349,9 +349,10 @@ export function WorkspaceMirrorDialog({
                         rows={3}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Paste the exact host key for a non-GitHub SSH source. GitHub uses its pinned host key.
+                        Paste the exact host key verified with the host administrator for a non-GitHub SSH source. Do not blindly trust ssh-keyscan output. GitHub uses its pinned host key.
                       </p>
                     </div>
+                    <p className="text-xs text-muted-foreground">Install the generated key read-only with a repository administrator. It is not your native Git/gh publishing credential. After installation use Verify / Refresh; Save source rotates the key. Fetching is not approval: explicitly adopt the reviewed candidate.</p>
                     {(result?.public_key || (result?.auth === 'deploy-key' && result.enabled)) && (
                       <div className="space-y-1">
                         <Label htmlFor="workspace-mirror-public-key">Public deploy key</Label>

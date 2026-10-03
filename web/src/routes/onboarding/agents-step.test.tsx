@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
+import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
 import type { ConfigImportResult, ConfigRoot, GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
@@ -105,6 +106,7 @@ function policyRoot(overrides: Partial<ConfigRoot> = {}): ConfigRoot {
     harness: 'claude',
     path: '~/.claude',
     runtime_ignores: [],
+    credential_names: ['.credentials.json', 'credentials.json', 'credentials', '.claude.json', 'auth.json', 'keychain', 'token.json', 'tokens.json', 'oauth.json', 'agent.db', 'agent.db-wal', 'agent.db-shm'],
     ...overrides,
   }
 }
@@ -137,7 +139,9 @@ beforeEach(() => {
 
 describe('agents step', () => {
   it('keeps setup and import independent of local gateway capabilities', async () => {
-    const client = fakeApi()
+    const client = fakeApi({
+      envHarnesses: vi.fn(async () => { throw new Error('env.harnesses is unavailable on this gateway') }),
+    })
     renderStep(client, {
       gateway: 'remote',
       methods: ['*'],
@@ -148,6 +152,8 @@ describe('agents step', () => {
     expect(await screen.findByText('Claude Code')).toBeDefined()
     expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Choose directory' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code' }))
+    expect(await screen.findByText(/claude.ai\/install.sh/)).toBeDefined()
   })
 
 
@@ -489,11 +495,8 @@ describe('agents step', () => {
     }
   })
 
-  it.each(['oversized', 'duplicate', 'invalid'] as const)('blocks the whole selection for an %s user file before reading', async (reason) => {
+  it.each(['duplicate', 'invalid'] as const)('rejects an unsafe %s path before reading', async (reason) => {
     const file = directoryFile(reason === 'invalid' ? '../outside.json' : 'rejected.json', '{}')
-    if (reason === 'oversized') {
-      Object.defineProperty(file, 'size', { value: MAX_IMPORT_FILE_BYTES + 1 })
-    }
     const read = vi.fn(async () => new TextEncoder().encode('{}').buffer)
     Object.defineProperty(file, 'arrayBuffer', { value: read })
     const client = fakeApi()
@@ -507,6 +510,96 @@ describe('agents step', () => {
     if (submit) expect(submit).toHaveProperty('disabled', true)
     expect(client.configImport).not.toHaveBeenCalled()
     expect(screen.queryByText(/Imported \d+ files/)).toBeNull()
+  })
+
+  it('requires explicit omission of oversized files, without reading runtime or unwanted files', async () => {
+    const root = policyRoot({ harness: 'omp', path: '~/.omp', runtime_ignores: ['stats.db', 'stats.db-wal', 'stats.db-shm'] })
+    const client = fakeApi({ configRoots: vi.fn(async () => ({ roots: [root] })) })
+    const unread = vi.fn(async () => { throw new Error('must not read excluded content') })
+    const files = ['stats.db', 'stats.db-wal', 'stats.db-shm', 'unknown-user.bin', 'agent/agent.db', 'unwanted.md'].map((path) => {
+      const file = directoryFile(path, '', '.omp')
+      Object.defineProperty(file, 'size', { value: MAX_IMPORT_FILE_BYTES + 1 })
+      Object.defineProperty(file, 'arrayBuffer', { value: unread })
+      return file
+    })
+    render(<ProfileImport client={client} />)
+    await choose([...files, directoryFile('agent/config.yml', 'theme: dark\n', '.omp')])
+    expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', true)
+    expect(screen.queryByLabelText('Include stats.db')).toBeNull()
+    expect(screen.queryByLabelText('Include agent/agent.db')).toBeNull()
+    expect(client.configImport).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude unsupported files' }))
+    expect(screen.getByLabelText('Include unknown-user.bin')).toHaveProperty('checked', false)
+    expect(screen.getAllByText(/explicitly excluded: .* exceeds the 64 MiB/)).toHaveLength(2)
+    await confirmImport()
+    await screen.findByText(/Import finished with omissions: 6/)
+    expect(unread).not.toHaveBeenCalled()
+    expect(vi.mocked(client.configImport).mock.calls.flatMap(([request]) => request.files.map(({ path }) => path))).toEqual(['agent/config.yml'])
+    expect(useStore.getState().configImportStatus?.excluded.map(({ path }) => path)).toEqual([
+      'stats.db', 'stats.db-wal', 'stats.db-shm', 'agent/agent.db', 'unknown-user.bin', 'unwanted.md',
+    ])
+  })
+
+  it('lets a known destination be changed and recomputes omissions before reading', async () => {
+    const client = fakeApi({ configRoots: vi.fn(async () => ({ roots: [
+      policyRoot({ harness: 'omp', path: '~/.omp', runtime_ignores: ['stats.db'] }),
+      policyRoot(),
+    ] })) })
+    const file = directoryFile('stats.db', 'user configuration', '.omp')
+    const read = vi.fn(async () => new TextEncoder().encode('user configuration').buffer)
+    Object.defineProperty(file, 'arrayBuffer', { value: read })
+    render(<ProfileImport client={client} />)
+    await choose([file, directoryFile('settings.json', '{}', '.omp')])
+    expect(screen.queryByLabelText('Include stats.db')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Configuration destination'), { target: { value: 'claude' } })
+    await screen.findByLabelText('Include stats.db')
+    expect(read).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText('Include stats.db'))
+    await confirmImport()
+    await screen.findByText(/Import finished with omissions: 1/)
+    expect(read).not.toHaveBeenCalled()
+    expect(vi.mocked(client.configImport).mock.calls[0][0].harness).toBe('claude')
+    expect(useStore.getState().configImportStatus?.excluded).toEqual([
+      { path: 'stats.db', reason: 'user', detail: 'excluded by you before upload' },
+    ])
+  })
+
+  it.each([true, false])('trusts only explicit pre-dispatch refusal evidence (%s)', async (notStarted) => {
+    const client = fakeApi({
+      configImport: vi.fn(async () => { throw new ApiError(503, 'config.import: capacity is busy', undefined, notStarted ? { config_import_not_started: true } : undefined) }),
+    })
+    render(<ProfileImport client={client} />)
+    await choose([directoryFile('settings.json', '{}')])
+    await confirmImport()
+    const status = useStore.getState().configImportStatus!
+    expect(status.result.files).toBe(0)
+    expect(status.result.error).toContain('config.import: capacity is busy')
+    expect(status.unknownPaths).toEqual(notStarted ? [] : ['settings.json'])
+    expect(status.remaining.map(({ destinationPath }) => destinationPath)).toEqual(notStarted ? ['settings.json'] : [])
+  })
+
+  it('never reads destination-specific credential names, including oversized credential directories', async () => {
+    const root = policyRoot({
+      harness: 'mybot', path: '~/.mybot',
+      credential_names: [...policyRoot().credential_names, 'session-store.json'],
+    })
+    const client = fakeApi({ configRoots: vi.fn(async () => ({ roots: [root] })) })
+    const read = vi.fn(async () => { throw new Error('credential content must not be read') })
+    const files = ['SESSION-STORE.JSON', 'session-store.json/data.bin', 'AUTH.JSON', 'private.PEM'].map((path) => {
+      const file = directoryFile(path, '', '.mybot')
+      Object.defineProperty(file, 'size', { value: MAX_IMPORT_FILE_BYTES + 1 })
+      Object.defineProperty(file, 'arrayBuffer', { value: read })
+      return file
+    })
+    render(<ProfileImport client={client} />)
+    await choose([...files, directoryFile('settings.json', '{}', '.mybot')])
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }))
+    expect(screen.queryByLabelText('Include SESSION-STORE.JSON')).toBeNull()
+    await confirmImport()
+    await screen.findByText(/Import finished with omissions: 4/)
+    expect(read).not.toHaveBeenCalled()
+    expect(useStore.getState().configImportStatus?.excluded.every(({ reason }) => reason === 'credential')).toBe(true)
+    expect(vi.mocked(client.configImport).mock.calls[0][0].files.map(({ path }) => path)).toEqual(['settings.json'])
   })
 
   it('rejects canonical aliases across prospective batches before reading or uploading', async () => {
@@ -569,7 +662,7 @@ describe('agents step', () => {
     }))
   })
 
-  it('stops on a later read error while preserving confirmed files and bytes', async () => {
+  it('continues after explicit exclusion of a read failure without resending confirmed files', async () => {
     const client = fakeApi({
       configImport: vi.fn(async ({ harness, files }) => ({
         harness, files: files.length, bytes: 2, excluded: [],
@@ -582,7 +675,7 @@ describe('agents step', () => {
     const last = bufferedFile('not-read.json', new ArrayBuffer(1))
     const readLast = vi.fn(async () => new ArrayBuffer(1))
     Object.defineProperty(last, 'arrayBuffer', { value: readLast })
-    render(<ProfileImport client={client} />)
+    const view = render(<ProfileImport client={client} />)
     await choose([
       directoryFile('settings.json', '{}'),
       ...dependencyFiles(IMPORT_BATCH_FILES - 1),
@@ -595,9 +688,29 @@ describe('agents step', () => {
     expect(alert.textContent).toContain(`${IMPORT_BATCH_FILES} files (2 B)`)
     expect(alert.textContent).not.toMatch(/unknown/i)
     expect(screen.getByText('settings.json')).toBeDefined()
-    expect(screen.queryByText('unreadable.json')).toBeNull()
+    expect(useStore.getState().configImportStatus?.remaining.map(({ destinationPath }) => destinationPath)).toEqual(['unreadable.json', 'not-read.json'])
     expect(readLast).not.toHaveBeenCalled()
     expect(client.configImport).toHaveBeenCalledOnce()
+    view.unmount()
+    render(<ProfileImport client={client} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Review remaining files' })).toHaveProperty('disabled', false))
+    fireEvent.click(screen.getByRole('button', { name: 'Review remaining files' }))
+    await screen.findByText('Preview')
+    expect(screen.queryByLabelText('Include settings.json')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Import configuration' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude unsupported files' }))
+    await confirmImport()
+    await screen.findByText(new RegExp(`Imported ${IMPORT_BATCH_FILES + 1} files`))
+    expect(client.configImport).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(client.configImport).mock.calls[1][0].files.map(({ path }) => path)).toEqual(['not-read.json'])
+    const recovered = useStore.getState().configImportStatus!
+    expect(recovered.result.error).toBeUndefined()
+    expect(recovered.remaining).toEqual([])
+    expect(recovered.excluded).toEqual([{
+      path: 'unreadable.json', reason: 'read',
+      detail: 'explicitly excluded: The file is no longer available',
+    }])
+    expect(recovered.errors).toEqual(['unreadable.json: The file is no longer available'])
   })
 
   it('recovers canonical committed paths for a custom root without stripping double prefixes twice', async () => {
@@ -678,7 +791,10 @@ describe('agents step', () => {
     expect(paths).not.toContain(excludedPath)
     expect(paths).not.toContain(uncommittedPath)
     expect(screen.getByText(/secret detected/)).toBeDefined()
-    expect(screen.queryByText('settings.json')).toBeNull()
+    expect(useStore.getState().configImportStatus?.remaining.map(({ destinationPath }) => destinationPath)).toEqual([
+      ...dependencies.slice(IMPORT_BATCH_FILES + 1).map((file) => file.webkitRelativePath.slice('.claude/'.length)),
+      'settings.json',
+    ])
   })
 
   it('distinguishes previously confirmed commits from an unknown batch after a lost response', async () => {
@@ -686,7 +802,8 @@ describe('agents step', () => {
     const client = fakeApi({
       configImport: vi.fn()
         .mockResolvedValueOnce({ harness: 'claude', files: IMPORT_BATCH_FILES, bytes: 0, excluded: [] })
-        .mockRejectedValueOnce(new Error('connection reset by peer')),
+        .mockRejectedValueOnce(new Error('connection reset by peer'))
+        .mockResolvedValueOnce({ harness: 'claude', files: 1, bytes: 2, excluded: [] }),
     })
     render(<ProfileImport client={client} />)
     await choose([...dependencies, directoryFile('settings.json', '{}')])
@@ -704,11 +821,31 @@ describe('agents step', () => {
     expect(Array.from(unknown.parentElement!.querySelectorAll('li'), (item) => item.textContent)).toEqual(
       dependencies.slice(IMPORT_BATCH_FILES).map((file) => file.webkitRelativePath.slice('.claude/'.length)),
     )
-    expect(screen.queryByText('settings.json')).toBeNull()
+    expect(useStore.getState().configImportStatus?.remaining.map(({ destinationPath }) => destinationPath)).toEqual(['settings.json'])
+    fireEvent.click(screen.getByRole('button', { name: 'Review remaining files' }))
+    await screen.findByText('Preview')
+    await confirmImport()
+    await waitFor(() => expect(useStore.getState().configImportPending).toBe(false))
+    expect(client.configImport).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(client.configImport).mock.calls[2][0].files.map(({ path }) => path)).toEqual(['settings.json'])
+    expect(useStore.getState().configImportStatus?.unknownPaths).toHaveLength(IMPORT_BATCH_FILES)
+    expect(screen.getByRole('alert').textContent).toContain('Import incomplete')
   })
 })
 
 describe('directory import bounds', () => {
+  it('accepts the exact file ceiling and flags one byte over it without reading either file', async () => {
+    const files = ['at-limit.bin', 'over-limit.bin'].map((path, index) => {
+      const file = directoryFile(path, '')
+      Object.defineProperty(file, 'size', { value: MAX_IMPORT_FILE_BYTES + index })
+      return file
+    })
+    const selection = await prepareDirectoryImport(files, policyRoot())
+    expect(selection?.files[0].problem).toBeUndefined()
+    expect(selection?.files[1].problem?.reason).toBe('size')
+    expect(selection?.excluded).toEqual([])
+  })
+
   it('ignores policy-excluded aliases before detecting destination collisions', async () => {
     const prepared = await prepareDirectoryImport(
       [
@@ -885,6 +1022,7 @@ describe('onboarding route', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
     fireEvent.click(await screen.findByRole('button', { name: `Use ${workspace.name}` }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Link local repository' }))
     fireEvent.change(await screen.findByLabelText('Repository path'), {
       target: { value: '/home/alice/code/myproject' },
     })

@@ -12,7 +12,7 @@ import {
   registerEnvTerminalSocket,
 } from '@/store/env-terminal'
 import { StubSocket } from '@/test/stub-socket'
-import { agentInfo } from '@/test/fixtures'
+import { agentInfo, fakeApi } from '@/test/fixtures'
 // vi.mock factories are hoisted above static imports, so the fixture module
 // must be loaded inside the factory (same as terminal.test.tsx).
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -128,26 +128,6 @@ describe('agents view', () => {
     },
   )
 
-  it('prefills argv templates and renders the live terminal dock', async () => {
-    const view = mount()
-    await flush()
-
-    fireEvent.click(screen.getByText('Add agent'))
-    await flush()
-    fireEvent.change(screen.getByPlaceholderText('claude'), {
-      target: { value: 'mycli' },
-    })
-
-    expect(screen.getByDisplayValue('mycli {task}')).toBeDefined()
-    expect(screen.getByDisplayValue('mycli -p {task}')).toBeDefined()
-
-    fireEvent.click(screen.getByText('Continue'))
-    await flush()
-
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
-    expect(screen.getByText('install mycli into ~/.local/bin')).toBeDefined()
-    view.unmount()
-  })
 
   it('sends the wizard install line once across instructions remounts', async () => {
     useStore.getState().resetEnvTerminal()
@@ -255,6 +235,29 @@ describe('agents view', () => {
       headless_args: ['mycli', '-p', '{task}'],
     })
     expect(screen.getByText('Agent registered')).toBeDefined()
+    view.unmount()
+  })
+
+  it('preserves an existing member definition through failed setup and retry', async () => {
+    const custom = agentInfo({ name: 'custom', source: 'member', installed: false, install_script: undefined })
+    const client = fakeApi({
+      agentList: vi.fn(async () => [custom]),
+      agentRegister: vi.fn(async () => { throw new Error('existing definition was replaced') }),
+    })
+    const onRegistered = vi.fn()
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    const view = render(<AgentWizard agents={[custom]} harness="custom" onRegistered={onRegistered} onCancel={vi.fn()} client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: "I've installed and logged in" }))
+    await flush()
+    expect(screen.getByText(/custom is not detected as installed/)).toBeDefined()
+    expect(client.envSave).not.toHaveBeenCalled()
+    expect(client.agentRegister).not.toHaveBeenCalled()
+    vi.mocked(client.agentList).mockResolvedValue([{ ...custom, installed: true }])
+    fireEvent.click(screen.getByRole('button', { name: "I've installed and logged in" }))
+    await flush()
+    expect(onRegistered).toHaveBeenCalledOnce()
+    expect(client.agentRegister).not.toHaveBeenCalled()
+    expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
     view.unmount()
   })
 

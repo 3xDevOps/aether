@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Users,
 } from 'lucide-react'
 import { Dialog as DialogPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
@@ -318,6 +319,8 @@ function WorkspaceSwitcher({
   const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
   const list = Object.values(workspaces)
   const current = workspaces[active]
+  const navigate = useStore((s) => s.navigate)
+  const caps = useCapability()
 
   return (
     <div className="flex h-[var(--title-bar-height)] shrink-0 items-center gap-1 border-b border-border px-2">
@@ -347,6 +350,7 @@ function WorkspaceSwitcher({
           )}
         </span>
       )}
+      {caps.hasMethod('workspace.list') && <Button variant="ghost" size="icon" aria-label="Add or manage workspaces" title="Add or manage workspaces" onClick={() => navigate('workspaces')}><Plus className="size-4" /></Button>}
       <Button
         ref={controlRef}
         variant="ghost"

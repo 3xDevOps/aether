@@ -93,14 +93,12 @@ export function GitIdentityStep({
       className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Step 2
-        </p>
         <h2 className="text-base font-semibold">Set your git identity</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           Every commit an agent makes in your runs is authored as this name and
           address, so the work you merge upstream credits you.
         </p>
+        <p className="text-xs text-muted-foreground">This is commit attribution, not repository authentication or agent login. Set publishing credentials separately in your environment terminal.</p>
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       <form
@@ -149,7 +147,7 @@ export function GitIdentityStep({
           <Button
             type="submit"
             size="sm"
-            disabled={busy || !name.trim() || !email.trim()}
+            disabled={busy || !caps.hasMethod('member.git') || !name.trim() || !email.trim()}
           >
             Save
           </Button>

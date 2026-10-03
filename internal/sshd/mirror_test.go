@@ -88,39 +88,80 @@ func mirrorRPCState(id domain.WorkspaceID) domain.WorkspaceMirror {
 	}
 }
 
-func TestWorkspaceMirrorAdminOnlyAndLocalStatus(t *testing.T) {
+func TestWorkspaceMirrorStatusReadAccess(t *testing.T) {
+	t.Parallel()
+	for _, role := range []domain.Role{domain.RoleCollaborator, domain.RoleViewer} {
+		t.Run(string(role), func(t *testing.T) {
+			t.Parallel()
+			fake := &mirrorRPCFake{statusErr: &gitengine.MirrorError{Kind: gitengine.MirrorErrorNotConfigured}}
+			e := newTestEnv(t, func(c *Config) {
+				c.Services.Mirrors = fake
+				c.revalidateInterval = time.Hour
+			})
+			signer, member := addMember(t, e, "Reader", role, false)
+			client := controlAs(t, e, signer)
+			params := protocol.WorkspaceMirrorParams{WorkspaceID: string(e.ws.ID)}
+			var local protocol.WorkspaceMirrorResult
+			if err := client.Call(protocol.MethodWorkspaceMirrorStatus, params, &local); err != nil {
+				t.Fatalf("local-only status: %v", err)
+			}
+			if local != (protocol.WorkspaceMirrorResult{}) {
+				t.Fatalf("local-only status = %+v, want empty disabled state", local)
+			}
+
+			fake.mu.Lock()
+			fake.statusErr = nil
+			fake.result = mirrorservice.Result{
+				Mirror: mirrorRPCState(e.ws.ID), PublicKey: "ssh-ed25519 AAAA-public-key",
+			}
+			fake.mu.Unlock()
+			var configured protocol.WorkspaceMirrorResult
+			if err := client.Call(protocol.MethodWorkspaceMirrorStatus, params, &configured); err != nil {
+				t.Fatalf("configured status: %v", err)
+			}
+			if !configured.Enabled || configured.SourceURL != "https://example.test/acme/repo" ||
+				configured.Branch != "main" || configured.Generation != 7 ||
+				configured.Auth != "deploy-key" || configured.Status != "ready" ||
+				configured.PublicKey != "ssh-ed25519 AAAA-public-key" {
+				t.Fatalf("configured status = %+v", configured)
+			}
+
+			for _, method := range []string{protocol.MethodWorkspaceMirrorRefresh, protocol.MethodWorkspaceMirrorDisable} {
+				wantDenied(t, client.Call(method, params, nil), method)
+			}
+			wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{
+				WorkspaceID: string(e.ws.ID), SourceURL: "https://example.test/repo", Branch: "main", Auth: "public",
+			}, nil), "mirror configure")
+			wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{
+				WorkspaceID: string(e.ws.ID), Generation: 7,
+			}, nil), "mirror adopt")
+
+			if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
+				t.Fatalf("delete member: %v", err)
+			}
+			wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorStatus, params, nil), "revoked member mirror status")
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if strings.Join(fake.calls, ",") != "status,status" {
+				t.Fatalf("service calls = %v, want only admitted status reads", fake.calls)
+			}
+		})
+	}
+}
+
+func TestWorkspaceMirrorStatusPendingMemberDenied(t *testing.T) {
 	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
-	collabSigner, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
-	collab := controlAs(t, e, collabSigner)
-	params := protocol.WorkspaceMirrorParams{WorkspaceID: string(e.ws.ID)}
-	for _, method := range []string{
-		protocol.MethodWorkspaceMirrorStatus, protocol.MethodWorkspaceMirrorRefresh,
-		protocol.MethodWorkspaceMirrorDisable,
-	} {
-		if err := collab.Call(method, params, nil); err == nil {
-			t.Fatalf("%s succeeded for collaborator", method)
-		} else if pe := wireErrOf(t, err); pe.Code != protocol.CodeDenied {
-			t.Fatalf("%s error = %d, want denied", method, pe.Code)
-		}
-	}
-	if err := collab.Call(protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{
-		WorkspaceID: string(e.ws.ID), SourceURL: "https://example.test/repo", Branch: "main", Auth: "public",
-	}, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
-		t.Fatal("collaborator configure was not denied")
-	}
-	if err := collab.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: 7}, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeDenied {
-		t.Fatal("collaborator adopt was not denied")
-	}
-
-	fake.statusErr = &gitengine.MirrorError{Kind: gitengine.MirrorErrorNotConfigured}
-	var status protocol.WorkspaceMirrorResult
-	if err := controlClient(t, e).Call(protocol.MethodWorkspaceMirrorStatus, params, &status); err != nil {
-		t.Fatalf("local-only status: %v", err)
-	}
-	if status.Enabled {
-		t.Fatal("local-only status enabled=true")
+	signer, _ := addMember(t, e, "Pending", domain.RoleCollaborator, true)
+	client := controlAs(t, e, signer)
+	wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorStatus, protocol.WorkspaceMirrorParams{
+		WorkspaceID: string(e.ws.ID),
+	}, nil), "pending member mirror status")
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.calls) != 0 {
+		t.Fatalf("pending member reached mirror service: %v", fake.calls)
 	}
 }
 

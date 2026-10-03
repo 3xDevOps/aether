@@ -244,6 +244,11 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 		{Path: "agent/skills/review.md", Content: []byte("# review"), Mode: 0o644},
 		{Path: "agent/extensions/review.js", Content: []byte("export {}"), Mode: 0o644},
 		{Path: "agent/npm/review/package.json", Content: []byte(`{"name":"review"}`), Mode: 0o644},
+		{Path: "agent/mcp.json", Content: []byte("{}"), Mode: 0o644},
+		{Path: "agent/config.yml", Content: []byte("theme: dark\n"), Mode: 0o644},
+		{Path: "agent/extensions/stats.db", Content: []byte{0, 0xff, 1}, Mode: 0o644},
+		{Path: "agent/skills/empty.md", Content: []byte{}, Mode: 0o644},
+		{Path: "stats.db.backup-notes", Content: []byte("keep"), Mode: 0o644},
 	}
 	tests := []struct {
 		name    string
@@ -272,6 +277,13 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 				"agent/history.db-shm",
 				"agent/history.db-wal",
 				"agent/models.db",
+				"agent/models.db-wal",
+				"agent/models.db-shm",
+				"stats.db",
+				"stats.db-wal",
+				"stats.db-shm",
+				"puppeteer/chrome",
+				"webcache/docs.html",
 				"natives/tool",
 				"cache/index",
 				"logs/output.log",
@@ -290,8 +302,12 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 			if err != nil {
 				t.Fatalf("import: %v", err)
 			}
-			if result.Files != len(config) || result.Bytes != 34 || len(result.Excluded) != len(tc.ignored) {
-				t.Fatalf("result = %+v, want %d files, 34 bytes, %d exclusions", result, len(config), len(tc.ignored))
+			var wantBytes int64
+			for _, file := range config {
+				wantBytes += int64(len(file.Content))
+			}
+			if result.Files != len(config) || result.Bytes != wantBytes || len(result.Excluded) != len(tc.ignored) {
+				t.Fatalf("result = %+v, want %d files, %d bytes, %d exclusions", result, len(config), wantBytes, len(tc.ignored))
 			}
 			excluded := make(map[string]bool, len(result.Excluded))
 			for _, file := range result.Excluded {
@@ -301,11 +317,14 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 				if !excluded[ignored] {
 					t.Errorf("runtime path %q was imported; exclusions = %+v", ignored, result.Excluded)
 				}
+				if _, statErr := os.Stat(filepath.Join(manager.Root(), string(tc.member), tc.root, ignored)); !errors.Is(statErr, fs.ErrNotExist) {
+					t.Errorf("excluded runtime file %q exists: %v", ignored, statErr)
+				}
 			}
 			for _, want := range config {
-				got, readErr := manager.ConfigRead(context.Background(), tc.member, tc.name, tc.root, want.Path, nil)
-				if readErr != nil || string(got.Content) != string(want.Content) {
-					t.Errorf("configuration %q = %q, err=%v; want %q", want.Path, got.Content, readErr, want.Content)
+				got, readErr := os.ReadFile(filepath.Join(manager.Root(), string(tc.member), tc.root, want.Path))
+				if readErr != nil || !bytes.Equal(got, want.Content) {
+					t.Errorf("configuration %q = %q, err=%v; want %q", want.Path, got, readErr, want.Content)
 				}
 			}
 		})

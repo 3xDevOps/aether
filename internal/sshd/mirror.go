@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodWorkspaceMirrorStatus, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorStatus)
+	registerGuarded(protocol.MethodWorkspaceMirrorStatus, permissions.View, workspaceTarget, (*Server).workspaceMirrorStatus)
 	registerGuarded(protocol.MethodWorkspaceMirrorConfigure, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorConfigure)
 	registerGuarded(protocol.MethodWorkspaceMirrorRefresh, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorRefresh)
 	registerGuarded(protocol.MethodWorkspaceMirrorAdopt, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorAdopt)
@@ -23,8 +23,8 @@ func init() {
 }
 
 // MirrorService is the control-channel and launch view of
-// internal/mirror.Service. Capture is used by the scheduler; the remaining
-// methods are exposed through the admin-only control channel.
+// internal/mirror.Service. Capture is used by the scheduler; control-channel
+// reads require view access and mutations require workspace administration.
 type MirrorService interface {
 	Configure(context.Context, domain.WorkspaceID, mirrorservice.ConfigureRequest) (mirrorservice.Result, error)
 	Status(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)

@@ -29,7 +29,7 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   // The identity is what the connect writes into the home's .gitconfig, so
   // this scenario sets one rather than skipping the step.
   await wizard.gitIdentity.save('Ada Lovelace', 'ada@example.invalid')
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.expectStep('Agents')

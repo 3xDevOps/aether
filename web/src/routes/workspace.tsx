@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { timeAgo } from '@/lib/format'
+import { message, timeAgo } from '@/lib/format'
 import type { WorkspaceMirrorResult } from '@/lib/types'
 import { api } from '@/lib/api'
 import { RunList } from '@/components/run-list'
 import { WorkspaceMirrorDialog } from '@/components/workspace-mirror-dialog'
+import { WorkspaceRepositoryDialog } from '@/components/workspace-repository'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
@@ -29,25 +30,31 @@ export function WorkspaceView({ params }: RouteProps) {
   const groupBy = useStore((s) => s.groupBy)
   const caps = useCapability()
   const isAdmin = useIsAdmin()
-  const [dialog, setDialog] = useState<'budget' | 'settings' | 'mirror' | null>(null)
+  const [dialog, setDialog] = useState<'budget' | 'settings' | 'mirror' | 'repository' | 'local' | null>(params.repository === 'local' ? 'local' : params.repository === 'remote' ? 'repository' : null)
   const [mirrorStatus, setMirrorStatus] = useState<WorkspaceMirrorResult | null>(null)
+  const [mirrorError, setMirrorError] = useState<string | null>(null)
+  const repositoryOpen = dialog === 'repository' || dialog === 'local'
   const canMirror = isAdmin && caps.hasMethod('workspace.mirror.status')
   useEffect(() => {
+    setDialog(params.repository === 'local' ? 'local' : params.repository === 'remote' ? 'repository' : null)
+  }, [workspaceID, params.repository])
+  useEffect(() => {
     setMirrorStatus(null)
-    if (!workspace || !canMirror) return
+    setMirrorError(null)
+    if (!workspace || !canMirror || repositoryOpen) return
     let live = true
     void api.workspaceMirrorStatus(workspaceID).then(
       (status) => {
         if (live) setMirrorStatus(status)
       },
-      () => {
-        if (live) setMirrorStatus(null)
+      (cause) => {
+        if (live) setMirrorError(message(cause))
       },
     )
     return () => {
       live = false
     }
-  }, [workspaceID, workspace, canMirror])
+  }, [workspaceID, workspace, canMirror, repositoryOpen])
 
   const runs = useMemo(
     () =>
@@ -85,17 +92,18 @@ export function WorkspaceView({ params }: RouteProps) {
         subtitle={`Base branch ${workspace.base_branch}`}
         actions={
           <>
+            <Button size="sm" variant="outline" onClick={() => setDialog('repository')}>Repository settings</Button>
             {canMirror && (
               <Button size="sm" variant="outline" onClick={() => setDialog('mirror')}>
                 Source control
               </Button>
             )}
-            {caps.hasMethod('budget.set') && (
+            {isAdmin && caps.hasMethod('budget.set') && (
               <Button size="sm" variant="outline" onClick={() => setDialog('budget')}>
                 Budget
               </Button>
             )}
-            {caps.hasMethod('workspace.settings') && (
+            {isAdmin && caps.hasMethod('workspace.settings') && (
               <Button
                 size="sm"
                 variant="outline"
@@ -150,6 +158,7 @@ export function WorkspaceView({ params }: RouteProps) {
                 <p className="mt-0.5 break-all font-mono text-[13px]" data-testid="workspace-source-state">
                   {sourceState}
                 </p>
+                {mirrorError && <p role="alert" className="mt-1 whitespace-pre-wrap text-xs text-state-failed">{mirrorError}</p>}
               </div>
               <Button size="sm" variant="outline" onClick={() => setDialog('mirror')}>
                 Open Source control
@@ -157,6 +166,16 @@ export function WorkspaceView({ params }: RouteProps) {
             </div>
           )}
         </section>
+        <div className="flex flex-wrap gap-2 border-b px-4 py-3">
+          <Button size="sm" variant="outline" onClick={() => setDialog('local')}>Link local repository</Button>
+          <Button size="sm" variant="outline" onClick={() => useStore.getState().navigate('workspaces')}>Add another workspace</Button>
+          <Button size="sm" variant="outline" onClick={() => {
+            const state = useStore.getState()
+            state.setOnboardingWorkspace(workspace.id)
+            state.setOnboardingStep('Agents')
+            state.navigate('onboarding')
+          }}>Set up agents / first run</Button>
+        </div>
         <section aria-labelledby="workspace-runs-heading" className="min-w-0">
           <div className="mx-auto flex min-h-[35px] w-full max-w-[1400px] items-center gap-2 border-b border-border px-4 sm:px-5">
             <h2 id="workspace-runs-heading" className="text-[13px] font-semibold leading-5">
@@ -167,6 +186,7 @@ export function WorkspaceView({ params }: RouteProps) {
           <RunList runs={runs} empty="No runs in this workspace yet." />
         </section>
       </div>
+      {repositoryOpen && <WorkspaceRepositoryDialog key={workspaceID} workspace={workspace} initialLocal={dialog === 'local'} onClose={() => setDialog(null)} />}
       {dialog === 'mirror' && (
         <WorkspaceMirrorDialog
           workspaceID={workspaceID}
@@ -183,6 +203,7 @@ export function WorkspaceView({ params }: RouteProps) {
       {dialog === 'settings' && (
         <WorkspaceSettingsDialog
           workspaceID={workspaceID}
+          onRepository={() => setDialog('repository')}
           onClose={() => setDialog(null)}
         />
       )}

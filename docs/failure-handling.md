@@ -164,7 +164,8 @@ dead worker: mission reconciliation can retry its original reserved run after
 the cause is fixed. Replaying an already-created reserved run returns its
 original pinned base without requiring another upstream fetch.
 
-Inspect and repair the mirror from an administrator's CLI:
+Any admitted member can inspect mirror status. Repairing or refreshing a
+mirror requires an administrator:
 
 ```sh
 aether workspace mirror status --workspace <workspace>

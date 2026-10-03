@@ -36,7 +36,8 @@ function sidebar() {
 }
 
 describe('App', () => {
-  it('renders the shell and fills it from the server', async () => {
+  it('renders the shell and fills it from the server for a member who completed onboarding', async () => {
+    useStore.getState().setOnboarded(true)
     await mount()
 
     // Sidebar, from workspace.list + run.list: the scope on top, its runs
@@ -45,8 +46,8 @@ describe('App', () => {
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
     )
     expect(screen.getByRole('combobox', { name: 'Workspace' }).textContent).toBe('main-repo')
-    // Center view, from the default route in the registry. By role: the
-    // sidebar nav entry carries the same words.
+    // Completed members keep the default board route. By role: the sidebar
+    // nav entry carries the same words.
     expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeDefined()
     // Status bar, from server.info.
     fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))

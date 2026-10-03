@@ -1,12 +1,3 @@
-// The onboarding Agents step, between Repository and First run. Three
-// optional parts: setting a coding agent up on the server (the same
-// environment-terminal instructions the Agents page shows, embedded
-// through AgentWizard), connecting GitHub, and bringing this machine's own
-// agent configuration across (ProfileImport). None is required - "Skip for
-// now" is reachable from every state, including a failed import and open
-// setup instructions - and nothing here touches another member's setup:
-// an agent login, a GitHub account and a configuration import are all
-// per-member.
 
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { friendly, message } from '@/lib/format'
@@ -17,7 +8,6 @@ import { useDelayed } from '@/lib/hooks'
 import type {
   AgentInfo,
   GitHubConnectResult,
-  HarnessStatus,
   Workspace,
 } from '@/lib/types'
 import { AgentWizard } from '@/routes/agents/wizard'
@@ -56,22 +46,10 @@ export function AgentsStep({
    * step can preselect it. */
   onReady: (harness: string) => void
 }) {
-  const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null)
-  const [listError, setListError] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [agentsError, setAgentsError] = useState<string | null>(null)
   const [done, setDone] = useState<string[]>([])
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
-
-  const loadHarnesses = useCallback(() => {
-    setListError(null)
-    client
-      .envHarnesses()
-      .then((result) => {
-        setHarnesses(result.harnesses)
-      })
-      .catch((err) => setListError(message(err)))
-  }, [client])
 
   const loadAgents = useCallback(() => {
     setAgentsError(null)
@@ -82,12 +60,11 @@ export function AgentsStep({
   }, [client])
 
   useEffect(() => {
-    loadHarnesses()
     loadAgents()
-  }, [loadHarnesses, loadAgents])
+  }, [loadAgents])
 
-  const loading = useDelayed(harnesses === null && listError === null)
-  const canSetUp = caps.hasMethod('agent.register')
+  const loading = useDelayed(agents === null && agentsError === null)
+  const canSetUp = caps.hasMethod('agent.register') && caps.hasMethod('env.save')
 
   // Every part is optional, so the way on is always here - including
   // while a setup shell is open and after a scan failed. Once something
@@ -123,13 +100,13 @@ export function AgentsStep({
         ) : (
           <AgentWizard
             agents={agents ?? []}
-            harness={setup}
+            harness={setup === '@custom' ? undefined : setup}
             client={client}
             onRegistered={() => {
               setDone((prev) =>
                 prev.includes(setup) ? prev : [...prev, setup],
               )
-              onReady(setup)
+              if (setup !== '@custom') onReady(setup)
               loadAgents()
             }}
             onCancel={() => onSetup('')}
@@ -146,9 +123,6 @@ export function AgentsStep({
       className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Step 5
-        </p>
         <h2 className="text-base font-semibold">Prepare your agents</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           These optional setup paths make runs useful without blocking the
@@ -172,24 +146,17 @@ export function AgentsStep({
         </div>
 
         {loading && <Skeleton className="h-20 w-full rounded-md" />}
-        {listError && (
-          <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-            <p className="text-sm text-state-failed">{listError}</p>
-            <Button size="sm" variant="outline" onClick={loadHarnesses}>
-              Retry
-            </Button>
-          </div>
-        )}
+        {agentsError && <Button size="sm" variant="outline" onClick={loadAgents}>Retry agents</Button>}
         {agentsError && (
           <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
             {agentsError}
           </p>
         )}
-        {harnesses && harnesses.length > 0 && (
+        {agents?.length === 0 && canSetUp && <Button size="sm" variant="outline" onClick={() => onSetup('@custom')}>Add an agent</Button>}
+        {agents && agents.length > 0 && (
           <ul className="min-w-0 border-y border-border/70 bg-card">
-            {harnesses.map((h) => {
+            {agents.map((h) => {
               const label = friendly[h.name] ?? h.name
-              const listed = (agents ?? []).some((a) => a.name === h.name)
               return (
                 <li
                   key={h.name}
@@ -198,18 +165,13 @@ export function AgentsStep({
                   <span className="min-w-0 flex-1 space-y-1 text-sm">
                     <span className="block font-medium">{label}</span>
                     <span className="block text-[13px] leading-5 text-muted-foreground">
-                      {h.installed
-                        ? 'installed on this machine'
-                        : 'not installed on this machine'}
-                      {' - '}
-                      {listed
-                        ? `the server can launch ${h.name}`
-                        : `the server does not list ${h.name}`}
+                      {h.installed === true
+                        ? 'Installed in your server environment; complete vendor login if needed.'
+                        : 'Not installed in your server environment.'}
                     </span>
                     {done.includes(h.name) && (
                       <span className="block text-[13px] leading-5 text-state-done">
-                        Set up in this session: the login and the installed
-                        tools persist in your environment home.
+                        Installation confirmed. Vendor login is checked by the agent when it starts.
                       </span>
                     )}
                   </span>
@@ -228,7 +190,7 @@ export function AgentsStep({
             })}
           </ul>
         )}
-        {harnesses && harnesses.length > 0 && !canSetUp && (
+        {agents && agents.length > 0 && !canSetUp && (
           <p className="text-xs text-muted-foreground">
             This gateway cannot register agents, so an agent is set up from
             a terminal with{' '}
@@ -237,10 +199,13 @@ export function AgentsStep({
         )}
       </section>
 
-      <GitHubSection
+      {caps.hasMethod('github.connect') && caps.hasMethod('github.probe') ? <GitHubSection
         connection={github}
         onOpen={() => onSetup(githubSubStep)}
-      />
+      /> : <section className="space-y-2 border-t py-3 text-sm">
+        <h3 className="font-semibold">Publishing credentials</h3>
+        <p>Source deploy keys are read-only. For GitHub publishing, use <code>aether terminal</code> to log in with <code>gh auth login</code>, then run <code>aether github connect</code> from your linked computer. Other hosts need their supported native Git credentials and upstream permission.</p>
+      </section>}
 
       <ProfileImport client={client} />
 

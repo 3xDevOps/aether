@@ -84,8 +84,9 @@ export class WorkspaceStep extends Step {
     super(page, 'Workspace')
   }
 
-  async create(name: string, baseBranch = 'main'): Promise<void> {
-    await this.section.getByLabel('Name', { exact: true }).fill(name)
+  async createFromClone(name: string, baseBranch = 'main'): Promise<void> {
+    await this.button('Create from local clone').click()
+    await this.section.getByLabel('Workspace name', { exact: true }).fill(name)
     await this.section.getByLabel('Base branch').fill(baseBranch)
     await this.button('Create workspace').click()
   }
@@ -99,6 +100,14 @@ export class WorkspaceStep extends Step {
 export class RepositoryStep extends Step {
   constructor(page: Page) {
     super(page, 'Repository')
+  }
+
+  override get section(): Locator {
+    return this.page.getByRole('region', { name: 'Workspace repository', exact: true })
+  }
+
+  localClone(): Locator {
+    return this.button('Link local repository')
   }
 
   async addRemote(repoPath: string): Promise<void> {
@@ -302,7 +311,7 @@ export class OnboardingWizard {
     await expect(current).toHaveCount(1)
     await expect(current.getByText(name, { exact: true })).toBeVisible()
     await expect(
-      this.page.getByRole('region', { name, exact: true }),
+      name === 'Repository' ? this.repository.section : this.page.getByRole('region', { name, exact: true }),
     ).toBeVisible()
   }
 

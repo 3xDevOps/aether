@@ -500,20 +500,20 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 		if mode == 0 {
 			mode = 0o644
 		}
-		candidates = append(candidates, ConfigFile{Path: rel, Content: append([]byte(nil), file.Content...), Mode: uint32(mode.Perm())})
+		candidates = append(candidates, ConfigFile{Path: rel, Content: file.Content, Mode: uint32(mode.Perm())})
 	}
 	home, err := m.openHome(member)
 	if err != nil {
-		return ConfigImportResult{}, err
+		return result, err
 	}
 	defer func() { _ = home.Close() }()
 	if err = preflightConfigTargets(home, rootRel, candidates); err != nil {
-		return ConfigImportResult{}, err
+		return result, err
 	}
 	if len(candidates) != 0 {
 		profileRoot, openErr := openProfileRoot(home, rootRel, true)
 		if openErr != nil {
-			return ConfigImportResult{}, openErr
+			return result, openErr
 		}
 		defer func() { _ = profileRoot.Close() }()
 		importFailure := func(index int, cause error) (ConfigImportResult, error) {

@@ -18,7 +18,7 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, brows
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.agents.skip().click()

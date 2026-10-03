@@ -210,9 +210,10 @@ describe('hydrate', () => {
       expect(window.location.search).toBe('')
     })
 
-    it('stays on the board for a run the member cannot see', async () => {
+    it('stays on the board for a completed member requesting a run they cannot see', async () => {
       window.history.replaceState({}, '', '/?run=run_someone_elses')
       const store = createRootStore()
+      store.getState().setOnboarded(true)
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
@@ -228,6 +229,24 @@ describe('hydrate', () => {
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    })
+
+    it.each(['run_1', 'run_someone_elses'])('resolves hosted onboarding before opening %s', async (requested) => {
+      window.history.replaceState({}, '', `/?run=${requested}`)
+      const store = createRootStore()
+      await hydrate(store, fakeApi({
+        workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+        capabilities: vi.fn(async () => ({
+          gateway: 'server',
+          methods: ['member.git', 'agent.list'],
+          ws: ['events', 'attach'],
+        })),
+      }))
+
+      expect(store.getState().route).toEqual(requested === 'run_1'
+        ? { name: 'terminal', params: { runId: requested } }
+        : { name: 'onboarding', params: {} })
+      expect(window.location.search).toBe('')
     })
 
     it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
@@ -512,12 +531,12 @@ describe('hydrate', () => {
     expect(c.hasWS('events')).toBe(true)
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
-  it('routes to onboarding only for an unboarded local gateway', async () => {
+  it('routes capable gateways to onboarding unless completed or already linked locally', async () => {
     const cases = [
       { onboarded: false, local: true, linked: false, onboarding: true },
       { onboarded: false, local: true, linked: true, onboarding: false },
       { onboarded: true, local: true, linked: false, onboarding: false },
-      { onboarded: false, local: false, linked: false, onboarding: false },
+      { onboarded: false, local: false, linked: false, onboarding: true },
     ]
 
     for (const tc of cases) {
@@ -545,6 +564,116 @@ describe('hydrate', () => {
       if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
   })
+
+  it.each([
+    { methods: ['*'] },
+    { methods: ['member.git', 'agent.list'] },
+  ])('onboards a fresh hosted member with shared workspaces and $methods capabilities', async ({ methods }) => {
+    const store = createRootStore()
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(false)
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods, ws: ['events'] })),
+    }))
+
+    expect(Object.keys(store.getState().workspaces)).toHaveLength(2)
+    expect(store.getState().route).toEqual({ name: 'onboarding', params: {} })
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(false)
+  })
+
+  it('keeps completed hosted members on the board without a saved onboarding workspace', async () => {
+    const store = createRootStore()
+    store.getState().setOnboarded(true)
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'server', methods: ['member.git', 'agent.list'], ws: ['events'],
+      })),
+    }))
+
+    expect(store.getState().onboardingWorkspace).toBe('')
+    expect(store.getState().onboarded).toBe(true)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it.each([
+    { methods: ['member.git'] },
+    { methods: ['agent.list'] },
+  ])('does not onboard a hosted member with only $methods capabilities', async ({ methods }) => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods, ws: ['events'] })),
+    }))
+
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('preserves navigation away and back to the board during hosted hydration and reconnect', async () => {
+    const store = createRootStore()
+    const info = Promise.withResolvers<typeof serverInfoFixture>()
+    const client = fakeApi({
+      serverInfo: vi.fn(() => info.promise),
+      capabilities: vi.fn(async () => ({
+        gateway: 'server', methods: ['member.git', 'agent.list'], ws: ['events'],
+      })),
+    })
+    const pending = hydrate(store, client)
+    store.getState().navigate('agents')
+    store.getState().navigate('board')
+    info.resolve(serverInfoFixture)
+    await pending
+
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('opens onboarding on a fresh hosted server and preserves a repository draft through reconnect', async () => {
+    const hosted = createRootStore()
+    await hydrate(hosted, fakeApi({ workspaceListFull: vi.fn(async () => []) }))
+    expect(hosted.getState().route.name).toBe('onboarding')
+
+    const local = createRootStore()
+    local.setState({ onboardingWorkspace: workspace.id, onboardingStep: 'Repository', route: { name: 'onboarding', params: {} } })
+    const client = fakeApi({ capabilities: vi.fn(async () => ({ gateway: 'local', methods: ['*'], ws: [], local: ['link.status'] })) })
+    await hydrate(local, client)
+    await hydrate(local, client)
+    expect(local.getState().onboardingWorkspace).toBe(workspace.id)
+    expect(local.getState().onboardingStep).toBe('Repository')
+    expect(local.getState().route.name).toBe('onboarding')
+  })
+
+  it('resumes a saved hosted first-run draft after a workspace import and reload', async () => {
+    const store = createRootStore()
+    const draft = { harness: 'claude', task: 'Review the imported repository' }
+    store.setState({
+      hydrated: false, onboarded: false, route: { name: 'board', params: {} },
+      onboardingWorkspace: workspace.id, onboardingStep: 'First run', onboardingFurthest: 'First run',
+      onboardingSource: 'remote', onboardingFirstRun: draft,
+    })
+    await hydrate(store, fakeApi())
+    expect(store.getState().route.name).toBe('onboarding')
+    expect(store.getState().onboardingWorkspace).toBe(workspace.id)
+    expect(store.getState().onboardingStep).toBe('First run')
+    expect(store.getState().onboardingFirstRun).toEqual(draft)
+  })
+
+  it.each(['finished', 'deleted workspace', 'explicit navigation'] as const)(
+    'does not resume hosted onboarding after %s',
+    async (reason) => {
+      const store = createRootStore()
+      store.setState({
+        hydrated: false, onboarded: reason === 'finished',
+        route: { name: reason === 'explicit navigation' ? 'agents' : 'board', params: {} },
+        onboardingWorkspace: reason === 'deleted workspace' ? 'deleted' : workspace.id,
+        onboardingStep: 'Repository',
+      })
+      const route = store.getState().route
+      await hydrate(store, fakeApi())
+      expect(store.getState().route).toEqual(route)
+    },
+  )
 
   it.each(['before', 'during'])('preserves navigation %s initial hydration without a local clone', async (when) => {
     const store = createRootStore()

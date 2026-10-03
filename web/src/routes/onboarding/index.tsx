@@ -1,16 +1,3 @@
-// The onboarding wizard: the quickstart's most error-prone stretch - link,
-// git identity, workspace, repo remote, agents, first run - as six steps. It
-// exists only where the gateway has this machine's SSH identity and
-// filesystem, so the whole route gates on the link.status local verb; a
-// remote gateway gets an empty state, not a broken wizard. Step and
-// workspace choices persist so a reload resumes where the user left off; the
-// step persists by name, so adding one does not move anyone mid-wizard.
-//
-// Navigation is two levels and nothing more: a step index, and a sub-screen
-// name owned by whichever step has one. Back closes the sub-screen first and
-// only then leaves the step, so a step's own screens never fall through to
-// the previous step. The wizard owns the Back button; every step renders it
-// in its own action row.
 
 import { Check } from 'lucide-react'
 import { useState } from 'react'
@@ -20,7 +7,7 @@ import { api, type Api } from '@/lib/api'
 import { cn, focusRing } from '@/lib/utils'
 import { AgentsStep } from '@/routes/onboarding/agents-step'
 import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
-import { RepoStep } from '@/routes/onboarding/repo-step'
+import { WorkspaceRepository } from '@/components/workspace-repository'
 import {
   FirstRunStep,
   LinkStep,
@@ -48,15 +35,17 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   // Repository and everything past it need the workspace the wizard settled
   // on; without one there is nothing to resume into, and nothing further
   // back to jump forward to either.
+  const firstStep = caps.hasLocal('link.status') ? 0 : onboardingStepIndex('Git identity')
   const reachable = (index: number) =>
-    index >= onboardingStepIndex('Repository') && !onboardingWorkspace
+    Math.max(firstStep, index >= onboardingStepIndex('Repository') && !workspace
       ? onboardingStepIndex('Workspace')
-      : index
+      : index)
   const [step, setStepState] = useState(() => reachable(onboardingStepIndex(persistedStep)))
   // Every step already reached stays reachable: a jump backwards must not
   // strand the member on a step whose own Back is gone.
   const furthest = Math.max(step, reachable(onboardingStepIndex(persistedFurthest)))
-  const current = onboardingSteps[step]
+  const currentStep = reachable(step)
+  const current = onboardingSteps[currentStep]
   // The harness the Agents step set up, so the first run starts on the one
   // that is actually logged in. Empty until a setup shell exits cleanly.
   const [setUpHarness, setSetUpHarness] = useState('')
@@ -70,35 +59,17 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   }
 
   const back =
-    step > 0 ? (
+    currentStep > firstStep ? (
       <Button
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => (subStep ? setSubStep('') : setStep(step - 1))}
+        onClick={() => (subStep ? setSubStep('') : setStep(currentStep - 1))}
       >
         Back
       </Button>
     ) : null
 
-  if (!caps.hasLocal('link.status')) {
-    return (
-      <div className="flex h-full min-w-0 flex-col">
-        <ViewHeader title="Onboarding" />
-        <div className="flex flex-1 items-center justify-center p-4">
-          <div className="w-full max-w-lg border border-border/70 bg-card px-4 py-4 text-left">
-            <p className="text-base font-medium">Onboarding needs a local gateway</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              This dashboard is served by the Aether server, which holds no SSH
-              identity of yours and can reach no repository on your computer.
-              Onboarding runs in the desktop app or `aether gui` there, where
-              the gateway has both.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -111,7 +82,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                 Setup path
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Step {step + 1} of {onboardingSteps.length}
+                Step {currentStep - firstStep + 1} of {onboardingSteps.length - firstStep}
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
@@ -122,12 +93,13 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
             aria-label="Steps"
             className="grid grid-cols-2 gap-px border-y border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-3"
           >
-            {onboardingSteps.map((label, i) => (
-              <li key={label} className="min-w-0" aria-current={i === step ? 'step' : undefined}>
-                {i !== step && i <= furthest ? (
+            {onboardingSteps.slice(firstStep).map((label, visibleIndex) => {
+              const i = visibleIndex + firstStep
+              return <li key={label} className="min-w-0" aria-current={i === currentStep ? 'step' : undefined}>
+                {i !== currentStep && i <= furthest ? (
                   <button
                     type="button"
-                    aria-label={`${i + 1}. ${label}, done - go to this step`}
+                    aria-label={`${visibleIndex + 1}. ${label}, visited - go to this step`}
                     className={cn(
                       focusRing,
                       chip,
@@ -139,7 +111,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                       <Check className="size-3" aria-hidden />
                     </span>
                     <span className="min-w-0 flex-1 truncate">
-                      <span aria-hidden="true" className="mr-1 text-xs text-muted-foreground">{i + 1}</span>
+                      <span aria-hidden="true" className="mr-1 text-xs text-muted-foreground">{visibleIndex + 1}</span>
                       {label}
                     </span>
                   </button>
@@ -147,7 +119,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                   <span
                     className={cn(
                       'flex min-w-0 w-full items-center gap-2 border-l-2 bg-card px-2 py-1.5 text-xs',
-                      i === step
+                      i === currentStep
                         ? 'border-primary/50 bg-primary/10 text-foreground'
                         : 'text-muted-foreground',
                     )}
@@ -155,18 +127,18 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                     <span
                       className={cn(
                         'flex size-5 items-center justify-center rounded-full text-xs',
-                        i === step
+                        i === currentStep
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted',
                       )}
                     >
-                      <span aria-hidden="true">{i + 1}</span>
+                      <span aria-hidden="true">{visibleIndex + 1}</span>
                     </span>
                     <span className="min-w-0 truncate">{label}</span>
                   </span>
                 )}
               </li>
-            ))}
+            })}
           </ol>
 
           <div className="min-w-0">
@@ -189,21 +161,26 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                 client={client}
                 caps={caps}
                 back={back}
-                onNext={(w) => {
+                onNext={(w, source) => {
                   upsertWorkspace(w)
                   setOnboardingWorkspace(w.id)
                   setActiveWorkspace(w.id)
+                  const previous = useStore.getState().onboardingRepo
+                  useStore.getState().setOnboardingSource(source ?? (previous?.workspace === w.id ? 'local' : 'remote'))
                   setStep(onboardingStepIndex('Repository'))
                 }}
               />
             )}
             {current === 'Repository' && (
-              <RepoStep
+              workspace && <WorkspaceRepository
+                key={workspace.id}
                 client={client}
                 caps={caps}
                 workspace={workspace}
                 back={back}
+                initialLocal={useStore.getState().onboardingSource === 'local'}
                 onNext={() => setStep(onboardingStepIndex('Agents'))}
+                onLocalChange={(local) => useStore.getState().setOnboardingSource(local ? 'local' : 'remote')}
               />
             )}
             {current === 'Agents' && (
@@ -226,6 +203,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
                 defaultHarness={setUpHarness}
                 onBackToWorkspace={() => setStep(onboardingStepIndex('Workspace'))}
                 onBackToAgents={() => setStep(onboardingStepIndex('Agents'))}
+                onBackToRepository={() => setStep(onboardingStepIndex('Repository'))}
               />
             )}
           </div>

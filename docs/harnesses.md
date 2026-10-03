@@ -55,7 +55,7 @@ window has passed without a new measurement.
 | `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
 | `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
 | `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
+| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no |
 
@@ -70,14 +70,15 @@ that runs in the owner's own omp sessions, and the owner's extensions run in
 the recipient's run; share an `omp` account only with someone you would give
 your home to ([security.md](security.md#account-sharing)).
 
-The `config.roots` response used by the dashboard carries a `runtime_ignores`
-list for each configuration root. These are root-relative paths, and the
-browser applies them before reading selected file bytes with case-sensitive
-exact or component-prefix matching; trailing slashes are presentation-only.
-This policy is destination-specific: a directory whose basename is renamed or
-ambiguous must be assigned to a destination before the import preview can be
-read. Credential names remain globally excluded, independent of this runtime
-list.
+The `config.roots` response carries the selected harness's effective
+`credential_names` and `runtime_ignores`. Credential names include shared
+denials and the harness's `DenyNames`; they match any path component
+case-insensitively. `*.pem` is also excluded. Runtime paths match exact
+root-relative paths or component prefixes case-sensitively; trailing slashes
+are presentation-only. Both lists apply before browser byte reads, including
+when the selected directory has been renamed. They cannot be overridden in
+the browser. A server without credential metadata must be upgraded before
+this importer can prepare a selection.
 
 The **Env setup** column marks harnesses that can participate in agent setup:
 the dashboard can open the member's environment terminal for installation and
@@ -1035,6 +1036,23 @@ Inside `aether terminal`, run `opencode auth login` and pick your provider.
 Credentials are written to `~/.local/share/opencode/auth.json` in the member
 home.
 
+**Configuration** import, **Files**, and the manual `aether profile` commands
+use `~/.config/opencode`, the default native configuration home for the
+[V1](#opencode-v1-inbox-integration) and [V2](#opencode-v2-inbox-integration)
+targets above. OpenCode loads settings and plugins there, not from its login
+directory. Aether's import/profile root is fixed relative to the member home;
+it does not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR`, or
+`OPENCODE_CONFIG` overrides. Native custom-root consumption requires separate
+verification; V2 `OPENCODE_CONFIG_DIR` relocation remains unverified.
+
+If an earlier import reported `~/.local/share/opencode` as its destination,
+open **Configuration**, select your local `~/.config/opencode` directory
+again, choose `opencode` with destination `~/.config/opencode`, review, and
+import. This writes the corrected destination without moving or deleting old
+files. Do not copy the data directory wholesale or move/delete
+`~/.local/share/opencode/auth.json`; native login and account sharing still
+use that file.
+
 ### `fake`
 
 The deterministic test harness. It has no login and no fixed command: the
@@ -1194,43 +1212,84 @@ or onboarding progress. The local onboarding Agents step offers the same
 importer as an optional entrypoint.
 
 Choose one directory such as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`
-with the browser directory picker. A hosted page can read a directory you
-explicitly select, not arbitrary local paths. The browser waits for
-`config.roots` and a known destination before it reads any file bytes. A
-unique basename selects its destination automatically; an unknown or ambiguous
-basename must be assigned explicitly. Review the accepted paths and the full
-list of omitted paths before upload. Import is explicit and repeatable:
-after a result, you can select a directory for another import or choose
-**Open remote files** to visit the existing **Files** editor.
+with **Choose directory**. A hosted page can read a directory you explicitly
+select, not arbitrary local paths. A unique basename selects its
+**Configuration destination** automatically; an unknown or ambiguous basename
+requires a choice. You can change any destination before importing. Doing so
+recomputes the metadata-only preview and resets the file checkboxes; it does
+not read file bytes.
+
+Under **Select files**, uncheck any configuration you do not want to copy.
+**Left out before upload** lists every local exclusion and its reason.
+Credential and runtime exclusions cannot be re-enabled. Review the selected
+paths and omissions, then choose **Import configuration**. After a result,
+select another directory for a repeat import or choose **Open remote files**.
 
 ![Configuration import outside onboarding](media/configuration-import.webp)
 
-Credential names in any path component and `*.pem` files are always skipped
-before upload. Runtime/history exclusions come from the selected root's
-`runtime_ignores` metadata, which matches exact root-relative paths or
-component prefixes case-sensitively after trailing slashes are trimmed. This
-policy applies to renamed directories too. Changing an ambiguous destination
-recomputes the preview from retained file handles without reading file bytes.
-These local exclusions are not overridden by `.aether-profile-ignore` in browser import.
-`agent/skills/`, `agent/extensions/`, and `agent/npm/` remain configuration and
-are imported.
-The accepted bytes are uploaded and scanned by the server; do not assume all
-secret-looking content stays on the laptop. A complete response reports
-accepted counts and server exclusions. If the server stops after writing files,
-the dashboard reports an incomplete result with exact committed paths, counts
-and the real error, and warns that copied files remain. If the RPC response is
-lost, the outcome is unknown and some files may have been copied; inspect
-**Files** before retrying. There is no watcher or automatic retry: selecting
-the directory and importing again is explicit.
-The directory has no file-count or total-size ceiling. The browser reads and
-uploads bounded batches, showing progress until all eligible files have been
-processed. There is no option to approve a truncated selection. Individual
-files use the same **64 MiB** ceiling as configuration editing; an oversized or
-unreadable file is an error, not a silently omitted file.
-Navigation within the dashboard preserves the operation and its result.
-Changing authenticated members or servers discards the prepared selection and
-stops further batches; an already submitted request may still finish for its
-original owner. Its paths and result are not shown to the new identity.
+The destination's policy applies to renamed directories too.
+`.aether-profile-ignore` is excluded: its CLI rules do not override browser
+policy. Remaining bytes are uploaded and scanned by the server; do not assume
+all secret-looking content stays on the laptop. Server exclusions appear in
+the result. Any local or server omission produces **Import finished with
+omissions**, not a claim that the whole directory was copied.
+
+For oh-my-pi, the shared runtime policy excludes:
+
+| Root-relative paths in `~/.omp` | Contents |
+| --- | --- |
+| `stats.db`, `stats.db-wal`, `stats.db-shm` | Usage statistics derived from session logs |
+| `agent/history.db`, `agent/history.db-wal`, `agent/history.db-shm` | Prompt history |
+| `agent/models.db`, `agent/models.db-wal`, `agent/models.db-shm` | Model/provider cache |
+| `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/` | Session history and cache |
+| `natives/`, `cache/`, `logs/`, `run/`, `collab/`, `puppeteer/`, `webcache/` | Downloaded runtime components, caches, logs, and process state |
+
+These names follow OMP's
+[statistics storage](https://raw.githubusercontent.com/can1357/oh-my-pi/9348320cc4a30a7195d36a1f05a6c11bcb701a17/packages/stats/README.md)
+and [path definitions](https://raw.githubusercontent.com/can1357/oh-my-pi/9348320cc4a30a7195d36a1f05a6c11bcb701a17/packages/utils/src/dirs.ts).
+The policy does not exclude all databases or dependency directories:
+`agent/config.yml`, MCP settings, `agent/skills/`, `agent/extensions/`, and
+`agent/npm/` remain eligible, including an extension's own `stats.db`.
+Empty files and binary assets are preserved.
+
+Directories have no file-count or total-size ceiling. The browser reads and
+uploads bounded batches, showing cumulative progress. Each file must be at
+most **64 MiB (67,108,864 bytes)**. A larger eligible file remains visible and
+blocks confirmation until you uncheck it or choose **Exclude unsupported
+files**. Runtime and credential exclusions happen before this size check, so
+a large runtime database does not block real configuration.
+
+For a required asset larger than 64 MiB, open your persistent member-home shell:
+
+```sh
+aether terminal
+```
+
+Install or download the asset there into the displayed configuration
+destination, following the asset's installation instructions. This is a
+terminal operation, not a browser import or a Files-editor upload. The manual
+`profile push` command is not a large-file alternative: it allows 1 MiB per
+file and 20 MiB per snapshot.
+
+An interruption stops further requests and preserves the original error.
+The result separates **Imported paths** (confirmed writes), **Paths with
+unknown outcome** (a submitted batch without a definitive reply), and
+**Failed or unattempted paths**. Copied files remain; there is no rollback or
+automatic retry.
+
+Use **Review remaining files** to continue only failed or unattempted paths.
+For a read failure, choose **Retry reading on import** after fixing access, or
+uncheck that file, then confirm again. Previously confirmed paths and
+unknown-outcome paths are not replayed by this recovery action. Earlier errors
+remain available after recovery. Inspect **Files** before deliberately
+reselecting and reimporting any path whose outcome is unknown.
+
+Navigation within the dashboard preserves the operation, remaining file
+handles, and result. A page reload loses this in-memory review; inspect
+**Files** before selecting the directory again. Changing authenticated members
+or servers discards preparation and remaining handles and stops further
+batches. An already submitted request may still finish for its original
+owner; its paths and result are not shown to the new identity.
 Browser imports create new files with mode `0644` and preserve existing remote
 file modes when overwriting. The browser cannot preserve local executable bits
 or symlinks, so a newly imported script may need `chmod` in the remote terminal.
@@ -1257,8 +1316,9 @@ force-save. Browser navigation warns before unloading dirty buffers.
 
 Configuration files are complete UTF-8 text up to 64 MiB. Binary and oversized
 files are read-only. New configuration files accept nested relative paths and
-never overwrite an existing file. A stale save keeps the draft; reload from the server only when
-you want to discard it and replace it with current content.
+never overwrite an existing file. A repeat import does not replace an already
+open editor buffer. Use **Reload from server** when you want current remote
+bytes, including after a stale save; it deliberately discards the local draft.
 Every `config.*` method requires `Launch` and addresses only the authenticated
 member's own home; an admin cannot select another member.
 
@@ -1294,6 +1354,11 @@ content-addressed snapshot; `status` reports recorded snapshot metadata, not a
 live inventory of the home. Browser imports and **Files** edits do not create
 or update this CLI snapshot history. Configuration persists in the member HOME
 even when no snapshot exists.
+
+CLI built-in runtime exclusions match from the profile root.
+`.aether-profile-ignore` keeps gitignore syntax and can reinclude runtime paths
+with `!`, but cannot reinclude credential names. These overrides do not apply to
+browser imports.
 
 Manual `push` and `rollback` overlay the snapshot's files into that same shared
 HOME, making those writes visible to the member's active and future runs.

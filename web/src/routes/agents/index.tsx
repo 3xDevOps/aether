@@ -13,6 +13,9 @@ import { registerRoute } from '@/routes/registry'
 import { AgentWizard } from '@/routes/agents/wizard'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import { GitHubConnect, GitHubSection } from '@/routes/onboarding/github-connect'
+import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
+import type { GitHubConnectResult } from '@/lib/types'
 
 function AgentsView() {
   const caps = useCapability()
@@ -20,6 +23,10 @@ function AgentsView() {
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [harness, setHarness] = useState<string | undefined>()
+  const [githubOpen, setGithubOpen] = useState(false)
+  const [github, setGithub] = useState<GitHubConnectResult | null>(null)
+  const [identityOpen, setIdentityOpen] = useState(false)
 
   const refetch = useCallback(() => {
     api
@@ -52,6 +59,10 @@ function AgentsView() {
       />
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
+          {caps.hasMethod('member.git') && <section className="space-y-2 border-b pb-3">
+            <Button size="sm" variant="outline" onClick={() => setIdentityOpen(!identityOpen)}>Git commit identity</Button>
+            {identityOpen && <GitIdentityStep client={api} caps={caps} onNext={() => setIdentityOpen(false)} />}
+          </section>}
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-2">
             <div className="min-w-0">
               <h2 className="text-[13px] font-semibold">Registered agents</h2>
@@ -109,6 +120,7 @@ function AgentsView() {
                     <span className="shrink-0 border-l pl-3 text-xs text-muted-foreground">
                       {a.source === 'shipped' ? 'shipped' : 'member'}
                     </span>
+                    {caps.hasMethod('agent.register') && caps.hasMethod('env.save') && <Button size="sm" variant="outline" onClick={() => { setHarness(a.name); setAdding(true) }}>Set up / log in</Button>}
                   </li>
                 ))}
                 {agents.length === 0 && (
@@ -121,6 +133,8 @@ function AgentsView() {
           )}
           {adding ? (
             <AgentWizard
+              key={harness ?? '@custom'}
+              harness={harness}
               agents={agents ?? []}
               onRegistered={refetch}
               onCancel={() => setAdding(false)}
@@ -135,13 +149,14 @@ function AgentsView() {
                       Register a member-managed executable and verify its setup.
                     </p>
                   </div>
-                  <Button size="sm" onClick={() => setAdding(true)}>
+                  <Button size="sm" onClick={() => { setHarness(undefined); setAdding(true) }}>
                     Add agent
                   </Button>
                 </div>
               </section>
             )
           )}
+          {caps.hasMethod('github.connect') && caps.hasMethod('github.probe') && (githubOpen ? <GitHubConnect client={api} caps={caps} onConnected={setGithub} onClose={() => setGithubOpen(false)} /> : <GitHubSection connection={github} onOpen={() => setGithubOpen(true)} />)}
         </div>
       </main>
     </div>
