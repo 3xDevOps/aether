@@ -1,5 +1,6 @@
 import type { MouseEvent } from 'react'
 import { StateIndicator } from '@/components/state-dot'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
@@ -135,9 +136,10 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
                 <span className="hidden min-w-0 items-center gap-2 break-words text-xs leading-4 text-muted-foreground md:flex">
                   {owner?.display_name ?? run.member_id}
                 </span>
-                <span className="col-start-1 row-start-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:col-auto md:row-auto">
+                <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground md:col-auto md:row-auto">
                   <span className="md:hidden">Status</span>
                   <StatusChip state={state} />
+                  <RunInputIndicator run={run} />
                 </span>
                 <time
                   className="col-start-2 row-start-1 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground md:col-auto md:row-auto"

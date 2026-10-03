@@ -42,6 +42,6 @@ test('a card gives up its branch name without opening the run', async ({ page, a
   // time a navigation would have needed to land.
   await card.getByRole('button', { name: `Copy branch ${run.branch}` }).click()
   await expect(page.getByText(/Copied|Press Ctrl\+C to copy/)).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Run tabs' })).toHaveCount(0)
+  await expect(page.getByRole('tablist', { name: 'Run tabs' })).toHaveCount(0)
   await expect(card).toBeVisible()
 })

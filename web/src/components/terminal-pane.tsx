@@ -30,6 +30,7 @@ import {
   useTerminalImage,
 } from '@/components/terminal-image'
 import { TerminalKeys } from '@/components/terminal-keys'
+import { TerminalControlBorder, type TerminalControlAppearance } from '@/components/terminal-control-border'
 import { useTerminalPan } from '@/components/terminal-pan'
 import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
@@ -115,7 +116,7 @@ function TerminalTools({
       data-expanded={expanded}
       className={cn(
         'group/terminal-tools flex min-w-32 max-w-full shrink gap-0.5',
-        expanded ? 'flex-col items-stretch [&>span]:hidden' : 'items-center overflow-x-auto',
+        expanded ? 'flex-col items-stretch [&>span]:hidden' : 'flex-wrap items-center',
       )}
     >
       <ToolButton
@@ -322,6 +323,7 @@ export function TerminalPane({
   replaying = false,
   surface,
   readingSurface,
+  controlAppearance,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
@@ -344,6 +346,8 @@ export function TerminalPane({
   surface?: React.ReactNode
   /** Redirect tools and mute input while the visible surface is recorded output. */
   readingSurface?: React.RefObject<TerminalReadSurface | null>
+  /** Acknowledged local lease state; omitted on surfaces without shared control. */
+  controlAppearance?: TerminalControlAppearance
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
@@ -394,8 +398,8 @@ export function TerminalPane({
   }
   return (
     <div className="@container/terminal-pane relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="relative z-10 flex min-h-9 shrink-0 items-start gap-1 border-b border-border bg-sidebar px-1 coarse:min-h-12 @sm/terminal-pane:gap-2 @sm/terminal-pane:px-2">
-        <div className="flex h-[35px] shrink-0 items-center coarse:h-[47px]">
+      <div className="relative z-10 flex min-h-9 shrink-0 flex-wrap items-start gap-x-2 border-b border-border bg-sidebar px-1 coarse:min-h-12 @sm/terminal-pane:px-2">
+        <div className="flex min-h-[35px] max-w-full shrink-0 items-center coarse:min-h-[47px]">
           {!controller.findOpen ? (
             <>
               <div className={coarse ? undefined : toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
@@ -422,7 +426,7 @@ export function TerminalPane({
             </Button>
           )}
         </div>
-        {toolbarEnd}
+        {toolbarEnd && <div className={cn('min-w-0 flex-1', !phone && 'basis-[28rem]')}>{toolbarEnd}</div>}
       </div>
       {controller.findOpen && (
         <div className="shrink-0 border-b border-border bg-sidebar p-1">
@@ -452,6 +456,7 @@ export function TerminalPane({
         }}
       />
         {surface}
+        {controlAppearance && <TerminalControlBorder appearance={replaying || readingSurface ? 'hidden' : controlAppearance} />}
       </div>
       {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
       {children}

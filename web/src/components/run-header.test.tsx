@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { lookupRoute } from '@/routes/registry'
 import { runTabs } from '@/routes/terminal/tabs'
@@ -59,14 +59,39 @@ describe('run header', () => {
     expect(within(bar).getByText('Working')).toBeDefined()
   })
 
-  it.each(tabs)('shows the pending approval as needs-you on the %s tab', (name) => {
+  it.each(tabs)('keeps execution and pending approval independent on the %s tab', (name) => {
     seed()
     useStore.setState({ inbox: { [workspace.id]: [approval()] } })
     const bar = runHeader(name)
 
-    // The domain status still reads `running`; only the presentation state
-    // knows the agent is parked on a question.
-    expect(within(bar).getByText('Needs you')).toBeDefined()
+    expect(within(bar).getByText('Working')).toBeDefined()
+    expect(within(bar).getByRole('button', { name: /Needs input: 1 approval/ })).toBeDefined()
+    expect(within(bar).queryByText('Idle')).toBeNull()
+
+    fireEvent.click(within(bar).getByRole('button', { name: /Needs input: 1 approval/ }))
+    expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
+  })
+
+  it('updates outstanding native requests independently of work and ignores a stale route snapshot', () => {
+    const question = { id: 'same', session_id: 'foreground', kind: 'question' as const }
+    const permission = { id: 'same', session_id: 'background', kind: 'permission' as const }
+    seed({ pending_inputs: [question, permission] })
+    const bar = runHeader('events')
+    const oldSnapshot = { ...useStore.getState().runs.run_1 }
+    expect(within(bar).getByText('Working')).toBeDefined()
+    expect(within(bar).getByRole('button', { name: /Needs input: 1 question in Terminal; 1 permission request in Terminal/ })).toBeDefined()
+
+    act(() => useStore.getState().applyRunInput('run_1', [permission]))
+    fireEvent.click(within(bar).getByRole('button', { name: /Needs input: 1 permission request/ }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: 'run_1' } })
+    act(() => useStore.getState().applyRunInput('run_1', []))
+    act(() => useStore.getState().upsertRun(oldSnapshot))
+    expect(within(bar).queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(within(bar).getByText('Working')).toBeDefined()
+
+    act(() => useStore.getState().applyRunStatus('run_1', 'needs-attention', undefined, '2026-08-14T12:00:00Z'))
+    expect(within(bar).getByText('Idle')).toBeDefined()
+    expect(within(bar).queryByRole('button', { name: /Needs input:/ })).toBeNull()
   })
 
   it.each(tabs)('shows the finished state on the %s tab', (name) => {

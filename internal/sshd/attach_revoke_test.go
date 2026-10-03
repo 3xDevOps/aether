@@ -409,7 +409,7 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		if !firstAck.OK {
 			t.Fatalf("first ack = %+v", firstAck)
 		}
-		displaced, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), func() error { return nil })
+		displaced, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), control.RevocationRevoked, func() error { return nil })
 		if err != nil || displaced == nil {
 			t.Fatalf("atomic revoke = displaced %+v, error %v", displaced, err)
 		}
@@ -433,7 +433,7 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if displaced, revokeErr := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), func() error { return nil }); revokeErr != nil || displaced == nil {
+		if displaced, revokeErr := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), control.RevocationRevoked, func() error { return nil }); revokeErr != nil || displaced == nil {
 			t.Fatalf("atomic revoke = displaced %+v, error %v", displaced, revokeErr)
 		}
 

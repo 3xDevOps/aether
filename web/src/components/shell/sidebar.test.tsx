@@ -32,6 +32,7 @@ beforeEach(async () => {
     activeWorkspace: '',
     groupBy: 'status',
     inbox: {},
+    roomMessages: {},
     inboxError: null,
     route: { name: 'overview', params: {} },
   })
@@ -278,15 +279,13 @@ describe('Sidebar', () => {
         ),
     )
 
-    expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle('Idle').length).toBeGreaterThan(0)
   })
 
-  it('badges how many runs are waiting on a human', () => {
+  it('does not infer input from a stalled or idle run', () => {
     render(<Sidebar />)
-    expect(screen.queryByLabelText(/needs? you/i)).toBeNull()
+    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
 
-    // A stall parks the run at needs-attention; the badge is how the
-    // dashboard says so without the member reading every row.
     act(() =>
       useStore
         .getState()
@@ -298,24 +297,33 @@ describe('Sidebar', () => {
         ),
     )
 
-    const badge = screen.getByLabelText('1 run needs you')
-    expect(badge.textContent).toBe('1')
+    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
+    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
   })
 
-  it('surfaces a run waiting on an approval as needs-attention', () => {
+  it('badges an approval without moving a busy run into Idle', () => {
     useStore.setState({ inbox: {} })
     render(<Sidebar />)
-    expect(screen.queryByTitle('Needs you')).toBeNull()
+    expect(screen.queryByTitle('Idle')).toBeNull()
 
     // The run still reads `running`; the pending inbox entry is the signal.
     act(() => useStore.getState().setInbox(workspace.id, [approval()]))
 
-    expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
-    // The run groups under Needs you, so the attention sort surfaces it.
-    expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
+    expect(screen.getByLabelText('1 run needs input')).toBeDefined()
+    expect(screen.getByRole('img', { name: /Needs input: 1 approval/ })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: /^Idle/ })).toBeNull()
+
+    act(() => useStore.getState().setInbox(workspace.id, [
+      approval({ decision: 'approved' }),
+    ]))
+    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
+    expect(screen.queryByLabelText('1 run needs input')).toBeNull()
+    expect(screen.getByRole('button', { name: /rewrite the checkout flow/ })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
   })
 
-  it('keeps a finished unanswered run under Needs you', () => {
+  it('keeps a finished unanswered run in its lifecycle group', () => {
     const finished = run({
       id: 'run_finished_question',
       task: 'answer after completion',
@@ -329,8 +337,8 @@ describe('Sidebar', () => {
     )
     render(<Sidebar />)
 
-    const needsYou = screen.getByRole('button', { name: /^Needs you/, expanded: true })
-    expect(needsYou.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Failed/, expanded: true })).toBeDefined()
+    expect(screen.getByRole('img', { name: /Needs input: 1 unanswered question/ })).toBeDefined()
     expect(screen.getByText('answer after completion')).toBeDefined()
   })
 

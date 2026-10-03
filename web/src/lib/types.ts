@@ -16,6 +16,12 @@ export type RunStatus =
   | 'failed'
   | 'interrupted'
 
+export interface RunInputRequest {
+  id: string
+  session_id: string
+  kind: 'question' | 'permission' | 'form' | 'extension_ui'
+}
+
 export interface Run {
   id: string
   workspace_id: string
@@ -45,6 +51,8 @@ export interface Run {
   profile_snapshot_id?: string
   /** Server-computed unanswered room questions; absent on older gateways. */
   unanswered_questions?: number
+  /** Correlated native requests; independent of execution status. */
+  pending_inputs?: RunInputRequest[]
   /** Last run.status reason, sanitized like the event payload. */
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
@@ -648,6 +656,10 @@ export interface EvidenceTranscriptResult {
   truncated: boolean
 }
 
+
+export interface RunInputPayload {
+  pending_inputs: RunInputRequest[]
+}
 
 export interface RunStatusPayload {
   from?: RunStatus

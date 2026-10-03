@@ -134,6 +134,8 @@ PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
 before replacement, upgrade and locked-file boundaries, `PATH` preservation,
 CLI-only installation, unsupported releases, and desktop-build failures.
 They use temporary files and restore the user's environment after running.
+Changes to `.github/actions/go-cache/` or `.github/actions/bun-cache/`
+trigger both lanes on pull requests and pushes to `main`.
 
 The same workflow builds the real CLI with the release's Windows metadata
 and embedded dashboard, removes the hosted runner's inherited exclusions,
@@ -200,8 +202,9 @@ compiler archives; each Go release-build lane owns its
 `release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
 The installer uses a separate `windows-install` compiler lane; only its
 PowerShell/system-Node main lane saves that cache and its Bun dependency
-cache, leaving Windows module writes to CI's `windows` job. Cache reuse
-does not replace any build or validation gate.
+cache, leaving Windows module writes to CI's `windows` job. Before compressing
+an archive, each writer checks whether its exact key already exists and skips
+the save on a hit. Cache reuse does not replace any build or validation gate.
 
 ## Headless browser and remote-development acceptance
 
@@ -401,8 +404,9 @@ Scenarios:
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: the run socket and both verified read-only executable binds are realized, no Aether-managed `mcp.json` is installed, `co-authors` is found at `0444`, the staged binary executes as `/opt/aether/aether-server mcp` by a non-root agent when manually configured, and a status/send/inbox round trip works between two overlapping runs |
-| `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --event ...` against the run's own socket, and each run parking at needs-attention with `waiting for your input` seconds after the agent's turn ends - not after the stall threshold - then returning to running with `agent resumed` on the agent's next turn |
-| `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The same path for a harness that has no flag to point at its reporter: the plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with the launch command left exactly as it was, the staged binary running `aether-server report opencode --event session.idle` against the run's own socket, the run parking at needs-attention with `waiting for your input` seconds after the turn ends, and returning to running with `agent resumed` when the agent takes the steer |
+| `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --json ...` against the run's own socket, and each run becoming Idle immediately after the turn ends, then returning to Working on the agent's next turn |
+| `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with native hosting unchanged, the staged binary running `aether-server report opencode --json ...` against the run's own socket, and execution changing from Idle to Working when the agent takes the steer |
+| `TestIntegrationRunInputReports` (`agentstatus_integration_test.go`) | The assembled server receives real socket `run.report` calls and exposes Working with independent input through SSH get/list and mutation snapshots; exact session/kind/id closes, last-close, duplicate suppression, Idle without input, and durable `run.input` replay are checked without requiring Docker or a vendor CLI |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to an active surviving container; an explicitly closed TUI run survives with the same row, paused container, and checkout and can relaunch that exact retained identity; a lost active container becomes `interrupted` after its `wip:` commit and published branch, with no replacement relaunch |
 | `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with branches surviving, the gauge's three-way breakdown following reclaim, new runs refused below the free-space floor while an eligible retained TUI relaunch uses no new admission, and a silent agent parking at needs-attention, returning when the agent answers a steer, and staying parked when it does not |
 
@@ -470,8 +474,14 @@ human approval, and exact delivery. It also checks failed verification,
 stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
 `omp` executables are scripted fixtures, not genuine vendor-agent runs.
 `web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
-control, and mission candidate preparation in a real browser and attaches a
-successful screenshot for visual inspection.
+control, and mission candidate preparation in a real browser. After a
+successful worker report, it checks that the same Docker container remains
+paused. It attaches a successful screenshot for visual inspection.
+
+`web/e2e/run-room.spec.ts` sends structured request snapshots through the
+staged reporter in a real container. Both members' browsers must add and
+clear **Needs input** without changing **Working**. The callback payloads
+are scripted fixtures, not evidence of a live vendor harness emitting them.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container
@@ -803,6 +813,30 @@ containers by name, along with the `aether/member-<member-id>` images an
 environment save commits. A failed test keeps its scratch directory and
 attaches the server's output to the report.
 
+### Command palette performance
+
+From `web/`, build the ordinary static export with `bun run build`. Use
+`bun run build --profile` for a separate React production-profiling export;
+do not substitute a development-server measurement for either.
+
+Compare the same browser, viewport, pointer mode and datasets on both revisions:
+50 and 500 runs, with short tasks and varied natural-prose tasks around 1,600
+characters. Preserve complete task bodies, branch names, harnesses, workspace
+names and IDs. Record synthetic fixtures separately from live workspace data,
+and keep fixtures and raw traces outside the source tree.
+
+Measure the first opening separately from at least 20 warm reopens. Use trusted
+keyboard and titlebar input, repeated queries, backspacing and clearing.
+Report scorer time separately from input-to-results and opening latency, plus
+result counts, long tasks, requests and focus/selection behavior. An
+event-to-`requestAnimationFrame`-plus-timer measurement is a paint-opportunity
+proxy, not compositor latency. Compare ordinary and profiling builds separately.
+
+Check full-text membership and ranking against cmdk's scorer, live run updates,
+offscreen keyboard selection, modal focus and Escape restoration. Filtering
+must not issue a search RPC. Score-disabled or hidden-Board ablations can locate
+a bottleneck; they do not prove the shipped behavior or its speed.
+
 ### Scenarios
 
 This inventory describes authored scenarios and their report attachments, not
@@ -819,7 +853,7 @@ runtime state.
 
 | Spec | Scenario |
 | --- | --- |
-| `board-card` | Opening a card's Details without opening the run, then resolving the branch name's `title` under the card's click overlay, selecting the name and using its copy control without navigating - all of which require real browser hit testing |
+| `board-card` | Opening a card's Details without opening the run, then selecting the visible full branch name and using its copy control without navigating - all of which require real browser hit testing |
 | `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
@@ -1010,7 +1044,8 @@ layer that owns them.
 | Failure | Covered by |
 | --- | --- |
 | Agent crashes or hangs | Multi-member E2E (crash -> `failed`, `wip:` commit); stall chaos E2E (park at needs-attention with a `stalled:` reason, surfaced on the run listing, then back to running when the steered agent answers, and still parked when it does not); `TestAgentCrash`, `TestTUIWrapperKeepsNormalShellsAndForwardsStop`, and `TestTUIWrapperForwardsTERMToHarness` in `internal/scheduler`; stall detection matrix in `internal/scheduler` unit tests; the dashboard badge in `web`'s sidebar tests |
-| Agent waiting for a human | Both status reporter E2Es in a real container (`claude` pointed at its hooks and `pi` at its extension by flag, `opencode` at its plugin by environment); the park/un-park matrix in `internal/scheduler` unit tests (a waiting report replaces a stall reason, a repaint does not un-park a harness that reports both ends, activity still un-parks one that only reports turn ends, silence still parks a working one, and a waiting report survives a server restart); the per-harness mapping tables in `internal/agentstatus`, where the opencode plugin is also driven through a turn under `node` (skipped where there is none); `run.report` dispatch and its refusals in `internal/coord`; the `report` subcommand's four callback shapes against a real socket in `cmd/aether-server` |
+| Agent becomes idle or stalls | Status reporter container E2Es; scheduler report/activity/restart tests distinguish explicit idle from terminal repaint and silence-based stalls |
+| Outstanding human request | `TestIntegrationRunInputReports` covers socket reports, exact request correlation, independent execution, snapshots, and durable replay; `run-room.spec.ts` crosses the real reporter, server, gateway, and two browser stores; native adapter regressions cover request resolution and interrupted cleanup |
 | Server reboot | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, and `TestIntegrationChaosRebootLostContainer` (SIGKILL, active-container reattachment, exact retained TUI identity, and lost-container interruption); `TestRebootRecoveryResumesSupervision`, `TestRebootRecoveryContainerGone`, `TestRecoveryProbeErrorRetainsRunAndContainer`, `TestRecoveryReissuesPersistedKill`, `TestTUICloseRelaunchKeepsExactRunAndContainer`, `TestRetainedExpiryDestroysContainerAndHidesRelaunch`, `TestNegativeRetentionDestroysAndRejectsRelaunch`, `TestBootRetainedDestroyFailureRetriesOnSweep`, `TestRetainedTUIRebootsAndReopensSameContainer`, and `TestStartCancelledDuringRecoveryIsACleanStop` (a shutdown landing inside recovery is a clean stop, not a failed start) in `internal/scheduler`; recovery also exercises runtime error paths |
 | Agent update fails before launch | `TestHarnessUpdateFailureStillLaunches`, `TestHarnessUpdateTimeoutStillLaunches`, `TestHarnessUpdateCreateFailureStillLaunches`, `TestHarnessUpdateWaitExpiresAndResultLandsLater`, `TestHarnessUpdateKillDoesNotStopUpdate`, and `TestHarnessUpdateSurvivesCancelledLaunch` in `internal/scheduler` |
 | Laptop offline | `internal/syncd` daemon tests (refs-only catch-up) |

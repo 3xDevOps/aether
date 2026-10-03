@@ -3,7 +3,7 @@
 
 import { registerSlot } from '@/components/slots'
 import type { Api } from '@/lib/api'
-import { ApprovalBadge, ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
+import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
 import { BudgetStatus } from '@/routes/team/budget'
 import { PresenceStatus, Watchers } from '@/routes/team/presence'
 import { registerRoute } from '@/routes/registry'
@@ -30,7 +30,6 @@ export function TeamStatusDetails() {
 }
 
 registerSlot('statusbar', 'team', TeamStatus)
-registerSlot('card:badges', 'approvals', ApprovalBadge)
 registerSlot('card:footer', 'watchers', Watchers)
 registerRoute('approvals', ApprovalInbox)
 registerRoute('timeline', TimelineFeed)

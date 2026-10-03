@@ -21,6 +21,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -420,6 +422,11 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	// A report with no user evidence refs still captures the retained packet and
 	// leaves the task in Review for human admission; it is never auto-accepted.
 	retrySocket := waitMissionSocket(t, e.coordDir(retried.Attempt.RunID))
+	retainedContainer := e.container(t, retried.Attempt.RunID)
+	retainedID, err := e.rt.FindByCreationKey(ctx, retried.Attempt.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var report protocol.CoordReportResult
 	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordReport, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeSuccess, Summary: "fixture completed without required user evidence", IdempotencyKey: "report-retry-A",
@@ -434,6 +441,38 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if !containsTaskStatus(shown.Tasks, string(taskA), string(domain.TaskReview)) {
 		t.Fatalf("task A did not remain Review after missing evidence: %+v", shown.Tasks)
+	}
+	retentionDeadline := time.Now().Add(30 * time.Second)
+	for {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: retried.Attempt.ID}, &inspected); err != nil {
+			t.Fatal(err)
+		}
+		if inspected.Attempt.State == string(domain.AttemptCompleted) {
+			break
+		}
+		if time.Now().After(retentionDeadline) {
+			t.Fatalf("reported worker did not release capacity: %+v", inspected.Attempt)
+		}
+	}
+	if domain.AttemptState(inspected.Attempt.State).HoldsConcurrency() {
+		t.Fatal("completed worker still holds attempt capacity")
+	}
+	currentID, err := e.rt.FindByCreationKey(ctx, retried.Attempt.RunID)
+	if err != nil || currentID != retainedID {
+		t.Fatalf("report destroyed or replaced worker container: %s, %v", currentID, err)
+	}
+	retainedContainer.mu.Lock()
+	retainedState := retainedContainer.state
+	retainedContainer.mu.Unlock()
+	if retainedState != "paused" {
+		t.Fatalf("reported worker remains executable: %s", retainedState)
+	}
+	observation, err := srv.srv.sched.ObserveMissionRun(ctx, domain.RunID(retried.Attempt.RunID))
+	if err != nil || observation.State != scheduler.MissionRunRetained || !observation.RetentionSettled {
+		t.Fatalf("completed worker retention unsettled: %+v, %v", observation, err)
+	}
+	if !srv.srv.sched.RetainsContainer(ctx, domain.RunID(retried.Attempt.RunID)) {
+		t.Fatal("completed worker lost its inspectable coordination assets")
 	}
 
 	// New work after activation goes through the same human gate: the
@@ -513,6 +552,48 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &stale)
 	if err == nil {
 		t.Fatal("old integrator socket worker.list unexpectedly succeeded after integrator replacement")
+	}
+	// Server boot preserves the exact paused worker, then a boot beyond its
+	// deadline reclaims that same runtime object and coordination ownership.
+	srv.stop()
+	restarted := e.start(ctx, t, false)
+	currentID, err = e.rt.FindByCreationKey(ctx, retried.Attempt.RunID)
+	if err != nil || currentID != retainedID {
+		t.Fatalf("restart lost retained worker: %s, %v", currentID, err)
+	}
+	restarted.stop()
+	sidecarPath := filepath.Join(e.dataDir, "scheduler", retried.Attempt.RunID+".json")
+	sidecarBytes, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sidecar map[string]json.RawMessage
+	if err := json.Unmarshal(sidecarBytes, &sidecar); err != nil {
+		t.Fatal(err)
+	}
+	sidecar["retained_until"], err = json.Marshal(time.Now().UTC().Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidecarBytes, err = json.Marshal(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecarPath, sidecarBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expired := e.start(ctx, t, false)
+	expiryDeadline := time.Now().Add(30 * time.Second)
+	for {
+		_, findErr := e.rt.FindByCreationKey(ctx, retried.Attempt.RunID)
+		if errors.Is(findErr, runtime.ErrNotFound) &&
+			!expired.srv.sched.RetainsContainer(ctx, domain.RunID(retried.Attempt.RunID)) {
+			break
+		}
+		if time.Now().After(expiryDeadline) {
+			t.Fatalf("expired worker still owns runtime or coordination: %v", findErr)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 }

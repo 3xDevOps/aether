@@ -29,7 +29,6 @@ const input: SidebarInput = {
   runs,
   members: { [alice.id]: alice, [bob.id]: bob },
   groupBy: 'status',
-  pending: new Set<string>(),
 }
 
 describe('sidebarRuns', () => {
@@ -50,13 +49,7 @@ describe('sidebarRuns', () => {
     expect(scoped.map((r) => r.run.id)).toEqual(['done'])
   })
 
-  it('surfaces a running run holding a pending approval as needs-attention', () => {
-    const scoped = sidebarRuns({ ...input, pending: new Set(['working']) })
-    expect(scoped.find((r) => r.run.id === 'working')?.state).toBe('needs-attention')
-    // Two attention runs now, and the more recent change leads.
-    expect(scoped.map((r) => r.run.id)).toEqual(['attention', 'working', 'done'])
-  })
-  it('surfaces a running run with unanswered questions as needs-attention', () => {
+  it('keeps a busy run with unanswered questions in Working', () => {
     const scoped = sidebarRuns({
       ...input,
       runs: {
@@ -64,10 +57,10 @@ describe('sidebarRuns', () => {
         working: record({ id: 'working', status: 'running', unanswered_questions: 1 }),
       },
     })
-    expect(scoped.find((r) => r.run.id === 'working')?.state).toBe('needs-attention')
+    expect(scoped.find((r) => r.run.id === 'working')?.state).toBe('working')
   })
 
-  it('keeps a terminal run with unanswered questions in Needs you', () => {
+  it('preserves the terminal lifecycle of a run with unanswered questions', () => {
     const finished = record({
       id: 'finished-question',
       status: 'failed',
@@ -77,7 +70,7 @@ describe('sidebarRuns', () => {
       ...input,
       runs: { ...input.runs, [finished.id]: finished },
     })
-    expect(scoped.find((entry) => entry.run.id === finished.id)?.state).toBe('needs-attention')
+    expect(scoped.find((entry) => entry.run.id === finished.id)?.state).toBe('failed')
   })
 })
 
@@ -85,7 +78,6 @@ describe('sidebarGroups', () => {
   it('groups by state, worst group first', () => {
     const groups = sidebarGroups(input)
 
-    expect(groups.map((g) => g.label)).toEqual(['Needs you', 'Working', 'Done'])
     expect(groups[0].runs.map((r) => r.run.id)).toEqual(['attention'])
     expect(groups[2].runs.map((r) => r.run.id)).toEqual(['done'])
   })
@@ -134,8 +126,7 @@ describe('sidebarGroups', () => {
   it('raises a swarm to its most urgent child without changing individual states', () => {
     const groups = sidebarGroups({
       ...input,
-      runs: { integrator, worker },
-      pending: new Set([worker.id]),
+      runs: { integrator, worker: { ...worker, status: 'needs-attention' } },
     })
     expect(groups.map((group) => group.key)).toEqual(['needs-attention'])
     expect(groups[0].runs[0].state).toBe('working')

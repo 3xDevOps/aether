@@ -1325,7 +1325,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // A run waiting on its supervisor has not ended: it goes back to running,
+  // An idle run has not ended: it goes back to running,
   // so telling it that it ended and taking its retry away is the dead end.
   it('lets a stalled run be steered without calling it not running', () => {
     const view = mount({}, { status: 'needs-attention' })
@@ -1337,10 +1337,10 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // A run waiting on a human is not a finished one: the server keeps it on
+  // An idle run is not a finished one: the server keeps it on
   // the live side of its own replay gate, so the tab must not answer its
   // refusals with a sentence about a transcript, or take the retry away.
-  it('keeps the retry on a run that is only waiting for attention', () => {
+  it('keeps the retry on a run that is idle', () => {
     const view = mount({}, { status: 'needs-attention' })
     act(() => StubSocket.last().onopen?.())
     act(() =>

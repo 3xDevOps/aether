@@ -33,7 +33,7 @@ func TestLifecycleReportsPreserveForegroundAndHookBudgets(t *testing.T) {
 	}
 	// Another connection must share the same bounded lifecycle allowance.
 	reconnected := h.dial(t, a)
-	if err := reconnected.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Waiting)}, nil); err == nil {
+	if err := reconnected.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Idle)}, nil); err == nil {
 		t.Fatal("lifecycle flood escaped its per-run budget")
 	}
 	socket := filepath.Join(dir, coordtransport.SocketName)
@@ -69,11 +69,11 @@ func TestLifecycleReportsPreserveForegroundAndHookBudgets(t *testing.T) {
 		t.Fatalf("foreground inbox after lifecycle burst: %s", output.String())
 	}
 	h.advance(requestRefill)
-	if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonInput}, nil); err != nil {
+	if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle}, nil); err != nil {
 		t.Fatalf("lifecycle state after refill: %v", err)
 	}
 	runs, reports := sink.reports()
-	if len(reports) != requestBurst+1 || reports[len(reports)-1].State != agentstatus.Waiting || runs[len(runs)-1] != a {
+	if len(reports) != requestBurst+1 || reports[len(reports)-1].State != agentstatus.Idle || runs[len(runs)-1] != a {
 		t.Fatalf("admitted lifecycle states: runs=%v reports=%v", runs, reports)
 	}
 }
@@ -92,8 +92,8 @@ func TestForegroundExhaustionPreservesLifecycleReports(t *testing.T) {
 		}
 	}
 	requireTransportConflict(t, client.Call(protocol.MethodCoordStatus, nil, nil))
-	if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Waiting), Reason: agentstatus.ReasonPermission}, nil); err != nil {
-		t.Fatalf("approval wait after foreground burst: %v", err)
+	if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle}, nil); err != nil {
+		t.Fatalf("idle report after foreground burst: %v", err)
 	}
 	requireTransportConflict(t, client.Call(protocol.MethodCoordStatus, nil, nil))
 }

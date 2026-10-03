@@ -100,7 +100,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 168h; negative destroys on close
+	RunContainerTTL      time.Duration // default 168h; negative destroys on close/completion
 	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
 	// on startup to learn whether a container already exited before
 	// attach. Defaults to defaultExitProbeTimeout.
@@ -299,13 +299,15 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	// agentReport is the last thing the agent said about itself, zero until
-	// it says anything and again whenever activity un-parks the run. It is
-	// only ever set to a report the run's status already matches, so a
-	// report the store refused leaves the silence fallback armed. Mirrored
-	// into the run's sidecar on every change, so a run the agent parked
-	// for its member comes back from a restart still held for them.
+	// agentReport is the last execution report only; input deltas are never
+	// retained or replayed. It is cleared when observed activity un-parks the
+	// run, and mirrored into the sidecar independently of pendingInputs.
 	agentReport agentstatus.Report
+	// pendingInputs is an immutable, sorted set for this execution lifetime.
+	pendingInputs []domain.RunInputRequest
+	// inputPublishPending keeps the current snapshot owed to the event log,
+	// including an empty set after the last request closes.
+	inputPublishPending bool
 	// lastWorking is when the agent last said it was working. A report is
 	// the only trace its hook leaves - it writes nothing to the terminal
 	// and touches no files - so the stall detector counts it as the
@@ -319,6 +321,7 @@ type supervised struct {
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
+	missionAssigned  bool
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
@@ -434,7 +437,7 @@ func (s *Scheduler) closeDone(entry *supervised) {
 	}
 }
 
-// RetainsContainer reports whether a durable terminal TUI row still owns a
+// RetainsContainer reports whether a durable terminal row still owns a
 // container. It intentionally does not consult in-memory state: coordination
 // recovery calls it during a fresh process boot. Every terminal sidecar with
 // a container ID remains an ownership reference until the scheduler confirms
@@ -442,18 +445,14 @@ func (s *Scheduler) closeDone(entry *supervised) {
 // not consulted here.
 func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool {
 	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil || r.Mode != domain.LaunchTUI || !r.Status.Terminal() {
+	if err != nil || !r.Status.Terminal() {
 		return false
 	}
 	sc, err := s.readSidecar(run)
 	if err != nil {
 		return false
 	}
-	mode := sc.Mode
-	if mode == "" {
-		mode = r.Mode
-	}
-	if sc.RunID != string(run) || mode != domain.LaunchTUI ||
+	if sc.RunID != string(run) ||
 		(sc.ContainerID == "" && !sc.DestroyPending) {
 		return false
 	}

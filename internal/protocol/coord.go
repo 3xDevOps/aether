@@ -1,5 +1,7 @@
 package protocol
 
+import "github.com/3xDevOps/Aether/internal/domain"
+
 // Coordination wire v3.
 //
 // This is the whole surface an agent reaches on its run's coordination
@@ -251,13 +253,13 @@ type CoordReportResult struct {
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`
 }
 
-// RunReportParams are the params of run.report: what the agent behind this
-// run's socket says it is doing now, and the user-visible reason it gives
-// for needing its member. State is one of the two agentstatus values; the
-// run is the socket, never a parameter.
+// RunReportParams carries independent execution and correlated input updates.
+// Empty State preserves execution and requires at least one input update. The
+// run identity comes from its socket, never a parameter.
 type RunReportParams struct {
-	State  string `json:"state"`
-	Reason string `json:"reason"`
+	State        string                  `json:"state,omitempty"`
+	Reason       string                  `json:"reason,omitempty"`
+	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
 }
 
 // RunReportResult is the result of run.report. It is empty: the caller is

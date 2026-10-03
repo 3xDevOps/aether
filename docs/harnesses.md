@@ -551,8 +551,13 @@ for acceptance, acknowledgement, and retries.
 
 ## Status reporting
 
-**Needs you** means the agent is waiting for you, or the run stalled. The
-first half comes from the agent itself.
+**Working** and **Idle** describe execution. Idle remains the display label
+for the existing `needs-attention` status and includes settled, failed, and
+stalled execution. **Needs input** is a separate indicator: it requires an
+unresolved, correlated question, form, extension dialog, or permission
+request. A run can be Working and need input at the same time. Turn end,
+silence, notification text, and a question in the final response do not
+establish a pending request.
 
 A harness with a **Status** entry can run a command on its own lifecycle
 events. Aether points each one at the staged server binary inside the
@@ -586,43 +591,87 @@ permission, and form events into the same canonical reporter commands.
 Taskless launch wiring is not a V2 activation guarantee; use a matching
 manual integration/custom launch and inspect the actual plugin host.
 
-Every one of them ends up running the same command inside the container:
+Every reporter uses the existing staged binary and coordination socket:
 
+```sh
+/opt/aether/aether-server report claude                 # hook JSON on stdin
+/opt/aether/aether-server report codex '<notify JSON>'
+/opt/aether/aether-server report pi --json '<report JSON>'       # pi and OMP
+/opt/aether/aether-server report opencode --json '<report JSON>' # V1 and V2
 ```
-/opt/aether/aether-server report claude                # hook event JSON on stdin
-/opt/aether/aether-server report codex '<payload>'     # the notify argument
-/opt/aether/aether-server report pi --event <name>     # from the extension, pi and omp
-/opt/aether/aether-server report opencode --event session.idle
-```
 
-The report travels back over the run's own coordination socket, so no token
-enters the container and nothing new is mounted. The server turns it into a
-run status straight away:
+Stateful extensions/plugins send `state` (`working` or the legacy `waiting`
+wire value), an optional `reason`, and `input_updates`. Their `replace`
+update contains the complete current request list, including `[]` when
+empty. Claude's stateless hooks send matching `open`/`close` updates.
+Each request contains only `id`, `session_id`, and `kind` (`question`,
+`permission`, `form`, or `extension_ui`). Identity includes all three:
+answering one request cannot clear another session's request with the same
+ID. An input-only report leaves execution unchanged. No prompt, answer,
+tool arguments, transcript, URL, or credential is included in metadata.
+There is no second report transport and no new way to answer prompts;
+use the existing terminal or native approval/question surface.
 
-| The agent says | The run becomes | Reason shown |
+| Reporter | Execution evidence | Needs input evidence and limits |
 | --- | --- | --- |
-| the turn ended, or it has been idle at its prompt | `needs-attention` | `waiting for your input` |
-| it is asking permission | `needs-attention` | `waiting for your permission` |
-| it is asking a question | `needs-attention` | `waiting for your answer` |
-| it started a turn, ran a tool, or got its answer | `running` | `agent resumed` |
+| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports Idle unless `background_tasks` is nonempty. `StopFailure` reports Idle with a failure reason, not an input request. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
+| OpenCode V1 1.18.32 | Tracks all native busy sessions; one child becoming idle cannot park another active session. | `permission.asked`/`question.asked` preserve `id` and `sessionID`; replies/rejections close the matching `requestID`. Idle reconciles that session's known requests with the released `/permission` and `/question` lists, including interruption cleanup without a reply event. |
+| OpenCode V2 2.0.18 | Tracks `session.execution.started` until succeeded, failed, interrupted, or session deletion. | `permission.asked/replied` and released `form.created/replied/cancelled` preserve request and session IDs. Terminal execution and permission replies reconcile known permissions through `ctx.permission.list`. Session deletion removes only that session's requests. |
+| pi 0.87.1 | Starts report Working; `agent_settled` or confirmed idle after `agent_end` reports Idle. A late finalized message cannot restart settled execution. | Named `ask`/`AskUserQuestion` tools retain `toolCallId` until tool execution ends. The documented `ui_prompt_start/end` pair tracks blocking extension UI with one process/session-scoped ID; Pi emits this pair around the outermost dialog, including dismissal/rejection. Titles and answers are discarded. |
+| OMP 18.3.1 | Uses its public main-session terminal event and `waitForIdle()` so owned background work can drain before Idle; automatic continuation is not settlement. | Named ask tools retain `toolCallId`. `tool_approval_requested/resolved` retain `sessionId` and `toolCallId`, including rejection. The pinned native TUI API has **no generic `ui_prompt_start/end` equivalent**. |
+| Codex legacy notify | `agent-turn-complete` reports Idle only. | No correlated input evidence in this integration. No app-server migration or inference from the final message. |
 
-Anything else the harness reports - a session opening, a reply streaming
-in, a compaction - is ignored rather than guessed at, and so is a subagent's
-own turn: opencode gives one a session of its own, and that session going
-idle is not the run's turn ending. The rule holds the other way round too.
-The run is `running` while any of its sessions is, so an opencode
-background subagent still working after the turn that spawned it ended
-keeps the run off your queue until it finishes - something there is still
-working.
+Pi, OMP, and OpenCode forward native Working reports even when the request
+snapshot is unchanged. Pi/OMP tool callbacks, V1 busy status callbacks, and
+V2 concurrent execution starts refresh liveness without inventing input or
+status transitions. Actual settlement still reports Idle; silence without
+further activity can still trigger the stall detector.
 
-opencode never announces the resume after a permission or a question of its
-own accord - its session stays busy for the whole tool call the prompt
-interrupted - so the member's answer is what returns the run to `running`.
-A run can have several prompts open at once, one per session, and only the
-answer to the last of them returns it: until then the run stays parked. If
-the turn that asked ended while the prompt was still open, that answer
-parks the run at `needs-attention` instead - nothing is working any more -
-and the next turn the agent starts is what returns it to `running`.
+OpenCode keeps execution and requests independent: a native busy session
+stays Working while its tool awaits input, and a background session can
+remain Working after the requesting session becomes idle. Closing a request
+does not invent a new busy session. An unresolved request survives ordinary
+settlement; matching completion, authoritative native reconciliation, or
+actual session/run termination clears it.
+
+The public CLI surfaces have limits:
+
+- Claude `PermissionRequest` explicitly omits `tool_use_id`, and
+  `Notification` permission/elicitation alerts have no correlated
+  resolution identity. Neither creates a durable Needs input indicator.
+  Elicitations without IDs are likewise unsupported. Claude has no general
+  command-hook interrupt/request-list API; an interrupted request whose
+  completion hook is absent can remain until session termination. Root
+  Stop can observe background work, but these stateless hooks cannot infer
+  root completion from a later child-only stop. Scheduled future wakeups
+  (`session_crons`) alone are not current work.
+- V1 reconciliation uses the public plugin `serverUrl`, the `directory`
+  query, and documented HTTP Basic authentication from
+  `OPENCODE_SERVER_PASSWORD` / `OPENCODE_SERVER_USERNAME` (default username
+  `opencode`). Each query is bounded to four seconds. Unreachable or
+  rejected native APIs retain the last-known requests and report the real
+  error through OpenCode's log; they do not guess that input was resolved.
+- The released V2 2.0.18 plugin context has `permission.list` but **does not
+  expose `session.form.list`**. Forms rely on their native reply/cancel and
+  session-deletion events; dropped form events cannot be reconstructed by
+  an invented list API. Current-development `question.v2.*` events are not
+  this release's contract.
+- Native plugin event streams are live, not a durable replay log. A plugin
+  reload or missed event can lose adapter evidence; persistence on Aether's
+  side cannot reconstruct a callback the native host never delivered.
+- OMP's separate `rpc-ui` mode and Codex app-server can expose other input
+  APIs, but Aether does not change native CLI hosting mode to use them.
+  Gemini, Copilot, and Cursor inbox hooks remain inbox integrations, not
+  status/input reporters. Default permission-bypass/auto-approve flags
+  suppress many ordinary permission prompts.
+
+Source contracts: [Claude command hooks](https://code.claude.com/docs/en/hooks),
+[V1 1.18.32 public SDK endpoints](https://unpkg.com/@opencode-ai/sdk@1.18.32/dist/v2/gen/sdk.gen.js),
+[OpenCode HTTP authentication](https://opencode.ai/docs/server/#authentication),
+[V2 2.0.18 form events](https://unpkg.com/@opencode/schema@2.0.18/dist/form.js),
+[V2 released plugin session API](https://unpkg.com/@opencode/plugin@2.0.18/dist/promise/session.d.ts),
+[Pi 0.87.1 UI prompt lifecycle](https://github.com/earendil-works/pi/blob/v0.87.1/packages/coding-agent/src/core/extensions/runner.ts),
+and [OMP 18.3.1 extension events](https://github.com/can1357/oh-my-pi/blob/v18.3.1/packages/coding-agent/src/extensibility/extensions/types.ts).
 
 `codex` only says when a turn ends. It never says a new one started, so its
 run comes back to `running` the way a harness with no reporter does: on
@@ -633,9 +682,11 @@ and `omp` report both ends, and their runs stay parked until the agent
 itself says it is working again - a TUI repainting while you type is not
 work.
 
-The last report is recorded with the run, so it survives a server restart:
-a run the agent parked comes back parked, and only what would have released
-it before releases it now. See [failure-handling.md](failure-handling.md).
+Execution and the current pending-request set are persisted separately, so
+both survive an Aether server restart for a still-live run. The server emits
+`run.input` only when the request set changes; it does not replay old input
+deltas as new opens. Actual run termination/relaunch clears the old
+lifetime's requests. See [failure-handling.md](failure-handling.md).
 
 For a harness with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` after `--stall-threshold`
@@ -1068,9 +1119,14 @@ update.
 | `omp` | `omp update` |
 
 For `codex` and `pi`, npm installs the new version into a stage directory
-beside the old one in `~/.local/lib`, and the package directory is then
-swapped in with two renames, so an agent starting meanwhile never sees a
-half-written install. Their own updaters are not used: `codex update`
+beside the old one in `~/.local/lib`. Aether resolves its server executable
+path before passing the read-only mount to Docker, so `/proc/self/exe`
+cannot select Docker's executable. That helper exchanges the installed and
+staged package directories with Linux's atomic directory-exchange operation:
+the installed path is never removed. If the filesystem rejects the exchange,
+the update reports that error and leaves the installed package in place.
+
+Their own updaters are not used: `codex update`
 installs into the image's global npm prefix, outside the member home, and
 `pi update --self` replaces files in place. A `codex` or `pi` in
 `~/.local/bin` that npm did not install is not updated, and the update

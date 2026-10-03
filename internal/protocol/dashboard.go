@@ -153,6 +153,8 @@ type DashAttachControl struct {
 	Error             string `json:"error,omitempty"`
 	HasControl        bool   `json:"has_control,omitempty"`
 	ControlSessionID  string `json:"control_session_id,omitempty"`
+	// RevocationReason is takeover, permission, or revoked on unsolicited fences.
+	RevocationReason string `json:"revocation_reason,omitempty"`
 	// Cursor and ResumeID are the legacy flat encoding of Position.
 	Cursor   uint64           `json:"cursor,omitempty"`
 	ResumeID string           `json:"resume_id,omitempty"`

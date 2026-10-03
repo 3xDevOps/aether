@@ -18,7 +18,7 @@ immediate cleanup.
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run or completed mission run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
@@ -31,14 +31,14 @@ The threshold is the **hang detector**, and the fallback for harnesses that
 cannot report their own state.
 
 Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
-[harnesses.md](harnesses.md)), a turn that ends parks the run immediately
-with a reason that says what it is waiting for, and the threshold is left
-to catch the case the agent cannot report: one that hangs mid-turn, which
-still parks with a `stalled:` reason. Where the agent does not report,
-silence is all the server has, and the threshold is a bet about the longest
-legitimate silence: an agent thinking, compiling, or waiting on a slow tool
-call produces no PTY output and touches no files, and there is no way to
-tell that apart from a hang.
+[harnesses.md](harnesses.md)), a turn that ends can mark execution **Idle**
+immediately. This does not mean the agent needs an answer: **Needs input**
+is a separate indication of an unresolved structured request. The threshold
+still catches a harness that hangs mid-turn with a `stalled:` reason. Where
+the agent does not report, silence is all the server has, and the threshold
+is a bet about the longest legitimate silence: an agent thinking, compiling,
+or waiting on a slow tool call produces no PTY output and touches no files,
+and there is no way to tell that apart from a hang.
 
 - **Too low** and long tool calls park healthy runs, which trains people to
   ignore the badge.
@@ -284,7 +284,7 @@ deleted by an older cleanup.
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
 to run. On the next boot the scheduler reconciles every non-terminal run and
-every retained closed TUI run against the runtime's actual containers:
+every retained closed TUI or completed mission run against the runtime's actual containers:
 
 - **An active container survived** (the server died, the container did not):
   supervision reattaches to it, the PTY session is re-adopted, the diff watch
@@ -292,9 +292,11 @@ every retained closed TUI run against the runtime's actual containers:
   continues the chain, and the run stays `running`. Attaches, injects and the
   eventual exit all work as if nothing happened. A kill that was accepted
   before the crash is re-issued. A run the agent had parked stays parked
-  with its reason: the last report is recovered with the run, so
+  with its reason: the last execution report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
-  repaint - does not read as the turn resuming.
+  repaint - does not read as the turn resuming. Its correlated pending-input
+  set is recovered separately; restart neither clears unanswered requests
+  nor replays old input-update deltas.
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run is not relaunchable.
@@ -303,15 +305,16 @@ every retained closed TUI run against the runtime's actual containers:
   in the narrow window before the sidecar exists, by the run ID the runtime
   persists as the container's creation key - and then the same wip-commit and
   interrupt applies.
-- **A retained closed TUI container survived**: its merged or abandoned row,
-  checkout, member account, and coordination surfaces remain owned by that
-  exact container. Boot reconciliation preserves them for an eligible
-  relaunch.
+- **A retained container survived**: its terminal row, checkout, member account,
+  and coordination surfaces remain owned by that exact container. Boot
+  reconciliation preserves paused mission workers and already-exited mission
+  containers until expiry. Only explicitly closed ordinary TUI runs are
+  eligible for relaunch; completion never revives an assigned worker.
 - **A retained container is gone or expired**: boot cleanup destroys any
   remaining runtime object, removes its retention metadata, and leaves the
   row unavailable for relaunch. It never creates a replacement.
 
-Headless runs are not recovered into a shell. When their agent exits, Aether
+Ordinary headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
 `failed` for an error, and destroys the container immediately. A `completed`
 run remains available for review and an authorized member may close it as
@@ -319,8 +322,16 @@ merged or abandoned, but neither headless status is relaunchable.
 
 Mission-assigned integrator and worker runs keep that same persistent supervisor
 even in headless mode, so a one-shot harness exit does not destroy the container
-or mark the run completed. They stay until Close, Kill, a successful worker
-report, or worker cancel.
+or mark the run completed. They stay until Close, Kill, a terminal worker
+report, or worker cancel. Accepted success/failure reports pause and retain the
+exact worker container for `--run-container-ttl` (default 7 days), and an actual
+mission container exit retains that exited container for the same duration.
+Attempts release execution capacity only after evidence, runtime quiescence,
+and durable retention have settled. Failed capture, runtime, or persistence
+steps keep ownership and capacity until reconciliation succeeds. Explicit
+worker cancellation, Kill, Delete, and negative-TTL cleanup remain destructive.
+Use the run's transcript, diff, evidence and worker inspection surfaces while
+it is retained; no new live work is admitted to a completed worker.
 
 Mission recovery also loads durable objectives and their bounded worker
 attempts. If the initial mission inventory scan fails, `aether-server serve`
@@ -535,16 +546,15 @@ for schedule administration.
 
 ### Agent stall or crash
 
-`needs-attention` - **Needs you** on the board - means one of two things,
-and the reason on the run says which.
+`needs-attention` - **Idle** on the board - describes execution, not a request
+for human action. It means one of two things, and the reason on the run says
+which.
 
-**The agent is waiting for you.** A harness that reports its own state
-parks the run the moment its turn ends, or it asks for permission or an
-answer, with a reason that reads `waiting for your input`,
-`waiting for your permission` or `waiting for your answer`. There is no
-delay: the report arrives as the agent stops. A server restart does not
-change that: the report is recovered with the run, so a run that was
-waiting for you is still waiting for you afterwards.
+**The harness reported idle or turn completion.** A harness that reports
+its own state parks the run when it has no active work. The `waiting` wire
+state means idle; generic turn completion, interruption, silence, and prose
+do not create **Needs input**. The execution report is recovered through a
+server restart.
 
 How such a run comes back depends on how much its harness can say. Where the
 agent reports both ends of a turn (`claude`, `pi`, `omp`), the run returns
@@ -566,7 +576,7 @@ Output here is anything drawn in the terminal, because a harness that
 cannot say when a turn starts leaves nothing else to go on. The echo of
 your own typing counts: type a long prompt into a parked `codex` run and it
 can read as `running` before you send it, and read as `stalled:` rather
-than `waiting for your input` if you then walk away.
+than `agent idle` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at
@@ -585,8 +595,59 @@ instead of finalizing the run. Explicit Close commits and publishes the latest
 work, records merged or abandoned, and applies the retention policy. A harness
 terminated by a signal or other non-normal error marks the run `failed` and
 cleans up the container; it does not receive a replacement shell. Headless
-clean exit still commits and publishes, records `completed`, and destroys the
-container immediately. A failed run's partial work is committed as `wip:`.
+clean exit of an ordinary run still commits and publishes, records `completed`,
+and destroys the container immediately. Mission-assigned runs instead retain
+the exact stopped container for the configured TTL. A failed run's partial
+work is committed as `wip:`.
+
+### Pending structured input
+
+**Needs input** is independent of **Working** and **Idle**. A run may keep
+working in one session while another has an unanswered question, permission
+request, form, or extension dialog. Closing a request does not claim execution
+resumed; only a positive execution signal does that. Codex's legacy notify
+reports turn completion only, not pending input. Supported native reporters
+and their limits are listed in [harnesses.md](harnesses.md).
+
+The server keeps a durable set keyed by session, request kind, and request
+ID, separate from the last execution report. A matching close removes only
+that request. A known terminated session can clear its own requests; an
+authoritative adapter snapshot can replace the set, including an empty set.
+Duplicate opens and closes are idempotent. A new turn or an unrelated
+completion cannot resolve somebody else's request. Request metadata contains
+identifiers and kinds, not prompt bodies, answers, paths, or transcripts.
+
+`run.report` may omit execution state only when `input_updates` is nonempty;
+an input-only update preserves execution. The server accepts at most 128
+updates per report and 128 requests per replacement snapshot. Identifiers
+must be valid, nonblank, control-free UTF-8 of at most 256 bytes. Unsupported
+operations or kinds and invalid or oversized metadata return `InvalidParams`
+before the scheduler is called. Reports keep the existing bounded reason
+sanitization and separate lifecycle request budget. A persistence failure
+returns `Internal` with the underlying cause rather than acknowledging an
+input change that was not saved.
+If saving succeeds but `run.input` publication fails, the report still returns
+an error. The sidecar retains the publication obligation, including a last-close
+empty set. A subsequent report or live-run recovery publishes the current set,
+not stale deltas; successful duplicate reports remain no-write/no-event. A crash
+after publication but before its acknowledgement is saved can replay the same
+replacement snapshot.
+
+The pending set survives server restart only for the same still-live run
+lifetime, with no observed exit. Disconnecting, pausing, going idle, or
+finishing a turn does not clear it. A durable terminal run transition clears
+the set, including mission completion that retains a paused container for
+inspection. Recovery treats the run row as authoritative, so stale sidecar
+data cannot resurrect requests from a terminated lifetime. Relaunch resets
+both execution and input before the new lifetime starts.
+
+A clean TUI harness exit into the supervisor's login shell is not a container
+exit. Pending requests clear there only when the native reporter sends a
+correlated close, session clear, or replacement snapshot; the scheduler
+cannot infer that the CLI exited while the container remains live. Resolving
+the last request clears the indicator through a `run.input` event without
+changing execution status. Use the existing terminal, approval, or room
+surface to answer; the indicator is not a separate answer channel.
 
 ### Agent update fails, or the vendor is unreachable
 
@@ -604,6 +665,11 @@ could not update codex from codex-cli 0.155.1: the updater exited 1: <updater ou
 The server log has the same failure as `scheduler: harness update failed`.
 The next launch from that home tries again after 15 minutes.
 `--harness-update=false` turns updates off.
+
+An interrupted `codex` or `pi` exchange leaves either complete version
+launchable. If an older updater left the installed package missing and a
+surviving `~/.local/lib/.<agent>-update.*/previous` copy, the next attempt
+restores that copy before contacting npm.
 
 ### SSH drop mid-attach
 

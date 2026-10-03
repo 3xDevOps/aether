@@ -13,6 +13,7 @@ import type {
   OverlapPayload,
   RunArchivedPayload,
   RunDiffPayload,
+  RunInputPayload,
   RunProtectedPayload,
   RunStatusPayload,
   RunTitlePayload,
@@ -417,6 +418,21 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time)
+      break
+    }
+    case 'run.input': {
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          if (!(err instanceof ApiError && err.status === 404)) {
+            store.getState().setUnreachable(classifyUnreachable(err, store))
+            return false
+          }
+        }
+      }
+      const p = ev.payload as RunInputPayload
+      store.getState().applyRunInput(ev.run_id, p.pending_inputs)
       break
     }
     case 'run.title': {

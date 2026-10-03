@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -83,12 +84,19 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 		// One name per home and harness: only one update per key runs at a
 		// time, so a match is left over from a crashed server.
 		name := "harness-update-" + filepath.Base(home.HostPath) + "-" + profile.Name
+		mounts := make([]runtime.Mount, 1, 2)
+		mounts[0] = home
+		if s.cfg.ServerBinary != "" {
+			mounts = append(mounts, runtime.Mount{
+				HostPath: s.cfg.ServerBinary, ContainerPath: agentstatus.ReporterCommand, ReadOnly: true,
+			})
+		}
 		spec := runtime.Spec{
 			Name:  name,
 			Image: plan.Image,
 			// The launch goes on to add coordination variables to plan.Env.
 			Env:        maps.Clone(plan.Env),
-			Mounts:     []runtime.Mount{home},
+			Mounts:     mounts,
 			User:       plan.User,
 			WorkingDir: plan.Home,
 			// Outlives the execs, and ends on its own if the server dies first.
@@ -175,6 +183,10 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 		}
 	} else if !errors.Is(findErr, runtime.ErrNotFound) {
 		return "", "", findErr
+	}
+	// Resolve /proc/self/exe before another process interprets the mount source.
+	if err = checkCoordinationMounts(spec.Mounts[1:]); err != nil {
+		return "", "", fmt.Errorf("resolve updater helper: %w", err)
 	}
 	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {

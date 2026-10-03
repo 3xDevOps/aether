@@ -4,6 +4,7 @@ package control
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -35,6 +36,15 @@ var (
 	ErrGenerationExhausted = errors.New("control: generation exhausted")
 )
 
+// RevocationReason records the authority transition that invalidated a lease.
+type RevocationReason string
+
+const (
+	RevocationTakeover   RevocationReason = "takeover"
+	RevocationPermission RevocationReason = "permission"
+	RevocationRevoked    RevocationReason = "revoked"
+)
+
 // Config configures a Service. A zero Config uses the production defaults.
 type Config struct {
 	// Now supplies the clock. It is called while the service lock is held.
@@ -55,6 +65,25 @@ type Snapshot struct {
 	Connected  bool
 	AcquiredAt time.Time
 	ExpiresAt  time.Time
+	revocation *atomic.Uint32
+}
+
+// RevocationReason belongs to this exact lease, not the run's latest controller.
+// Snapshots retain it across later acquisitions without retaining lease history
+// in the service. Without a recorded transition it reports generic revocation,
+// never an inferred takeover.
+func (s Snapshot) RevocationReason() RevocationReason {
+	if s.revocation == nil {
+		return RevocationRevoked
+	}
+	switch s.revocation.Load() {
+	case 1:
+		return RevocationTakeover
+	case 2:
+		return RevocationPermission
+	default:
+		return RevocationRevoked
+	}
 }
 
 type lease struct {
@@ -64,6 +93,18 @@ type lease struct {
 	connected  bool
 	acquiredAt time.Time
 	expiresAt  time.Time
+	revocation atomic.Uint32
+}
+
+func (l *lease) revoke(reason RevocationReason) {
+	var value uint32 = 3
+	switch reason {
+	case RevocationTakeover:
+		value = 1
+	case RevocationPermission:
+		value = 2
+	}
+	l.revocation.CompareAndSwap(0, value)
 }
 
 type runState struct {
@@ -171,6 +212,11 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		if genErr != nil {
 			return Snapshot{}, nil, genErr
 		}
+		reason := RevocationRevoked
+		if current.memberID != domain.MemberID(member) || current.sessionID != session {
+			reason = RevocationTakeover
+		}
+		current.revoke(reason)
 		current = &lease{
 			memberID:   domain.MemberID(member),
 			sessionID:  session,
@@ -289,11 +335,11 @@ func (s *Service) AdmitMember(run string, member domain.MemberID, session string
 // before releasing the run lock. The durable mutation supplied by fn and the
 // authority boundary therefore form one in-process linearization point. The
 // returned snapshot is the lease displaced inside that boundary.
-func (s *Service) AdmitRevoke(run string, fn func() error) (*Snapshot, error) {
+func (s *Service) AdmitRevoke(run string, reason RevocationReason, fn func() error) (*Snapshot, error) {
 	if err := s.validateRun(run); err != nil {
 		return nil, err
 	}
-	if fn == nil {
+	if fn == nil || (reason != RevocationPermission && reason != RevocationRevoked) {
 		return nil, ErrInvalid
 	}
 	state := s.stateFor(domain.RunID(run), true)
@@ -305,7 +351,7 @@ func (s *Service) AdmitRevoke(run string, fn func() error) (*Snapshot, error) {
 		return nil, err
 	}
 	s.fenceSurfacesLocked(domain.RunID(run))
-	return s.fenceLocked(domain.RunID(run), state), nil
+	return s.fenceLocked(domain.RunID(run), state, reason), nil
 }
 
 // Validate authorizes one write against the current connected lease.
@@ -388,7 +434,13 @@ func (s *Service) Disconnect(run, session string, generation uint64) {
 // A disconnected session may release during its reconnect window. The
 // authenticated member, session, and explicit generation must all match.
 func (s *Service) Release(run string, member domain.MemberID, session string, generation uint64) error {
-	return s.releaseAdmitted(run, member, session, generation, nil)
+	return s.releaseAdmitted(run, member, session, generation, RevocationRevoked, nil)
+}
+
+// RevokeMember revokes only the matching lease after its member loses permission.
+// A concurrently installed replacement is never invalidated by this notification.
+func (s *Service) RevokeMember(run string, member domain.MemberID, session string, generation uint64) error {
+	return s.releaseAdmitted(run, member, session, generation, RevocationPermission, nil)
 }
 
 // ReleaseAdmitted releases a lease only after admit succeeds inside the same
@@ -399,10 +451,10 @@ func (s *Service) ReleaseAdmitted(run string, member domain.MemberID, session st
 	if admit == nil {
 		return ErrInvalid
 	}
-	return s.releaseAdmitted(run, member, session, generation, admit)
+	return s.releaseAdmitted(run, member, session, generation, RevocationRevoked, admit)
 }
 
-func (s *Service) releaseAdmitted(run string, member domain.MemberID, session string, generation uint64, admit func() error) error {
+func (s *Service) releaseAdmitted(run string, member domain.MemberID, session string, generation uint64, reason RevocationReason, admit func() error) error {
 	if err := s.validateRunMember(run, string(member)); err != nil {
 		return err
 	}
@@ -437,6 +489,7 @@ func (s *Service) releaseAdmitted(run string, member domain.MemberID, session st
 	if advance {
 		state.generation++
 	}
+	current.revoke(reason)
 	state.current = nil
 	return nil
 }
@@ -456,13 +509,14 @@ func (s *Service) Fence(run string) *Snapshot {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	s.fenceSurfacesLocked(domain.RunID(run))
-	return s.fenceLocked(domain.RunID(run), state)
+	return s.fenceLocked(domain.RunID(run), state, RevocationRevoked)
 }
 
-func (s *Service) fenceLocked(runID domain.RunID, state *runState) *Snapshot {
+func (s *Service) fenceLocked(runID domain.RunID, state *runState, reason RevocationReason) *Snapshot {
 	s.expireLocked(state, s.now())
 	var displaced *Snapshot
 	if current := state.current; current != nil {
+		current.revoke(reason)
 		copy := s.snapshotLocked(runID, current)
 		displaced = &copy
 		state.current = nil
@@ -545,6 +599,7 @@ func (s *Service) expireLocked(state *runState, now time.Time) {
 	if state.current == nil || state.current.connected || state.current.expiresAt.After(now) {
 		return
 	}
+	state.current.revoke(RevocationRevoked)
 	state.current = nil
 }
 
@@ -565,5 +620,6 @@ func (s *Service) snapshotLocked(run domain.RunID, current *lease) Snapshot {
 		Connected:  current.connected,
 		AcquiredAt: current.acquiredAt,
 		ExpiresAt:  current.expiresAt,
+		revocation: &current.revocation,
 	}
 }

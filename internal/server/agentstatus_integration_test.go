@@ -25,7 +25,7 @@ import (
 // the server wrote into the run's coordination directory, the argument
 // pointing the harness at it, the staged binary executing
 // "aether-server report claude" against the socket its own mount carries,
-// and the run moving between Working and Needs you as the agent says so.
+// and the run moving between Working and Idle as the agent says so.
 //
 // It runs on the shipped claude profile with a scripted stand-in for the
 // CLI, so nothing here is a test-only branch in production code: the
@@ -53,16 +53,15 @@ done
 `
 
 // piStatusAgentScript stands in for pi and omp, whose shared extension
-// names the event on the command line instead of piping a payload. The
-// shape is the same as the claude stand-in above: end a turn, then start a
-// new one whenever a steer arrives.
+// sends canonical execution/input JSON. It ends a turn, then starts a new
+// one whenever a steer arrives.
 const piStatusAgentScript = `#!/bin/sh
 sleep 1
 echo "argv:$*"
-` + coordtransport.BinaryPath + ` report pi --event agent_end
+` + coordtransport.BinaryPath + ` report pi --json '{"state":"waiting","reason":"agent idle"}'
 echo "reported:end"
 while read line; do
-  ` + coordtransport.BinaryPath + ` report pi --event agent_start
+  ` + coordtransport.BinaryPath + ` report pi --json '{"state":"working"}'
   echo "reported:start"
 done
 `
@@ -116,8 +115,8 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
-		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
 	}
 	// The shipped threshold is ten minutes and this test's own budget is
 	// three, so anything that lands here was the agent talking.
@@ -168,8 +167,8 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(piRun.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := piParked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
-		t.Fatalf("pi park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	if p := piParked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("pi park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
 	}
 	if waited := time.Since(piStarted); waited > time.Minute {
 		t.Errorf("the pi run took %s to park; that is the silence heuristic, not the reporter", waited)
@@ -235,10 +234,10 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 sleep 1
-` + coordtransport.BinaryPath + ` report opencode --event session.idle
+` + coordtransport.BinaryPath + ` report opencode --json '{"state":"waiting","reason":"agent idle"}'
 echo "reported:idle"
 while read line; do
-  ` + coordtransport.BinaryPath + ` report opencode --event session.status --status busy
+  ` + coordtransport.BinaryPath + ` report opencode --json '{"state":"working"}'
   echo "reported:busy"
 done
 `
@@ -286,8 +285,8 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonInput {
-		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
+	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
 	}
 	if waited := time.Since(started); waited > time.Minute {
 		t.Errorf("the run took %s to park; that is the silence heuristic, not the reporter", waited)
@@ -310,5 +309,192 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 
 	if out := att.output(); strings.Contains(out, "aether-server report") {
 		t.Errorf("the reporter wrote an error into the agent's terminal: %q", out)
+	}
+}
+
+// The assembled server receives real run.report RPCs over the run's Unix
+// coordination socket; SSH snapshots and durable replay must agree without
+// conflating an unresolved request with the agent's execution state.
+func TestIntegrationRunInputReports(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	t.Setenv("AETHER_FAKE_AGENT", "fake-agent {task}")
+	e := &coordEnv{
+		rt:      newE2ERuntime(),
+		image:   "e2e/fake",
+		dataDir: filepath.Join(shortTempDir(t), "data"),
+	}
+	srv := e.seed(ctx, t, false)
+	release := make(chan struct{})
+	defer close(release)
+	const task = "independent input reports"
+	e.e2e(t).script(task, func(c *e2eContainer) {
+		coordAgent{release: release}.run(ctx, c)
+	})
+	ctrl, client := srv.control(t, e.ada.key)
+	defer client.Close()
+	sub := srv.subscribe(ctx, t)
+	var seen []events.Event
+	run := e.launch(t, ctrl, task, "fake")
+	socket := waitMissionSocket(t, e.coordDir(run.ID))
+
+	question := domain.RunInputRequest{ID: "request-1", SessionID: "session-a", Kind: "question"}
+	permission := domain.RunInputRequest{ID: question.ID, SessionID: question.SessionID, Kind: "permission"}
+	otherSession := domain.RunInputRequest{ID: question.ID, SessionID: "session-b", Kind: question.Kind}
+	update := func(operation string, request domain.RunInputRequest) domain.RunInputUpdate {
+		return domain.RunInputUpdate{
+			Operation: operation, ID: request.ID, SessionID: request.SessionID, Kind: request.Kind,
+		}
+	}
+	sameInputs := func(got, want []domain.RunInputRequest) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for _, request := range want {
+			if !slices.Contains(got, request) {
+				return false
+			}
+		}
+		return true
+	}
+	assertSnapshots := func(t *testing.T, status domain.RunStatus, pending []domain.RunInputRequest) {
+		t.Helper()
+		assertRun := func(source string, got protocol.Run) {
+			t.Helper()
+			if got.Status != string(status) || got.PendingInputs == nil || !sameInputs(got.PendingInputs, pending) {
+				t.Fatalf("%s snapshot = status %q, inputs %+v; want %q, %+v (non-null list)",
+					source, got.Status, got.PendingInputs, status, pending)
+			}
+		}
+		var got protocol.RunResult
+		if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: run.ID}, &got); err != nil {
+			t.Fatalf("run.get: %v", err)
+		}
+		assertRun("run.get", got.Run)
+		var listed protocol.RunListResult
+		if err := ctrl.Call(protocol.MethodRunList, protocol.RunListParams{WorkspaceID: run.WorkspaceID}, &listed); err != nil {
+			t.Fatalf("run.list: %v", err)
+		}
+		for _, candidate := range listed.Runs {
+			if candidate.ID == run.ID {
+				assertRun("run.list", candidate)
+				return
+			}
+		}
+		t.Fatalf("run.list omitted %s", run.ID)
+	}
+	steps := []struct {
+		name    string
+		report  protocol.RunReportParams
+		pending []domain.RunInputRequest
+	}{
+		{
+			name: "working with independent pending inputs",
+			report: protocol.RunReportParams{
+				State: string(agentstatus.Working),
+				InputUpdates: []domain.RunInputUpdate{
+					update("open", question), update("open", permission),
+				},
+			},
+			pending: []domain.RunInputRequest{question, permission},
+		},
+		{
+			name:    "input-only open preserves working execution",
+			report:  protocol.RunReportParams{InputUpdates: []domain.RunInputUpdate{update("open", otherSession)}},
+			pending: []domain.RunInputRequest{question, permission, otherSession},
+		},
+		{
+			name:    "close matches kind as well as session and id",
+			report:  protocol.RunReportParams{InputUpdates: []domain.RunInputUpdate{update("close", permission)}},
+			pending: []domain.RunInputRequest{question, otherSession},
+		},
+		{
+			name:    "close preserves another session's same id",
+			report:  protocol.RunReportParams{InputUpdates: []domain.RunInputUpdate{update("close", question)}},
+			pending: []domain.RunInputRequest{otherSession},
+		},
+		{
+			name:    "last close clears input without changing execution",
+			report:  protocol.RunReportParams{InputUpdates: []domain.RunInputUpdate{update("close", otherSession)}},
+			pending: []domain.RunInputRequest{},
+		},
+	}
+	var inputEvents []events.Event
+	var lastSeq uint64
+	for index, step := range steps {
+		if !t.Run(step.name, func(t *testing.T) {
+			if err := coordtransport.Call(ctx, socket, protocol.MethodRunReport, step.report, nil); err != nil {
+				t.Fatalf("run.report: %v", err)
+			}
+			ev := waitEvent(t, sub, &seen, step.name, func(ev events.Event) bool {
+				return ev.RunID == domain.RunID(run.ID) && ev.Type == events.TypeRunInput && ev.Seq > lastSeq
+			})
+			p, ok := ev.Payload.(events.RunInputPayload)
+			if !ok || p.PendingInputs == nil || !sameInputs(p.PendingInputs, step.pending) {
+				t.Fatalf("run.input payload = %+v, want %+v", ev.Payload, step.pending)
+			}
+			lastSeq = ev.Seq
+			inputEvents = append(inputEvents, ev)
+			assertSnapshots(t, domain.RunRunning, step.pending)
+			if index == 0 {
+				// Mutation responses seed the same client cache as get/list.
+				// Protecting a Working run must not erase its pending requests.
+				var protected protocol.RunResult
+				if err := ctrl.Call(protocol.MethodRunProtect, protocol.RunProtectParams{RunID: run.ID, Protected: true}, &protected); err != nil {
+					t.Fatalf("run.protect: %v", err)
+				}
+				if !protected.Run.Protected || protected.Run.Status != string(domain.RunRunning) || !sameInputs(protected.Run.PendingInputs, step.pending) {
+					t.Fatalf("protection response erased execution/input state: %+v", protected.Run)
+				}
+			}
+		}) {
+			return
+		}
+	}
+	// A repeated close is idempotent, and an idle report is not an input
+	// request. The status event is a durable barrier for replay below.
+	if err := coordtransport.Call(ctx, socket, protocol.MethodRunReport, protocol.RunReportParams{
+		InputUpdates: []domain.RunInputUpdate{update("close", otherSession)},
+	}, nil); err != nil {
+		t.Fatalf("repeated close: %v", err)
+	}
+	if err := coordtransport.Call(ctx, socket, protocol.MethodRunReport, protocol.RunReportParams{
+		State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle,
+	}, nil); err != nil {
+		t.Fatalf("idle report: %v", err)
+	}
+	idle := waitEvent(t, sub, &seen, "idle without pending inputs", func(ev events.Event) bool {
+		p, ok := ev.Payload.(events.RunStatusPayload)
+		return ok && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention && ev.Seq > lastSeq
+	})
+	assertSnapshots(t, domain.RunNeedsAttention, []domain.RunInputRequest{})
+
+	replay, err := srv.srv.Bus().Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Run: domain.RunID(run.ID)}, Replay: true, Buffer: 128,
+	})
+	if err != nil {
+		t.Fatalf("subscribe durable replay: %v", err)
+	}
+	defer replay.Close()
+	var replayed []events.Event
+	waitEvent(t, replay, &replayed, "durable idle barrier", func(ev events.Event) bool {
+		return ev.Seq == idle.Seq
+	})
+	var replayedInputs []events.Event
+	for _, ev := range replayed {
+		if ev.Type == events.TypeRunInput {
+			replayedInputs = append(replayedInputs, ev)
+		}
+	}
+	if len(replayedInputs) != len(inputEvents) {
+		t.Fatalf("durable input events = %d, want %d (no event for duplicate close or idle)",
+			len(replayedInputs), len(inputEvents))
+	}
+	for i, ev := range replayedInputs {
+		p, ok := ev.Payload.(events.RunInputPayload)
+		if ev.Seq != inputEvents[i].Seq || !ok || p.PendingInputs == nil || !sameInputs(p.PendingInputs, steps[i].pending) {
+			t.Fatalf("durable input event %d = %+v, want seq %d, inputs %+v",
+				i, ev, inputEvents[i].Seq, steps[i].pending)
+		}
 	}
 }

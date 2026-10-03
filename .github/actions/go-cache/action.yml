@@ -42,14 +42,30 @@ runs:
         key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}
         restore-keys: |
           go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-
-    - name: Save Go modules
+    - name: Check for saved Go modules
+      id: saved-modules
       if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.mod }}
+        key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
+        lookup-only: true
+    - name: Save Go modules
+      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-modules.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.paths.outputs.mod }}
         key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
-    - name: Save Go compiler cache
+    - name: Check for saved Go compiler cache
+      id: saved-build
       if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}
+        lookup-only: true
+    - name: Save Go compiler cache
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-build.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ${{ steps.paths.outputs.build }}

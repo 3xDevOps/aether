@@ -1,6 +1,7 @@
 import { Archive, ChevronDown, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -14,13 +15,14 @@ import { MemberAvatar } from '@/routes/board/member-avatar'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { approvalsForRun } from '@/store/approvals'
+import { useRunInput } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 const lifecycleLabel: Record<RunRecord['status'], string> = {
   queued: 'Queued',
   provisioning: 'Provisioning',
   running: 'Running',
-  'needs-attention': 'Needs attention',
+  'needs-attention': 'Idle',
   completed: 'Completed',
   merged: 'Merged',
   abandoned: 'Abandoned',
@@ -51,8 +53,8 @@ export function RunCard({
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
   const unseenId = unseen ? `${detailsId}-unseen` : undefined
-  const unansweredCount =
-    state === 'needs-attention' ? Math.max(0, run.unanswered_questions ?? 0) : 0
+  const input = useRunInput(run)
+  const unansweredCount = input.questions
   const questionAction =
     unansweredCount > 0
       ? `${unansweredCount} unanswered ${
@@ -72,10 +74,7 @@ export function RunCard({
   // run can also carry a lifecycle reason, but that reason belongs below the
   // action rather than replacing it.
   const summary = useStore((s) =>
-    questionAction ||
-    (state === 'needs-attention' && !run.reason
-      ? (approvalsForRun(s.inbox, run.id)[0]?.action ?? '')
-      : run.reason ?? ''),
+    questionAction || approvalsForRun(s.inbox, run.id)[0]?.action || input.summary || run.reason || '',
   )
   const handleCardClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target
@@ -174,9 +173,7 @@ export function RunCard({
           <div className="flex h-[22px] min-w-0 items-center gap-1 coarse:h-11">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
               <StateChip state={state} />
-              {finishedQuestion && (
-                <span className="shrink-0 text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}</span>
-              )}
+              <RunInputIndicator run={run} />
               {paused && (
                 <span title="Paused" className="shrink-0">
                   <Chip color="warning" variant="soft" size="sm">
@@ -220,7 +217,7 @@ export function RunCard({
             </span>
             {unseen && <span id={unseenId} className="sr-only">Unseen</span>}
           </button>
-          {state === 'needs-attention' && summary && (
+          {(input.count > 0 || state === 'needs-attention') && summary && (
             <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
               {summary}
             </p>

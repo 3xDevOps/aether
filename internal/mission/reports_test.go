@@ -3,12 +3,18 @@ package mission
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -19,6 +25,11 @@ type recordingCanceller struct {
 }
 
 func (c *recordingCanceller) CancelMission(_ context.Context, run domain.RunID) error {
+	c.runs = append(c.runs, run)
+	return c.err
+}
+
+func (c *recordingCanceller) CompleteMission(_ context.Context, run domain.RunID, _ domain.RunStatus) error {
 	c.runs = append(c.runs, run)
 	return c.err
 }
@@ -118,7 +129,7 @@ func setupReconcileReportRequirements(t *testing.T, outcome store.CoordOutcome, 
 	bus := &recordingBus{}
 	svc, err := New(Config{
 		Store: db, Missions: db, Evidence: &mutableEvidenceReader{packet: packet},
-		Cancel: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{},
+		Cancel: canceller, Complete: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{},
 		Now: func() time.Time { return clock },
 	})
 	if err != nil {
@@ -194,7 +205,7 @@ func TestReconcileReportBlockedKeepsWorkerRunning(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureMarksAttemptAndCancels(t *testing.T) {
+func TestReconcileReportFailureRetainsBeforeReleasingAttempt(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
@@ -219,7 +230,7 @@ func TestReconcileReportFailureMarksAttemptAndCancels(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
+func TestReconcileReportFailureKeepsCapacityOnRetentionError(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	fix.canceller.err = errors.New("scheduler unavailable")
@@ -231,8 +242,8 @@ func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
 	if getErr != nil {
 		t.Fatalf("get attempt: %v", getErr)
 	}
-	if attempt.State != domain.AttemptFailed {
-		t.Fatalf("attempt state after cancel error = %q, want failed", attempt.State)
+	if !attempt.State.HoldsConcurrency() {
+		t.Fatalf("attempt state after retention error = %q, want capacity held", attempt.State)
 	}
 	if len(fix.canceller.runs) != 1 || fix.canceller.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", fix.canceller.runs, fix.attempt.RunID)
@@ -248,7 +259,7 @@ type settlingCanceller struct {
 	runs    []domain.RunID
 }
 
-func (c *settlingCanceller) CancelMission(ctx context.Context, run domain.RunID) error {
+func (c *settlingCanceller) CompleteMission(ctx context.Context, run domain.RunID, _ domain.RunStatus) error {
 	c.runs = append(c.runs, run)
 	if c.db == nil || c.attempt == nil {
 		return nil
@@ -309,11 +320,11 @@ func TestReconcileReportFailureCancelsBeforePublishError(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
+func TestReconcileReportFailurePreservesConcurrentCancellation(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	settler := &settlingCanceller{db: fix.db, attempt: fix.attempt}
-	fix.svc.cfg.Cancel = settler
+	fix.svc.cfg.Complete = settler
 	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
 		t.Fatalf("ReconcileReport failure: %v", err)
 	}
@@ -321,11 +332,8 @@ func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get attempt: %v", err)
 	}
-	if attempt.State != domain.AttemptFailed {
-		t.Fatalf("attempt state after raced cancel = %q, want failed", attempt.State)
-	}
-	if attempt.LastError != report.Summary {
-		t.Fatalf("attempt detail = %q, want %q", attempt.LastError, report.Summary)
+	if attempt.State != domain.AttemptCancelled {
+		t.Fatalf("attempt state after raced cancel = %q, want cancelled", attempt.State)
 	}
 	if len(settler.runs) != 1 || settler.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", settler.runs, fix.attempt.RunID)
@@ -360,28 +368,33 @@ func TestReconcileRecordsAWorkerThatEndedWithoutAReport(t *testing.T) {
 	}
 }
 
-type reportAdmissionCanceller struct {
-	authorizationMu *sync.Mutex
-}
-
-func (c reportAdmissionCanceller) CancelMission(context.Context, domain.RunID) error {
-	if !c.authorizationMu.TryLock() {
-		return errors.New("report cancellation retained mission authorization")
-	}
-	c.authorizationMu.Unlock()
-	return nil
-}
-
-func TestReconcileReportDefersContendedTerminalTransition(t *testing.T) {
+func TestCoordReportWaitsForAdmissionWithoutBlockingRelease(t *testing.T) {
 	for _, outcome := range []store.CoordOutcome{store.CoordOutcomeSuccess, store.CoordOutcomeFailure} {
 		t.Run(string(outcome), func(t *testing.T) {
-			ctx := context.Background()
-			f, report := setupReconcileReport(t, outcome)
-			report.IdempotencyKey = "contended-report"
-			if _, err := f.db.ReserveCoordReport(ctx, report); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			f, _ := setupReconcileReport(t, outcome)
+			f.packet.Sources = nil
+			capture := &reportAdmissionCapture{
+				packet: f.packet, entered: make(chan struct{}), resume: make(chan struct{}),
+			}
+			resume := sync.OnceFunc(func() { close(capture.resume) })
+			defer resume()
+			dir, err := os.MkdirTemp("", "mission-report-")
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.db.FinalizeCoordReport(ctx, report); err != nil {
+			t.Cleanup(func() { _ = os.RemoveAll(dir) })
+			coordSvc, err := coord.New(coord.Config{
+				Dir: dir, Store: f.db, Mail: f.db, Bus: f.bus,
+				Peers: overlap.NewIndex(f.bus, f.db, nil), Mission: f.svc, Evidence: capture,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = coordSvc.Close() })
+			runDir, err := coordSvc.Provision(ctx, f.attempt.RunID, nil)
+			if err != nil {
 				t.Fatal(err)
 			}
 			before, err := f.db.GetAttempt(ctx, f.attempt.ID)
@@ -392,31 +405,79 @@ func TestReconcileReportDefersContendedTerminalTransition(t *testing.T) {
 			mu.Lock()
 			unlock := sync.OnceFunc(mu.Unlock)
 			defer unlock()
-			done := make(chan error, 1)
-			go func() { done <- f.svc.ReconcileReport(ctx, f.attempt.RunID, report, f.packet) }()
+			var receipt protocol.CoordReportResult
+			reportDone := make(chan error, 1)
+			go func() {
+				reportDone <- coordtransport.Call(ctx, filepath.Join(runDir, coordtransport.SocketName),
+					protocol.MethodCoordReport, protocol.CoordReportParams{
+						Outcome: string(outcome), Summary: "finished without user evidence", IdempotencyKey: "contended-report",
+					}, &receipt)
+			}()
 			select {
-			case reportErr := <-done:
-				if !errors.Is(reportErr, store.ErrConflict) {
-					t.Fatalf("contended report = %v, want retryable conflict", reportErr)
+			case <-capture.entered:
+			case <-ctx.Done():
+				t.Fatal("report did not reach evidence capture")
+			}
+			// Cancellation can hold mission admission while synchronously releasing
+			// coordination. The accepted socket must still return its durable receipt.
+			released := make(chan error, 1)
+			go func() { released <- coordSvc.Release(f.attempt.RunID) }()
+			resume()
+			select {
+			case err = <-released:
+				if err != nil {
+					t.Fatal(err)
 				}
-			case <-time.After(time.Second):
-				t.Fatal("report waited on authorization while retaining its caller's run reference")
+			case <-ctx.Done():
+				t.Fatal("report pinned coordination release while waiting for admission")
 			}
 			current, err := f.db.GetAttempt(ctx, f.attempt.ID)
 			if err != nil || current.State != before.State {
-				t.Fatalf("contended report changed attempt: %+v, %v", current, err)
-			}
-			if len(f.canceller.runs) != 0 {
-				t.Fatal("contended report cancelled a still-admitted worker")
+				t.Fatalf("report bypassed mission admission: %+v, %v", current, err)
 			}
 			pending, err := f.db.ListPendingCoordReportPublications(ctx, 10)
-			if err != nil || len(pending) != 1 || pending[0].ReportID != report.ID {
-				t.Fatalf("contended report lost its durable retry: %+v, %v", pending, err)
+			if err != nil || len(pending) != 1 {
+				t.Fatalf("report did not retain its durable publication: %+v, %v", pending, err)
+			}
+			var outboxDone chan error
+			if outcome == store.CoordOutcomeSuccess {
+				finalized, getErr := f.db.GetCoordReport(ctx, pending[0].ReportID)
+				if getErr != nil {
+					t.Fatal(getErr)
+				}
+				// The durable outbox races the still-pending socket request for
+				// the same submission; both must reconcile the one report.
+				outboxDone = make(chan error, 1)
+				go func() {
+					outboxDone <- f.svc.ReconcileReport(ctx, f.attempt.RunID, finalized, f.packet)
+				}()
 			}
 			unlock()
-			f.svc.cfg.Cancel = reportAdmissionCanceller{authorizationMu: mu}
-			if err = f.svc.ReconcileReport(ctx, f.attempt.RunID, report, f.packet); err != nil {
-				t.Fatalf("retry after admission release: %v", err)
+			select {
+			case err = <-reportDone:
+				if err != nil {
+					t.Fatalf("coord.report after admission release: %v", err)
+				}
+			case <-ctx.Done():
+				t.Fatal("admitted report did not return its receipt")
+			}
+			if outboxDone != nil {
+				select {
+				case err = <-outboxDone:
+					if err != nil {
+						t.Fatalf("concurrent outbox reconciliation: %v", err)
+					}
+				case <-ctx.Done():
+					t.Fatal("concurrent outbox reconciliation did not finish")
+				}
+			}
+			if receipt.ReportID != pending[0].ReportID || receipt.EvidenceRef != f.packet.ID ||
+				receipt.Outcome != string(outcome) {
+				t.Fatalf("report receipt lost finalized identity: %+v", receipt)
+			}
+			stored, err := f.db.GetCoordReport(ctx, receipt.ReportID)
+			if err != nil || stored.State != store.CoordReportFinalized || stored.PublishedAt == nil {
+				t.Fatalf("admitted report was not durably published: %+v, %v", stored, err)
 			}
 			want := domain.AttemptSubmitted
 			if outcome == store.CoordOutcomeFailure {
@@ -424,8 +485,42 @@ func TestReconcileReportDefersContendedTerminalTransition(t *testing.T) {
 			}
 			current, err = f.db.GetAttempt(ctx, f.attempt.ID)
 			if err != nil || current.State != want {
-				t.Fatalf("retried report state = %+v, %v; want %s", current, err, want)
+				t.Fatalf("admitted report state = %+v, %v; want %s", current, err, want)
+			}
+			submissions, err := f.db.ListSubmissions(ctx, f.mission.ID, f.task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome == store.CoordOutcomeFailure {
+				if len(submissions) != 0 {
+					t.Fatalf("failure became a task submission: %+v", submissions)
+				}
+				return
+			}
+			if len(submissions) != 1 || submissions[0].AttemptID != f.attempt.ID ||
+				submissions[0].Ref.EvidenceRef != receipt.EvidenceRef {
+				t.Fatalf("success lost its exact worker submission: %+v", submissions)
+			}
+			task, err := f.db.GetTask(ctx, f.task.ID)
+			if err != nil || task.Status != domain.TaskReview {
+				t.Fatalf("missing-evidence success did not remain in Review: %+v, %v", task, err)
 			}
 		})
+	}
+}
+
+type reportAdmissionCapture struct {
+	packet  protocol.EvidencePacket
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (c *reportAdmissionCapture) Capture(ctx context.Context, _ evidence.Request) (protocol.EvidencePacket, error) {
+	close(c.entered)
+	select {
+	case <-c.resume:
+		return c.packet, nil
+	case <-ctx.Done():
+		return protocol.EvidencePacket{}, ctx.Err()
 	}
 }

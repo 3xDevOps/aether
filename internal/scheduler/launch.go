@@ -336,14 +336,15 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // when a kill was accepted meanwhile.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	entry := &supervised{
-		runID:       run.ID,
-		workspaceID: run.WorkspaceID,
-		task:        run.Task,
-		memberID:    run.HomeMember(),
-		launchMode:  run.Mode,
-		status:      domain.RunProvisioning,
-		startedAt:   time.Now().UTC(),
-		done:        make(chan struct{}),
+		runID:           run.ID,
+		workspaceID:     run.WorkspaceID,
+		task:            run.Task,
+		memberID:        run.HomeMember(),
+		launchMode:      run.Mode,
+		missionAssigned: persistSupervisor,
+		status:          domain.RunProvisioning,
+		startedAt:       time.Now().UTC(),
+		done:            make(chan struct{}),
 	}
 	s.mu.Lock()
 	if pending := s.pending[run.ID]; pending != nil && pending.killRequested {

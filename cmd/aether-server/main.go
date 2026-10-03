@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -45,6 +46,11 @@ func main() {
 		exitOn(mcp(args))
 	case "report":
 		report(args)
+	case "package-exchange":
+		if len(args) != 2 {
+			exitOn(fmt.Errorf("usage: aether-server package-exchange <installed> <staged>"))
+		}
+		exitOn(harness.ExchangePackages(args[0], args[1]))
 	case "serve":
 		exitOn(serve(args))
 	case "install":
@@ -149,7 +155,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long an explicitly closed TUI run's container is retained (0 = 168h / 7 days, negative = no retention)")
+		"how long closed TUI and completed mission-run containers are retained (0 = 168h / 7 days, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
 	return o

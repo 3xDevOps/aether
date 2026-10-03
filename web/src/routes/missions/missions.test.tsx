@@ -710,7 +710,6 @@ describe('mission integrator run', () => {
     })
     expect(useStore.getState().runs.run_integrator?.status).toBe('needs-attention')
     const authorization = within(screen.getByRole('region', { name: 'Mission authorization' }))
-    expect(authorization.getByText('Needs you')).toBeDefined()
     expect(authorization.getByText('waiting for approval')).toBeDefined()
     expect(authorization.getByRole('button', { name: 'Open integrator run' })).toBeDefined()
     expect(screen.queryByText(/has not started/)).toBeNull()

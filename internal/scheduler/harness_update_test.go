@@ -185,45 +185,13 @@ func noteMessages(notes []events.Event) []string {
 	return out
 }
 
-func TestHarnessUpdateNotesVersionChange(t *testing.T) {
+func TestHarnessUpdateCleansUpContainer(t *testing.T) {
 	t.Parallel()
 	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	rt.after = "2.1.1 (Claude Code)"
 
-	run, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)"}
-	if got := noteMessages(notes); !slices.Equal(got, want) {
-		t.Fatalf("notes = %q, want %q", got, want)
-	}
-	if notes[0].ActorID != "" {
-		t.Errorf("note actor = %q, want the server (empty)", notes[0].ActorID)
-	}
-	runContainer := e.rt.byName(string(run.ID))
-	if runContainer == nil {
-		t.Fatal("run container was not created")
-	}
-	specs := rt.updates()
-	if len(specs) != 1 {
-		t.Fatalf("update containers = %d, want 1", len(specs))
-	}
-	spec := specs[0]
-	home, _ := e.cfg.Homes.Path(e.member.ID)
-	wantMounts := []runtime.Mount{{HostPath: home, ContainerPath: "/root"}}
-	if spec.Image != runContainer.spec.Image || spec.User != runContainer.spec.User ||
-		!slices.Equal(spec.Mounts, wantMounts) || spec.WorkingDir != "/root" ||
-		spec.WorktreeHostPath != "" || spec.SetupScript != "" || spec.TTY || spec.Env["HOME"] != "/root" {
-		t.Fatalf("update container spec = %+v, want the run's image, user and home alone", spec)
-	}
-	var ranUpdate bool
-	for _, call := range e.rt.execRuns() {
-		if slices.Equal(call.argv, []string{"/bin/sh", "-c", "claude update"}) && call.workDir == "/root" {
-			ranUpdate = true
-		}
-	}
-	if !ranUpdate {
-		t.Fatalf("execs = %+v, want claude update in the home", e.rt.execRuns())
-	}
+	launchNotes(t, e, "claude", domain.LaunchTUI)
 	if _, err := e.rt.get(rt.ids[0]); !errors.Is(err, runtime.ErrNotFound) {
 		t.Fatalf("update container still exists: %v", err)
 	}

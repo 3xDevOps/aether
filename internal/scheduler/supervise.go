@@ -103,6 +103,23 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 		return
 	}
 	if retained {
+		s.mu.Lock()
+		keep := entry.missionAssigned && !entry.destroyPending && s.cfg.RunContainerTTL >= 0 &&
+			entry.retainedUntil != nil && time.Now().UTC().Before(*entry.retainedUntil) && err == nil
+		if keep {
+			entry.exitObserved = true
+			entry.exitCode = st.Code
+			entry.paused = false
+			if persistErr := s.persistRetainedSidecar(entry.sidecar()); persistErr != nil {
+				entry.evidencePending = true
+				slog.Warn("scheduler: persist retained worker exit", "run", entry.runID, "error", persistErr)
+			}
+		}
+		s.mu.Unlock()
+		if keep {
+			entry.lifecycleMu.Unlock()
+			return
+		}
 		if err := s.expireRetainedLocked(context.Background(), entry); err != nil {
 			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
 		}
@@ -141,7 +158,8 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 
 // finalize implements the pinned exit handling (§6.6): stop the watches,
 // commit results ("aether:" on clean exit, "wip:" otherwise), publish the
-// run branch, record the completed or final status, destroy the container.
+// run branch, and record the outcome. Mission containers are retained unless
+// killed; ordinary exits follow the immediate destruction path.
 // The caller has already released entry.lifecycleMu; the finalizing flag
 // keeps other destructive lifecycle operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
@@ -167,6 +185,10 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		slog.Warn("scheduler: publish run branch", "run", entry.runID, "error", publishErr)
 	}
 
+	// Serialize the terminal ownership handoff with Kill. Retention keeps
+	// this admission through settlement; destructive finalization releases it
+	// after the handoff so Close can relabel while runtime cleanup is pending.
+	entry.lifecycleMu.Lock()
 	var (
 		to     domain.RunStatus
 		reason string
@@ -186,6 +208,26 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if entry.killRequested {
 		to, reason, actor = domain.RunAbandoned, "killed", entry.killActor
 	}
+	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0
+	if retain {
+		deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
+		entry.evidenceIdentity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
+		sc := entry.sidecar()
+		sc.Retained = true
+		sc.RetainedUntil = &deadline
+		sc.EvidencePending = true
+		if persistErr := s.persistRetainedSidecar(sc); persistErr != nil {
+			entry.finalizing = false
+			s.mu.Unlock()
+			slog.Warn("scheduler: persist completed worker retention", "run", entry.runID, "error", persistErr)
+			entry.lifecycleMu.Unlock()
+			return
+		}
+		entry.retained = true
+		entry.retainedUntil = &deadline
+		entry.evidencePending = true
+		reason = retainedCompletionReason
+	}
 	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
@@ -193,6 +235,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		// Without a durable terminal row, destruction would orphan the
 		// recoverable checkout and transcript.
 		s.retainAfterEvidenceFailure(entry)
+		entry.lifecycleMu.Unlock()
 		return
 	}
 
@@ -201,7 +244,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if s.runs[entry.runID] == entry {
 		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
 		entry.evidenceIdentity = identity
-		entry.evidencePending = false
+		entry.evidencePending = retain
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
 			slog.Warn("scheduler: persist evidence identity", "run", entry.runID, "error", sidecarErr)
 		}
@@ -210,6 +253,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if identity == "" {
 		identity = finishCaptureIdentity("", published, committed, code)
 	}
+	if retain {
+		defer entry.lifecycleMu.Unlock()
+		if settleErr := s.settleRetainedCompletion(ctx, entry); settleErr != nil {
+			slog.Warn("scheduler: settle completed worker retention", "run", entry.runID, "error", settleErr)
+		}
+		_ = s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID))
+		s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
+		return
+	}
+	entry.lifecycleMu.Unlock()
 	if captureErr := s.captureFinishEvidence(ctx, entry.runID, to, identity); captureErr != nil {
 		logEvidenceFailure(entry.runID, captureErr)
 		s.retainAfterEvidenceFailure(entry)
@@ -273,7 +326,7 @@ func (s *Scheduler) sweepRetained(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0)
 	for _, entry := range s.runs {
-		if entry.destroyPending || (entry.retained && entry.retainedUntil != nil) {
+		if entry.destroyPending || (entry.retained && entry.retainedUntil != nil) || (entry.exitObserved && !entry.finalizing) {
 			entries = append(entries, entry)
 		}
 	}
@@ -284,10 +337,27 @@ func (s *Scheduler) sweepRetained(ctx context.Context) {
 		pending := s.runs[entry.runID] == entry && entry.destroyPending
 		due := s.runs[entry.runID] == entry && entry.retainedUntil != nil &&
 			!now.Before(*entry.retainedUntil)
+		settle := s.runs[entry.runID] == entry && entry.retained && entry.status.Terminal() &&
+			entry.evidencePending
+		finalize := s.runs[entry.runID] == entry && entry.exitObserved && !entry.status.Terminal() && !entry.finalizing
+		if finalize {
+			entry.finalizing = true
+		}
 		s.mu.Unlock()
 		if pending {
 			s.retryDestroyPending(ctx, entry)
 			continue
+		}
+		if finalize {
+			s.finalize(entry, entry.exitCode)
+			continue
+		}
+		if settle && !due {
+			entry.lifecycleMu.Lock()
+			if err := s.settleRetainedCompletion(ctx, entry); err != nil {
+				slog.Warn("scheduler: settle retained run", "run", entry.runID, "error", err)
+			}
+			entry.lifecycleMu.Unlock()
 		}
 		if due {
 			if err := s.expireRetained(ctx, entry); err != nil {
@@ -499,11 +569,11 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// A run whose harness reports both ends of a turn and has said
 			// it is waiting is released by the agent's own next report, not
 			// by anything on the terminal.
-			heldForTheMember := e.agentReport.State == agentstatus.Waiting &&
+			heldForTheMember := e.agentReport.State == agentstatus.Idle &&
 				e.reporter == harness.ReporterFull
 			released := e.status == domain.RunNeedsAttention && observed &&
 				idle <= s.cfg.StallThreshold && !heldForTheMember
-			if released && e.agentReport.State == agentstatus.Waiting {
+			if released && e.agentReport.State == agentstatus.Idle {
 				released = e.unparks(activity, s.cfg.turnTail)
 			}
 			var err error
@@ -719,9 +789,8 @@ func (s *Scheduler) sweepArchived(ctx context.Context) {
 }
 
 // sweepArchivedRun holds archiveMu across the re-read and the delete so a
-// restore cannot race it. A run whose reason is retainedCloseReason is
-// skipped: DeleteRun would take its lifecycleMu, which Relaunch takes
-// before archiveMu.
+// restore cannot race it. Runs with durable container ownership are skipped:
+// DeleteRun would take lifecycleMu, which Relaunch takes before archiveMu.
 func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) error {
 	s.archiveMu.Lock()
 	defer s.archiveMu.Unlock()
@@ -734,7 +803,7 @@ func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutof
 		return fmt.Errorf("reread run: %w", err)
 	}
 	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() ||
-		fresh.Reason == retainedCloseReason {
+		s.RetainsContainer(ctx, id) {
 		return nil
 	}
 

@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-install.yml'
+      - '.github/actions/go-cache/**'
+      - '.github/actions/bun-cache/**'
       - 'scripts/install*.ps1'
       - 'cmd/aether/**'
       - 'internal/localops/**'
@@ -15,6 +17,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/windows-install.yml'
+      - '.github/actions/go-cache/**'
+      - '.github/actions/bun-cache/**'
       - 'scripts/install*.ps1'
       - 'cmd/aether/**'
       - 'internal/localops/**'

@@ -13,7 +13,7 @@ import {
 } from '@/routes/admin-dialogs'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, usePendingApprovalRuns } from '@/store/hooks'
+import { useCapability, useIsAdmin } from '@/store/hooks'
 import { sidebarRuns } from '@/store/selectors'
 
 /**
@@ -27,7 +27,6 @@ export function WorkspaceView({ params }: RouteProps) {
   const allRuns = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
   const groupBy = useStore((s) => s.groupBy)
-  const pending = usePendingApprovalRuns()
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const [dialog, setDialog] = useState<'budget' | 'settings' | 'mirror' | null>(null)
@@ -57,9 +56,8 @@ export function WorkspaceView({ params }: RouteProps) {
         runs: allRuns,
         members,
         groupBy,
-        pending,
       }),
-    [workspaceID, allRuns, members, groupBy, pending],
+    [workspaceID, allRuns, members, groupBy],
   )
 
   if (!workspace) {

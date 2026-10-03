@@ -1,5 +1,6 @@
 import { Archive, GitCommitHorizontal, Shield } from 'lucide-react'
 import { RunActions } from '@/components/run-actions'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { StateIndicator } from '@/components/state-dot'
 import { deletesInLabel, timeAgo } from '@/lib/format'
 import { runLabel, runState, stateLabel, type PresentationState } from '@/lib/status'
@@ -7,7 +8,6 @@ import { focusRing } from '@/lib/utils'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
-import { usePendingApprovalRuns } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 function stateTone(state: PresentationState) {
@@ -48,12 +48,11 @@ export function RunHeader({
   subtitle?: string
   active: string
 }) {
-  const pending = usePendingApprovalRuns()
   const owner = useStore((s) => s.members[run.member_id])
   const account = useStore((s) =>
     run.account_member_id ? s.members[run.account_member_id] : undefined,
   )
-  const state = runState(run.status, pending.has(run.id))
+  const state = runState(run.status)
   const label = runLabel(run)
   const task = run.task.trim()
   const detail = subtitle?.trim()
@@ -103,6 +102,7 @@ export function RunHeader({
               />
               <span>{stateLabel[state]}</span>
             </span>
+            <RunInputIndicator run={run} />
             <span className="shrink-0 whitespace-nowrap font-mono text-[11px]">
               {run.harness}
               <span className="mx-1 text-muted-foreground/70" aria-hidden>
