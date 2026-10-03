@@ -279,8 +279,9 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 }
 
 // Discovery on a shared account describes what a launch there would run: the
-// caller's own installations and definitions, never the owner's, and whether
-// the owner has the login each agent needs.
+// caller's own definitions, never the owner's, an agent installed in either
+// home, since a launch borrows the owner's installation when the caller has
+// none, and whether the owner has the login each agent needs.
 func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	t.Parallel()
 	s, owner := newAgentTestServer(t)
@@ -364,7 +365,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("the owner's definition is listed for the grantee: %+v", agents)
 	}
 	for name, want := range map[string]protocol.AgentInfo{
-		"claude": {Name: "claude", Source: "shipped", Installed: false, LoginMissing: true},
+		"claude": {Name: "claude", Source: "shipped", Installed: true, LoginMissing: true},
 		"codex":  {Name: "codex", Source: "shipped", Installed: true},
 		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
 		"omp":    {Name: "omp", Source: "shipped", Installed: false, Unavailable: refusal},

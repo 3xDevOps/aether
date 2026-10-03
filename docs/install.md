@@ -405,12 +405,12 @@ way to get there is to have just updated.
 ### Account share migration
 
 A run on a shared agent account now uses its launcher's image and home and
-mounts only the agent's login from the account owner's home
-([security.md](security.md#account-sharing)). Recipients install the agent in
-their own environment (**Agents** > **Add agent**, or `aether agent add`) and
-connect their own GitHub (**Connect GitHub** in the local dashboard's
-onboarding, or `aether github connect`); they no longer get the owner's tools,
-image, GitHub login, or files. Runs on a shared account, and every container
+mounts the agent's login from the account owner's home, plus the owner's
+agent installation, read-only, when the launcher has none
+([security.md](security.md#account-sharing)). Recipients connect their own
+GitHub (**Connect GitHub** in the local dashboard's onboarding, or `aether
+github connect`); they no longer get the owner's image, GitHub login, or
+other files. Runs on a shared account, and every container
 that mounts a sharing owner's home (their runs, their environment terminal,
 and candidate verification started by them or by their runs), need Docker
 Engine 26.0 or newer; on an older engine Aether refuses them with `runtime:

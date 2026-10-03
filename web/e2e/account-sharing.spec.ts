@@ -1,14 +1,16 @@
 // Account sharing through the dashboard: the owner shares on Members, the
 // recipient's launch dialog offers the owner's account only after that, lists
-// the recipient's own installed agents for it, and the run launches in the
-// recipient's environment with the owner's login mounted.
+// the agents installed in either home for it, and the run launches in the
+// recipient's environment with the owner's login mounted and, since the
+// recipient has no installation of their own, the owner's.
 //
 // The launch dialog never lists the scheduler's `fake` harness, so the run is
-// launched by a `claude` shim installed in the recipient's home. On a shared
-// account `claude` needs a login in the owner's home: the spec writes a
-// placeholder `~/.claude/.credentials.json` there, which the scheduler mounts
-// into the run as a Docker volume subpath (Docker Engine 26.0 or newer). The
-// shim prints the login it sees, so the run's terminal shows whose it is.
+// launched by a `claude` shim installed only in the owner's home, which the
+// scheduler mounts read-only into the run. On a shared account `claude` also
+// needs a login in the owner's home: the spec writes a placeholder
+// `~/.claude/.credentials.json` there. Both are Docker volume subpath mounts
+// (Docker Engine 26.0 or newer). The shim prints the login it sees, so the
+// run's terminal shows whose it is.
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -19,8 +21,8 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'the environment terminal and the run need a reachable Docker daemon')
 
-/** What the recipient's `claude` shim runs: the seed repository's script,
- * then the login at the harness's login path. */
+/** What the owner's `claude` shim runs: the seed repository's script, then
+ * the login at the harness's login path. */
 const agentShim = `sh /workspace/agent.sh
 printf 'login-seen:%s\\n' "$(cat "$HOME/.claude/.credentials.json")"`
 const ownerLogin = '{"claudeAiOauth":{"owner":"alice-e2e"}}'
@@ -44,8 +46,8 @@ test('a member shares their agent account and a teammate launches on it', async 
   const aliceName = await displayName(alice)
   const bobName = await displayName(bob)
   const aliceID = await memberID(alice)
-  // The recipient has claude installed; only the owner has codex.
-  aether.installAgent(await memberID(bob), 'claude', agentShim)
+  // Only the owner has agents installed; the recipient has none.
+  aether.installAgent(aliceID, 'claude', agentShim)
   aether.installAgent(aliceID, 'codex')
 
   const bobContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -98,21 +100,22 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(confirm).toBeHidden()
     await expect(notice).toBeHidden()
 
-    // After the share, Alice's account is offered, with Bob's own agents:
-    // his claude, refused until Alice has a login, and not Alice's codex.
+    // After the share, Alice's account is offered with the agents installed
+    // in her home, both refused until Alice has a login.
     dialog = await openLaunch()
     const account = dialog.getByRole('combobox', { name: 'Account', exact: true })
     await account.click()
     await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to claude, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+      `${aliceName} is not logged in to claude, codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
     )
     await dialog.getByRole('combobox', { name: 'Agent', exact: true }).click()
-    await expect(bobPage.getByRole('option', { name: 'claude (not logged in)' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
-    await expect(bobPage.getByRole('option', { name: /^codex/ })).toHaveCount(0)
+    for (const agent of ['claude', 'codex']) {
+      await expect(bobPage.getByRole('option', { name: `${agent} (not logged in)` })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      )
+    }
     await bobPage.keyboard.press('Escape')
 
     // The login a vendor flow would leave in Alice's home.
@@ -122,7 +125,9 @@ test('a member shares their agent account and a teammate launches on it', async 
 
     await dialog.getByRole('button', { name: 'Refresh agents' }).click()
     await expect(dialog.getByRole('combobox', { name: 'Agent', exact: true })).toHaveText('claude')
-    await expect(dialog.getByRole('status')).toHaveCount(0)
+    await expect(dialog.getByRole('status')).toHaveText(
+      `${aliceName} is not logged in to codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+    )
     await dialog.getByLabel(/^Task/).fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
 

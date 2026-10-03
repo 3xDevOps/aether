@@ -67,8 +67,9 @@ func newShareEnv(t *testing.T, mutate func(*Config)) *shareEnv {
 	return &shareEnv{testEnv: e, owner: owner, ownerHome: ownerHome, adaHome: adaHome}
 }
 
-// ownerState is what a shared run must never reach in the owner's home.
-var ownerState = []string{".gitconfig", ".config/gh/hosts.yml", ".ssh/id_ed25519", ".codex/auth.json", ".claude/settings.json", ".bash_history"}
+// ownerState is what a shared run must never reach in the owner's home,
+// opencode's login under ~/.local/share among it.
+var ownerState = []string{".gitconfig", ".config/gh/hosts.yml", ".ssh/id_ed25519", ".codex/auth.json", ".claude/settings.json", ".bash_history", ".local/share/opencode/auth.json"}
 
 func writeHomeFiles(t *testing.T, home string, rels ...string) {
 	t.Helper()
@@ -109,9 +110,10 @@ func within(child, parent string) bool {
 }
 
 // assertOwnerExposedOnlyAt fails unless the owner's home reaches the
-// container through exactly one subpath mount per login, and none of the
-// owner's other state is under any exposed path.
-func (e *shareEnv) assertOwnerExposedOnlyAt(t *testing.T, spec runtime.Spec, logins ...string) {
+// container through exactly one subpath mount per path, a login or a
+// borrowed installation directory, and none of the owner's other state is
+// under any exposed path.
+func (e *shareEnv) assertOwnerExposedOnlyAt(t *testing.T, spec runtime.Spec, paths ...string) {
 	t.Helper()
 	var got []string
 	for _, m := range spec.Mounts {
@@ -120,12 +122,12 @@ func (e *shareEnv) assertOwnerExposedOnlyAt(t *testing.T, spec runtime.Spec, log
 			continue
 		}
 		if m.HostPath != e.ownerHome || m.Subpath == "" {
-			t.Fatalf("mount %+v exposes the owner's home other than through a login subpath", m)
+			t.Fatalf("mount %+v exposes the owner's home other than through a subpath", m)
 		}
 		got = append(got, m.Subpath)
 	}
-	if !slices.Equal(got, logins) {
-		t.Fatalf("owner home exposed at %v, want only %v", got, logins)
+	if !slices.Equal(got, paths) {
+		t.Fatalf("owner home exposed at %v, want only %v", got, paths)
 	}
 	for _, rel := range ownerState {
 		host := filepath.Join(e.ownerHome, filepath.FromSlash(rel))

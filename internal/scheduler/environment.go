@@ -45,7 +45,8 @@ type EnvironmentPlan struct {
 // server-owned mounts for one member container: the member's image and home.
 // A run launched on another member's shared account additionally mounts the
 // harness's declared login paths from that account owner's home over the
-// same paths in the member's home, and nothing else of the owner's.
+// same paths in the member's home and, when the member has no installation
+// of the harness, the owner's, read-only, and nothing else of the owner's.
 func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, profile harness.Profile, purpose EnvironmentPurpose) (*EnvironmentPlan, error) {
 	switch purpose {
 	case EnvironmentPurposeRun, EnvironmentPurposeTerminal:
@@ -137,6 +138,17 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				plan.Mounts = append(plan.Mounts, logins...)
 				plan.LoginMember = run.AccountMemberID
 			}
+			install, err := s.installMounts(member.ID, run.AccountMemberID, profile, home)
+			if err != nil {
+				return nil, err
+			}
+			if len(install) > 0 {
+				plan.Mounts = append(plan.Mounts, install...)
+				// After the image's directories too: the launcher's own
+				// executables win, and the owner's fill the gaps.
+				env["PATH"] += ":" + path.Join(home, accountBin)
+				plan.Path = env["PATH"]
+			}
 		}
 		pins, err := s.pinnedLogins(ctx, member.ID, homePath, home, plan.Mounts)
 		if err != nil {
@@ -183,6 +195,66 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 			HostPath:      ownerHome,
 			Subpath:       login.rel,
 			ContainerPath: path.Join(home, login.rel),
+		})
+	}
+	return mounts, nil
+}
+
+// accountBin and accountLib are where a launch that borrows the account
+// owner's installation mounts the owner's ~/.local/bin and ~/.local/lib in
+// the launcher's home: beside each other, so a launcher linked by relative
+// path into ../lib resolves, and apart from the launcher's own ~/.local.
+const (
+	accountBin = ".aether/account/bin"
+	accountLib = ".aether/account/lib"
+)
+
+// installMounts borrows account's installation of profile's executable for a
+// launch by launcher, whose home has none: account's ~/.local/bin and
+// ~/.local/lib at accountBin and accountLib, and each of profile's
+// InstallPaths at its own path, all read-only. It mounts nothing when
+// launcher has the executable or account has none either.
+func (s *Scheduler) installMounts(launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
+	if len(profile.TUIArgs) == 0 {
+		return nil, nil
+	}
+	installation, err := s.cfg.Homes.Installation(launcher, account, profile.TUIArgs[0])
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: find %s: %w", profile.TUIArgs[0], err)
+	}
+	if installation != account {
+		return nil, nil
+	}
+	ownerHome, err := s.cfg.Homes.Path(account)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: resolve account home: %w", err)
+	}
+	targets := map[string]string{".local/bin": accountBin, ".local/lib": accountLib}
+	rels := append([]string{".local/bin", ".local/lib"}, profile.InstallPaths...)
+	var mounts []runtime.Mount
+	for _, rel := range rels {
+		dir, pathErr := s.cfg.Homes.LoginPathIsDir(account, rel)
+		if errors.Is(pathErr, fs.ErrNotExist) {
+			continue
+		}
+		if pathErr != nil {
+			return nil, fmt.Errorf("scheduler: borrow the account's %s installation: %w", profile.Name, pathErr)
+		}
+		if !dir {
+			return nil, fmt.Errorf("scheduler: borrow the account's %s installation: ~/%s in %q is not a directory", profile.Name, rel, account)
+		}
+		target, ok := targets[rel]
+		if !ok {
+			target = rel
+		}
+		if prepareErr := s.cfg.Homes.PrepareLoginMountpoint(launcher, target, true); prepareErr != nil {
+			return nil, fmt.Errorf("scheduler: %w", prepareErr)
+		}
+		mounts = append(mounts, runtime.Mount{
+			HostPath:      ownerHome,
+			Subpath:       rel,
+			ContainerPath: path.Join(home, target),
+			ReadOnly:      true,
 		})
 	}
 	return mounts, nil
