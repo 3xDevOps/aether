@@ -19,8 +19,8 @@ Layers, per the design spec's testing strategy:
   `make test TEST_PKGS=./internal/store` covers concurrent database opens
   against real SQLite files. The migration contention regressions keep a
   competing writer active while checking startup resumption from committed
-  progress, newer-schema rejection, foreign-key restoration, and refusal
-  to trust an uncommitted version.
+  progress, the newer-schema error and its version bounds, foreign-key
+  restoration, and refusal to trust an uncommitted version.
   `TestConcurrentOpen` still races eight opens on a fresh database.
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the

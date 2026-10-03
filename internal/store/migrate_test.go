@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -135,8 +136,13 @@ func TestMigrationStartupResumesCommittedPeerProgress(t *testing.T) {
 				t.Fatalf("competing writer was not established: %v", err)
 			}
 			if newer {
-				if err == nil || isBusy(err) {
-					t.Fatalf("startup must reject the peer's newer schema, not return a lock error: %v", err)
+				var schemaErr *newerSchemaError
+				if !errors.As(err, &schemaErr) {
+					t.Fatalf("startup error = %v; want newer-schema rejection", err)
+				}
+				if schemaErr.current != len(migrations)+1 || schemaErr.supported != len(migrations) {
+					t.Fatalf("rejected schema = %d, supported = %d; want %d, %d",
+						schemaErr.current, schemaErr.supported, len(migrations)+1, len(migrations))
 				}
 			} else if err != nil {
 				t.Fatalf("startup did not resume the peer's committed schema: %v", err)

@@ -1449,6 +1449,16 @@ func isBusy(err error) bool {
 	return errors.As(err, &se) && se.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
+type newerSchemaError struct {
+	current   int
+	supported int
+}
+
+func (e *newerSchemaError) Error() string {
+	return fmt.Sprintf("store: database schema version %d is newer than this binary supports (%d)",
+		e.current, e.supported)
+}
+
 func migrateOnce(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    INTEGER PRIMARY KEY,
@@ -1471,8 +1481,7 @@ func migrateOnce(db *sql.DB) error {
 		}
 	}
 	if current > len(migrations) {
-		return fmt.Errorf("store: database schema version %d is newer than this binary supports (%d)",
-			current, len(migrations))
+		return &newerSchemaError{current: current, supported: len(migrations)}
 	}
 	return nil
 }
