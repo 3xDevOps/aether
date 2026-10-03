@@ -31,7 +31,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const waitTimeout = 10 * time.Second
+// waitTimeout bounds every wait in this package's tests. CI runs them with
+// the race detector and in parallel on a shared runner, where a login shell
+// or a destroy sweep can take well over ten seconds to settle.
+const waitTimeout = 30 * time.Second
 
 // testEnv wires a scheduler to the real store, real event bus, fake git/pty,
 // and an in-memory immutable base-capture seam.
