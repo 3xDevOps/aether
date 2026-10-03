@@ -346,30 +346,29 @@ func (p Profile) SteerSuffix() string {
 	return p.SteerSubmit
 }
 
-// npmUpdateScript updates a CLI installed by npm into ~/.local. The new
-// version is installed beside the old one and its package directory swapped
-// in with two renames, so an agent starting meanwhile never runs a
-// half-written install; the bin symlink npm made is relative and survives
-// the swap. installed is a case pattern matching "<exe> --version" output
-// for the version in $latest. A stage left by a stopped update is removed
-// only while the package directory exists, so it cannot hold the only copy.
+// installed is a shell case pattern matching the CLI's current version
+// against $latest.
 func npmUpdateScript(pkg, exe, installed string, extra ...string) string {
 	return strings.NewReplacer("{pkg}", pkg, "{exe}", exe, "{installed}", installed,
+		"{server}", agentstatus.ReporterCommand,
 		"{extra}", strings.Join(append([]string{""}, extra...), " ")).Replace(
 		`dir="$HOME/.local/lib/node_modules/{pkg}"
+if [ ! -d "$dir" ]; then
+	for previous in "$HOME/.local/lib/.{exe}-update."*/previous; do
+		[ -d "$previous" ] || continue
+		mv "$previous" "$dir" || exit 1
+		break
+	done
+fi
 [ -d "$dir" ] || { echo "{exe} in ~/.local/bin was not installed with npm, so Aether cannot update it" >&2; exit 1; }
+rm -rf "$HOME/.local/lib/.{exe}-update."*
 command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and {exe} updates through npm" >&2; exit 1; }
 latest=$(npm view {pkg} version --fetch-retries=0) && [ -n "$latest" ] || exit 1
 case "$({exe} --version)" in {installed}) exit 0 ;; esac
-rm -rf "$HOME/.local/lib/.{exe}-update."*
 stage=$(mktemp -d "$HOME/.local/lib/.{exe}-update.XXXXXX") || exit 1
 trap 'rm -rf "$stage"' EXIT
 npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
-mv "$dir" "$stage/previous" || exit 1
-if ! mv "$stage/lib/node_modules/{pkg}" "$dir"; then
-	mv "$stage/previous" "$dir"
-	exit 1
-fi`)
+"{server}" package-exchange "$dir" "$stage/lib/node_modules/{pkg}"`)
 }
 
 // profiles is the shipped registry. "custom" is the escape hatch: its

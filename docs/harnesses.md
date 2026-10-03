@@ -1119,9 +1119,13 @@ update.
 | `omp` | `omp update` |
 
 For `codex` and `pi`, npm installs the new version into a stage directory
-beside the old one in `~/.local/lib`, and the package directory is then
-swapped in with two renames, so an agent starting meanwhile never sees a
-half-written install. Their own updaters are not used: `codex update`
+beside the old one in `~/.local/lib`. The server binary, mounted read-only,
+exchanges the installed and staged package directories with Linux's atomic
+directory-exchange operation: the installed path is never removed. If the
+filesystem rejects the exchange, the update reports that error and leaves
+the installed package in place.
+
+Their own updaters are not used: `codex update`
 installs into the image's global npm prefix, outside the member home, and
 `pi update --self` replaces files in place. A `codex` or `pi` in
 `~/.local/bin` that npm did not install is not updated, and the update

@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -45,6 +46,11 @@ func main() {
 		exitOn(mcp(args))
 	case "report":
 		report(args)
+	case "package-exchange":
+		if len(args) != 2 {
+			exitOn(fmt.Errorf("usage: aether-server package-exchange <installed> <staged>"))
+		}
+		exitOn(harness.ExchangePackages(args[0], args[1]))
 	case "serve":
 		exitOn(serve(args))
 	case "install":
