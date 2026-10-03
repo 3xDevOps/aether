@@ -145,7 +145,7 @@ type Store interface {
 	GetIntegrationCandidate(ctx context.Context, id string) (*IntegrationCandidate, error)
 	GetIntegrationCandidateByKey(ctx context.Context, workspace domain.WorkspaceID, actorKey, idempotencyKey string) (*IntegrationCandidate, error)
 	UpdateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate, expectedVersion int64) error
-	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, limit int) ([]*IntegrationCandidateSummary, error)
+	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID, limit int) ([]*IntegrationCandidateSummary, error)
 	ListIntegrationCleanupCandidates(ctx context.Context, now time.Time, limit int) ([]*IntegrationCandidate, error)
 	ListIntegrationCleanupCandidatesAfter(ctx context.Context, now time.Time, afterID string, limit int) ([]*IntegrationCandidate, error)
 	ListIntegrationCandidateIDs(ctx context.Context, workspace domain.WorkspaceID) ([]string, error)

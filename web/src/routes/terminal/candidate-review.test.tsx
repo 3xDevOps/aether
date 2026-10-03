@@ -66,6 +66,26 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('mission candidate progress', () => {
+  it('lists only the mission candidates and follows the integrator without a reload', async () => {
+    vi.useFakeTimers()
+    const prepared = candidate({ state: 'frozen', conflicts: [], mission_id: 'mission_1' })
+    const integrationList = vi.fn()
+      .mockResolvedValueOnce({ candidates: [] })
+      .mockResolvedValue({ candidates: [summary(prepared)] })
+    const client = fakeApi({ integrationList })
+    render(<CandidateReview workspaceID={workspace.id} currentRunID="run_1" client={client} readOnly missionID="mission_1" initialExpanded />)
+    await settle()
+    await settle()
+    expect(screen.getByText('No candidate has been prepared yet.')).toBeDefined()
+    expect(integrationList).toHaveBeenCalledWith({ workspace_id: workspace.id, mission_id: 'mission_1', limit: 50 })
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(screen.getByText(prepared.candidate_id)).toBeDefined()
+    expect(screen.queryByText('No candidate has been prepared yet.')).toBeNull()
+  })
+})
+
 describe('candidate review authority and resolution drafts', () => {
   it('preserves selected inputs and resolution drafts through resize and applies the in-flight retry once', async () => {
     const resize = atViewport(768)

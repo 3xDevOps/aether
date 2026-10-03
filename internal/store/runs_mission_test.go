@@ -12,7 +12,7 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 2, 3)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
 	createRun := func(id domain.RunID, status domain.RunStatus) *domain.Run {
 		t.Helper()
@@ -134,7 +134,7 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 4)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "shared run")
 	worker := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
 	reserve := func(m *domain.Mission, task *domain.Task, key string) {
@@ -173,8 +173,8 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 		}
 	}
 	assertSnapshots(mission.ID, "worker")
-	other := mustCreatePlanningMission(t, db, workspace.ID, member.ID, 4, 4, "other-mission")
-	if _, err := db.db.ExecContext(ctx, `UPDATE missions SET phase='active', plan_version=1 WHERE id=?`, other.ID); err != nil {
+	other := mustCreatePlanningMission(t, db, workspace.ID, member.ID, "other-mission")
+	if _, err := db.db.ExecContext(ctx, `UPDATE missions SET phase='active' WHERE id=?`, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	otherTask := mustCreateMissionTask(t, db, other.ID, "conflicting ownership")

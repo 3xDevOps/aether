@@ -18,7 +18,7 @@ import (
 // dependency's submission is accepted.
 func TestDependencyHoldsTheDependentUntilTheDependencyIsAccepted(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	propose := func(key string, revision protocol.TaskRevision) (protocol.Task, error) {
 		out, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 			MissionID: string(f.mission.ID), Revision: revision, IdempotencyKey: key,
@@ -74,14 +74,13 @@ func TestDependencyHoldsTheDependentUntilTheDependencyIsAccepted(t *testing.T) {
 		t.Fatalf("first after refused revise = %+v (err %v), want revision 1 untouched", reloaded, reloadErr)
 	}
 
-	f.clarify(t, "1")
-	f.decide(t, f.submit(t, "1", domain.MissionPhasePlanReview), domain.MissionPlanApprove, "", "decide-approve-1")
+	f.start(t, "start-1")
 	blocked, err := f.db.GetTask(ctx, domain.TaskID(second.ID))
 	if err != nil {
 		t.Fatalf("reload second: %v", err)
 	}
 	if blocked.Status != domain.TaskBlocked || len(blocked.Blockers) != 1 || blocked.Blockers[0].Kind != "dependency" || blocked.Blockers[0].TaskID != domain.TaskID(first.ID) {
-		t.Fatalf("second after approval = %s %+v, want blocked by %s", blocked.Status, blocked.Blockers, first.ID)
+		t.Fatalf("second after start = %s %+v, want blocked by %s", blocked.Status, blocked.Blockers, first.ID)
 	}
 	err = f.startWorker(t, blocked, "dispatch-second")
 	if !errors.Is(err, store.ErrMissionNotReady) || !strings.Contains(err.Error(), "task "+second.ID+" waits for task "+first.ID) {

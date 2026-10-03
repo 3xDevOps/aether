@@ -502,9 +502,12 @@ delivery use the existing **Push** capability. The service resolves the
 current member, workspace, run ownership, and candidate state itself. It
 rechecks the caller and the approved human approver at the actual delivery,
 so an old page, role change, or stale request cannot turn into authority.
-`integration.decide` is human-only: an agent/run actor cannot approve its own
-delivery, and an optional mission identifier is context rather than a
-permission grant.
+`integration.decide` is human-only, and an optional mission identifier is
+context rather than a permission grant. The one delivery without a human
+decision is a mission integrator's: its request is recorded as approved by the
+mission's accountable human, who must hold Push when it is requested and again
+when it is delivered, and only while the mission is active. Cancelling the
+mission stops it.
 
 Verification runs against a server-owned isolated candidate revision and a
 disposable verification tree; candidate inputs and retained evidence are not

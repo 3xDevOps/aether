@@ -62,10 +62,9 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if err != nil {
 		return nil, false, err
 	}
-	// Dispatch needs an approved plan; amendment_review keeps dispatching the
-	// already-approved set, and a pending revision cannot be reserved because
-	// it is not the task's current revision.
-	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview); phaseErr != nil {
+	// A pending revision cannot be reserved because it is not the task's
+	// current revision.
+	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive); phaseErr != nil {
 		return nil, false, phaseErr
 	}
 	if r.IntegratorGeneration != 0 && r.IntegratorGeneration != m.IntegratorGeneration {
@@ -102,18 +101,6 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if taskRevisionStatus != string(domain.TaskRevisionAccepted) {
 		return nil, false, ErrMissionNotReady
 	}
-	// A task the amendment under review changes is held back whole: starting
-	// work on the approved revision now would be work the human is deciding
-	// whether to redirect.
-	if m.Phase == domain.MissionPhaseAmendmentReview {
-		var underReview int
-		if reviewErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_plan_items WHERE mission_id=? AND plan_version=? AND task_id=?`, r.MissionID, m.PlanVersion, r.TaskID).Scan(&underReview); reviewErr != nil {
-			return nil, false, fmt.Errorf("store: read plan items of task %s: %w", r.TaskID, reviewErr)
-		}
-		if underReview > 0 {
-			return nil, false, fmt.Errorf("%w: task %s has a revision awaiting human approval; wait for the decision", ErrMissionNotReady, r.TaskID)
-		}
-	}
 	var blocker domain.TaskID
 	blockedErr := tx.QueryRowContext(ctx, `SELECT d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=t.current_revision) ORDER BY d.depends_on_task_id LIMIT 1`, r.TaskID, r.TaskRevision).Scan(&blocker)
 	if blockedErr == nil {
@@ -128,20 +115,6 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	}
 	if takeover > 0 {
 		return nil, false, ErrMissionTakeover
-	}
-	var total int
-	if totalErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ?`, r.MissionID).Scan(&total); totalErr != nil {
-		return nil, false, totalErr
-	}
-	if total >= m.MaxTotalAttempts {
-		return nil, false, ErrMissionLimit
-	}
-	var active int
-	if activeErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ? AND state IN ('reserved','launching','running','unknown','submitted')`, r.MissionID).Scan(&active); activeErr != nil {
-		return nil, false, activeErr
-	}
-	if active >= m.MaxConcurrentAttempts {
-		return nil, false, ErrMissionLimit
 	}
 	var number int
 	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {
@@ -303,7 +276,7 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 		query += ` AND task_id = ?`
 		args = append(args, taskID)
 	}
-	query += ` ORDER BY created_at, id LIMIT 1025`
+	query += ` ORDER BY created_at, id`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -311,9 +284,6 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Attempt, 0, 32)
 	for rows.Next() {
-		if len(out) == 1024 {
-			return nil, ErrConflict
-		}
 		a, scanErr := scanAttempt(rows)
 		if scanErr != nil {
 			return nil, scanErr
@@ -453,7 +423,7 @@ func (d *DB) ListSubmissions(ctx context.Context, missionID domain.MissionID, ta
 		query += ` AND task_id=?`
 		args = append(args, taskID)
 	}
-	query += ` ORDER BY created_at, id LIMIT 1025`
+	query += ` ORDER BY created_at, id`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -461,9 +431,6 @@ func (d *DB) ListSubmissions(ctx context.Context, missionID domain.MissionID, ta
 	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Submission, 0, 32)
 	for rows.Next() {
-		if len(out) == 1024 {
-			return nil, ErrConflict
-		}
 		s, scanErr := scanSubmission(rows)
 		if scanErr != nil {
 			return nil, scanErr

@@ -248,7 +248,6 @@ describe('board', () => {
           attempts: [],
           submissions: [],
           questions: [],
-          plan_reviews: [],
           diagnostics: [{
             kind: 'observed_overlap',
             task_id: 'task_checkout',

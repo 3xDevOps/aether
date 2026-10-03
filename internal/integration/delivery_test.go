@@ -58,6 +58,20 @@ func (s *deliveryTestStore) GetWorkspace(_ context.Context, id domain.WorkspaceI
 	return &copy, nil
 }
 
+func (s *deliveryTestStore) GetRun(_ context.Context, id domain.RunID) (*domain.Run, error) {
+	if id != "integrator-run" {
+		return nil, store.ErrNotFound
+	}
+	return &domain.Run{ID: id, WorkspaceID: "workspace-1", MemberID: "owner-1"}, nil
+}
+
+func (s *deliveryTestStore) GetMission(_ context.Context, id domain.MissionID) (*domain.Mission, error) {
+	if id != "mission-1" {
+		return nil, store.ErrNotFound
+	}
+	return &domain.Mission{ID: id, WorkspaceID: "workspace-1", AccountableHumanID: "approver-1"}, nil
+}
+
 func (s *deliveryTestStore) GetMember(_ context.Context, id domain.MemberID) (*domain.Member, error) {
 	member := s.members[id]
 	if member == nil {
@@ -240,6 +254,59 @@ func TestDeliveryVersionReplacementHumanDecisionAndCallerRevocation(t *testing.T
 	}
 	if git.deliverCalls != 0 {
 		t.Fatalf("revoked caller triggered Git action: %d", git.deliverCalls)
+	}
+}
+
+func TestDeliveryMissionIntegratorRequestIsApprovedForAccountableHuman(t *testing.T) {
+	service, st, git := newDeliveryTestService(t, protocol.DeliveryPending)
+	// The mission policy, not the engine, admits only the current integrator.
+	service.admission = func(context.Context, Admission) (func(), error) { return func() {}, nil }
+	candidate := serviceCandidate(t, service)
+	candidate.MissionID = "mission-1"
+	candidate.DeliveryRequest = nil
+	storeCandidate(t, service, candidate)
+	ctx := context.Background()
+	integrator := Actor{RunID: "integrator-run"}
+	request := func(actor Actor, key string) (protocol.Candidate, error) {
+		return service.RequestDelivery(ctx, actor, protocol.IntegrationRequestDeliveryParams{
+			WorkspaceID: "workspace-1", CandidateID: "candidate-1", CandidateRevision: "candidate-revision-1",
+			VerificationIDs: []string{"verification-1"}, Action: protocol.DeliveryActionUpdateRef, IdempotencyKey: key,
+		})
+	}
+
+	st.members["approver-1"].Role = domain.RoleViewer
+	if _, err := request(integrator, "integrator-request"); err == nil {
+		t.Fatal("integrator request was approved for an accountable human without Push")
+	}
+	if persisted := serviceCandidate(t, service); persisted.DeliveryRequest != nil {
+		t.Fatalf("refused request was recorded: %+v", persisted.DeliveryRequest)
+	}
+	st.members["approver-1"].Role = domain.RoleCollaborator
+
+	human, err := request(Actor{MemberID: "owner-1"}, "human-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if human.DeliveryRequest.State != protocol.DeliveryPending {
+		t.Fatalf("human request on a mission candidate = %+v, want pending for a human decision", human.DeliveryRequest)
+	}
+
+	approved, err := request(integrator, "integrator-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := approved.DeliveryRequest
+	if r.State != protocol.DeliveryApproved || r.DecidedBy != "approver-1" || r.DecidedAt == nil {
+		t.Fatalf("integrator request = %+v, want approved by the accountable human", r)
+	}
+	delivered, err := service.Deliver(ctx, integrator, protocol.IntegrationDeliverParams{
+		WorkspaceID: "workspace-1", CandidateID: "candidate-1", RequestID: r.RequestID, RequestVersion: r.RequestVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered.DeliveryReceipt == nil || delivered.DeliveryReceipt.Result != protocol.DeliveryResultLanded || git.deliverCalls != 1 {
+		t.Fatalf("integrator delivery = %+v with %d Git calls, want one landed delivery", delivered.DeliveryReceipt, git.deliverCalls)
 	}
 }
 

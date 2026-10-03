@@ -532,7 +532,10 @@ output, and checks that the frozen tree was not changed, but a passed
 verification is not proof of semantic correctness.
 
 Delivery is a human gate over the exact candidate revision, verification IDs,
-target ref, expected target revision, and action. The caller and approver must
+target ref, expected target revision, and action, except for a swarm: its
+integrator's verified candidate is approved on behalf of the swarm's
+accountable human, with no human step; see
+[integration.md](integration.md). The caller and approver must
 still be active members with the existing **Push** capability when the action
 is performed; no candidate operation grants a new permission. On a local
 target, `update_ref` uses an atomic expected-old compare-and-swap and refuses
@@ -950,8 +953,10 @@ not presented as current after a reset has passed without a fresh measurement.
 ### Launching a swarm
 
 A **swarm** is a mission: one objective handed to an interactive integrator
-run that asks you clarifying questions, submits a plan, waits for your
-approval, then dispatches worker runs within the attempt limits you set.
+run that asks you clarifying questions only if it needs answers, splits the
+objective into tasks, runs as many workers on them as it judges useful,
+delivers the verified result, and reports success. No human approves the plan
+or the delivery.
 The dashboard's launch dialog creates one under **Swarm**; the CLI does the
 same with `aether swarm create`. The integrator runs on your account (or the
 shared account named by `--account`) with the `--agent` harness in `tui`
@@ -961,8 +966,7 @@ of the objective reads it from stdin.
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --worker claude:headless --worker codex:headless \
-  --max-concurrent 2 --max-attempts 8
+  --agent claude --worker claude:headless --worker codex:headless
 ```
 
 ```
@@ -970,10 +974,7 @@ swarm 01m3bnfkwbqx7y9m98m351mxq2 planning
 integrator run 01m3bnfkwbfdna6tbtq2vw5e62
 ```
 
-`--max-concurrent` bounds worker attempts running at once (1 to 8) and
-`--max-attempts` bounds them over the whole swarm (1 to 128, at least the
-concurrent limit). The command refuses values outside those bounds before
-calling the server. If the server stored the mission but could not start the
+If the server stored the mission but could not start the
 integrator, the command prints the server's error verbatim and the
 `aether swarm show` command to follow it; see
 [failure-handling.md](failure-handling.md#integrator-launch-failures).
@@ -996,15 +997,10 @@ swarm 01m3bnfkwbqx7y9m98m351mxq2 active
 objective: add a health check endpoint and document it
 accountable human: 01m3bkxq4d8bz9m7ngkn0w2hce
 integrator: run 01m3bnfkwbfdna6tbtq2vw5e62 generation 1 (claude tui, account 01m3bkxq4d8bz9m7ngkn0w2hce)
-plan version: 1
 
 questions (0 open):
   01m3bnh2v6xk7g8p1q4r9s0t2u Which HTTP framework does the service use?
     answer: net/http, no framework
-
-plan reviews:
-  v1 submitted from clarified at 2026-09-25T07:20:11Z: approve
-    summary: one task adds the endpoint, one documents it
 
 tasks:
 ID                          TITLE                  STATUS   BLOCKERS
@@ -1018,41 +1014,36 @@ ID                          TASK                        STATE    RUN
 
 `show` prints the launch error, when there is one, after the integrator line.
 
-The integrator's questions and its plan wait for you. `show` lists the
-question IDs and the plan version under review; the commands below act on
-them, as the dashboard's Missions page does. Each one reads the swarm, then
-sends one mutation with a fresh idempotency key against the plan version or
-integrator generation it read. A decision, `cancel`, and `replace-integrator`
-print the swarm's phase afterwards; `answer` prints the question ID. A server
-refusal is printed verbatim.
+The integrator's questions wait for you; nothing else does. `show` lists the
+question IDs; the commands below act on them and on the swarm, as the
+dashboard's Missions page does. Each one sends one mutation with a fresh
+idempotency key. `cancel` and `replace-integrator` print the swarm's phase
+afterwards; `answer` prints the question ID. A server refusal is printed
+verbatim.
 
 ```sh
 aether swarm answer 01m3bnfkwbqx7y9m98m351mxq2 \
   --question 01m3bnh2v6xk7g8p1q4r9s0t2u "net/http, no framework"
-aether swarm approve 01m3bnfkwbqx7y9m98m351mxq2
-aether swarm request-changes 01m3bnfkwbqx7y9m98m351mxq2 "document the endpoint in its own task"
-aether swarm reject 01m3bnfkwbqx7y9m98m351mxq2 "wrong repository"
 aether swarm cancel 01m3bnfkwbqx7y9m98m351mxq2
 aether swarm replace-integrator 01m3bnfkwbqx7y9m98m351mxq2 --agent codex
 ```
 
 ```
-swarm 01m3bnfkwbqx7y9m98m351mxq2 active
+swarm 01m3bnfkwbqx7y9m98m351mxq2 cancelled
 ```
 
 `answer` takes the answer as its last argument, or `-` to read it from stdin,
-and refuses a question ID that is not on that swarm. `approve`,
-`request-changes`, and `reject` decide the plan version `show` reports, so a
-plan the integrator resubmitted in the meantime is not decided unread;
-`request-changes` requires feedback and `reject` accepts it. The server
-refuses `reject` on an amendment, refuses `cancel` once a plan is approved,
-and refuses every one of these from anyone but the accountable human or an
-admin; see [Mission identity and current
+and refuses a question ID that is not on that swarm. `cancel` stops a swarm in
+`planning` or `active`: its workers and integrator run are stopped and the
+swarm moves to `cancelled`. The server refuses `cancel` on a `completed` or
+`cancelled` swarm, and refuses every one of these from anyone but the
+accountable human or an admin; see [Mission identity and current
 authority](#mission-identity-and-current-authority). `replace-integrator`
 starts a new integrator run on the `--agent` harness in `tui` mode, under the
 current integrator's account or the one named by `--account`; both must be
-among the swarm's execution choices. It sends the integrator generation `show`
-reports and prints the new run ID after the phase.
+among the swarm's execution choices. It reads the swarm first, sends the
+integrator generation `show` reports, and prints the new run ID after the
+phase.
 
 ### Mission identity and current authority
 
@@ -1071,10 +1062,7 @@ Record these roles separately:
   run owner's.
 
 The actor is not rewritten as the authorizing human, run owner, or account
-owner merely because the operation was performed on somebody's behalf. A
-mission's finite concurrency and total-attempt limits bound Aether admission;
-they do not narrow what the credentials in the home the run's container
-mounts and the selected agent login can do inside the container.
+owner merely because the operation was performed on somebody's behalf.
 
 Release B rechecks the current member role, account-sharing authority,
 mission assignment, and control/assignment generation at each consequential
@@ -1092,85 +1080,51 @@ authority, or foreign holder is refused without clearing it; an integrator or
 worker cannot release the hold through its assignment socket. Releasing a
 hold changes control state, not account sharing.
 
-A mission starts in the `planning` phase and dispatches no worker until a human
-approves its plan. The integrator may ask clarifying questions, then declares
-clarification complete (`clarified`) and submits the plan for review
-(`plan_review`). After approval the mission is `active`; a further plan
-submitted from `active` is an **amendment** and puts the mission in
-`amendment_review` until the same human decides it.
+A mission is in one of four phases: `planning`, `active`, `completed`, or
+`cancelled`. It starts in `planning`, where the integrator may ask clarifying
+questions, proposes tasks, and runs `mission start`, which accepts every
+proposed task and moves the mission to `active`. Start is refused while a
+question is unanswered and rechecks the mission's own launch admission, so an
+accountable human who lost `run.launch` or the integrator's account share
+cannot carry the mission forward. In `active` the integrator dispatches
+workers, accepts their work, adds or revises tasks and accepts them itself,
+and delivers the verified candidate. Its success report moves the mission to
+`completed` and stops leftover workers; a failure report ends the integrator
+run and leaves the mission `active` for **Replace integrator**. See
+[coordination.md](coordination.md#mission-phases).
 
-Three control-channel methods carry that decision. Each needs
-the `run.launch` permission (collaborator or admin) and is refused unless the
-authenticated member is the mission's accountable human or holds the `admin`
-role, so an accountable human demoted to viewer can no longer answer, decide,
-or cancel, and an admin must take over:
+Two control-channel methods are the human's part. Each needs the `run.launch`
+permission (collaborator or admin) and is refused unless the authenticated
+member is the mission's accountable human or holds the `admin` role, so an
+accountable human demoted to viewer can no longer answer or cancel, and an
+admin must take over:
 
 - `mission.question.answer` answers one clarifying question the integrator
-  asked. The answering member is the session, never a request field.
-- `mission.plan.decide` approves, requests changes to, or rejects one plan
-  version. Approval re-resolves the mission's own launch admission first, so an
-  accountable human who lost `run.launch` or the integrator's account share
-  cannot carry the mission past the gate. Requesting changes and rejecting do
-  not, so a plan whose accountable human lost that admission can still be
-  closed out by an admin. Rejecting an amendment is refused: the approved plan
-  stands either way, so an amendment is approved or sent back for changes and
-  the integrator abandons its tasks or revisions to drop it.
-- `mission.cancel` ends a mission in `planning`, `clarified`, or `plan_review`
-  by moving it to `rejected`, whether or not a plan was ever submitted. A round
-  under review is recorded as a `reject` decision with the feedback
-  `swarm cancelled`. It is refused once a plan is approved and on a mission
-  that already ended.
+  asked, in `planning` only. The answering member is the session, never a
+  request field.
+- `mission.cancel` ends a mission in `planning` or `active` by moving it to
+  `cancelled`. It is refused on a mission that already ended.
 
-Reading the gate is not deciding it. `mission.show` stays a View read: every
-member sees the questions, the answers, the plan summaries, and the feedback
-attached to each review round.
+`mission.show` stays a View read: every member sees the questions and the
+answers.
 
-Rejecting a plan or cancelling the mission cancels its integrator run. That
-cancellation needs no per-run Kill check: the run is the mission's own reserved
-integrator and the decider is already the accountable human or an admin.
-Cancellation is the reconcile loop's job and is retried every pass until the
-run is terminal, so a rejection survives a server restart.
+Cancelling a mission stops its live workers and its integrator run. That
+needs no per-run Kill check: the runs are the mission's own and the canceller
+is already the accountable human or an admin. Stopping them is the reconcile
+loop's job and is retried every pass until each run is terminal, so a
+cancellation survives a server restart.
 
 `mission.replace-integrator` is the recovery when an integrator run exits, in
-`planning`, `clarified`, `plan_review`, `active`, and `amendment_review` alike.
-It changes neither the phase nor the plan version and leaves an undecided
-review round decidable. A rejected mission refuses it.
+`planning` and `active`. It does not change the phase. A completed or
+cancelled mission refuses it.
 
 The integrator does not poll for any of this. The server types one `aether:`
-line into its terminal when a human answers or decides, when a worker
+line into its terminal when a human answers a question, when a worker
 reports, and when a worker's run ends without a report, each naming the
-command to run next. A notice never reaches a retired integrator run. See
-[coordination.md](coordination.md#the-mission-plan-gate).
+command to run next. A notice never reaches a retired integrator run.
 
-An amendment does not stop the approved plan. While a mission is in
-`amendment_review` the integrator still starts, retries, cancels, and inspects
-workers on approved tasks and still accepts their submissions; it cannot
-propose, revise, abandon, or accept task revisions, and it cannot dispatch a
-task whose revision is in the round under review.
-
-After approval the integrator accepts later revisions of already-approved tasks
-itself, but only within what the human approved. The server refuses
-`task.accept` and directs the revision through `mission.plan.submit` when the
-revision:
-
-- belongs to a task that was never approved (new work);
-- is declared `material` by its proposer;
-- widens the approved scope - an `expected_paths` entry outside the union of
-  the approved tasks' expected paths;
-- drops an exclusion the task's approved revision carried;
-- belongs to a task whose latest review round a human sent back for changes;
-  only a round that approves the task again lifts that hold.
-
-`material` is the proposer's own declaration, not a server inference. It is
-recorded on the revision and is the sixth reason a revision needs a human
-round.
-
-Every approved round is auditable without reading history: the plan review row
-records who submitted it, from which phase, who decided it and when, and one
-plan item per task in the round with that task's revision, whether it was new
-work, whether it was material, and which paths or exclusions widened the
-approved scope. Each revision records its proposer, and, once accepted, the
-member or integrator run that accepted it.
+Each revision records its proposer, and, once accepted, the member or
+integrator run that accepted it.
 
 Mission progress has the same evidence boundary as the dashboard: a worker
 report or process success does not make a task **Done**. The current task

@@ -14,7 +14,7 @@ func TestWorkspaceDeletionRetiresFinishedMissionReferences(t *testing.T) {
 	ctx := t.Context()
 	ws := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, ws.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, ws.ID, member.ID)
 	if err := db.CheckWorkspaceDeletion(ctx, ws.ID); !errors.Is(err, ErrInUse) {
 		t.Fatalf("pending integrator deletion = %v", err)
 	}
@@ -60,5 +60,20 @@ func TestWorkspaceDeletionRetiresFinishedMissionReferences(t *testing.T) {
 	}
 	if _, err := db.GetSubmission(ctx, submission.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("submission remains: %v", err)
+	}
+}
+
+func TestWorkspaceDeletionIgnoresAnEndedMissionsUnlaunchedIntegrator(t *testing.T) {
+	t.Parallel()
+	db, mission, member := planningFixture(t)
+	ctx := t.Context()
+	if _, err := db.RecordIntegratorLaunch(ctx, mission.ID, mission.CurrentIntegratorRunID, "launch failed", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CancelMission(ctx, mission.ID, member, "cancel-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckWorkspaceDeletion(ctx, mission.WorkspaceID); err != nil {
+		t.Fatalf("cancelled mission blocks deletion: %v", err)
 	}
 }

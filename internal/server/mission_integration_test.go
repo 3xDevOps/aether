@@ -18,20 +18,19 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // TestIntegrationMissionOrchestration drives the mission authority through the
 // real human and run sockets. The workers are deliberately named shell
 // fixtures, not vendor harness demonstrations: each fixture proactively
 // exchanges a coordination message before it waits for the test to release it.
-// The same scenario covers replay after a lost response, concurrency/total
-// attempt bounds, cancellation and retry, report reconciliation to Review,
+// The same scenario covers replay after a lost response, cancellation and retry, report reconciliation to Review,
 // and an integrator generation change rejecting the disconnected old client.
 func TestIntegrationMissionOrchestration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
@@ -73,7 +72,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		AccountableHumanID: string(e.ada.id), Integrator: protocol.MissionIntegrator{
 			AccountMemberID: string(e.ada.id), Harness: "fake", Mode: string(domain.LaunchTUI),
 		}, ExecutionChoices: []protocol.MissionExecutionChoice{choiceAda, choiceBo},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 3, IdempotencyKey: "mission-create-1",
+		IdempotencyKey: "mission-create-1",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)
 	}
@@ -90,8 +89,8 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if err := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
 		WorkspaceID: string(e.ws.ID), Objective: missionObjective,
 		AccountableHumanID: string(e.ada.id), Integrator: created.Mission.Integrator,
-		ExecutionChoices:      created.Mission.ExecutionChoices,
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 3, IdempotencyKey: "mission-create-1",
+		ExecutionChoices: created.Mission.ExecutionChoices,
+		IdempotencyKey:   "mission-create-1",
 	}, &replay); err != nil {
 		t.Fatalf("mission.create replay: %v", err)
 	}
@@ -165,14 +164,15 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	taskA := propose(workerAObjective, "worker A", "propose-A")
 	taskB := propose(workerBObjective, "worker B", "propose-B")
 
-	// The plan gate: no worker runs and no revision is accepted until the
-	// accountable human answers the integrator and approves the plan.
+	// Planning: no worker runs and no revision is accepted until the
+	// integrator starts the mission, and it cannot start while the question
+	// it asked the accountable human is unanswered. No human approves a plan.
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
-		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-before-approval",
+		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-before-start",
 		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id),
 		RunOwnerID: string(e.ada.id), ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
 	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("worker.start before plan approval error = %v, want CodeInvalidState", err)
+		t.Fatalf("worker.start before mission.start error = %v, want CodeInvalidState", err)
 	}
 	var asked protocol.MissionQuestionResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
@@ -187,15 +187,10 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if pending.Plan.Phase != string(domain.MissionPhasePlanning) || pending.Plan.OpenQuestions != 1 {
 		t.Fatalf("plan state before the answer = %+v, want planning with one open question", pending.Plan)
 	}
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
-		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-early"},
-		nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("mission.clarification.complete with an unanswered question = %v, want CodeInvalidState", err)
-	}
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "submitted too early", IdempotencyKey: "mission-submit-early",
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: missionID, IdempotencyKey: "mission-start-early",
 	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("mission.plan.submit before clarification is complete = %v, want CodeInvalidState", err)
+		t.Fatalf("mission.start with an unanswered question = %v, want CodeInvalidState", err)
 	}
 	// Every seeded member is an admin, and an admin may answer for the
 	// accountable human; the refusal is for a plain collaborator.
@@ -232,59 +227,41 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		answeredPlan.Questions[0].AnsweredByMemberID != string(e.ada.id) {
 		t.Fatalf("integrator answer context = %+v, want the accountable human's answer", answeredPlan.Questions)
 	}
-	var clarified protocol.MissionClarificationCompleteResult
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
-		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-1"}, &clarified); err != nil {
-		t.Fatalf("mission.clarification.complete: %v", err)
+	var started protocol.MissionStartResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: missionID, IdempotencyKey: "mission-start-1",
+	}, &started); err != nil {
+		t.Fatalf("mission.start: %v", err)
 	}
-	if clarified.Plan.Phase != string(domain.MissionPhaseClarified) || clarified.Plan.OpenQuestions != 0 {
-		t.Fatalf("plan state after clarification = %+v, want clarified with no open question", clarified.Plan)
+	if started.Plan.Phase != string(domain.MissionPhaseActive) || started.Plan.OpenQuestions != 0 {
+		t.Fatalf("plan state after start = %+v, want active with no open question", started.Plan)
 	}
-	var submitted protocol.MissionPlanSubmitResult
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "two bounded worker tasks", IdempotencyKey: "mission-submit-1",
-	}, &submitted); err != nil {
-		t.Fatalf("mission.plan.submit: %v", err)
+	var startedPlan protocol.MissionPlanShowResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &startedPlan); err != nil {
+		t.Fatalf("mission.plan.show after start: %v", err)
 	}
-	if submitted.Plan.Phase != string(domain.MissionPhasePlanReview) || submitted.Plan.PlanVersion == 0 {
-		t.Fatalf("plan state after submit = %+v, want plan_review at a non-zero version", submitted.Plan)
+	if startedPlan.Plan.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("integrator plan phase = %q, want active", startedPlan.Plan.Phase)
 	}
-	var approved protocol.MissionPlanDecideResult
-	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-1",
-	}, &approved); err != nil {
-		t.Fatalf("mission.plan.decide: %v", err)
-	}
-	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
-		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
-	}
-	var approvedPlan protocol.MissionPlanShowResult
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &approvedPlan); err != nil {
-		t.Fatalf("mission.plan.show after approval: %v", err)
-	}
-	if approvedPlan.Plan.Phase != string(domain.MissionPhaseActive) {
-		t.Fatalf("integrator plan phase = %q, want active", approvedPlan.Plan.Phase)
-	}
-	// Approval accepted both revisions; the integrator never accepted its own.
+	// Start accepted both revisions in one step.
 	var readyTasks protocol.TaskListResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {
-		t.Fatalf("task.list after approval: %v", err)
+		t.Fatalf("task.list after start: %v", err)
 	}
 	if len(readyTasks.Tasks) != 2 {
-		t.Fatalf("task.list after approval returned %d tasks, want 2", len(readyTasks.Tasks))
+		t.Fatalf("task.list after start returned %d tasks, want 2", len(readyTasks.Tasks))
 	}
 	for _, task := range readyTasks.Tasks {
-		if task.Status != string(domain.TaskReady) {
-			t.Fatalf("task %s status after approval = %q, want ready", task.ID, task.Status)
+		if task.Status != string(domain.TaskReady) || task.Revision == nil || task.Revision.AcceptedByRunID != integratorRun {
+			t.Fatalf("task %s after start = %+v, want ready and accepted by the integrator", task.ID, task)
 		}
 	}
 	var reaccepted protocol.TaskMutationResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
 		TaskID: string(taskA), Revision: 1, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
-		IdempotencyKey: "reaccept-approved-A",
+		IdempotencyKey: "reaccept-started-A",
 	}, &reaccepted); coordtransport.ErrorCode(err) != protocol.CodeConflict {
-		t.Fatalf("task.accept already approved revision = %v, want conflict", err)
+		t.Fatalf("task.accept already accepted revision = %v, want conflict", err)
 	}
 
 	start := func(task domain.TaskID, key string) protocol.WorkerStartResult {
@@ -373,16 +350,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		t.Fatalf("denied cancellation fired after explicit release: %+v", inspected.Attempt)
 	}
 
-	// No third active attempt fits the concurrent bound. Cancel A, consume the
-	// one remaining total-attempt slot with retry, then prove the total bound.
-	var tooMany protocol.WorkerStartResult
-	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
-		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-C",
-		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
-	}, &tooMany)
-	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
-		t.Fatalf("worker.start over concurrency bound error = %v, want mission attempt limit conflict", err)
-	}
 	var cancelled protocol.WorkerMutationResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
 		AttemptID: attemptA.Attempt.ID, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "cancel-A",
@@ -409,14 +376,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if retried.Attempt.ID == attemptA.Attempt.ID || retried.Attempt.RunID == "" {
 		t.Fatalf("worker.retry A did not reserve a new attempt: %+v", retried)
-	}
-	var overTotal protocol.WorkerStartResult
-	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
-		MissionID: missionID, TaskID: string(taskB), TaskRevision: 1, DispatchKey: "dispatch-D",
-		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
-	}, &overTotal)
-	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
-		t.Fatalf("worker.start over total bound error = %v, want mission attempt limit conflict", err)
 	}
 
 	// A report with no user evidence refs still captures the retained packet and
@@ -475,65 +434,26 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		t.Fatal("completed worker lost its inspectable coordination assets")
 	}
 
-	// New work after activation goes through the same human gate: the
-	// integrator cannot accept it alone, the amendment freezes plan changes
-	// while it is read, and an amendment is approved or sent back, never
-	// rejected.
-	var amendmentTask protocol.TaskMutationResult
+	// New work after start needs no human: the integrator accepts it alone.
+	var addedTask protocol.TaskMutationResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 		MissionID:      missionID,
-		Revision:       protocol.TaskRevision{Title: "worker C", Objective: "mission shell worker C", Material: true},
+		Revision:       protocol.TaskRevision{Title: "worker C", Objective: "mission shell worker C"},
 		IdempotencyKey: "propose-C",
-	}, &amendmentTask); err != nil {
+	}, &addedTask); err != nil {
 		t.Fatalf("task.propose during an active mission: %v", err)
 	}
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-		TaskID: amendmentTask.Task.ID, Revision: amendmentTask.Task.CurrentRevision,
+		TaskID: addedTask.Task.ID, Revision: addedTask.Task.CurrentRevision,
 		ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "accept-C",
-	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("task.accept of new work = %v, want CodeInvalidState", err)
-	}
-	var amendment protocol.MissionPlanSubmitResult
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "add worker C", IdempotencyKey: "mission-submit-2",
-	}, &amendment); err != nil {
-		t.Fatalf("mission.plan.submit amendment: %v", err)
-	}
-	if amendment.Plan.Phase != string(domain.MissionPhaseAmendmentReview) || amendment.Plan.PlanVersion != submitted.Plan.PlanVersion+1 {
-		t.Fatalf("plan state after the amendment submit = %+v, want amendment_review at the next version", amendment.Plan)
-	}
-	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
-		MissionID:      missionID,
-		Revision:       protocol.TaskRevision{Title: "worker D", Objective: "mission shell worker D"},
-		IdempotencyKey: "propose-D",
-	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("task.propose during an amendment = %v, want CodeInvalidState", err)
-	}
-	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
-		Decision: string(domain.MissionPlanReject), IdempotencyKey: "mission-decide-reject-2",
-	}, nil); controlErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("mission.plan.decide reject on an amendment = %v, want CodeInvalidState", err)
-	}
-	var amended protocol.MissionPlanDecideResult
-	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-2",
-	}, &amended); err != nil {
-		t.Fatalf("mission.plan.decide amendment: %v", err)
-	}
-	if amended.Mission.Phase != string(domain.MissionPhaseActive) {
-		t.Fatalf("mission phase after approving the amendment = %q, want active", amended.Mission.Phase)
+	}, nil); err != nil {
+		t.Fatalf("task.accept of new work: %v", err)
 	}
 	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
-		t.Fatalf("mission.show after the amendment: %v", err)
+		t.Fatalf("mission.show after new work: %v", err)
 	}
-	if !containsTaskStatus(shown.Tasks, amendmentTask.Task.ID, string(domain.TaskReady)) {
-		t.Fatalf("amended task %s is not ready after approval: %+v", amendmentTask.Task.ID, shown.Tasks)
-	}
-	if len(shown.PlanReviews) != 2 || shown.PlanReviews[1].SubmittedPhase != string(domain.MissionPhaseActive) ||
-		len(shown.PlanReviews[1].Items) != 1 || !shown.PlanReviews[1].Items[0].NewTask {
-		t.Fatalf("plan reviews after the amendment = %+v, want a second round recording one new task", shown.PlanReviews)
+	if shown.Mission.Phase != string(domain.MissionPhaseActive) || !containsTaskStatus(shown.Tasks, addedTask.Task.ID, string(domain.TaskReady)) {
+		t.Fatalf("mission after accepting new work = %s %+v, want active with task %s ready", shown.Mission.Phase, shown.Tasks, addedTask.Task.ID)
 	}
 
 	// Replacing the integrator bumps generation and invalidates the old socket.
@@ -552,6 +472,40 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &stale)
 	if err == nil {
 		t.Fatal("old integrator socket worker.list unexpectedly succeeded after integrator replacement")
+	}
+
+	// The current integrator's success report completes the mission with no
+	// human decision, and the reconcile loop stops the worker still running.
+	replacedSocket := waitMissionSocket(t, e.coordDir(replaced.RunID))
+	if err := pacedCall(ctx, replacedSocket, protocol.MethodCoordReport, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "all tasks delivered", IdempotencyKey: "integrator-success",
+	}, nil); err != nil {
+		t.Fatalf("integrator coord.report success: %v", err)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
+		t.Fatalf("mission.show after the integrator's report: %v", err)
+	}
+	if shown.Mission.Phase != string(domain.MissionPhaseCompleted) {
+		t.Fatalf("mission phase after the integrator's success report = %q, want completed", shown.Mission.Phase)
+	}
+	teardownDeadline := time.Now().Add(time.Minute)
+	for {
+		if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
+			t.Fatalf("mission.show while stopping leftover workers: %v", err)
+		}
+		live := false
+		for _, attempt := range shown.Attempts {
+			if domain.AttemptState(attempt.State).HoldsConcurrency() {
+				live = true
+			}
+		}
+		if !live {
+			break
+		}
+		if time.Now().After(teardownDeadline) {
+			t.Fatalf("completed mission still has live workers: %+v", shown.Attempts)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	// Server boot preserves the exact paused worker, then a boot beyond its
 	// deadline reclaims that same runtime object and coordination ownership.
@@ -623,8 +577,6 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	srv := e.seed(ctx, t, false)
 	adaCtrl, adaClient := srv.control(t, e.ada.key)
 	defer adaClient.Close()
-	boCtrl, boClient := srv.control(t, e.bo.key)
-	defer boClient.Close()
 
 	const (
 		integratorObjective = "mission Docker integrator fixture"
@@ -644,7 +596,6 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 			{AccountMemberID: string(e.ada.id), Harness: "omp", Mode: string(domain.LaunchTUI)},
 			{AccountMemberID: string(e.bo.id), Harness: "claude", Mode: string(domain.LaunchTUI)},
 		},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4,
 		IdempotencyKey: "docker-mission-create",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)
@@ -671,23 +622,23 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	}
 	taskA := propose(workerAObjective, "Docker worker A", "worker-a.txt", "docker-propose-a")
 	taskB := propose(workerBObjective, "Docker worker B", "worker-b.txt", "docker-propose-b")
-	// The objective needs no clarification: the integrator says so and
-	// submits, and the accountable human approves both tasks at once.
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
-		protocol.MissionClarificationCompleteParams{IdempotencyKey: "docker-clarify"}, nil); err != nil {
-		t.Fatalf("mission.clarification.complete: %v", err)
+	// The only human step is answering the integrator's question. Start
+	// accepts both tasks at once; nothing after it waits for a human.
+	var asked protocol.MissionQuestionResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which files should the workers write?", IdempotencyKey: "docker-ask",
+	}, &asked); err != nil {
+		t.Fatalf("mission.question.ask: %v", err)
 	}
-	var submitted protocol.MissionPlanSubmitResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "two Docker workers", IdempotencyKey: "docker-submit",
-	}, &submitted); err != nil {
-		t.Fatalf("mission.plan.submit: %v", err)
-	}
-	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "docker-decide",
+	if err := adaCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "worker-a.txt and worker-b.txt", IdempotencyKey: "docker-answer",
 	}, nil); err != nil {
-		t.Fatalf("mission.plan.decide: %v", err)
+		t.Fatalf("mission.question.answer: %v", err)
+	}
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: missionID, IdempotencyKey: "docker-start",
+	}, nil); err != nil {
+		t.Fatalf("mission.start: %v", err)
 	}
 
 	start := func(taskID, dispatch string) protocol.WorkerStartResult {
@@ -731,8 +682,8 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	if len(shown.Submissions) != 2 {
 		t.Fatalf("mission submissions = %d, want two retained submissions", len(shown.Submissions))
 	}
-	// Acceptance is human-controlled by the current integrator run. The
-	// accepted-set version is advanced and fed back for the next acceptance.
+	// The current integrator accepts each submission. The accepted-set
+	// version is advanced and fed back for the next acceptance.
 	acceptedOrder := make([]protocol.Submission, 0, len(shown.Submissions))
 	for _, sub := range shown.Submissions {
 		var accepted protocol.TaskMutationResult
@@ -841,24 +792,11 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 		"verification_ids": verificationIDs, "action": string(protocol.DeliveryActionUpdateRef),
 		"idempotency_key": "docker-request-delivery",
 	})
-	if requested.DeliveryRequest == nil || requested.DeliveryRequest.State != protocol.DeliveryPending {
-		t.Fatalf("request-delivery = %+v, want pending request", requested.DeliveryRequest)
-	}
-	// Disconnect the human SSH client before approval and reconnect it. The
-	// durable candidate/request are the only state used after this boundary.
-	_ = adaClient.Close()
-	adaCtrl, adaClient = srv.control(t, e.ada.key)
-	defer adaClient.Close()
-	var decided protocol.IntegrationDecideResult
-	if err := adaCtrl.Call(protocol.MethodIntegrationDecide, protocol.IntegrationDecideParams{
-		WorkspaceID: string(e.ws.ID), CandidateID: candidate.CandidateID,
-		RequestID:      requested.DeliveryRequest.RequestID,
-		RequestVersion: requested.DeliveryRequest.RequestVersion, Approve: true,
-	}, &decided); err != nil {
-		t.Fatalf("human integration.decide after reconnect: %v", err)
-	}
-	if decided.Candidate.DeliveryRequest == nil || decided.Candidate.DeliveryRequest.State != protocol.DeliveryApproved {
-		t.Fatalf("human approval result = %+v", decided.Candidate.DeliveryRequest)
+	// A verified mission candidate needs no human decision: the request is
+	// approved for the accountable human, who still holds Push.
+	if requested.DeliveryRequest == nil || requested.DeliveryRequest.State != protocol.DeliveryApproved ||
+		requested.DeliveryRequest.DecidedBy != string(e.ada.id) {
+		t.Fatalf("request-delivery = %+v, want a request approved for the accountable human", requested.DeliveryRequest)
 	}
 
 	// Move the target ref away from the reviewed revision: delivery must fail
@@ -892,26 +830,40 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 		t.Fatalf("main after exact delivery = %s, want candidate %s", got, candidate.CandidateRevision)
 	}
 
-	// Replacement starts a new integrator run and retires the disconnected
-	// run's authority; its old socket cannot mutate or inspect this mission.
-	var replaced protocol.MissionReplaceIntegratorResult
-	if err := boCtrl.Call(protocol.MethodMissionReplaceIntegrator, protocol.MissionReplaceIntegratorParams{
-		MissionID: missionID, ExpectedGeneration: created.Mission.IntegratorGeneration,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: string(e.bo.id), Harness: "claude", Mode: string(domain.LaunchTUI)},
-		IdempotencyKey: "docker-replace-integrator",
-	}, &replaced); err != nil {
-		t.Fatalf("mission.replace-integrator after delivery: %v", err)
+	// The integrator's own success report completes the mission and
+	// finishes its run.
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodCoordReport, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "delivered both workers", IdempotencyKey: "docker-integrator-success",
+	}, nil); err != nil {
+		t.Fatalf("integrator coord.report success: %v", err)
 	}
-	if replaced.RunID == "" || replaced.RunID == integratorRun ||
-		replaced.Mission.IntegratorGeneration <= created.Mission.IntegratorGeneration {
-		t.Fatalf("integrator replacement = %+v, want new generation/run", replaced)
+	var completed protocol.MissionShowResult
+	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &completed); err != nil {
+		t.Fatalf("mission.show after the integrator's report: %v", err)
 	}
-	// The replacement has a fresh, restarted integrator socket; the retired
-	// socket remains present only as a durable stale identity.
-	_ = waitMissionSocket(t, e.coordDir(replaced.RunID))
-	var staleList protocol.WorkerListResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &staleList); err == nil {
-		t.Fatal("replaced integrator socket remained authorized")
+	if completed.Mission.Phase != string(domain.MissionPhaseCompleted) {
+		t.Fatalf("mission phase after the integrator's success report = %q, want completed", completed.Mission.Phase)
+	}
+	// The run finishes at the turn-end idle report a real harness's hook
+	// sends; the shell fixture sends none, so the test sends it.
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodRunReport, protocol.RunReportParams{
+		State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle,
+	}, nil); err != nil {
+		t.Fatalf("integrator run.report idle: %v", err)
+	}
+	finishDeadline := time.Now().Add(time.Minute)
+	for {
+		var run protocol.RunResult
+		if err := adaCtrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: integratorRun}, &run); err != nil {
+			t.Fatalf("run.get integrator: %v", err)
+		}
+		if run.Run.Status == string(domain.RunCompleted) {
+			break
+		}
+		if time.Now().After(finishDeadline) {
+			t.Fatalf("integrator run after its success report = %q, want completed", run.Run.Status)
+		}
+		time.Sleep(time.Second)
 	}
 }
 

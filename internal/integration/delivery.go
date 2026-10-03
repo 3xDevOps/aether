@@ -118,6 +118,17 @@ func (s *Service) RequestDelivery(ctx context.Context, actor Actor, p protocol.I
 	if existing := candidate.DeliveryRequest; existing != nil {
 		requestVersion = existing.RequestVersion + 1
 	}
+	state, decidedBy, decidedAt := protocol.DeliveryPending, "", (*time.Time)(nil)
+	if actor.RunID != "" && candidate.MissionID != "" {
+		// Admission lets a run act on a mission candidate only as that
+		// mission's current integrator, so its verified request is approved
+		// for the accountable human, who must still hold Push.
+		approver, e := s.missionApprover(ctx, candidate)
+		if e != nil {
+			return protocol.Candidate{}, e
+		}
+		state, decidedBy, decidedAt = protocol.DeliveryApproved, approver, &now
+	}
 	candidate.DeliveryRequest = &protocol.DeliveryRequest{
 		RequestID:              requestID,
 		RequestVersion:         requestVersion,
@@ -126,10 +137,12 @@ func (s *Service) RequestDelivery(ctx context.Context, actor Actor, p protocol.I
 		TargetRef:              candidate.TargetRef,
 		ExpectedTargetRevision: candidate.ExpectedTargetRevision,
 		Action:                 p.Action,
-		State:                  protocol.DeliveryPending,
+		State:                  state,
 		RequestedBy:            string(actor.MemberID),
+		DecidedBy:              decidedBy,
 		CreatedAt:              now,
 		ExpiresAt:              expires,
+		DecidedAt:              decidedAt,
 	}
 	if err := appendMutation(candidate, actor, protocol.MethodIntegrationRequestDelivery, p.IdempotencyKey, digest, requestID); err != nil {
 		return protocol.Candidate{}, err
@@ -528,6 +541,18 @@ func (s *Service) validateCurrentApprover(ctx context.Context, c *protocol.Candi
 		return errors.New("integration: approver no longer has delivery permission")
 	}
 	return nil
+}
+
+func (s *Service) missionApprover(ctx context.Context, c *protocol.Candidate) (string, error) {
+	m, err := s.store.GetMission(ctx, domain.MissionID(c.MissionID))
+	if err != nil {
+		return "", err
+	}
+	approver := string(m.AccountableHumanID)
+	if err := s.validateCurrentApprover(ctx, c, approver); err != nil {
+		return "", err
+	}
+	return approver, nil
 }
 
 func validateVerificationSelection(c *protocol.Candidate, revision string, ids []string, now time.Time) error {

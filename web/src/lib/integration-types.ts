@@ -155,7 +155,7 @@ export interface IntegrationPrepareResult { candidate: Candidate }
 export interface IntegrationShowParams { workspace_id: string; candidate_id: string }
 export interface IntegrationShowResult { candidate: Candidate }
 
-export interface IntegrationListParams { workspace_id: string; limit?: number }
+export interface IntegrationListParams { workspace_id: string; mission_id?: string; limit?: number }
 export interface IntegrationListResult { candidates: CandidateSummary[] }
 
 export interface CandidateResolution { path: string; content?: string; delete?: boolean }

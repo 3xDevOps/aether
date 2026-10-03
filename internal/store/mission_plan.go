@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,22 +22,6 @@ func scanMissionQuestion(row interface{ Scan(...any) error }) (*domain.MissionQu
 	}
 	q.AskedAt, q.AnsweredAt = decodeTime(asked), decodeTimePtr(answered)
 	return &q, nil
-}
-
-const missionPlanReviewColumns = `mission_id, plan_version, summary, submitted_by_run_id, submitted_at, submitted_phase, decision, feedback, decided_by_member_id, decided_at`
-
-func scanMissionPlanReview(row interface{ Scan(...any) error }) (*domain.MissionPlanReview, error) {
-	var r domain.MissionPlanReview
-	var decision, submittedPhase string
-	var submitted int64
-	var decided *int64
-	if err := row.Scan(&r.MissionID, &r.PlanVersion, &r.Summary, &r.SubmittedByRunID, &submitted, &submittedPhase, &decision, &r.Feedback, &r.DecidedByMemberID, &decided); err != nil {
-		return nil, err
-	}
-	r.SubmittedPhase = domain.MissionPhase(submittedPhase)
-	r.Decision = domain.MissionPlanDecision(decision)
-	r.SubmittedAt, r.DecidedAt = decodeTime(submitted), decodeTimePtr(decided)
-	return &r, nil
 }
 
 // populateOpenQuestions fills Mission.OpenQuestions for a page of missions
@@ -100,7 +83,7 @@ func (d *DB) InsertMissionQuestion(ctx context.Context, missionID domain.Mission
 	if err != nil {
 		return nil, err
 	}
-	if phaseErr := requireMissionPhase(m, "mission.question.ask", domain.MissionPhasePlanning, domain.MissionPhaseClarified); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission.question.ask", domain.MissionPhasePlanning); phaseErr != nil {
 		return nil, phaseErr
 	}
 	resultID, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.question.ask", key, payload)
@@ -141,14 +124,6 @@ func (d *DB) InsertMissionQuestion(ctx context.Context, missionID domain.Mission
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.question.ask", key, payload, id, seq, n); receiptErr != nil {
 		return nil, receiptErr
-	}
-	// Clarification is not a one-way door: asking again reopens it, and the
-	// unanswered-question check then holds the mission in planning until the
-	// human answers.
-	if m.Phase == domain.MissionPhaseClarified {
-		if _, reopenErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=? AND phase=?`, domain.MissionPhasePlanning, n, missionID, domain.MissionPhaseClarified); reopenErr != nil {
-			return nil, fmt.Errorf("store: reopen clarification for mission %s: %w", missionID, reopenErr)
-		}
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
@@ -268,73 +243,6 @@ func (d *DB) ListMissionQuestions(ctx context.Context, missionID domain.MissionI
 	return out, nil
 }
 
-// CompleteMissionClarification is the integrator declaring that it has the
-// answers it needs. Questions are optional, so this is the explicit end of
-// clarification rather than a side effect of asking one.
-func (d *DB) CompleteMissionClarification(ctx context.Context, missionID domain.MissionID, run domain.RunID, key string) (*domain.Mission, error) {
-	if missionID == "" || run == "" || !validMutationKey(key) {
-		return nil, errors.New("store: mission clarification complete requires mission_id, the integrator run, and idempotency_key")
-	}
-	payload, err := mutationPayload(struct{}{})
-	if err != nil {
-		return nil, err
-	}
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("store: complete mission clarification: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	m, err := lockMissionRow(ctx, tx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.clarification.complete", key, payload)
-	if err != nil {
-		return nil, err
-	}
-	if replayed {
-		// The same key can only mean the round it was first used on. Once the
-		// mission moved on, replaying it would silently skip the next round's
-		// clarification.
-		if m.Phase != domain.MissionPhaseClarified {
-			return nil, fmt.Errorf("%w: clarification was already completed for an earlier round; complete the next round with a new idempotency key", ErrMissionIdempotencyConflict)
-		}
-		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, commitErr
-		}
-		return m, nil
-	}
-	if phaseErr := requireMissionPhase(m, "mission.clarification.complete", domain.MissionPhasePlanning); phaseErr != nil {
-		return nil, phaseErr
-	}
-	unanswered, err := unansweredQuestions(ctx, tx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	if unanswered > 0 {
-		return nil, fmt.Errorf("%w: %d questions are unanswered; wait for answers, then complete clarification", ErrMissionPhase, unanswered)
-	}
-	now := missionNow(time.Time{})
-	n, err := encodeTime(now)
-	if err != nil {
-		return nil, err
-	}
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=? AND phase=?`, domain.MissionPhaseClarified, n, missionID, domain.MissionPhasePlanning); updateErr != nil {
-		return nil, fmt.Errorf("store: move mission %s to clarified: %w", missionID, updateErr)
-	}
-	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.clarification.complete", key, payload, string(missionID), 0, n); receiptErr != nil {
-		return nil, receiptErr
-	}
-	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
-		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
-	}
-	if commitErr := tx.Commit(); commitErr != nil {
-		return nil, fmt.Errorf("store: complete mission clarification: commit: %w", commitErr)
-	}
-	m.Phase, m.UpdatedAt = domain.MissionPhaseClarified, now
-	return m, nil
-}
-
 func unansweredQuestions(ctx context.Context, tx *sql.Tx, missionID domain.MissionID) (int, error) {
 	var unanswered int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_questions WHERE mission_id=? AND answered_at IS NULL`, missionID).Scan(&unanswered); err != nil {
@@ -343,207 +251,29 @@ func unansweredQuestions(ctx context.Context, tx *sql.Tx, missionID domain.Missi
 	return unanswered, nil
 }
 
-// pendingPlanRevisionsQuery selects one revision per non-abandoned task: the
-// highest-numbered proposed revision at or above the task's current revision.
-// A new task's current revision is itself proposed, so the same query covers
-// new work and a change to approved work. It is the mission's pending set:
-// mission.plan.submit requires it non-empty and records it as the round's
-// items, and approval accepts exactly those items.
-func pendingPlanRevisionsQuery(columns string) string {
-	return `SELECT ` + columns + ` FROM mission_tasks t
-		JOIN mission_task_revisions r ON r.task_id=t.id
-		WHERE t.mission_id=? AND t.abandoned_at IS NULL AND r.status='proposed'
-			AND r.revision >= t.current_revision
-			AND r.revision = (SELECT MAX(p.revision) FROM mission_task_revisions p
-				WHERE p.task_id=t.id AND p.status='proposed' AND p.revision >= t.current_revision)`
-}
-
-// planItem is one row of the pending set as submit reads it, before the
-// widening computation turns it into a mission_plan_items row.
-type planItem struct {
-	taskID   domain.TaskID
-	revision int
-	material bool
-	newTask  bool
-	scope    domain.TaskScope
-	approved domain.TaskScope
-}
-
-// readPendingPlanRevisions returns the mission's pending set with everything
-// the round needs to record: whether the task is new, and the scope of both
-// the proposed revision and the approved revision it would replace.
-func readPendingPlanRevisions(ctx context.Context, tx *sql.Tx, missionID domain.MissionID) ([]planItem, error) {
-	rows, err := tx.QueryContext(ctx, pendingPlanRevisionsQuery(`t.id, r.revision, r.material,
-		(SELECT COUNT(*) FROM mission_task_revisions a WHERE a.task_id=t.id AND a.accepted_at IS NOT NULL),
-		r.scope,
-		COALESCE((SELECT c.scope FROM mission_task_revisions c WHERE c.task_id=t.id AND c.revision=t.current_revision AND c.status='accepted'), '{}')`)+` ORDER BY t.id`, missionID)
-	if err != nil {
-		return nil, fmt.Errorf("store: read pending mission plan revisions: %w", err)
+// StartMission is the integrator's mission.start: in one transaction it
+// accepts every proposed task, recording run as the accepting run, and moves
+// the mission from planning to active. While planning, each live task's
+// current revision is its latest proposal (see proposeTaskRevision), so those
+// revisions are the plan.
+func (d *DB) StartMission(ctx context.Context, missionID domain.MissionID, run domain.RunID, key string) (*domain.Mission, error) {
+	if missionID == "" || run == "" || !validMutationKey(key) {
+		return nil, errors.New("store: mission start requires mission_id, the integrator run, and idempotency_key")
 	}
-	defer func() { _ = rows.Close() }()
-	var out []planItem
-	for rows.Next() {
-		var item planItem
-		var material, approvedRevisions int
-		var scope, approved string
-		if scanErr := rows.Scan(&item.taskID, &item.revision, &material, &approvedRevisions, &scope, &approved); scanErr != nil {
-			return nil, fmt.Errorf("store: read pending mission plan revisions: %w", scanErr)
-		}
-		item.material, item.newTask = material != 0, approvedRevisions == 0
-		if unmarshalErr := json.Unmarshal([]byte(scope), &item.scope); unmarshalErr != nil {
-			return nil, fmt.Errorf("store: decode task %s revision %d scope: %w", item.taskID, item.revision, unmarshalErr)
-		}
-		if unmarshalErr := json.Unmarshal([]byte(approved), &item.approved); unmarshalErr != nil {
-			return nil, fmt.Errorf("store: decode task %s approved scope: %w", item.taskID, unmarshalErr)
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: read pending mission plan revisions: %w", err)
-	}
-	return out, nil
-}
-
-// SubmitMissionPlan freezes the pending set as plan version N+1 and hands the
-// mission to a human. From clarified it is the initial plan; from active it is
-// an amendment to a plan the human already approved, and approved work keeps
-// running while the human decides.
-func (d *DB) SubmitMissionPlan(ctx context.Context, missionID domain.MissionID, submittedBy domain.RunID, summary, key string) (*domain.MissionPlanReview, error) {
-	if missionID == "" || submittedBy == "" || strings.TrimSpace(summary) == "" || !validMutationKey(key) {
-		return nil, errors.New("store: mission plan submit requires mission_id, submitting run, summary, and idempotency_key")
-	}
-	payload, err := mutationPayload(struct{ Summary string }{summary})
+	payload, err := mutationPayload(struct{}{})
 	if err != nil {
 		return nil, err
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: submit mission plan: begin: %w", err)
+		return nil, fmt.Errorf("store: start mission: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	m, err := lockMissionRow(ctx, tx, missionID)
 	if err != nil {
 		return nil, err
 	}
-	_, replayedVersion, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.plan.submit", key, payload)
-	if err != nil {
-		return nil, err
-	}
-	if replayed {
-		review, scanErr := scanMissionPlanReview(tx.QueryRowContext(ctx, `SELECT `+missionPlanReviewColumns+` FROM mission_plan_reviews WHERE mission_id=? AND plan_version=?`, missionID, replayedVersion))
-		if scanErr != nil {
-			return nil, fmt.Errorf("store: replay mission plan submit: %w", scanErr)
-		}
-		if review.Decision != "" {
-			return nil, fmt.Errorf("%w: plan version %d was already decided; submit the next round with a new idempotency key", ErrMissionIdempotencyConflict, review.PlanVersion)
-		}
-		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, commitErr
-		}
-		return review, nil
-	}
-	if phaseErr := requireMissionPhase(m, "mission.plan.submit", domain.MissionPhaseClarified, domain.MissionPhaseActive); phaseErr != nil {
-		return nil, phaseErr
-	}
-	// Defence in depth: mission.question.ask returns a clarified mission to
-	// planning, so an unanswered question cannot reach this point.
-	unanswered, err := unansweredQuestions(ctx, tx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	if unanswered > 0 {
-		return nil, fmt.Errorf("%w: %d questions are unanswered; wait for answers before submitting", ErrMissionPhase, unanswered)
-	}
-	pending, err := readPendingPlanRevisions(ctx, tx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(pending) == 0 {
-		return nil, fmt.Errorf("%w: propose at least one task or revision before submitting", ErrMissionPhase)
-	}
-	amendment := m.Phase == domain.MissionPhaseActive
-	var approvedUnion []string
-	if amendment {
-		if approvedUnion, err = approvedScopeUnion(ctx, tx, missionID); err != nil {
-			return nil, err
-		}
-	}
-	version := m.PlanVersion + 1
-	now := missionNow(time.Time{})
-	n, err := encodeTime(now)
-	if err != nil {
-		return nil, err
-	}
-	if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_plan_reviews (mission_id,plan_version,summary,submitted_by_run_id,submitted_at,submitted_phase) VALUES (?,?,?,?,?,?)`, missionID, version, summary, submittedBy, n, m.Phase); insertErr != nil {
-		return nil, fmt.Errorf("store: insert mission plan review: %w", mapConstraint(insertErr, ErrConflict))
-	}
-	for _, item := range pending {
-		// An initial plan widens nothing: there is no approved scope yet.
-		widening := []string{}
-		if amendment {
-			widening = append(widening, widenedPaths(approvedUnion, item.scope.ExpectedPaths)...)
-			widening = append(widening, droppedExclusions(item.approved.Exclusions, item.scope.Exclusions)...)
-		}
-		encoded, encodeErr := missionJSON(widening, "[]")
-		if encodeErr != nil {
-			return nil, encodeErr
-		}
-		if _, itemErr := tx.ExecContext(ctx, `INSERT INTO mission_plan_items (mission_id,plan_version,task_id,revision,new_task,material,widening) VALUES (?,?,?,?,?,?,?)`, missionID, version, item.taskID, item.revision, item.newTask, item.material, encoded); itemErr != nil {
-			return nil, fmt.Errorf("store: insert mission plan item for task %s: %w", item.taskID, mapConstraint(itemErr, ErrConflict))
-		}
-	}
-	next := domain.MissionPhasePlanReview
-	if amendment {
-		next = domain.MissionPhaseAmendmentReview
-	}
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, plan_version=?, updated_at=? WHERE id=? AND phase=?`, next, version, n, missionID, m.Phase); updateErr != nil {
-		return nil, fmt.Errorf("store: move mission %s to %s: %w", missionID, next, updateErr)
-	}
-	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.plan.submit", key, payload, string(missionID), int(version), n); receiptErr != nil {
-		return nil, receiptErr
-	}
-	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
-		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
-	}
-	if commitErr := tx.Commit(); commitErr != nil {
-		return nil, fmt.Errorf("store: submit mission plan: commit: %w", commitErr)
-	}
-	return &domain.MissionPlanReview{MissionID: missionID, PlanVersion: version, Summary: summary, SubmittedByRunID: submittedBy, SubmittedAt: now, SubmittedPhase: m.Phase}, nil
-}
-
-// DecideMissionPlan records the human verdict on one plan version and moves
-// the mission to the phase that verdict implies. Approval accepts the round's
-// task revisions inline: AcceptTaskRevision opens its own transaction and
-// would block on the SQLite write lock this one holds.
-func (d *DB) DecideMissionPlan(ctx context.Context, missionID domain.MissionID, expectedPlanVersion uint64, decision domain.MissionPlanDecision, feedback string, decidedBy domain.MemberID, key string) (*domain.Mission, error) {
-	if missionID == "" || decidedBy == "" || expectedPlanVersion == 0 || !validMutationKey(key) {
-		return nil, errors.New("store: mission plan decide requires mission_id, plan version, deciding member, and idempotency_key")
-	}
-	if !decision.Valid() {
-		return nil, fmt.Errorf("store: mission plan decision %q is not approve, revise, or reject", decision)
-	}
-	if decision == domain.MissionPlanRevise && strings.TrimSpace(feedback) == "" {
-		return nil, errors.New("store: mission plan revise requires feedback")
-	}
-	payload, err := mutationPayload(struct {
-		PlanVersion uint64
-		Decision    domain.MissionPlanDecision
-		Feedback    string
-		DecidedBy   domain.MemberID
-	}{expectedPlanVersion, decision, feedback, decidedBy})
-	if err != nil {
-		return nil, err
-	}
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("store: decide mission plan: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	m, err := lockMissionRow(ctx, tx, missionID)
-	if err != nil {
-		return nil, err
-	}
-	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.plan.decide", key, payload)
+	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.start", key, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -553,73 +283,92 @@ func (d *DB) DecideMissionPlan(ctx context.Context, missionID domain.MissionID, 
 		}
 		return m, nil
 	}
-	// The phase check is not replaced by the version check: a mission that
-	// went back to planning still carries the plan version it was reviewed at.
-	if phaseErr := requireMissionPhase(m, "mission.plan.decide", domain.MissionPhasePlanReview, domain.MissionPhaseAmendmentReview); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission.start", domain.MissionPhasePlanning); phaseErr != nil {
 		return nil, phaseErr
 	}
-	next, ok := domain.MissionPhaseAfterDecision(m.Phase, decision)
-	if !ok {
-		return nil, fmt.Errorf("%w: an amendment is approved or sent back for changes; abandon its tasks or revisions to drop it", ErrMissionPhase)
+	unanswered, err := unansweredQuestions(ctx, tx, missionID)
+	if err != nil {
+		return nil, err
 	}
-	if m.PlanVersion != expectedPlanVersion {
-		return nil, fmt.Errorf("%w: expected plan version %d, current %d", ErrConflict, expectedPlanVersion, m.PlanVersion)
-	}
-	var openDecision string
-	if reviewErr := tx.QueryRowContext(ctx, `SELECT decision FROM mission_plan_reviews WHERE mission_id=? AND plan_version=?`, missionID, expectedPlanVersion).Scan(&openDecision); errors.Is(reviewErr, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%w: mission %s has no plan version %d to decide", ErrConflict, missionID, expectedPlanVersion)
-	} else if reviewErr != nil {
-		return nil, fmt.Errorf("store: read mission plan review: %w", reviewErr)
-	}
-	if openDecision != "" {
-		return nil, fmt.Errorf("%w: plan version %d was already decided %s", ErrConflict, expectedPlanVersion, openDecision)
+	if unanswered > 0 {
+		return nil, fmt.Errorf("%w: %d questions are unanswered; wait for answers with mission plan show --wait 30, then start", ErrMissionPhase, unanswered)
 	}
 	now := missionNow(time.Time{})
 	n, err := encodeTime(now)
 	if err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE mission_plan_reviews SET decision=?, feedback=?, decided_by_member_id=?, decided_at=? WHERE mission_id=? AND plan_version=? AND decision=''`, decision, feedback, decidedBy, n, missionID, expectedPlanVersion)
+	res, err := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='accepted', accepted_at=?, accepted_by_run_id=?
+		WHERE status='proposed' AND (task_id, revision) IN (
+			SELECT t.id, t.current_revision FROM mission_tasks t WHERE t.mission_id=? AND t.abandoned_at IS NULL)`, n, run, missionID)
 	if err != nil {
-		return nil, fmt.Errorf("store: decide mission plan review: %w", err)
+		return nil, fmt.Errorf("store: accept proposed tasks of mission %s: %w", missionID, err)
 	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, fmt.Errorf("%w: plan version %d was decided concurrently", ErrConflict, expectedPlanVersion)
+	if accepted, _ := res.RowsAffected(); accepted == 0 {
+		return nil, fmt.Errorf("%w: propose at least one task with task propose before starting", ErrMissionPhase)
 	}
-	bumped := 0
-	if decision == domain.MissionPlanApprove {
-		if bumped, err = acceptPlanTaskRevisions(ctx, tx, missionID, expectedPlanVersion, decidedBy, n); err != nil {
-			return nil, err
-		}
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=? AND phase=?`, domain.MissionPhaseActive, n, missionID, domain.MissionPhasePlanning); updateErr != nil {
+		return nil, fmt.Errorf("store: move mission %s to active: %w", missionID, updateErr)
 	}
-	phaseRes, err := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=? AND phase=?`, next, n, missionID, m.Phase)
-	if err != nil {
-		return nil, fmt.Errorf("store: move mission %s to %s: %w", missionID, next, err)
-	}
-	if affected, _ := phaseRes.RowsAffected(); affected != 1 {
-		return nil, fmt.Errorf("%w: mission %s left %s concurrently", ErrConflict, missionID, m.Phase)
-	}
-	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.plan.decide", key, payload, string(missionID), int(expectedPlanVersion), n); receiptErr != nil {
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.start", key, payload, string(missionID), 0, n); receiptErr != nil {
 		return nil, receiptErr
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
-		return nil, fmt.Errorf("store: decide mission plan: commit: %w", commitErr)
+		return nil, fmt.Errorf("store: start mission: commit: %w", commitErr)
 	}
-	m.Phase, m.UpdatedAt = next, now
-	m.AcceptedSetVersion += uint64(bumped)
+	m.Phase, m.UpdatedAt = domain.MissionPhaseActive, now
 	return m, nil
 }
 
-// missionCancelledFeedback is the feedback on a plan round that mission.cancel
-// closed rather than a human decision.
-const missionCancelledFeedback = "swarm cancelled"
+// CompleteMission records that run, the mission's current integrator,
+// reported success: the mission moves to completed. Completing a completed
+// mission again is a no-op, so a replayed report changes nothing.
+func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, run domain.RunID) (*domain.Mission, error) {
+	if missionID == "" || run == "" {
+		return nil, errors.New("store: mission complete requires mission_id and the integrator run")
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: complete mission: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	m, err := lockMissionRow(ctx, tx, missionID)
+	if err != nil {
+		return nil, err
+	}
+	if m.CurrentIntegratorRunID != run {
+		return nil, fmt.Errorf("%w: run %s is not the current integrator of mission %s", ErrMissionStale, run, missionID)
+	}
+	if m.Phase == domain.MissionPhaseCompleted {
+		return m, tx.Commit()
+	}
+	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhaseActive); phaseErr != nil {
+		return nil, phaseErr
+	}
+	now := missionNow(time.Time{})
+	n, err := encodeTime(now)
+	if err != nil {
+		return nil, err
+	}
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseCompleted, n, missionID); updateErr != nil {
+		return nil, fmt.Errorf("store: move mission %s to completed: %w", missionID, updateErr)
+	}
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
+		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, fmt.Errorf("store: complete mission: commit: %w", commitErr)
+	}
+	m.Phase, m.UpdatedAt = domain.MissionPhaseCompleted, now
+	return m, nil
+}
 
-// CancelMission ends a mission before its plan is approved by moving it to
-// rejected, the terminal phase whose integrator the reconcile loop stops. A
-// key names one cancellation of one mission.
+// CancelMission ends a planning or active mission by moving it to cancelled;
+// the reconcile loop then stops its workers and its integrator. A key names
+// one cancellation of one mission.
 func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, cancelledBy domain.MemberID, key string) (*domain.Mission, error) {
 	if missionID == "" || cancelledBy == "" || !validMutationKey(key) {
 		return nil, errors.New("store: mission cancel requires mission_id, cancelling member, and idempotency_key")
@@ -653,7 +402,7 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 		}
 		return m, nil
 	}
-	if phaseErr := requireMissionPhase(m, "mission.cancel", domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission.cancel", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
 		return nil, phaseErr
 	}
 	now := missionNow(time.Time{})
@@ -661,16 +410,8 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	if err != nil {
 		return nil, err
 	}
-	// A round under review is closed as rejected, so no reader takes the
-	// cancelled mission's plan for one still awaiting a decision.
-	if m.Phase == domain.MissionPhasePlanReview {
-		if _, reviewErr := tx.ExecContext(ctx, `UPDATE mission_plan_reviews SET decision=?, feedback=?, decided_by_member_id=?, decided_at=? WHERE mission_id=? AND plan_version=? AND decision=''`,
-			domain.MissionPlanReject, missionCancelledFeedback, cancelledBy, n, missionID, m.PlanVersion); reviewErr != nil {
-			return nil, fmt.Errorf("store: close plan version %d of cancelled mission %s: %w", m.PlanVersion, missionID, reviewErr)
-		}
-	}
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseRejected, n, missionID); updateErr != nil {
-		return nil, fmt.Errorf("store: move mission %s to rejected: %w", missionID, updateErr)
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseCancelled, n, missionID); updateErr != nil {
+		return nil, fmt.Errorf("store: move mission %s to cancelled: %w", missionID, updateErr)
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.cancel", key, payload, string(missionID), 0, n); receiptErr != nil {
 		return nil, receiptErr
@@ -681,136 +422,6 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, fmt.Errorf("store: cancel mission: commit: %w", commitErr)
 	}
-	m.Phase, m.UpdatedAt = domain.MissionPhaseRejected, now
+	m.Phase, m.UpdatedAt = domain.MissionPhaseCancelled, now
 	return m, nil
-}
-
-// acceptPlanTaskRevisions accepts exactly the revisions this round recorded as
-// its items, and reports how many times accepted_set_version was bumped: once
-// per task whose superseded revision held an acceptance, because that output
-// leaves the current accepted set.
-func acceptPlanTaskRevisions(ctx context.Context, tx *sql.Tx, missionID domain.MissionID, version uint64, decidedBy domain.MemberID, n int64) (int, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT task_id, revision FROM mission_plan_items WHERE mission_id=? AND plan_version=? ORDER BY task_id`, missionID, version)
-	if err != nil {
-		return 0, fmt.Errorf("store: read mission plan items: %w", err)
-	}
-	type item struct {
-		id       domain.TaskID
-		revision int
-	}
-	var items []item
-	for rows.Next() {
-		var it item
-		if scanErr := rows.Scan(&it.id, &it.revision); scanErr != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("store: read mission plan items: %w", scanErr)
-		}
-		items = append(items, it)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return 0, fmt.Errorf("store: read mission plan items: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("store: read mission plan items: %w", err)
-	}
-	if len(items) == 0 {
-		return 0, fmt.Errorf("%w: the plan has no proposed task to accept; request changes to return the mission to planning", ErrMissionPhase)
-	}
-	bumped := 0
-	for _, it := range items {
-		var previous int
-		if currentErr := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, it.id).Scan(&previous); currentErr != nil {
-			return 0, fmt.Errorf("store: read task %s current revision: %w", it.id, currentErr)
-		}
-		var previousOutput int
-		if previous != it.revision {
-			outputErr := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances WHERE mission_id=? AND task_id=? AND task_revision=?`, missionID, it.id, previous).Scan(&previousOutput)
-			if outputErr != nil && !errors.Is(outputErr, sql.ErrNoRows) {
-				return 0, fmt.Errorf("store: read acceptance of task %s revision %d: %w", it.id, previous, outputErr)
-			}
-		}
-		res, execErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='accepted', accepted_at=?, accepted_by_member_id=? WHERE task_id=? AND revision=? AND status='proposed'`, n, decidedBy, it.id, it.revision)
-		if execErr != nil {
-			return 0, fmt.Errorf("store: accept task %s revision %d: %w", it.id, it.revision, execErr)
-		}
-		if affected, _ := res.RowsAffected(); affected != 1 {
-			return 0, fmt.Errorf("%w: task %s revision %d changed while the plan was approved", ErrConflict, it.id, it.revision)
-		}
-		if previous != it.revision {
-			if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='superseded' WHERE task_id=? AND revision=? AND status='accepted'`, it.id, previous); supersedeErr != nil {
-				return 0, fmt.Errorf("store: supersede task %s revision %d: %w", it.id, previous, supersedeErr)
-			}
-		}
-		if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='superseded' WHERE task_id=? AND revision<? AND status='proposed'`, it.id, it.revision); supersedeErr != nil {
-			return 0, fmt.Errorf("store: supersede earlier proposals of task %s: %w", it.id, supersedeErr)
-		}
-		if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET current_revision=?, updated_at=? WHERE id=?`, it.revision, n, it.id); updateErr != nil {
-			return 0, fmt.Errorf("store: advance task %s to revision %d: %w", it.id, it.revision, updateErr)
-		}
-		if previousOutput == 1 {
-			if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); versionErr != nil {
-				return 0, fmt.Errorf("store: advance accepted set version: %w", versionErr)
-			}
-			bumped++
-		}
-	}
-	return bumped, nil
-}
-
-// ListMissionPlanReviews returns every round oldest first, each carrying the
-// items it recorded: what was proposed, by which revision, and what widened
-// the approved scope at the moment it was submitted.
-func (d *DB) ListMissionPlanReviews(ctx context.Context, missionID domain.MissionID) ([]*domain.MissionPlanReview, error) {
-	if missionID == "" {
-		return nil, ErrNotFound
-	}
-	rows, err := d.db.QueryContext(ctx, `SELECT `+missionPlanReviewColumns+` FROM mission_plan_reviews WHERE mission_id=? ORDER BY plan_version`, missionID)
-	if err != nil {
-		return nil, fmt.Errorf("store: list mission plan reviews: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*domain.MissionPlanReview
-	byVersion := make(map[uint64]*domain.MissionPlanReview)
-	for rows.Next() {
-		r, scanErr := scanMissionPlanReview(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("store: list mission plan reviews: %w", scanErr)
-		}
-		out = append(out, r)
-		byVersion[r.PlanVersion] = r
-	}
-	if rowsErr := rows.Err(); rowsErr != nil {
-		return nil, fmt.Errorf("store: list mission plan reviews: %w", rowsErr)
-	}
-	if len(out) == 0 {
-		return out, nil
-	}
-	items, err := d.db.QueryContext(ctx, `SELECT i.plan_version, i.task_id, i.revision, i.new_task, i.material, i.widening, r.title, r.supersedes_revision
-		FROM mission_plan_items i
-		JOIN mission_task_revisions r ON r.task_id=i.task_id AND r.revision=i.revision
-		WHERE i.mission_id=? ORDER BY i.plan_version, i.task_id`, missionID)
-	if err != nil {
-		return nil, fmt.Errorf("store: list mission plan items: %w", err)
-	}
-	defer func() { _ = items.Close() }()
-	for items.Next() {
-		var item domain.MissionPlanItem
-		var newTask, material int
-		var widening string
-		if scanErr := items.Scan(&item.PlanVersion, &item.TaskID, &item.Revision, &newTask, &material, &widening, &item.Title, &item.SupersedesRevision); scanErr != nil {
-			return nil, fmt.Errorf("store: list mission plan items: %w", scanErr)
-		}
-		item.NewTask, item.Material = newTask != 0, material != 0
-		if unmarshalErr := json.Unmarshal([]byte(widening), &item.Widening); unmarshalErr != nil {
-			return nil, fmt.Errorf("store: decode plan item widening for task %s: %w", item.TaskID, unmarshalErr)
-		}
-		if review, ok := byVersion[item.PlanVersion]; ok {
-			review.Items = append(review.Items, item)
-		}
-	}
-	if itemsErr := items.Err(); itemsErr != nil {
-		return nil, fmt.Errorf("store: list mission plan items: %w", itemsErr)
-	}
-	return out, nil
 }

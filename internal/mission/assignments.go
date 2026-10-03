@@ -123,48 +123,28 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	if m == nil {
 		return protocol.CoordMissionAssignment{}, nil
 	}
-	attempts, err := s.cfg.Missions.ListAttempts(ctx, m.ID, "")
-	if err != nil {
-		return protocol.CoordMissionAssignment{}, err
-	}
 	choices := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
 	for _, choice := range m.ExecutionChoices {
 		choices = append(choices, protocol.MissionExecutionChoice{AccountMemberID: string(choice.AccountMemberID), Harness: choice.Harness, Mode: string(choice.Mode)})
 	}
 	out := protocol.CoordMissionAssignment{
-		MissionID:             string(m.ID),
-		IntegratorRunID:       string(m.CurrentIntegratorRunID),
-		IntegratorGeneration:  m.IntegratorGeneration,
-		ExecutionChoices:      choices,
-		MaxConcurrentAttempts: m.MaxConcurrentAttempts,
-		MaxTotalAttempts:      m.MaxTotalAttempts,
-		TotalAttempts:         len(attempts),
-		Phase:                 string(m.Phase),
-		PlanVersion:           m.PlanVersion,
-	}
-	for _, candidate := range attempts {
-		if candidate != nil && candidate.State.HoldsConcurrency() {
-			out.ActiveAttempts++
-		}
+		MissionID:            string(m.ID),
+		IntegratorRunID:      string(m.CurrentIntegratorRunID),
+		IntegratorGeneration: m.IntegratorGeneration,
+		ExecutionChoices:     choices,
+		Phase:                string(m.Phase),
 	}
 	if attempt == nil {
 		out.Role = missionRoleIntegrator
 		out.Capabilities = integratorCapabilities()
-		// Only a mission with an undecided round has open questions or pending
-		// feedback to act on, so the two extra reads stay off the approved
-		// path: active is the one phase where nothing is waiting on a human.
-		switch m.Phase {
-		case domain.MissionPhasePlanning, domain.MissionPhaseClarified,
-			domain.MissionPhasePlanReview, domain.MissionPhaseAmendmentReview:
+		// Questions are asked only while planning, so the extra read stays off
+		// every other phase.
+		if m.Phase == domain.MissionPhasePlanning {
 			current, missionErr := s.cfg.Missions.GetMission(ctx, m.ID)
 			if missionErr != nil {
 				return protocol.CoordMissionAssignment{}, missionErr
 			}
-			reviews, reviewErr := s.cfg.Missions.ListMissionPlanReviews(ctx, m.ID)
-			if reviewErr != nil {
-				return protocol.CoordMissionAssignment{}, reviewErr
-			}
-			out.OpenQuestions, out.LatestFeedback = current.OpenQuestions, latestReviseFeedback(reviews)
+			out.OpenQuestions = current.OpenQuestions
 		}
 		return out, nil
 	}
@@ -186,9 +166,8 @@ func integratorCapabilities() []string {
 		protocol.MethodTaskAcceptSubmission,
 		protocol.MethodTaskAbandon,
 		protocol.MethodMissionQuestionAsk,
-		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
-		protocol.MethodMissionPlanSubmit,
+		protocol.MethodMissionStart,
 		protocol.MethodWorkerStart,
 		protocol.MethodWorkerList,
 		protocol.MethodWorkerInspect,

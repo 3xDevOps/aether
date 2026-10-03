@@ -197,14 +197,14 @@ func (l lazyMission) HandleAgent(ctx context.Context, run domain.RunID, method s
 		HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
 	}).HandleAgent(ctx, run, method, raw)
 }
-func (l lazyMission) ValidateReport(ctx context.Context, run domain.RunID) error {
+func (l lazyMission) ValidateReport(ctx context.Context, run domain.RunID, outcome store.CoordOutcome) error {
 	s, err := l.service()
 	if err != nil {
 		return err
 	}
 	return s.(interface {
-		ValidateReport(context.Context, domain.RunID) error
-	}).ValidateReport(ctx, run)
+		ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error
+	}).ValidateReport(ctx, run, outcome)
 }
 func (l lazyMission) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
 	s, err := l.service()

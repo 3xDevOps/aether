@@ -35,10 +35,9 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if err != nil {
 		return nil, err
 	}
-	// Dispatch needs an approved plan; amendment_review keeps dispatching the
-	// already-approved set, and a pending revision cannot be reserved because
-	// it is not the task's current revision.
-	if m.Phase != domain.MissionPhaseActive && m.Phase != domain.MissionPhaseAmendmentReview {
+	// A pending revision cannot be reserved because it is not the task's
+	// current revision.
+	if m.Phase != domain.MissionPhaseActive {
 		return nil, missionPhaseRefusal(m, "worker dispatch")
 	}
 	task, err := s.cfg.Missions.GetTask(ctx, domain.TaskID(p.TaskID))

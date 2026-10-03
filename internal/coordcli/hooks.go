@@ -125,7 +125,7 @@ func hookContext(status protocol.CoordStatusResult, stopping bool) string {
 		text.WriteString(hookInboxContext(status.Unread))
 	}
 	if assignment := status.Assignment; assignment != nil && assignment.Role == "integrator" {
-		fmt.Fprintf(&text, "Refresh the durable mission state before waiting or declaring completion: /usr/local/bin/aether-internal mission plan show reads human answers and plan decisions; /usr/local/bin/aether-internal worker list --mission-id %s reads worker attempts. Run /usr/local/bin/aether-internal skill for current phase instructions.\n", shellquote.Quote(assignment.MissionID))
+		fmt.Fprintf(&text, "Refresh the durable mission state before waiting or declaring completion: /usr/local/bin/aether-internal mission plan show reads the mission phase and human answers; /usr/local/bin/aether-internal worker list --mission-id %s reads worker attempts. Run /usr/local/bin/aether-internal skill for current phase instructions.\n", shellquote.Quote(assignment.MissionID))
 	}
 	if stopping {
 		return text.String()

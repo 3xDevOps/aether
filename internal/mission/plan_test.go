@@ -14,7 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-type planGateFixture struct {
+type missionFixture struct {
 	db        *store.DB
 	svc       *Service
 	mission   *domain.Mission
@@ -46,27 +46,27 @@ func (p *planShowProbe) ListMissionQuestions(ctx context.Context, missionID doma
 	return questions, err
 }
 
-func newPlanGateFixture(t *testing.T) *planGateFixture {
+func newMissionFixture(t *testing.T) *missionFixture {
 	t.Helper()
-	return newPlanGateFixtureFor(t, "claude", domain.LaunchTUI)
+	return newMissionFixtureFor(t, "claude", domain.LaunchTUI)
 }
 
-// newPlanGateFixtureFor builds the plan gate fixture around an integrator
+// newMissionFixtureFor builds a planning mission around an integrator
 // run of the given harness and mode.
-func newPlanGateFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMode) *planGateFixture {
+func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMode) *missionFixture {
 	t.Helper()
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
 	workspace := regressionWorkspace(t, db)
 	member := regressionMember(t, db, "accountable")
 	m := &domain.Mission{
-		WorkspaceID: workspace.ID, Objective: "plan gate mission", AccountableHumanID: member.ID,
+		WorkspaceID: workspace.ID, Objective: "fixture mission", AccountableHumanID: member.ID,
 		Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: harnessName, Mode: mode},
 		ExecutionChoices: []domain.MissionExecutionChoice{
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI},
 		},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4, IdempotencyKey: "plan-gate-mission",
+		IdempotencyKey:               "fixture-mission",
 		IntegratorAuthorizingHumanID: member.ID, IntegratorRunOwnerID: member.ID,
 	}
 	if err := db.CreateMission(ctx, m); err != nil {
@@ -93,13 +93,13 @@ func newPlanGateFixtureFor(t *testing.T, harnessName string, mode domain.LaunchM
 	if err != nil {
 		t.Fatalf("new mission service: %v", err)
 	}
-	return &planGateFixture{
+	return &missionFixture{
 		db: db, svc: svc, mission: m, workspace: workspace, member: member,
 		canceller: canceller, launcher: launcher, evidence: evidence, reads: reads,
 	}
 }
 
-func (f *planGateFixture) call(t *testing.T, run domain.RunID, method string, params any) (any, error) {
+func (f *missionFixture) call(t *testing.T, run domain.RunID, method string, params any) (any, error) {
 	t.Helper()
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -108,7 +108,7 @@ func (f *planGateFixture) call(t *testing.T, run domain.RunID, method string, pa
 	return f.svc.HandleAgent(context.Background(), run, method, raw)
 }
 
-func (f *planGateFixture) mustCall(t *testing.T, method string, params any) any {
+func (f *missionFixture) mustCall(t *testing.T, method string, params any) any {
 	t.Helper()
 	out, err := f.call(t, f.mission.CurrentIntegratorRunID, method, params)
 	if err != nil {
@@ -117,7 +117,7 @@ func (f *planGateFixture) mustCall(t *testing.T, method string, params any) any 
 	return out
 }
 
-func (f *planGateFixture) phaseRefusal(t *testing.T, method string, params any) {
+func (f *missionFixture) phaseRefusal(t *testing.T, method string, params any) {
 	t.Helper()
 	_, err := f.call(t, f.mission.CurrentIntegratorRunID, method, params)
 	if !errors.Is(err, store.ErrMissionPhase) {
@@ -126,7 +126,7 @@ func (f *planGateFixture) phaseRefusal(t *testing.T, method string, params any) 
 }
 
 // answerAll answers every open question as the accountable human.
-func (f *planGateFixture) answerAll(t *testing.T, keyPrefix string) {
+func (f *missionFixture) answerAll(t *testing.T, keyPrefix string) {
 	t.Helper()
 	questions, err := f.db.ListMissionQuestions(context.Background(), f.mission.ID)
 	if err != nil {
@@ -144,48 +144,31 @@ func (f *planGateFixture) answerAll(t *testing.T, keyPrefix string) {
 	}
 }
 
-// clarify declares clarification complete, which is what the initial plan
-// submit needs. Questions are optional, so every round answers first and then
-// says it has what it needs.
-func (f *planGateFixture) clarify(t *testing.T, round string) {
+// propose proposes one task while planning and returns its ID.
+func (f *missionFixture) propose(t *testing.T, key string) string {
 	t.Helper()
-	f.mustCall(t, protocol.MethodMissionClarificationComplete, protocol.MissionClarificationCompleteParams{
-		IdempotencyKey: "clarify-" + round,
-	})
-}
-
-// submit sends the plan and returns the version now awaiting a decision.
-func (f *planGateFixture) submit(t *testing.T, round string, wantPhase domain.MissionPhase) uint64 {
-	t.Helper()
-	out := f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "what will be built and why", IdempotencyKey: "submit-" + round,
-	})
-	submitted, ok := out.(protocol.MissionPlanSubmitResult)
-	if !ok || submitted.Plan.Phase != string(wantPhase) {
-		t.Fatalf("mission.plan.submit result = %#v, want %s", out, wantPhase)
-	}
-	return submitted.Plan.PlanVersion
-}
-
-// proposeAndSubmit walks the whole gate up to the human decision and returns
-// the submitted plan version.
-func (f *planGateFixture) proposeAndSubmit(t *testing.T) uint64 {
-	t.Helper()
-	const round = "1"
-	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
-		Body: "which checkout flow?", IdempotencyKey: "ask-" + round,
-	})
-	f.answerAll(t, "answer-"+round+"-")
-	f.mustCall(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+	out := f.mustCall(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 		MissionID:      string(f.mission.ID),
-		Revision:       protocol.TaskRevision{Title: "plan task " + round, Objective: "plan task " + round},
-		IdempotencyKey: "propose-" + round,
+		Revision:       protocol.TaskRevision{Title: "plan task " + key, Objective: "plan task " + key},
+		IdempotencyKey: key,
 	})
-	f.clarify(t, round)
-	return f.submit(t, round, domain.MissionPhasePlanReview)
+	return out.(protocol.TaskMutationResult).Task.ID
 }
 
-func (f *planGateFixture) workerStart(t *testing.T) error {
+// start calls mission.start and returns the resulting plan state.
+func (f *missionFixture) start(t *testing.T, key string) protocol.MissionPlanState {
+	t.Helper()
+	out := f.mustCall(t, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: string(f.mission.ID), IdempotencyKey: key,
+	})
+	started, ok := out.(protocol.MissionStartResult)
+	if !ok {
+		t.Fatalf("mission.start result = %#v, want MissionStartResult", out)
+	}
+	return started.Plan
+}
+
+func (f *missionFixture) workerStart(t *testing.T) error {
 	t.Helper()
 	_, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 		MissionID: string(f.mission.ID), TaskID: "task-does-not-matter", TaskRevision: 1,
@@ -195,10 +178,12 @@ func (f *planGateFixture) workerStart(t *testing.T) error {
 	return err
 }
 
-// TestPlanGateRefusesDispatchAndAcceptanceBeforeApproval is the whole point of
-// the gate: no worker runs and nothing is accepted until a human decides.
-func TestPlanGateRefusesDispatchAndAcceptanceBeforeApproval(t *testing.T) {
-	f := newPlanGateFixture(t)
+// TestPlanningRefusesDispatchAndAcceptanceUntilStart: no worker runs and
+// nothing is accepted until the integrator starts the mission, and start
+// needs no human decision.
+func TestPlanningRefusesDispatchAndAcceptanceUntilStart(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
 
 	if err := f.workerStart(t); !errors.Is(err, store.ErrMissionPhase) {
 		t.Fatalf("worker.start in planning = %v, want ErrMissionPhase", err)
@@ -212,142 +197,53 @@ func TestPlanGateRefusesDispatchAndAcceptanceBeforeApproval(t *testing.T) {
 		IdempotencyKey: "accept-submission-in-planning",
 	})
 
-	f.proposeAndSubmit(t)
-
-	if err := f.workerStart(t); !errors.Is(err, store.ErrMissionPhase) {
-		t.Fatalf("worker.start in plan_review = %v, want ErrMissionPhase", err)
-	}
-	// The plan is frozen while a human reads it: every task mutation is
-	// refused, not only the accepting ones.
-	f.phaseRefusal(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
-		MissionID:      string(f.mission.ID),
-		Revision:       protocol.TaskRevision{Title: "late", Objective: "late"},
-		IdempotencyKey: "propose-in-review",
+	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which checkout flow?", IdempotencyKey: "ask-1",
 	})
-	f.phaseRefusal(t, protocol.MethodTaskRevise, protocol.TaskReviseParams{
-		TaskID: "task-1", Revision: protocol.TaskRevision{Title: "late", Objective: "late"},
-		IdempotencyKey: "revise-in-review",
+	f.propose(t, "propose-1")
+	f.phaseRefusal(t, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: string(f.mission.ID), IdempotencyKey: "start-1",
 	})
-	f.phaseRefusal(t, protocol.MethodTaskAbandon, protocol.TaskAbandonParams{
-		TaskID: "task-1", ExpectedIntegratorGeneration: f.mission.IntegratorGeneration,
-		IdempotencyKey: "abandon-in-review",
-	})
-	f.phaseRefusal(t, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-		TaskID: "task-1", Revision: 1, ExpectedIntegratorGeneration: f.mission.IntegratorGeneration,
-		IdempotencyKey: "accept-in-review",
-	})
-}
-
-func TestPlanApproveActivatesAndReviseReturnsToPlanningWithFeedback(t *testing.T) {
-	ctx := context.Background()
-	f := newPlanGateFixture(t)
-	version := f.proposeAndSubmit(t)
-
-	revised, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
-		Decision: string(domain.MissionPlanRevise), Feedback: "split the migration out",
-		IdempotencyKey: "decide-revise-1",
-	})
-	if err != nil {
-		t.Fatalf("revise decision: %v", err)
-	}
-	if revised.Mission.Phase != string(domain.MissionPhasePlanning) {
-		t.Fatalf("phase after revise = %q, want planning", revised.Mission.Phase)
-	}
-	shown, ok := f.mustCall(t, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}).(protocol.MissionPlanShowResult)
-	if !ok {
-		t.Fatal("mission.plan.show returned the wrong result type")
-	}
-	if shown.Plan.LatestFeedback != "split the migration out" {
-		t.Fatalf("latest_feedback = %q, want the revise feedback", shown.Plan.LatestFeedback)
-	}
-	if len(shown.Questions) != 1 || len(shown.PlanReviews) != 1 {
-		t.Fatalf("mission.plan.show = %d questions and %d reviews, want 1 and 1", len(shown.Questions), len(shown.PlanReviews))
-	}
-
-	// A revise round reuses the same tasks, so the second submission needs no
-	// new task: the draft the integrator already proposed is still there. It
-	// does need clarification again, because revise returned it to planning.
-	f.clarify(t, "2")
-	f.submit(t, "2", domain.MissionPhasePlanReview)
-	approved, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version + 1,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-approve-1",
-	})
-	if err != nil {
-		t.Fatalf("approve decision: %v", err)
-	}
-	if approved.Mission.Phase != string(domain.MissionPhaseActive) || approved.Mission.PlanVersion != version+1 {
-		t.Fatalf("mission after approve = %+v, want active at version %d", approved.Mission, version+1)
+	f.answerAll(t, "answer-1-")
+	if plan := f.start(t, "start-1"); plan.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("plan after start = %+v, want active", plan)
 	}
 	tasks, err := f.db.ListTasks(ctx, f.mission.ID)
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	if len(tasks) != 1 || tasks[0].Revision == nil || tasks[0].Revision.Status != domain.TaskRevisionAccepted {
-		t.Fatalf("plan tasks after approve = %+v, want one accepted revision", tasks)
+	if len(tasks) != 1 || tasks[0].Revision == nil || tasks[0].Revision.Status != domain.TaskRevisionAccepted ||
+		tasks[0].Revision.AcceptedByRunID != f.mission.CurrentIntegratorRunID {
+		t.Fatalf("tasks after start = %+v, want one revision accepted by the integrator", tasks)
 	}
-	// Approval is the only thing the gate held back; dispatch now fails on the
-	// task identity it was given, not on the phase.
-	if err := f.workerStart(t); errors.Is(err, store.ErrMissionPhase) {
-		t.Fatalf("worker.start after approve = %v, want a non-phase refusal", err)
-	}
-}
-
-func TestPlanRejectCancelsIntegratorAndBlocksRelaunch(t *testing.T) {
-	ctx := context.Background()
-	f := newPlanGateFixture(t)
-	version := f.proposeAndSubmit(t)
-	if _, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
-		Decision: string(domain.MissionPlanReject), IdempotencyKey: "decide-reject-1",
-	}); err != nil {
-		t.Fatalf("reject decision: %v", err)
-	}
-	rejected, err := f.db.GetMission(ctx, f.mission.ID)
-	if err != nil {
-		t.Fatalf("reload rejected mission: %v", err)
-	}
-	if rejected.Phase != domain.MissionPhaseRejected {
-		t.Fatalf("phase after reject = %q, want rejected", rejected.Phase)
-	}
-
-	// Cancellation is the reconcile loop's job and is retried every pass until
-	// the run is terminal.
-	for range 2 {
-		if reconcileErr := f.svc.reconcileMission(ctx, rejected); reconcileErr != nil {
-			t.Fatalf("reconcile rejected mission: %v", reconcileErr)
-		}
-	}
-	if len(f.canceller.runs) != 2 || f.canceller.runs[0] != rejected.CurrentIntegratorRunID {
-		t.Fatalf("cancelled runs = %v, want the integrator run twice", f.canceller.runs)
-	}
-
-	relaunchErr := f.svc.launchRecovered(ctx, MissionLaunchRequest{
-		WorkspaceID: rejected.WorkspaceID, MissionID: rejected.ID,
-		IntegratorGeneration: rejected.IntegratorGeneration,
-		RunID:                rejected.CurrentIntegratorRunID, ActorRunID: rejected.CurrentIntegratorRunID,
-		RunOwnerID: rejected.IntegratorRunOwnerID, AccountOwner: rejected.Integrator.AccountMemberID,
-		Task: rejected.Objective, Harness: rejected.Integrator.Harness, Mode: rejected.Integrator.Mode,
+	// Questions are planning-only.
+	f.phaseRefusal(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "one more?", IdempotencyKey: "ask-late",
 	})
-	if !errors.Is(relaunchErr, store.ErrMissionStale) {
-		t.Fatalf("relaunch of a rejected mission = %v, want ErrMissionStale", relaunchErr)
-	}
-
-	// Replacing the integrator is the recovery path in every other phase; a
-	// rejected mission refuses it too.
-	if _, replaceErr := f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
-		MissionID: string(rejected.ID), ExpectedGeneration: rejected.IntegratorGeneration,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)},
-		IdempotencyKey: "replace-after-reject",
-	}); !errors.Is(replaceErr, store.ErrMissionPhase) {
-		t.Fatalf("replace integrator after reject = %v, want ErrMissionPhase", replaceErr)
+	// Dispatch now fails on the task identity it was given, not on the phase.
+	if err := f.workerStart(t); errors.Is(err, store.ErrMissionPhase) {
+		t.Fatalf("worker.start after start = %v, want a non-phase refusal", err)
 	}
 }
 
-func TestPlanHumanDecisionsRefuseANonAccountableCollaborator(t *testing.T) {
+func TestStartRefusesAnotherMissionAndAnEmptyPlan(t *testing.T) {
+	f := newMissionFixture(t)
+	if _, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: "mission-elsewhere", IdempotencyKey: "start-elsewhere",
+	}); !errors.Is(err, store.ErrMissionStale) {
+		t.Fatalf("start naming another mission = %v, want ErrMissionStale", err)
+	}
+	f.phaseRefusal(t, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: string(f.mission.ID), IdempotencyKey: "start-empty",
+	})
+	if got := f.reloadMission(t).Phase; got != domain.MissionPhasePlanning {
+		t.Fatalf("phase after a refused start = %s, want planning", got)
+	}
+}
+
+func TestQuestionAnswerRefusesANonAccountableCollaborator(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	other := regressionMember(t, f.db, "bystander")
 
 	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
@@ -362,38 +258,21 @@ func TestPlanHumanDecisionsRefuseANonAccountableCollaborator(t *testing.T) {
 	}); !errors.Is(answerErr, permissions.ErrDenied) {
 		t.Fatalf("foreign answer = %v, want ErrDenied", answerErr)
 	}
-
-	f.answerAll(t, "answer-1-")
-	f.mustCall(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
-		MissionID:      string(f.mission.ID),
-		Revision:       protocol.TaskRevision{Title: "plan task", Objective: "plan task"},
-		IdempotencyKey: "propose-1",
-	})
-	f.clarify(t, "1")
-	f.submit(t, "1", domain.MissionPhasePlanReview)
-	if _, decideErr := f.svc.DecidePlan(ctx, other.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: 1,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-foreign",
-	}); !errors.Is(decideErr, permissions.ErrDenied) {
-		t.Fatalf("foreign decision = %v, want ErrDenied", decideErr)
-	}
-
-	// An admin who is not the accountable human decides for them.
+	// An admin who is not the accountable human answers for them.
 	other.Role = domain.RoleAdmin
 	if updateErr := f.db.UpdateMember(ctx, other); updateErr != nil {
 		t.Fatalf("promote bystander: %v", updateErr)
 	}
-	if _, decideErr := f.svc.DecidePlan(ctx, other.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: 1,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-admin",
-	}); decideErr != nil {
-		t.Fatalf("admin decision: %v", decideErr)
+	if _, answerErr := f.svc.AnswerQuestion(ctx, other.ID, protocol.MissionQuestionAnswerParams{
+		QuestionID: string(questions[0].ID), Answer: "the guest flow", IdempotencyKey: "answer-admin",
+	}); answerErr != nil {
+		t.Fatalf("admin answer: %v", answerErr)
 	}
 }
 
 func TestPlanShowWaitReturnsOnAnswerAndRefusesAReplacedIntegrator(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
 		Body: "which checkout flow?", IdempotencyKey: "ask-1",
 	})
@@ -441,7 +320,7 @@ func TestPlanShowWaitReturnsOnAnswerAndRefusesAReplacedIntegrator(t *testing.T) 
 }
 
 func TestPlanShowRejectsAnOutOfRangeWait(t *testing.T) {
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	_, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodMissionPlanShow,
 		protocol.MissionPlanShowParams{WaitSeconds: protocol.CoordMaxInboxWaitSeconds + 1})
 	var rpcErr *protocol.Error
@@ -454,9 +333,9 @@ func TestPlanShowRejectsAnOutOfRangeWait(t *testing.T) {
 	}
 }
 
-// TestPlanGateMethodsRefuseAWorkerSocket: the three agent methods belong to
+// TestPlanMethodsRefuseAWorkerSocket: the planning agent methods belong to
 // the integrator's own mission, so a worker run never resolves one.
-func TestPlanGateMethodsRefuseAWorkerSocket(t *testing.T) {
+func TestPlanMethodsRefuseAWorkerSocket(t *testing.T) {
 	ctx := context.Background()
 	db, mission, _, _, _, _ := setupSubmissionRegression(t)
 	attempts, err := db.ListAttempts(ctx, mission.ID, "")
@@ -469,11 +348,10 @@ func TestPlanGateMethodsRefuseAWorkerSocket(t *testing.T) {
 	}
 	for _, method := range []string{
 		protocol.MethodMissionQuestionAsk,
-		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
-		protocol.MethodMissionPlanSubmit,
+		protocol.MethodMissionStart,
 	} {
-		_, callErr := svc.HandleAgent(ctx, attempts[0].RunID, method, []byte(`{"body":"x","summary":"x","idempotency_key":"worker-attempt"}`))
+		_, callErr := svc.HandleAgent(ctx, attempts[0].RunID, method, []byte(`{"body":"x","mission_id":"`+string(mission.ID)+`","idempotency_key":"worker-attempt"}`))
 		if !errors.Is(callErr, store.ErrNotFound) && !errors.Is(callErr, store.ErrMissionStale) {
 			t.Fatalf("%s from a worker socket = %v, want a closed refusal", method, callErr)
 		}
@@ -484,49 +362,32 @@ func TestPlanGateMethodsRefuseAWorkerSocket(t *testing.T) {
 	}
 }
 
-func TestPlanRejectStaysAvailableAfterAccountableHumanLosesLaunch(t *testing.T) {
+// TestStartRequiresTheAccountableHumansLaunchAdmission: start is what lets
+// workers dispatch, so an accountable human who lost Launch cannot carry the
+// mission forward, while cancel stays available to an admin.
+func TestStartRequiresTheAccountableHumansLaunchAdmission(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	admin := regressionMember(t, f.db, "admin")
 	admin.Role = domain.RoleAdmin
 	if updateErr := f.db.UpdateMember(ctx, admin); updateErr != nil {
 		t.Fatalf("promote admin: %v", updateErr)
 	}
+	f.propose(t, "propose-1")
 
-	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
-		Body: "which checkout flow?", IdempotencyKey: "ask-1",
-	})
-	f.answerAll(t, "answer-1-")
-	f.mustCall(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
-		MissionID:      string(f.mission.ID),
-		Revision:       protocol.TaskRevision{Title: "plan task", Objective: "plan task"},
-		IdempotencyKey: "propose-1",
-	})
-	f.clarify(t, "1")
-	f.submit(t, "1", domain.MissionPhasePlanReview)
-
-	// The accountable human is demoted while the plan sits in review.
 	f.member.Role = domain.RoleViewer
 	if updateErr := f.db.UpdateMember(ctx, f.member); updateErr != nil {
 		t.Fatalf("demote accountable human: %v", updateErr)
 	}
-	if _, approveErr := f.svc.DecidePlan(ctx, admin.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: 1,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-approve",
-	}); !errors.Is(approveErr, permissions.ErrDenied) {
-		t.Fatalf("approve without launch admission = %v, want ErrDenied", approveErr)
+	if _, startErr := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodMissionStart, protocol.MissionStartParams{
+		MissionID: string(f.mission.ID), IdempotencyKey: "start-1",
+	}); !errors.Is(startErr, permissions.ErrDenied) {
+		t.Fatalf("start without launch admission = %v, want ErrDenied", startErr)
 	}
-	if _, rejectErr := f.svc.DecidePlan(ctx, admin.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: 1,
-		Decision: string(domain.MissionPlanReject), IdempotencyKey: "decide-reject",
-	}); rejectErr != nil {
-		t.Fatalf("reject without launch admission: %v", rejectErr)
+	if _, cancelErr := f.cancel(admin.ID, "cancel-1"); cancelErr != nil {
+		t.Fatalf("cancel without launch admission: %v", cancelErr)
 	}
-	m, err := f.db.GetMission(ctx, f.mission.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Phase != domain.MissionPhaseRejected {
-		t.Fatalf("phase = %s, want rejected", m.Phase)
+	if got := f.reloadMission(t).Phase; got != domain.MissionPhaseCancelled {
+		t.Fatalf("phase = %s, want cancelled", got)
 	}
 }

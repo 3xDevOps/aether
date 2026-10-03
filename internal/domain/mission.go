@@ -23,72 +23,31 @@ type MissionIntegrator struct {
 	Mode            LaunchMode `json:"mode"`
 }
 
-// MissionPhase is the human gate a mission currently sits behind. A mission
-// starts in MissionPhasePlanning and reaches MissionPhaseActive only through a
-// human plan decision; MissionPhaseRejected is terminal.
+// MissionPhase is where a mission is in its life. A mission starts in
+// MissionPhasePlanning, where the integrator may ask the accountable human
+// questions and proposes tasks; mission.start accepts the proposed tasks and
+// moves it to MissionPhaseActive. Completed and cancelled are terminal.
 //
-//	planning         --mission.clarification.complete-->  clarified
-//	clarified        --mission.question.ask----------->   planning
-//	clarified        --mission.plan.submit----------->    plan_review
-//	plan_review      --decide approve--------------->     active
-//	plan_review      --decide revise---------------->     planning
-//	plan_review      --decide reject---------------->     rejected
-//	active           --mission.plan.submit----------->    amendment_review
-//	amendment_review --decide approve--------------->     active
-//	amendment_review --decide revise---------------->     active
-//	planning|clarified|plan_review --mission.cancel--> rejected
+//	planning         --mission.start------------------>  active
+//	active           --integrator success report------>  completed
+//	planning|active  --mission.cancel----------------->  cancelled
 type MissionPhase string
 
 const (
-	MissionPhasePlanning        MissionPhase = "planning"
-	MissionPhaseClarified       MissionPhase = "clarified"
-	MissionPhasePlanReview      MissionPhase = "plan_review"
-	MissionPhaseActive          MissionPhase = "active"
-	MissionPhaseAmendmentReview MissionPhase = "amendment_review"
-	MissionPhaseRejected        MissionPhase = "rejected"
+	MissionPhasePlanning  MissionPhase = "planning"
+	MissionPhaseActive    MissionPhase = "active"
+	MissionPhaseCompleted MissionPhase = "completed"
+	MissionPhaseCancelled MissionPhase = "cancelled"
 )
 
-// MissionPlanDecision is the human verdict on one submitted plan version.
-type MissionPlanDecision string
-
-const (
-	MissionPlanApprove MissionPlanDecision = "approve"
-	MissionPlanRevise  MissionPlanDecision = "revise"
-	MissionPlanReject  MissionPlanDecision = "reject"
-)
-
-func (d MissionPlanDecision) Valid() bool {
-	return d == MissionPlanApprove || d == MissionPlanRevise || d == MissionPlanReject
-}
-
-// MissionPhaseAfterDecision is the only legal phase transition out of a review
-// phase. It reports false for anything else, including reject on an amendment:
-// an amendment leaves the approved plan standing, so there is nothing to
-// reject.
-func MissionPhaseAfterDecision(current MissionPhase, d MissionPlanDecision) (MissionPhase, bool) {
-	switch current {
-	case MissionPhasePlanReview:
-		switch d {
-		case MissionPlanApprove:
-			return MissionPhaseActive, true
-		case MissionPlanRevise:
-			return MissionPhasePlanning, true
-		case MissionPlanReject:
-			return MissionPhaseRejected, true
-		}
-	case MissionPhaseAmendmentReview:
-		switch d {
-		case MissionPlanApprove, MissionPlanRevise:
-			return MissionPhaseActive, true
-		}
-	}
-	return "", false
+// Terminal reports whether the mission has ended: no agent of it runs again.
+func (p MissionPhase) Terminal() bool {
+	return p == MissionPhaseCompleted || p == MissionPhaseCancelled
 }
 
 // ScopeCovers reports whether p lies inside one of the declared scope paths:
 // an exact match or a directory prefix, both cleaned first. It is the single
-// path rule the mission scope uses, shared by the store's scope-widening check
-// and the service's overlap diagnostics.
+// path rule the mission scope diagnostics use.
 func ScopeCovers(declared []string, p string) bool {
 	p = path.Clean(strings.TrimSpace(p))
 	if p == "." || p == "" {
@@ -122,41 +81,6 @@ type MissionQuestion struct {
 	AnsweredAt         *time.Time
 }
 
-// MissionPlanReview is one round of plan submission and human decision.
-// DecidedAt is non-nil exactly when Decision is non-empty. SubmittedPhase is
-// the phase the round left: clarified for an initial plan, active for an
-// amendment.
-type MissionPlanReview struct {
-	MissionID         MissionID
-	PlanVersion       uint64
-	Summary           string
-	SubmittedByRunID  RunID
-	SubmittedAt       time.Time
-	SubmittedPhase    MissionPhase
-	Decision          MissionPlanDecision
-	Feedback          string
-	DecidedByMemberID MemberID
-	DecidedAt         *time.Time
-	Items             []MissionPlanItem
-}
-
-// MissionPlanItem is one task revision a plan round put in front of a human.
-// It is written at submit and never rewritten, so a round sent back for
-// changes keeps the record of exactly what was declined. Widening holds the
-// expected paths and the dropped exclusions that reach outside the approved
-// scope, computed against the approved union at submit and empty for an
-// initial plan.
-type MissionPlanItem struct {
-	PlanVersion        uint64
-	TaskID             TaskID
-	Revision           int
-	NewTask            bool
-	Material           bool
-	Widening           []string
-	Title              string
-	SupersedesRevision int
-}
-
 type Mission struct {
 	ID                           MissionID
 	WorkspaceID                  WorkspaceID
@@ -164,15 +88,12 @@ type Mission struct {
 	AccountableHumanID           MemberID
 	Integrator                   MissionIntegrator
 	ExecutionChoices             []MissionExecutionChoice
-	MaxConcurrentAttempts        int
-	MaxTotalAttempts             int
 	CurrentIntegratorRunID       RunID
 	IntegratorAuthorizingHumanID MemberID
 	IntegratorRunOwnerID         MemberID
 	IntegratorGeneration         uint64
 	AcceptedSetVersion           uint64
 	Phase                        MissionPhase
-	PlanVersion                  uint64
 	// OpenQuestions is populated only by store.GetMission and
 	// store.ListMissionsPage. Transaction-local mission reads leave it zero
 	// and no store decision may consult it.
@@ -192,14 +113,12 @@ type Mission struct {
 }
 
 const (
-	MaxMissionConcurrentAttempts = 8
-	MaxMissionTotalAttempts      = 128
-	MaxMissionTasks              = 128
-	MaxMissionQuestions          = 32
-	MaxTaskRevisions             = 64
-	MaxTaskDependencies          = 128
-	MaxTaskEvidenceRequirements  = 64
-	MaxMissionScopeBytes         = 64 << 10
+	MaxMissionTasks             = 128
+	MaxMissionQuestions         = 32
+	MaxTaskRevisions            = 64
+	MaxTaskDependencies         = 128
+	MaxTaskEvidenceRequirements = 64
+	MaxMissionScopeBytes        = 64 << 10
 )
 
 type TaskRevisionStatus string
@@ -253,15 +172,11 @@ type TaskScope struct {
 }
 
 type TaskRevision struct {
-	TaskID    TaskID
-	Revision  int
-	Title     string
-	Objective string
-	Scope     TaskScope
-	// Material is the proposer's declaration that this revision changes what
-	// the human approved. It is an audit fact and, with the scope rules in
-	// store.AcceptTaskRevision, a reason the revision needs a human round.
-	Material             bool
+	TaskID               TaskID
+	Revision             int
+	Title                string
+	Objective            string
+	Scope                TaskScope
 	EvidenceRequirements []EvidenceRequirement
 	// DependsOn is what the proposer declared; the store writes it as the
 	// revision's dependency rows and reads it back through Task.Dependencies.
@@ -297,9 +212,8 @@ type Task struct {
 	CurrentRevision int
 	Revision        *TaskRevision
 	// PendingRevision is the task's highest-numbered proposed revision above
-	// CurrentRevision, nil when there is none. It is the proposed side of an
-	// amendment: it is never dispatched, because it is not the current
-	// revision.
+	// CurrentRevision, nil when there is none. It is never dispatched,
+	// because it is not the current revision.
 	PendingRevision *TaskRevision
 	Dependencies    []TaskDependency
 	Status          TaskStatus

@@ -652,8 +652,7 @@ func isMissionMethod(method string) bool {
 		protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
 		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
 		protocol.MethodIntegrationDeliver,
-		protocol.MethodMissionQuestionAsk, protocol.MethodMissionClarificationComplete,
-		protocol.MethodMissionPlanShow, protocol.MethodMissionPlanSubmit:
+		protocol.MethodMissionQuestionAsk, protocol.MethodMissionPlanShow, protocol.MethodMissionStart:
 		return true
 	default:
 		return false

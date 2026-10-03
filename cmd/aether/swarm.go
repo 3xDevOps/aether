@@ -10,25 +10,21 @@ import (
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
 	register(command{
 		name:  "swarm",
-		short: "create, follow, and decide swarms (missions with an integrator run)",
+		short: "create, follow, and cancel swarms (missions with an integrator run)",
 		run:   runSwarm,
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--max-concurrent N] [--max-attempts N] [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <mission-id>\n" +
 	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
-	"   or: aether swarm approve <mission-id>\n" +
-	"   or: aether swarm request-changes <mission-id> \"<feedback>\"\n" +
-	"   or: aether swarm reject <mission-id> [\"<feedback>\"]\n" +
 	"   or: aether swarm cancel <mission-id>\n" +
 	"   or: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
 
@@ -45,12 +41,6 @@ func runSwarm(args []string) error {
 		return swarmShow(args[1:])
 	case "answer":
 		return swarmAnswer(args[1:], os.Stdin)
-	case "approve":
-		return swarmDecide("approve", args[1:])
-	case "request-changes":
-		return swarmDecide("revise", args[1:])
-	case "reject":
-		return swarmDecide("reject", args[1:])
 	case "cancel":
 		return swarmCancel(args[1:])
 	case "replace-integrator":
@@ -62,13 +52,11 @@ func runSwarm(args []string) error {
 // swarmSpec is a validated create request before the account and workspace
 // are resolved over the control channel.
 type swarmSpec struct {
-	objective     string
-	agent         string
-	account       string
-	workspace     string
-	workers       []protocol.MissionExecutionChoice
-	maxConcurrent int
-	maxAttempts   int
+	objective string
+	agent     string
+	account   string
+	workspace string
+	workers   []protocol.MissionExecutionChoice
 }
 
 func swarmCreate(args []string, stdin io.Reader) error {
@@ -100,8 +88,6 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	agent := fs.String("agent", "", "integrator harness name (runs in tui mode)")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	maxConcurrent := fs.Int("max-concurrent", 2, "worker attempts running at once (1..8)")
-	maxAttempts := fs.Int("max-attempts", 8, "worker attempts over the whole swarm (1..128)")
 	var workers stringList
 	fs.Var(&workers, "worker", "allow workers on this harness, harness[:tui|headless] (repeatable, default mode tui)")
 	objective, err := parseLeadingArg(fs, args)
@@ -112,19 +98,13 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if err != nil {
 		return swarmSpec{}, err
 	}
-	spec := swarmSpec{
-		objective: objective, agent: *agent, account: *account, workspace: *workspace,
-		maxConcurrent: *maxConcurrent, maxAttempts: *maxAttempts,
-	}
+	spec := swarmSpec{objective: objective, agent: *agent, account: *account, workspace: *workspace}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
 		if parseErr != nil {
 			return swarmSpec{}, parseErr
 		}
 		spec.workers = append(spec.workers, choice)
-	}
-	if err := validateSwarmLimits(spec.maxConcurrent, spec.maxAttempts); err != nil {
-		return swarmSpec{}, err
 	}
 	return spec, nil
 }
@@ -158,19 +138,6 @@ func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
 }
 
-func validateSwarmLimits(concurrent, total int) error {
-	if concurrent < 1 || concurrent > domain.MaxMissionConcurrentAttempts {
-		return fmt.Errorf("--max-concurrent %d is out of range (want 1..%d)", concurrent, domain.MaxMissionConcurrentAttempts)
-	}
-	if total < 1 || total > domain.MaxMissionTotalAttempts {
-		return fmt.Errorf("--max-attempts %d is out of range (want 1..%d)", total, domain.MaxMissionTotalAttempts)
-	}
-	if total < concurrent {
-		return fmt.Errorf("--max-attempts %d is below --max-concurrent %d", total, concurrent)
-	}
-	return nil
-}
-
 // missionCreateParams builds the request the server accepts: the integrator
 // tuple is always the first execution choice, and a --worker that repeats it
 // or another worker is sent once, because the store refuses duplicates.
@@ -191,13 +158,11 @@ func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key stri
 		}
 	}
 	return protocol.MissionCreateParams{
-		WorkspaceID:           workspaceID,
-		Objective:             spec.objective,
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      choices,
-		MaxConcurrentAttempts: spec.maxConcurrent,
-		MaxTotalAttempts:      spec.maxAttempts,
-		IdempotencyKey:        key,
+		WorkspaceID:      workspaceID,
+		Objective:        spec.objective,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: choices,
+		IdempotencyKey:   key,
 	}
 }
 
@@ -310,7 +275,6 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	if m.IntegratorLaunchError != "" {
 		fmt.Fprintf(&b, "launch error: %s (since %s)\n", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
 	}
-	fmt.Fprintf(&b, "plan version: %d\n", m.PlanVersion)
 
 	if len(res.Questions) > 0 {
 		fmt.Fprintf(&b, "\nquestions (%d open):\n", m.OpenQuestions)
@@ -320,20 +284,6 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 				b.WriteString("    unanswered\n")
 			} else {
 				fmt.Fprintf(&b, "    answer: %s\n", q.Answer)
-			}
-		}
-	}
-	if len(res.PlanReviews) > 0 {
-		b.WriteString("\nplan reviews:\n")
-		for _, r := range res.PlanReviews {
-			decision := "undecided"
-			if r.Decision != "" {
-				decision = r.Decision
-			}
-			fmt.Fprintf(&b, "  v%d submitted from %s at %s: %s\n", r.PlanVersion, r.SubmittedPhase, r.SubmittedAt, decision)
-			fmt.Fprintf(&b, "    summary: %s\n", r.Summary)
-			if r.Feedback != "" {
-				fmt.Fprintf(&b, "    feedback: %s\n", r.Feedback)
 			}
 		}
 	}
@@ -349,7 +299,7 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 		title := ""
 		switch {
 		case t.Revision != nil && t.PendingRevision != nil:
-			// A proposed revision awaiting review may carry a new title; a
+			// A proposed revision not yet accepted may carry a new title; a
 			// reader of the swarm sees both, not only the one in force.
 			title = fmt.Sprintf("%s (pending rev %d: %s)", cell(t.Revision.Title), t.PendingRevision.Revision, cell(t.PendingRevision.Title))
 		case t.Revision != nil:

@@ -104,7 +104,7 @@ func setupReconcileReportRequirements(t *testing.T, outcome store.CoordOutcome, 
 	if err := db.CreateTask(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	mission = regressionApprovePlan(t, db, mission)
+	mission = regressionStartMission(t, db, mission)
 	attempt, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
 		DispatchKey: "report-dispatch", Harness: "claude", Mode: domain.LaunchHeadless,

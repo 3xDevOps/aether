@@ -138,7 +138,7 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			status := protocol.CoordStatusResult{
 				RunID:        "run-current",
-				Capabilities: []string{protocol.MethodIntegrationDeliver, protocol.MethodWorkerStart, protocol.MethodMissionPlanSubmit},
+				Capabilities: []string{protocol.MethodIntegrationDeliver, protocol.MethodWorkerStart, protocol.MethodMissionStart},
 			}
 			if role != "ordinary" {
 				status.Assignment = &protocol.CoordMissionAssignment{
@@ -186,11 +186,12 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 }
 
 // TestCLISkillOutcomesFollowTheRole: an ordinary run learns that a terminal
-// report finishes it; a mission role keeps the worker outcome text.
+// report finishes it, a worker that it submits the attempt, and an integrator
+// that success completes the mission.
 func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
-	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": missionOutcomes} {
+	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": workerOutcomes, "integrator": integratorOutcomes} {
 		status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: []string{protocol.MethodCoordInbox}}
-		if role == "worker" {
+		if role != "ordinary" {
 			status.Assignment = &protocol.CoordMissionAssignment{Role: role, MissionID: "mission-current"}
 		}
 		var out bytes.Buffer

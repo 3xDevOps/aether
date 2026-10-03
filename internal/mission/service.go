@@ -336,13 +336,10 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 		if missionErr != nil {
 			return missionErr
 		}
-		// The phase is re-read under the authorization lock, so a decision
-		// that landed while this launch was queued is authoritative here.
-		switch current.Phase {
-		case domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview,
-			domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview:
-		default:
-			return fmt.Errorf("%w: mission phase %s does not launch an integrator", store.ErrMissionStale, current.Phase)
+		// The phase is re-read under the authorization lock, so a mission
+		// that ended while this launch was queued launches nothing.
+		if current.Phase.Terminal() {
+			return fmt.Errorf("%w: mission is %s and launches nothing", store.ErrMissionStale, current.Phase)
 		}
 		if req.AttemptID == "" {
 			if current.CurrentIntegratorRunID != req.RunID || current.IntegratorGeneration != req.IntegratorGeneration ||
@@ -432,11 +429,10 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 	if mission == nil {
 		return nil
 	}
-	if mission.Phase == domain.MissionPhaseRejected {
-		if cancelErr := s.cancelRejectedIntegrator(ctx, mission); cancelErr != nil {
-			slog.Warn("mission: cancel rejected integrator", "mission", mission.ID, "error", cancelErr)
-		}
-	} else if mission.CurrentIntegratorRunID != "" {
+	if mission.Phase.Terminal() {
+		return s.stopEndedMission(ctx, mission)
+	}
+	if mission.CurrentIntegratorRunID != "" {
 		run, runErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
 		switch {
 		case errors.Is(runErr, store.ErrNotFound) && mission.IntegratorRunLaunched:
@@ -616,35 +612,6 @@ func launchErrorForRow(m *domain.Mission, run *domain.Run) string {
 	return ""
 }
 
-// cancelRejectedIntegrator stops the integrator run of a mission whose plan a
-// human rejected. Rejection only records the durable decision; stopping the
-// process is the reconcile loop's job, retried every pass until the run is
-// terminal, so a lost cancellation survives a server restart. No per-run Kill
-// check is needed: this is the mission's own reserved run and the decider was
-// the accountable human or an admin. control.AdmitInput is deliberately not
-// used - it fences integrator-to-worker input and refuses an integrator run.
-func (s *Service) cancelRejectedIntegrator(ctx context.Context, mission *domain.Mission) error {
-	if mission.CurrentIntegratorRunID == "" {
-		return nil
-	}
-	run, err := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if run.Status.Terminal() {
-		return nil
-	}
-	if s.cfg.Cancel == nil {
-		return errors.New("mission: scheduler cancel unavailable")
-	}
-	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
-	return s.cfg.Cancel.CancelMission(s.operationContext(ctx), mission.CurrentIntegratorRunID)
-}
-
 func (s *Service) reconcileCancellation(ctx context.Context, mission *domain.Mission, attempt *domain.Attempt) error {
 	if attempt == nil || attempt.RunID == "" || attempt.CancelRequestedAt == nil {
 		return nil
@@ -800,7 +767,6 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		WorkspaceID: domain.WorkspaceID(p.WorkspaceID), Objective: p.Objective,
 		AccountableHumanID: domain.MemberID(p.AccountableHumanID),
 		Integrator:         choice, ExecutionChoices: choices,
-		MaxConcurrentAttempts: p.MaxConcurrentAttempts, MaxTotalAttempts: p.MaxTotalAttempts,
 		IdempotencyKey:               p.IdempotencyKey,
 		IntegratorAuthorizingHumanID: actor, IntegratorRunOwnerID: actor,
 	}
@@ -824,7 +790,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	}
 	// A same-key replay must not bring back an integrator run a human
 	// deleted, nor start one for a swarm that has ended.
-	if m.IntegratorRunLaunched || m.Phase == domain.MissionPhaseRejected {
+	if m.IntegratorRunLaunched || m.Phase.Terminal() {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 	}
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
@@ -923,7 +889,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	}
 	// The run existed and a human deleted it, or the swarm ended: a replay
 	// returns the stored result and launches nothing, as create does.
-	if replaced.IntegratorRunLaunched || replaced.Phase == domain.MissionPhaseRejected {
+	if replaced.IntegratorRunLaunched || replaced.Phase.Terminal() {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(replaced.CurrentIntegratorRunID)}, nil
 	}
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
@@ -1036,13 +1002,6 @@ func (s *Service) Show(ctx context.Context, p protocol.MissionShowParams) (proto
 	for _, question := range questions {
 		out.Questions = append(out.Questions, protocol.MissionQuestionFromDomain(question))
 	}
-	reviews, err := s.cfg.Missions.ListMissionPlanReviews(ctx, m.ID)
-	if err != nil {
-		return protocol.MissionShowResult{}, err
-	}
-	for _, review := range reviews {
-		out.PlanReviews = append(out.PlanReviews, protocol.MissionPlanReviewFromDomain(review))
-	}
 	diagnostics, diagErr := s.scopeDiagnostics(ctx, tasks, attempts, submissions)
 	if diagErr != nil {
 		return protocol.MissionShowResult{}, diagErr
@@ -1063,8 +1022,7 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 		return s.handleTaskRead(ctx, run, method, raw)
 	case protocol.MethodTaskPropose, protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission, protocol.MethodTaskAbandon:
 		return s.handleTaskMutation(ctx, run, method, raw)
-	case protocol.MethodMissionQuestionAsk, protocol.MethodMissionClarificationComplete,
-		protocol.MethodMissionPlanShow, protocol.MethodMissionPlanSubmit:
+	case protocol.MethodMissionQuestionAsk, protocol.MethodMissionPlanShow, protocol.MethodMissionStart:
 		return s.handlePlanAgent(ctx, run, method, raw)
 	case protocol.MethodWorkerStart:
 		return s.workerStart(ctx, run, raw)

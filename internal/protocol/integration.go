@@ -241,6 +241,7 @@ type IntegrationShowResult struct {
 }
 type IntegrationListParams struct {
 	WorkspaceID string `json:"workspace_id"`
+	MissionID   string `json:"mission_id,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
 }
 

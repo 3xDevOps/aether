@@ -86,9 +86,9 @@ func regressionMission(t *testing.T, db *store.DB, workspace domain.WorkspaceID,
 	t.Helper()
 	m := &domain.Mission{
 		WorkspaceID: workspace, Objective: "regression mission", AccountableHumanID: accountable,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchTUI},
-		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchHeadless}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 2, IdempotencyKey: "regression-mission",
+		Integrator:       domain.MissionIntegrator{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchTUI},
+		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchHeadless}},
+		IdempotencyKey:   "regression-mission",
 	}
 	if err := db.CreateMission(context.Background(), m); err != nil {
 		t.Fatalf("create mission: %v", err)
@@ -96,11 +96,11 @@ func regressionMission(t *testing.T, db *store.DB, workspace domain.WorkspaceID,
 	return m
 }
 
-// regressionApprovePlan drives the real plan gate - ask, answer, complete
-// clarification, submit, approve - so the mission reaches active and can
-// dispatch. Approval accepts the pending revision of every non-abandoned task,
-// so callers create their tasks before calling this.
-func regressionApprovePlan(t *testing.T, db *store.DB, m *domain.Mission) *domain.Mission {
+// regressionStartMission drives the real planning path - ask, answer, start -
+// so the mission reaches active and can dispatch. Start accepts the proposed
+// revision of every non-abandoned task, so callers create their tasks before
+// calling this.
+func regressionStartMission(t *testing.T, db *store.DB, m *domain.Mission) *domain.Mission {
 	t.Helper()
 	ctx := context.Background()
 	question, err := db.InsertMissionQuestion(ctx, m.ID, m.CurrentIntegratorRunID, "which flow?", "plan-ask-1")
@@ -110,18 +110,11 @@ func regressionApprovePlan(t *testing.T, db *store.DB, m *domain.Mission) *domai
 	if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, m.AccountableHumanID, "this flow", "plan-answer-1"); answerErr != nil {
 		t.Fatalf("answer plan question: %v", answerErr)
 	}
-	if _, completeErr := db.CompleteMissionClarification(ctx, m.ID, m.CurrentIntegratorRunID, "plan-clarify-1"); completeErr != nil {
-		t.Fatalf("complete clarification: %v", completeErr)
-	}
-	review, err := db.SubmitMissionPlan(ctx, m.ID, m.CurrentIntegratorRunID, "regression plan", "plan-submit-1")
+	started, err := db.StartMission(ctx, m.ID, m.CurrentIntegratorRunID, "plan-start-1")
 	if err != nil {
-		t.Fatalf("submit plan: %v", err)
+		t.Fatalf("start mission: %v", err)
 	}
-	approved, err := db.DecideMissionPlan(ctx, m.ID, review.PlanVersion, domain.MissionPlanApprove, "", m.AccountableHumanID, "plan-approve-1")
-	if err != nil {
-		t.Fatalf("approve plan: %v", err)
-	}
-	return approved
+	return started
 }
 func regressionRun(t *testing.T, db *store.DB, runID domain.RunID, workspace domain.WorkspaceID, member domain.MemberID, task string) {
 	t.Helper()
@@ -209,7 +202,7 @@ func setupSubmissionRegression(t *testing.T) (*store.DB, *domain.Mission, *domai
 	if err := db.CreateTask(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	mission = regressionApprovePlan(t, db, mission)
+	mission = regressionStartMission(t, db, mission)
 	attempt, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
 		DispatchKey: "evidence-dispatch", Harness: "claude", Mode: domain.LaunchHeadless,

@@ -14,7 +14,7 @@ func TestAcceptSubmissionEvidenceRefreshIsAtomicAndIdentityBound(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{
 		Title: "bounded transcript", Objective: "bounded transcript", Status: domain.TaskRevisionAccepted,
 		EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "transcript"}},

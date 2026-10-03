@@ -177,8 +177,8 @@ func (s *Service) scopeDiagnostics(ctx context.Context, tasks []*domain.Task, at
 }
 
 // plannedScope is the scope a task is heading for: a pending revision is what
-// the human is being asked to approve, so an amendment's intended overlap
-// describes the proposed paths rather than the approved ones.
+// the integrator is about to accept, so its intended overlap describes the
+// proposed paths rather than the accepted ones.
 func plannedScope(t *domain.Task) domain.TaskScope {
 	if t.PendingRevision != nil {
 		return t.PendingRevision.Scope

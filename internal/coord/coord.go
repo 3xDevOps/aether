@@ -82,7 +82,7 @@ type MissionService interface {
 	Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error)
 	Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error)
 	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
-	ValidateReport(context.Context, domain.RunID) error
+	ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error
 	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
 }
 

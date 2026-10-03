@@ -36,7 +36,7 @@ async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
     .toBeTruthy()
 }
 
-test('launches a bounded mission, controls a worker, and prepares its accepted candidate', async ({ page, aether }, testInfo) => {
+test('launches a mission, controls a worker, and shows its candidate without a human gate', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('mission-candidate-project')
   const expectedTargetRevision = await seedWorkspace(alice, aether.server.addr, repo, 'mission-candidate-project')
@@ -61,8 +61,6 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await workerChoice.getByRole('checkbox').check()
   await workerChoice.getByRole('combobox').click()
   await page.getByRole('option', { name: 'headless', exact: true }).click()
-  await launch.getByLabel('Max concurrent attempts').fill('1')
-  await launch.getByLabel('Max total attempts').fill('1')
   await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
   await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()
   const { missions } = await alice.api.rpc<{
@@ -72,8 +70,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   if (!mission) throw new Error('browser launch did not create the mission')
   await waitForCoordCLI(mission.current_integrator_run_id, aether.server.dataDir)
 
-  // The plan gate. The integrator cannot submit a plan before the human has
-  // answered, and no worker can start before the human approves.
+  // The only human step: answering a question the integrator chose to ask.
   runCoordCLI<{ question: { id: string } }>(mission.current_integrator_run_id, [
     'mission', 'question', 'ask',
     '--body', 'which checkout flow?',
@@ -100,23 +97,18 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
       evidence_requirements: [],
     }),
   )
-  // Clarification is explicit: the plan cannot be submitted until the
-  // integrator declares it has what it asked for.
-  runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [
-    'mission', 'clarification', 'complete',
-    '--idempotency-key', 'mission-candidate-clarify',
+  // Start accepts every proposed task and moves the mission to active; no
+  // human decides the plan.
+  const startedMission = runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [
+    'mission', 'start',
+    '--mission-id', mission.id,
+    '--idempotency-key', 'mission-candidate-start',
   ])
-  // Approval accepts every proposed revision, so the integrator never accepts
-  // its own plan.
-  runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [
-    'mission', 'plan', 'submit',
-    '--summary', 'one bounded task produces the candidate fixture output',
-    '--idempotency-key', 'mission-candidate-plan',
-  ])
-  const approve = page.getByRole('button', { name: 'Approve', exact: true })
-  await expect(approve).toBeVisible({ timeout: terminalTimeout })
-  await approve.click()
+  expect(startedMission.plan.phase).toBe('active')
   await expect(page.getByRole('region', { name: 'Mission tasks' })).toBeVisible({ timeout: 30_000 })
+  for (const name of ['Approve', 'Request changes', 'Reject']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
 
   const started = runCoordCLI<{ attempt: { id: string; run_id: string } }>(mission.current_integrator_run_id, [
     'worker', 'start',
@@ -169,6 +161,10 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
   const released = await inspectWorker()
   expect(released.takeover_active ?? false).toBe(false)
+  // The mission page stays open from here on: candidate progress must follow
+  // the integrator without a reload.
+  const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
+  await expect(candidateReview).toContainText('No candidate has been prepared yet.', { timeout: terminalTimeout })
 
   const workerContainerID = execFileSync(
     'docker',
@@ -213,42 +209,44 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
     '--idempotency-key', 'mission-candidate-accept-submission',
   ])
 
-  const missionURL = new URL(alice.url)
-  await page.goto(missionURL.toString())
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
-  const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
-  await expect(candidateReview).toBeVisible({ timeout: terminalTimeout })
-  await expect(candidateReview.getByTestId('mission-candidate-inputs')).toContainText(submission.ref.evidence_ref)
-  await expect(candidateReview.getByLabel('Target ref')).toHaveValue('refs/heads/main')
-  await expect(candidateReview.getByLabel('Expected target revision')).toHaveValue(expectedTargetRevision)
-  await candidateReview.getByRole('button', { name: 'Prepare candidate', exact: true }).click()
-  await expect(candidateReview.getByRole('heading', { name: 'Candidate details', exact: true })).toBeVisible({ timeout: terminalTimeout })
-  const listedCandidates = await alice.api.rpc<{ candidates: { candidate_id: string }[] }>('integration.list', {
-    workspace_id: workspaceID,
-    limit: 10,
-  })
-  const candidateID = listedCandidates.candidates[0]?.candidate_id
-  if (!candidateID) throw new Error('mission candidate prepare returned no candidate')
-  const prepared = await alice.api.rpc<{
+  // The integrator prepares the candidate itself; the server fills in the
+  // mission and its accepted set from the assignment.
+  const prepared = runCoordCLI<{
     candidate: {
+      candidate_id: string
       state: string
       mission_id?: string
       mission_accepted_set_version?: number
       submissions: Array<{ workspace_id: string; run_id: string; evidence_ref: string; retained_revision: string }>
     }
-  }>('integration.show', { workspace_id: workspaceID, candidate_id: candidateID })
-  expect(prepared.candidate.state).toBe('frozen')
-  expect(prepared.candidate.mission_id).toBe(mission.id)
-  expect(prepared.candidate.mission_accepted_set_version).toBe(1)
-  expect(prepared.candidate.submissions).toEqual([{
+  }>(
+    mission.current_integrator_run_id,
+    ['integration', 'prepare', '--params-file', '-'],
+    JSON.stringify({
+      target_ref: 'refs/heads/main',
+      expected_target_revision: expectedTargetRevision,
+      idempotency_key: 'mission-candidate-prepare',
+    }),
+  ).candidate
+  expect(prepared.state).toBe('frozen')
+  expect(prepared.mission_id).toBe(mission.id)
+  expect(prepared.mission_accepted_set_version).toBe(1)
+  expect(prepared.submissions).toEqual([{
     workspace_id: workspaceID,
     run_id: started.attempt.run_id,
     evidence_ref: submission.ref.evidence_ref,
     retained_revision: submission.ref.retained_revision,
   }])
+
+  // The open mission page picks up the candidate, read-only.
+  await expect(candidateReview).toContainText(prepared.candidate_id, { timeout: 30_000 })
+  await candidateReview.getByRole('button', { name: 'Show full', exact: true }).click()
+  await expect(candidateReview.getByRole('heading', { name: 'Candidate details', exact: true })).toBeVisible({ timeout: terminalTimeout })
   await expect(candidateReview).toContainText(`Mission ${mission.id}`)
-  await testInfo.attach('mission accepted candidate review surface', {
+  for (const name of ['Prepare candidate', 'Run verification', 'Request delivery', 'Approve delivery', 'Deliver candidate']) {
+    await expect(candidateReview.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
+  await testInfo.attach('mission candidate progress surface', {
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',
   })

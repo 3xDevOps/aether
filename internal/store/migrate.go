@@ -1418,11 +1418,77 @@ CREATE UNIQUE INDEX idx_coord_reports_active_terminal
 	`
 ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
 `,
+	// v49: missions lose their human plan gate. The phases are planning,
+	// active, completed and cancelled; plan rounds, the material flag and the
+	// two attempt limits go.
+	// A mission waiting on a plan decision returns to planning with its
+	// proposals intact, so its integrator runs mission start; one waiting on
+	// an amendment is active with its proposals still acceptable; a rejected
+	// one is cancelled. SQLite cannot change a CHECK in place, so missions is
+	// rebuilt; its children reference it ON DELETE CASCADE, so this version
+	// runs with foreign keys off (see foreignKeysOffMigrations).
+	`
+DROP TABLE mission_plan_items;
+DROP TABLE mission_plan_reviews;
+ALTER TABLE mission_task_revisions DROP COLUMN material;
+ALTER TABLE mission_create_receipts DROP COLUMN max_concurrent_attempts;
+ALTER TABLE mission_create_receipts DROP COLUMN max_total_attempts;
+CREATE TABLE missions_migrate AS SELECT * FROM missions;
+DROP TABLE missions;
+CREATE TABLE missions (
+	id                              TEXT PRIMARY KEY,
+	workspace_id                    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	objective                       TEXT NOT NULL,
+	accountable_human_id            TEXT NOT NULL REFERENCES members(id),
+	integrator_account_member_id    TEXT NOT NULL DEFAULT '',
+	integrator_harness              TEXT NOT NULL DEFAULT '',
+	integrator_mode                 TEXT NOT NULL DEFAULT 'headless',
+	execution_choices               TEXT NOT NULL DEFAULT '[]',
+	current_integrator_run_id       TEXT,
+	integrator_generation           INTEGER NOT NULL DEFAULT 1,
+	accepted_set_version            INTEGER NOT NULL DEFAULT 0,
+	idempotency_key                 TEXT NOT NULL,
+	created_at                      INTEGER NOT NULL,
+	updated_at                      INTEGER NOT NULL,
+	integrator_authorizing_human_id TEXT NOT NULL DEFAULT '',
+	integrator_run_owner_id         TEXT NOT NULL DEFAULT '',
+	phase                           TEXT NOT NULL DEFAULT 'planning'
+		CHECK (phase IN ('planning', 'active', 'completed', 'cancelled')),
+	integrator_launch_error         TEXT NOT NULL DEFAULT '',
+	integrator_launch_error_at      INTEGER,
+	integrator_run_launched         INTEGER NOT NULL DEFAULT 0,
+	CHECK (json_valid(execution_choices)),
+	UNIQUE (workspace_id, idempotency_key)
+);
+INSERT INTO missions (id, workspace_id, objective, accountable_human_id, integrator_account_member_id,
+                      integrator_harness, integrator_mode, execution_choices,
+                      current_integrator_run_id, integrator_generation,
+                      accepted_set_version, idempotency_key, created_at, updated_at,
+                      integrator_authorizing_human_id, integrator_run_owner_id, phase,
+                      integrator_launch_error, integrator_launch_error_at, integrator_run_launched)
+	SELECT id, workspace_id, objective, accountable_human_id, integrator_account_member_id,
+	       integrator_harness, integrator_mode, execution_choices,
+	       current_integrator_run_id, integrator_generation,
+	       accepted_set_version, idempotency_key, created_at, updated_at,
+	       integrator_authorizing_human_id, integrator_run_owner_id,
+	       CASE phase
+	           WHEN 'clarified' THEN 'planning'
+	           WHEN 'plan_review' THEN 'planning'
+	           WHEN 'amendment_review' THEN 'active'
+	           WHEN 'rejected' THEN 'cancelled'
+	           ELSE phase
+	       END,
+	       integrator_launch_error, integrator_launch_error_at, integrator_run_launched
+	FROM missions_migrate;
+DROP TABLE missions_migrate;
+CREATE INDEX idx_missions_workspace ON missions(workspace_id, created_at, id);
+CREATE INDEX idx_missions_integrator_run ON missions(current_integrator_run_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
-var foreignKeysOffMigrations = map[int]bool{45: true, 47: true}
+var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true}
 
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so

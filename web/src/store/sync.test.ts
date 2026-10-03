@@ -1384,7 +1384,7 @@ describe('applyEvent', () => {
 
     const client = fakeApi({
       missionList: vi.fn(async () => ({
-        missions: [mission({ id: 'mission_newest' }), mission({ id: 'mission_new', phase: 'rejected' })],
+        missions: [mission({ id: 'mission_newest' }), mission({ id: 'mission_new', phase: 'cancelled' })],
         next_cursor: 'page-2-shifted',
       })),
     })
@@ -1397,7 +1397,7 @@ describe('applyEvent', () => {
     const s = store.getState()
     expect(client.missionList).toHaveBeenCalledWith({ workspace_id: workspace.id, limit: 50 })
     expect(Object.keys(s.missions).sort()).toEqual(['mission_new', 'mission_newest', 'mission_old'])
-    expect(s.missions.mission_new.phase).toBe('rejected')
+    expect(s.missions.mission_new.phase).toBe('cancelled')
     expect(s.missionNextCursor).toBe('page-3')
   })
 

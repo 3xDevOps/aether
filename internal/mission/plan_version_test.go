@@ -31,7 +31,7 @@ func acceptedVersionFromPlan(t *testing.T, out any) uint64 {
 }
 
 func TestPlanShowDiscoversAcceptanceVersionAndWaitsForChange(t *testing.T) {
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
 	initial := f.mustCall(t, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{})
 	version := acceptedVersionFromPlan(t, initial)

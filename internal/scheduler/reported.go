@@ -169,8 +169,8 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 // failure. The run finishes on the agent's next turn-end idle report with
 // no input request open, at once when that report already came, at
 // reportFinishDeadline when the harness cannot report one, or when the
-// process exits, whichever is first. A mission worker is left to
-// CompleteMission. reportedAt is
+// process exits, whichever is first. A mission integrator finishes like an
+// ordinary run; a mission worker is left to CompleteMission. reportedAt is
 // when the report was finalized: a report finalized before the run's last
 // relaunch speaks for a launch that relaunch ended and is ignored. A run
 // whose process exited first takes the reported outcome over the exit's
@@ -186,10 +186,17 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	if entry == nil || entry.status.Terminal() {
 		return s.overrideExitLocked(ctx, run, reportID, outcome)
 	}
-	// CompleteMission finishes an assigned worker; its report is the
-	// mission's to reconcile.
-	if entry.missionAssigned || reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
+	if reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
 		return nil
+	}
+	if entry.missionAssigned {
+		r, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			return fmt.Errorf("scheduler: finish reported run %s: %w", run, err)
+		}
+		if r.MissionRole != "integrator" {
+			return nil
+		}
 	}
 	prior, priorAt, blocked, shown := entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown
 	entry.reported, entry.reportedAt = outcome, time.Now().UTC()

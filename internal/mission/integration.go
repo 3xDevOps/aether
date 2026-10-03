@@ -250,6 +250,11 @@ func (s *Service) AdmitIntegration(ctx context.Context, a feature.Admission) (re
 	if a.Actor.RunID != "" && a.Operation == protocol.MethodIntegrationDecide {
 		return nil, missionDenied("agent actors cannot approve delivery")
 	}
+	// The integrator's delivery needs no human decision, so cancelling or
+	// completing the mission is what stops its candidate work.
+	if a.Actor.RunID != "" && m.Phase != domain.MissionPhaseActive {
+		return nil, missionConflict(fmt.Sprintf("mission is %s, not active", m.Phase))
+	}
 	refs := a.Submissions
 	if a.Candidate != nil {
 		refs = a.Candidate.Submissions
@@ -549,7 +554,8 @@ func submissionRefsSubset(selected, current []protocol.SubmissionRef) bool {
 }
 
 // HandleAgent is intentionally narrower than the human IntegrationService.
-// Agents cannot list, resolve, delete, or approve delivery.
+// Agents cannot list, resolve, delete, or decide delivery; the engine
+// approves the integrator's own verified request for the accountable human.
 func (s *Service) handleIntegrationAgent(ctx context.Context, run domain.RunID, method string, raw json.RawMessage) (any, error) {
 	engine, err := s.integrationService()
 	if err != nil {

@@ -119,6 +119,10 @@ func init() {
 		if d.Runtime == nil {
 			return nil, fmt.Errorf("integration: runtime is required")
 		}
+		st, ok := d.Store.(integration.Store)
+		if !ok {
+			return nil, fmt.Errorf("integration: store does not implement integration.Store")
+		}
 
 		admission := func(ctx context.Context, a integration.Admission) (func(), error) {
 			releases := make([]func(), 0, 2)
@@ -154,7 +158,7 @@ func init() {
 			}, nil
 		}
 		svc, err := integration.New(integration.Config{
-			Store:       d.Store,
+			Store:       st,
 			Git:         d.Git,
 			Evidence:    d.Evidence,
 			Runtime:     d.Runtime,

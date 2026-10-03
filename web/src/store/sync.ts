@@ -368,7 +368,6 @@ export async function applyEvent(
               submissions: result.submissions ?? [],
               diagnostics: result.diagnostics ?? [],
               questions: result.questions ?? [],
-              plan_reviews: result.plan_reviews ?? [],
             })
           })
           .catch(ignore)

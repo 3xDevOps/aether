@@ -283,6 +283,37 @@ func TestMissionNegativeTTLFailedDestroyHoldsCapacityUntilCleanup(t *testing.T) 
 	}
 }
 
+// TestIntegratorReportArmsTheReportedFinish: a mission integrator's terminal
+// report finishes its run like an ordinary run's does.
+func TestIntegratorReportArmsTheReportedFinish(t *testing.T) {
+	e := newTestEnv(t, nil)
+	m := &domain.Mission{
+		WorkspaceID: e.ws.ID, Objective: "integrator finish", AccountableHumanID: e.member.ID,
+		Integrator:     domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "fake", Mode: domain.LaunchTUI},
+		IdempotencyKey: "integrator-finish",
+	}
+	if err := e.db.CreateMission(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: m.CurrentIntegratorRunID, Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: m.Objective,
+		Harness: "fake", Mode: domain.LaunchTUI,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.FinishReported(t.Context(), run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	armed := e.sched.runs[run.ID].reported
+	e.sched.mu.Unlock()
+	if armed != domain.RunCompleted {
+		t.Fatalf("integrator armed for %q, want a completed reported finish", armed)
+	}
+}
+
 // TestWorkerReportLeavesCompletionToTheMission: a worker's terminal report
 // never arms the ordinary reported finish, so CompleteMission alone finishes
 // it, with the mission reason, and leaves no unseen outcome for the owner.

@@ -268,7 +268,7 @@ func missionRPCError(method string, err error) *protocol.Error {
 	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
 		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict), errors.Is(err, store.ErrConflict):
 		code = protocol.CodeConflict
-	case errors.Is(err, store.ErrMissionPhase), errors.Is(err, store.ErrMissionAmendmentRequired):
+	case errors.Is(err, store.ErrMissionPhase):
 		code = protocol.CodeInvalidState
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
@@ -605,7 +605,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			missionActive = assignment.MissionID != ""
 		}
 		if !existingFinalized {
-			if err := s.cfg.Mission.ValidateReport(ctx, run); err != nil {
+			if err := s.cfg.Mission.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
 				return protocol.CoordReportResult{}, missionRPCError(method, err)
 			}
 		}

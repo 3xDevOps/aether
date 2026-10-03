@@ -155,7 +155,7 @@ stopped. Mission launch uses a service-owned context; its durable attempt and
 reserved run ID survive the request. Replay the same start command with the
 **same dispatch key** to retrieve that attempt, then use `worker list` or
 `worker inspect` to observe it. Do not switch keys to work around an unknown
-result: the original attempt can still launch and hold concurrency.
+result: the original attempt can still launch.
 
 Before creating a run, strict base capture refreshes a configured mirror.
 A failed fetch never silently substitutes the previously accepted commit.
@@ -192,7 +192,7 @@ requires review and explicit candidate adoption; do not disable mirror
 protection merely to force a launch.
 
 After repair, inspect the original attempt before any retry. If it is still
-launching, running, or unknown and holds concurrency, either let reconciliation
+launching, running, or unknown, either let reconciliation
 settle it or use the normal authorized cancel operation and observe the settled
 state before retrying. Cancellation and takeover authority are unchanged.
 Only a launch path that explicitly supports `--cached-base <sha>` may use a
@@ -234,8 +234,8 @@ Reconciliation only relaunches an integrator run whose row never existed.
 Once the row exists, `mission.show` reports `integrator_run_launched: true`,
 and deleting that run does not bring it back, not even through a same-key
 `mission.create`, which then returns the mission unchanged, as it does for
-a cancelled swarm. Use **Replace integrator** to start a new one, or, before
-the plan is approved, cancel the swarm.
+a cancelled swarm. Use **Replace integrator** to start a new one, or cancel
+the swarm.
 
 Upgrading to the server version that added `integrator_run_launched` marks
 every existing swarm's integrator as launched, so the upgrade relaunches
