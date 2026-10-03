@@ -105,6 +105,7 @@ if ($state.RunID -ne $env:GITHUB_RUN_ID -or $state.RunAttempt -ne $env:GITHUB_RU
 Assert-Protection
 $failures = @()
 $hashes = [ordered]@{}
+$paths = [ordered]@{}
 $names = @('aether-windows-amd64.exe', 'aether-windows-arm64.exe')
 Write-Evidence '| Binary | SHA256 before scan |'
 Write-Evidence '| --- | --- |'
@@ -112,10 +113,12 @@ foreach ($name in $names) {
     $path = Join-Path $ArtifactDirectory $name
     try {
         $file = Get-Item -LiteralPath $path
-        if ($file.PSIsContainer -or $file.Length -eq 0) {
+        if ($file -isnot [System.IO.FileInfo] -or $file.Length -eq 0) {
             throw 'Expected a nonempty executable file.'
         }
-        $hashes[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        # Defender's service cannot resolve paths relative to this shell.
+        $paths[$name] = $file.FullName
+        $hashes[$name] = (Get-FileHash -LiteralPath $paths[$name] -Algorithm SHA256).Hash
         Write-Evidence "| $name | $($hashes[$name]) |"
     } catch {
         $failures += "${name}: missing, quarantined, or unreadable before scanning: $_"
@@ -123,9 +126,9 @@ foreach ($name in $names) {
 }
 foreach ($name in $names) {
     if (-not $hashes.Contains($name)) { continue }
-    $path = Join-Path $ArtifactDirectory $name
+    $path = $paths[$name]
     try {
-        Write-Host "Scanning $name with remediation enabled"
+        Write-Host "Scanning $path with remediation enabled"
         & $mpcmdrun -Scan -ScanType 3 -File $path
         $code = $LASTEXITCODE
         Write-Evidence "${name}: MpCmdRun exit $code."
@@ -134,11 +137,23 @@ foreach ($name in $names) {
         $failures += "${name}: scan failed: $_"
     }
 }
+if ($failures.Count -gt 0) {
+    $logPath = Join-Path ([System.IO.Path]::GetTempPath()) 'MpCmdRun.log'
+    Write-Host "MpCmdRun diagnostics: $logPath (last 200 lines)"
+    try {
+        Get-Content -LiteralPath $logPath -Tail 200 | ForEach-Object { Write-Host $_ }
+    } catch {
+        Write-Host "Could not read MpCmdRun diagnostics at ${logPath}: $_"
+    }
+}
 # A successful native exit code can mean that remediation succeeded. It does
 # not clear a detection, and both files must still match their original bytes.
 foreach ($name in $names) {
     try {
-        $hash = (Get-FileHash -LiteralPath (Join-Path $ArtifactDirectory $name) -Algorithm SHA256).Hash
+        if (-not $paths.Contains($name)) {
+            throw 'No executable file was resolved before scanning.'
+        }
+        $hash = (Get-FileHash -LiteralPath $paths[$name] -Algorithm SHA256).Hash
         Write-Evidence "${name}: SHA256 after scan $hash."
         if (-not $hashes.Contains($name) -or $hash -ne $hashes[$name]) {
             $failures += "${name}: SHA256 changed during scanning"

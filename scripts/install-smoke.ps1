@@ -8,6 +8,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
 if ($env:OS -ne 'Windows_NT') { throw 'This smoke scenario requires Windows.' }
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+    throw 'This smoke changes user shell registrations and requires a disposable GitHub-hosted runner.'
+}
 $initialPreferences = Get-MpPreference
 if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true -or $initialPreferences.MAPSReporting -ne 2) {
     throw 'Enable Defender realtime and cloud protection before running this smoke scenario.'
@@ -34,9 +37,10 @@ $shortcutBackup = Join-Path $root 'Aether.lnk.backup'
 $shortcutCaptured = $false
 $shortcutRestored = $true
 $hadShortcut = $false
-$variables = @('LOCALAPPDATA', 'APPDATA', 'USERPROFILE', 'HOME', 'PATH', 'AETHER_BIN',
+$variables = @('LOCALAPPDATA', 'PATH', 'AETHER_BIN',
     'AETHER_BASE_URL', 'AETHER_REPO', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR',
-    'AETHER_CONFIG_DIR', 'AETHER_NO_UPDATE_CHECK')
+    'AETHER_CONFIG_DIR', 'AETHER_NO_UPDATE_CHECK', 'npm_config_cache',
+    'ELECTRON_CACHE', 'ELECTRON_BUILDER_CACHE')
 $saved = @{}
 foreach ($name in $variables) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 $registry = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
@@ -45,10 +49,30 @@ $userPath = $registry.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOpti
 $userPathKind = if ($hadUserPath) { $registry.GetValueKind('Path') } else { $null }
 $server = $null
 $app = $null
+$catalogueApp = $null
+$installed = $null
+$desktop = $null
 $protocolKey = 'HKCU:\Software\Classes\aether'
 $protocolCaptured = $false
 $protocolBackup = Join-Path $root 'protocol.reg'
 $reg = Join-Path $env:SystemRoot 'System32\reg.exe'
+
+function Wait-DesktopSidecar([Diagnostics.Process]$Process) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    do {
+        $Process.Refresh()
+        if ($Process.HasExited) { throw "The desktop exited before opening its main window (code $($Process.ExitCode))." }
+        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id) AND Name = 'aether.exe'" |
+                Where-Object { $_.ExecutablePath -ieq $installed })
+            if ($children.Count -eq 1) {
+                return Get-Process -Id $children[0].ProcessId -ErrorAction Stop
+            }
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'The installed desktop did not open a main window with its CLI sidecar.' }
+        Start-Sleep -Milliseconds 200
+    } while ($true)
+}
 
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
@@ -100,13 +124,16 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     $env:LOCALAPPDATA = Join-Path $root 'Local'
-    $env:APPDATA = Join-Path $root 'Roaming'
-    $env:USERPROFILE = Join-Path $root 'Home'
-    $env:HOME = $env:USERPROFILE
+    # Keep the native shell identity: Known Folder expansion uses USERPROFILE.
+    # APPDATA/HOME also stay real. These overrides isolate direct child processes;
+    # Explorer-mediated activation may instead use the disposable hosted profile.
     $env:AETHER_CONFIG_DIR = Join-Path $root 'config'
+    $env:npm_config_cache = Join-Path $root 'npm-cache'
+    $env:ELECTRON_CACHE = Join-Path $root 'electron-cache'
+    $env:ELECTRON_BUILDER_CACHE = Join-Path $root 'electron-builder-cache'
     $env:AETHER_NO_UPDATE_CHECK = '1'
     $env:AETHER_BASE_URL = "http://127.0.0.1:$port"
-    foreach ($dir in @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE)) {
+    foreach ($dir in @($env:LOCALAPPDATA, $env:AETHER_CONFIG_DIR)) {
         New-Item -ItemType Directory -Path $dir | Out-Null
     }
     if ($WithoutNode) {
@@ -145,6 +172,16 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         throw 'The build did not provision its private Node runtime.'
     }
 
+    # AppsFolder's open verb has no argument parameter. Persist only the data
+    # isolation flag on the fixture shortcut before the shell catalogues it;
+    # leave its installed executable target and working directory unchanged.
+    $profile = Join-Path $root 'Electron'
+    $link = $shortcutShell.CreateShortcut($shortcut)
+    $installedArguments = $link.Arguments
+    $catalogueArguments = ($installedArguments + ' --user-data-dir="' + $profile + '"').Trim()
+    $link.Arguments = $catalogueArguments
+    $link.Save()
+
     # AppsFolder is the real shell catalogue, not keyboard-driven Start Search.
     # Match its target, not just a stale or unrelated item with the same name.
     $deadline = [DateTime]::UtcNow.AddSeconds(90)
@@ -168,8 +205,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         }
         Start-Sleep -Milliseconds 250
     } while ($true)
-    # Resolve the matching shortcut through the shell too, and launch that item
-    # so debugging arguments reach Electron under both Windows PowerShell and pwsh.
+    # Resolve the matching shortcut too for the separate instrumented launch.
     $programsFolder = $shell.NameSpace($programs)
     if ($null -eq $programsFolder) { throw "The shell Programs folder is unavailable: $programs" }
     $discoveredShortcut = $programsFolder.ParseName('Aether.lnk')
@@ -178,6 +214,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     if ($link.TargetPath -ine $desktop -or $link.WorkingDirectory -ine (Split-Path -Parent $desktop)) {
         throw 'The catalogued Aether shortcut no longer identifies the installed desktop and its working directory.'
     }
+    if ($link.Arguments -cne $catalogueArguments) { throw 'The catalogued shortcut lost its isolated Electron data directory.' }
     Write-Host "Discovered shell catalogue entry: Name=$($discovered.Name); Path=$($discovered.Path); Target=$($link.TargetPath); Programs=$programs"
 
     # Model Explorer retaining the PATH from before the installer ran.
@@ -189,13 +226,40 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         if ($LASTEXITCODE -ne 0) { throw 'Could not back up the aether:// protocol registration.' }
     }
     $protocolCaptured = $true
-    $profile = Join-Path $root 'Electron'
+    # First launch the exact item returned by AppsFolder, not the .lnk path.
+    $discovered.InvokeVerb('open')
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    do {
+        $launched = @(Get-Process -Name 'aether-desktop' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -ieq $desktop -and $_.MainWindowHandle -ne [IntPtr]::Zero })
+        if ($launched.Count -eq 1) {
+            $catalogueApp = $launched[0]
+            break
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'The AppsFolder open verb did not launch the installed desktop main window.' }
+        Start-Sleep -Milliseconds 200
+    } while ($true)
+    $catalogueChild = Wait-DesktopSidecar $catalogueApp
+    if (-not $catalogueApp.CloseMainWindow()) { throw 'The AppsFolder desktop main window could not be closed.' }
+    if (-not $catalogueApp.WaitForExit(15000)) { throw 'The AppsFolder desktop did not exit after closing its window.' }
+    if (-not $catalogueChild.WaitForExit(15000)) { throw 'The AppsFolder desktop left its CLI sidecar running.' }
+    Write-Host 'The exact AppsFolder item opened the installed desktop and closed with its CLI sidecar.'
+    $link.Arguments = $installedArguments
+    $link.Save()
+    $link = $shortcutShell.CreateShortcut($discoveredShortcut.Path)
+    if ($link.TargetPath -ine $desktop -or $link.WorkingDirectory -ine (Split-Path -Parent $desktop) -or $link.Arguments -cne $installedArguments) {
+        throw 'Restoring the fixture shortcut arguments changed its installed identity.'
+    }
+
+    # A second launch supplies CDP instrumentation for the onboarding screenshot.
+    # Pass data isolation explicitly too, without relying on shortcut arg merging.
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $debugPort = $listener.LocalEndpoint.Port
     $listener.Stop()
     $app = Start-Process -FilePath $discoveredShortcut.Path -ArgumentList @("--remote-debugging-port=$debugPort", ('--user-data-dir="' + $profile + '"')) -PassThru
     if ($app.Path -ne $desktop) { throw "The Start Menu shortcut launched $($app.Path), not $desktop." }
+    $appChild = Wait-DesktopSidecar $app
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
         if ($app.HasExited) { throw "The Start Menu app exited with code $($app.ExitCode)." }
@@ -233,6 +297,7 @@ const { chromium } = require(process.argv[2])
     & $node $verifyScript $playwright $endpoint (Join-Path $env:RUNNER_TEMP 'windows-desktop.png')
     if ($LASTEXITCODE -ne 0) { throw 'The installed desktop did not render onboarding.' }
     if (-not $app.WaitForExit(15000)) { throw 'The desktop did not exit after closing its window.' }
+    if (-not $appChild.WaitForExit(15000)) { throw 'The instrumented desktop left its CLI sidecar running.' }
     Write-Host 'The shell-catalogued Aether shortcut found the CLI without an updated PATH and loaded its dashboard.'
 
     $preferences = Get-MpPreference
@@ -263,9 +328,14 @@ const { chromium } = require(process.argv[2])
 } finally {
     try {
         try {
-            if ($app -and -not $app.HasExited) {
-                & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
-                if (-not $app.WaitForExit(15000)) { throw 'The desktop test process did not stop.' }
+            # Match the unique fixture paths, including sidecars orphaned by an
+            # early launch failure before either process handle was captured.
+            $remaining = @(Get-Process -Name 'aether-desktop', 'aether' -ErrorAction SilentlyContinue |
+                Where-Object { ($desktop -and $_.Path -ieq $desktop) -or ($installed -and $_.Path -ieq $installed) })
+            foreach ($process in $remaining) {
+                if ($process.HasExited) { continue }
+                & "$env:SystemRoot\System32\taskkill.exe" /PID $process.Id /T /F | Out-Null
+                if (-not $process.WaitForExit(15000)) { throw 'A desktop smoke process did not stop.' }
             }
         } finally {
             if ($server -and -not $server.HasExited) {
