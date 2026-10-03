@@ -96,7 +96,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 				s.syncRunUserReservationsLocked()
 			} else {
 				s.mu.Unlock()
-				return nil
+				return fmt.Errorf("%w: release cleanup still in progress", ErrInvalidTransition)
 			}
 		}
 		s.mu.Unlock()

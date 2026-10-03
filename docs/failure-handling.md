@@ -466,6 +466,8 @@ selected workspace, including archived runs. Released sessions cannot be
 relaunched; the existing checkout and history retention rules still apply.
 These actions use the same evidence-preserving cleanup as Kill: an evidence
 or runtime error leaves cleanup incomplete and is shown in the dashboard.
+Unfinished finalization and interrupted-finish recovery return a release error
+instead of reporting that resources were freed.
 **Archive closed runs...** only hides runs and starts the archive deletion
 timer; it does not release container memory.
 
