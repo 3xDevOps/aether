@@ -836,9 +836,8 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Clear done runs'))
+    fireEvent.click(await screen.findByText('Archive closed runs...'))
 
-    expect(await screen.findByText('Archive 1 finished run?')).toBeDefined()
     expect(api.runArchive).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive 1' }))
@@ -870,5 +869,35 @@ describe('command palette', () => {
     fireEvent.click(await screen.findByText('Relaunch run'))
 
     await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith('run_1'))
+  })
+  it('offers release for archived retained history in the active workspace, even when no Done card is visible', async () => {
+    const archived = run({
+      id: 'retained_archived', status: 'merged', reason: 'closed; retained container',
+      archived_at: '2026-08-14T10:00:00Z',
+    })
+    useStore.setState({
+      runs: { [active.id]: toRecord(active), [archived.id]: toRecord(archived) },
+      capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
+    })
+    open()
+    fireEvent.click(await screen.findByText('Release finished resources...'))
+    expect(api.runRelease).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Release 1' }))
+    await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(archived.id))
+    expect(useStore.getState().runs[archived.id]?.archived_at).toBeDefined()
+  })
+
+  it('confirms focused release before calling the gateway', async () => {
+    useStore.setState({
+      runs: { [active.id]: toRecord(run({ ...active, status: 'merged', reason: 'closed; retained container' })) },
+      route: { name: 'terminal', params: { runId: active.id } },
+      capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
+    })
+    open()
+    fireEvent.click(await screen.findByText('Release resources...'))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(api.runRelease).not.toHaveBeenCalled()
+    fireEvent.click(dialog.getByRole('button', { name: 'Release resources' }))
+    await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(active.id))
   })
 })

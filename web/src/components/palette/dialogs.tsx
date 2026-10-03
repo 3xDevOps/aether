@@ -5,7 +5,7 @@
 // stays with the palette: its open state is local to that host, not in the
 // store's dialog union.
 
-import { ClearDoneDialog } from '@/components/palette/clear-done-dialog'
+import { ClearDoneDialog, ReleaseFinishedDialog } from '@/components/palette/clear-done-dialog'
 import { CloseDialog } from '@/components/palette/close-dialog'
 import { ForwardDialog } from '@/components/palette/forward-dialog'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
@@ -21,6 +21,7 @@ export function PaletteDialogs() {
       {dialog === 'forward' && <ForwardDialog />}
       {dialog === 'close' && <CloseDialog />}
       {dialog === 'clear-done' && <ClearDoneDialog />}
+      {dialog === 'release-finished' && <ReleaseFinishedDialog />}
     </>
   )
 }

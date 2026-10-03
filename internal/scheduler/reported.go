@@ -96,6 +96,8 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 		return reportedSuccessReason, true
 	case status == domain.RunFailed && reason == reportedFailureRetainedReason:
 		return reportedFailureReason, true
+	case (status == domain.RunCompleted || status == domain.RunFailed) && reason == retainedCompletionReason:
+		return "worker finished", true
 	case status == domain.RunMerged || status == domain.RunAbandoned:
 		return closed, true
 	}

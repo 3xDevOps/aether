@@ -532,6 +532,10 @@ func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.Member
 	return f.record(fmt.Sprintf("kill:%s:%s", run, actor))
 }
 
+func (f *fakeRuns) Release(_ context.Context, run domain.RunID, actor domain.MemberID) error {
+	return f.record(fmt.Sprintf("release:%s:%s", run, actor))
+}
+
 func (f *fakeRuns) DeleteRun(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("delete:%s:%s", run, actor))
 }

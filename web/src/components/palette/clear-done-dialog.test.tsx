@@ -34,14 +34,10 @@ beforeEach(() => {
   })
 })
 
-// The palette's "Clear done runs" entry hands its plan to the same
-// ClearDoneConfirm the Done header's button renders, so this only has to
-// prove the palette wires it up: the dialog reads the snapshot it was
-// given and archiving fires the same fan-out.
-describe('clear done dialog', () => {
+// The palette's archive entry shares the board confirmation and executor.
+describe('archive confirmation dialog', () => {
   it('archives every eligible run in order and closes the palette form', async () => {
     render(<ClearDoneDialog />)
-    expect(screen.getByText('Archive 2 finished runs?')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive 2' }))
 

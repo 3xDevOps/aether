@@ -422,6 +422,16 @@ events received after a snapshot request began when merging that response,
 so an older `run.get`/`run.list` response cannot resurrect closed input.
 
 
+`run.release` accepts `{"run_id":"..."}` and returns `{}`. It uses the same
+`Kill` permission as `run.kill`, but only releases a finished run's retained
+container and browser companion. It preserves the outcome, archive state,
+checkout, transcript and run record under their existing retention rules.
+The released session cannot be relaunched. A run that has become active is
+rejected with `-32002`; repeating a successful release is a no-op. Evidence
+capture or runtime cleanup errors are returned without claiming release.
+The dashboard offers this as **Release resources...** and, for the selected
+workspace including archived runs, **Release finished resources...**.
+
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
 waits for supervision to publish the final branch before removing the

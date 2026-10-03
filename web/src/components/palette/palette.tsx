@@ -60,11 +60,9 @@ export function PaletteBody({
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
   const self = useSelf()
-  const { columns } = useBoard()
-  const doneCandidates =
-    columns
-      .find((c) => c.key === 'done')
-      ?.cards.map((card) => ({ run: card.run, workspace: card.workspace })) ?? []
+  const { columns, archivedCards } = useBoard()
+  const doneCandidates = columns.find((c) => c.key === 'done')?.cards ?? []
+  const releaseCandidates = [...columns.flatMap((column) => column.cards), ...archivedCards]
   const selected = useRef<Command | null>(null)
   const complete = () => {
     const command = selected.current
@@ -85,7 +83,7 @@ export function PaletteBody({
     ...surface,
     value: `${surface.label} ${surface.name}`,
   }))
-  const board = boardCommands({ cap, self, doneCandidates })
+  const board = boardCommands({ cap, self, doneCandidates, releaseCandidates })
   const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')
   const boardActions = board.filter((command) => command.id !== 'board' && command.id !== 'overview')
   const runItems = runs.map(({ run, state }) => ({

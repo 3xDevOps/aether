@@ -112,6 +112,7 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 func init() {
 	registerGuarded(protocol.MethodRunLaunch, permissions.Launch, nil, (*Server).runLaunch)
 	registerGuarded(protocol.MethodRunKill, permissions.Kill, runTarget, (*Server).runKill)
+	registerGuarded(protocol.MethodRunRelease, permissions.Kill, runTarget, (*Server).runRelease)
 	registerGuarded(protocol.MethodRunDelete, permissions.Kill, runTarget, (*Server).runDelete)
 	registerGuarded(protocol.MethodRunArchive, permissions.Kill, runTarget, (*Server).runArchive)
 	registerGuarded(protocol.MethodRunSeen, permissions.View, runTarget, (*Server).runSeen)

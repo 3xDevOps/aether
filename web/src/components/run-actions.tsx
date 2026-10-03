@@ -48,11 +48,11 @@ export function RunActions({ run }: { run: RunRecord }) {
   const handoffs = handoffCommands(context)
   const state = runState(run.status)
   const primaryIds = run.archived_at
-    ? ['restore', 'relaunch']
+    ? ['restore', 'relaunch', 'release']
     : run.status === 'completed'
-      ? ['close', 'relaunch']
+      ? ['close', 'relaunch', 'release']
       : state === 'done' || state === 'failed'
-        ? ['relaunch', 'archive']
+        ? ['relaunch', 'release', 'archive']
         : ['inject', paused ? 'resume' : 'pause']
   const primary = primaryIds.flatMap((id) => commands.filter((command) => command.id === id))
   const overflow = commands.filter((command) => !primaryIds.includes(command.id))

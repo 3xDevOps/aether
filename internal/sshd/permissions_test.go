@@ -102,6 +102,7 @@ func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 
 	vc := controlAs(t, e, viewer)
 	wantDenied(t, vc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.kill")
+	wantDenied(t, vc.Call(protocol.MethodRunRelease, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.release")
 	wantDenied(t, vc.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "viewer run.delete")
 	wantDenied(t, vc.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(e.ws.ID), Task: "t", Harness: "claude",
@@ -134,6 +135,7 @@ func TestProtectedRunRestrictsToOwnerAndAdmin(t *testing.T) {
 	cc := controlAs(t, e, collab)
 	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x", IdempotencyKey: "protected-x"}, nil), "non-owner steer of protected run")
 	wantDenied(t, cc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "non-owner kill of protected run")
+	wantDenied(t, cc.Call(protocol.MethodRunRelease, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "non-owner release of protected run")
 	// Non-owner cannot toggle protection either.
 	wantDenied(t, cc.Call(protocol.MethodRunProtect, protocol.RunProtectParams{RunID: string(e.run.ID)}, nil), "non-owner run.protect")
 
@@ -288,6 +290,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 	cc := controlAs(t, e, collab)
 	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x", IdempotencyKey: "other-x"}, nil), "admins_only steer of another's run")
 	wantDenied(t, cc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "admins_only kill of another's run")
+	wantDenied(t, cc.Call(protocol.MethodRunRelease, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "admins_only release of another's run")
 
 	// Own runs stay steerable under admins_only.
 	own := &domain.Run{

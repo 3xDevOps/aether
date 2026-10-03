@@ -450,6 +450,7 @@ export const api = {
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
+  runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
   runGitStatus: (params: RunGitStatusParams) =>
     call<RunGitStatusResult>('run.git.status', params),
   runGitDiff: (params: RunGitDiffParams) =>

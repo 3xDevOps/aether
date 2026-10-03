@@ -90,6 +90,40 @@ func TestMissionCompletionRetainsExactContainerAcrossRestartAndExpiry(t *testing
 	}
 }
 
+func TestReleaseRecoveredMissionWorkerPreservesOutcome(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, _ := launchRetentionWorker(t, e, domain.LaunchHeadless)
+	if err := e.sched.CompleteMission(ctx, run.ID, domain.RunFailed); err != nil {
+		t.Fatalf("CompleteMission: %v", err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	if err := recovered.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	sub := e.subscribe(t)
+	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release recovered worker: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil || recovered.RetainsContainer(ctx, run.ID) {
+		t.Fatal("release retained a completed worker's resources")
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if row.Reason != "worker finished" || row.Worktree != run.Worktree || row.FinishedAt == nil {
+		t.Fatalf("release changed completed worker's outcome or checkout: %+v", row)
+	}
+	if got := expectOnlyStatusEvent(t, sub, run.ID, domain.RunFailed); got.Reason != "worker finished" {
+		t.Fatalf("worker release event = %+v", got)
+	}
+	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("repeat worker Release: %v", err)
+	}
+}
+
 func TestMissionNaturalHeadlessExitRetainsStoppedContainer(t *testing.T) {
 	for _, code := range []int{0, 1} {
 		t.Run(string(rune('0'+code)), func(t *testing.T) {

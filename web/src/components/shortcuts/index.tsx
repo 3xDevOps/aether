@@ -54,6 +54,7 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
         ],
         ['Close as merged / abandoned', 'Finish the run and record how it ended'],
         ['Kill run', 'Stop the run immediately'],
+        ['Release resources', 'Free a finished run’s retained container without hiding its history'],
         ['Delete run', 'Remove the run, checkout and transcript'],
         ['Protect / Unprotect', 'Shield the run from the idle reaper'],
         ['Relaunch run', 'Start a finished run over from its task'],
@@ -78,6 +79,8 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
         ['Open the board / all runs', 'Jump between the board and the flat list'],
         ['Launch a run / from a template', 'Start new work'],
         ['Mark all runs seen', 'Clear the attention markers'],
+        ['Archive closed runs', 'Hide finished runs and schedule their deletion'],
+        ['Release finished resources', 'Free retained containers without archiving runs'],
       ],
     },
     {
