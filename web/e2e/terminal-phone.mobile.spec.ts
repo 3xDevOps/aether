@@ -74,7 +74,7 @@ async function takeControlFromRawHolder(page: Page, room: Locator): Promise<void
     })
     try {
       // Keep the real contact down until the server acknowledges the 5s hold.
-      await expect(button).toHaveText(/^Requested · \d+s$/, { timeout: 15_000 })
+      await expect(button).toHaveAttribute('aria-disabled', 'true', { timeout: 15_000 })
     } finally {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
