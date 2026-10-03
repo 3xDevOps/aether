@@ -671,9 +671,10 @@ func HomeRelative(p string) string {
 	return clean
 }
 
-// BorrowRoots lists the home-relative directories a launch that borrows an
-// account owner's installation mounts read-only: the owner's ~/.local/bin and
-// ~/.local/lib, plus InstallPaths.
+// BorrowRoots is what a launch that borrows an account owner's installation
+// mounts read-only from the owner's home. bin and lib travel together because
+// npm links a launcher into ../lib; InstallPaths cover installers that link by
+// absolute path instead.
 func (p Profile) BorrowRoots() []string {
 	return append([]string{".local/bin", ".local/lib"}, p.InstallPaths...)
 }
