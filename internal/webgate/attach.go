@@ -151,7 +151,7 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize, interactiv
 				if _, err := term.Write(payload); err != nil {
 					return
 				}
-			case protocol.DashAttachControlFrame:
+			case protocol.DashAttachControlFrame, protocol.DashAttachTakeover:
 				if !interactive {
 					continue
 				}

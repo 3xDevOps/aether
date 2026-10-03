@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { toast } from 'sonner'
 import { Eye, KeyRound } from 'lucide-react'
@@ -7,7 +7,6 @@ import { RunHeader } from '@/components/run-header'
 import { TerminalPane, TerminalSpinner, type TerminalReadSurface } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
@@ -23,6 +22,9 @@ import { TerminalHistory } from '@/routes/terminal/history'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useRunTerminalSession } from '@/routes/terminal/session'
+import { ControlButton } from '@/routes/terminal/control-button'
+import { useTakeover } from '@/routes/terminal/use-takeover'
+import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
@@ -162,42 +164,17 @@ function TerminalRoute({ params }: RouteProps) {
   const controllerName = controllerMember?.display_name || controllerID
   const controllerNote = localControl ? 'this tab' : stalePresence ? 'last known' :
     state.connection === 'live' && controlMetadata?.has_control === false && controllerID === self.id ? 'another session' : null
-  const occupiedLease = roomStatus?.controller
-    ? JSON.stringify([roomStatus.controller.member_id, roomStatus.controller.acquired_at])
-    : null
-  const [takeover, setTakeover] = useState<{
-    control: typeof roomControl
-    authorityKey: string
-    lease: string
-  } | null>(null)
-  const takeoverInvoker = useRef<HTMLElement | null>(null)
-  const canConfirmTakeover = takeover !== null &&
-    roomControl !== undefined && takeover.control === roomControl &&
-    takeover.authorityKey === authorityKey && takeover.lease === occupiedLease &&
-    !stalePresence && !state.write
-  useEffect(() => {
-    if (!canConfirmTakeover) setTakeover(null)
-  }, [canConfirmTakeover])
-  const takeControl = () => {
-    if (!steerable || state.steerDenied) return
-    if (occupiedLease && roomControl && !stalePresence && !state.write) {
-      takeoverInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setTakeover({ control: roomControl, authorityKey, lease: occupiedLease })
-    } else {
-      setTakeover(null)
-      session.takeControl(false)
-    }
-  }
-  const confirmTakeover = () => {
-    setTakeover(null)
-    // Approval belongs to this observed lease and attach, never a replacement.
-    if (canConfirmTakeover) session.takeControl(true)
-  }
-  const releaseControl = () => session.releaseControl()
-  const toggleWrite = () => {
-    if (state.write) releaseControl()
-    else takeControl()
-  }
+  const takeover = useTakeover({
+    state: session.takeover,
+    error: session.takeoverError,
+    control: controlMetadata,
+    enabled: state.connection === 'live' && steerable && !state.steerDenied,
+    occupied: Boolean(roomStatus?.controller),
+    request: session.requestTakeover,
+  })
+  const controlUnavailable = state.connection !== 'live' || state.steerDenied || !steerable
+  const requesterID = takeover.review?.requester_member_id
+  const reviewingTakeover = Boolean(takeover.review)
 
   if (!run) {
     return <MissingRun />
@@ -257,15 +234,13 @@ function TerminalRoute({ params }: RouteProps) {
             {stalePresence && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
           </div>
         </div>
-        <Button
-          size="sm"
-          variant={state.write ? 'default' : 'outline'}
-          disabled={state.steerDenied || !steerable}
-          className="shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
-          onClick={toggleWrite}
-        >
-          {state.write ? 'Release' : 'Take control'}
-        </Button>
+        <ControlButton
+          ownsControl={localControl}
+          unavailable={controlUnavailable}
+          onTakeControl={session.takeControl}
+          onReleaseControl={session.releaseControl}
+          takeover={takeover.interaction}
+        />
       </div>
       {roomStatusError && (
         <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
@@ -316,6 +291,7 @@ function TerminalRoute({ params }: RouteProps) {
                 controlAppearance={liveWritable ? 'active' :
                   state.connection !== 'live' || state.steerDenied || !steerable || replaying || readingHistory
                     ? 'hidden' : controlMetadata?.loss ?? 'hidden'}
+                takeoverProgress={takeover.holderProgress}
                 readingSurface={readingHistory ? historyTools : undefined}
                 surface={
                   <TerminalHistory
@@ -337,7 +313,7 @@ function TerminalRoute({ params }: RouteProps) {
                 {starting && <TerminalSpinner label="Starting the run's container" />}
               </TerminalPane>
             </div>
-            <RunDock runID={runID} onEvidenceAnswer={(fact) => setEvidenceAnswer({ fact })} />
+            <RunDock runID={runID} onEvidenceAnswer={(fact) => setEvidenceAnswer({ fact })} deferLayout={reviewingTakeover} />
           </div>
         </div>
         <RunRoom
@@ -345,32 +321,28 @@ function TerminalRoute({ params }: RouteProps) {
           run={run}
           selfID={self.id}
           control={roomControl}
-          onTakeControl={takeControl}
-          onReleaseControl={releaseControl}
+          onTakeControl={session.takeControl}
+          onReleaseControl={session.releaseControl}
+          controlUnavailable={controlUnavailable}
+          takeover={takeover.interaction}
           evidenceAnswer={evidenceAnswer}
         />
       </div>
-      <Dialog open={canConfirmTakeover} onOpenChange={(open) => { if (!open) setTakeover(null) }}>
-        <DialogContent onCloseAutoFocus={(event) => {
-          event.preventDefault()
-          const target = takeoverInvoker.current
-          takeoverInvoker.current = null
-          if (target?.isConnected && target !== document.body && !target.matches(':disabled')) target.focus()
-          else if (readingHistory) historyTools.current?.focus()
-          else if (controller.terminal?.element?.isConnected) controller.focusTerminal()
-        }}>
-          <DialogHeader>
-            <DialogTitle>Take control of this run?</DialogTitle>
-            <DialogDescription>
-              {controllerName} currently controls the run. Taking control will end their writable session and notify them.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setTakeover(null)}>Cancel</Button>
-            <Button type="button" disabled={!canConfirmTakeover} onClick={confirmTakeover}>Take control</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {!localControl && takeover.interaction.phase === 'holding'
+          ? `Keep holding to request control. ${takeover.interaction.seconds} seconds remaining.`
+          : !localControl && takeover.interaction.phase === 'review'
+            ? `Control requested. Waiting for the controller's decision. ${takeover.interaction.seconds} seconds remaining.`
+            : ''}
+      </span>
+      <TakeoverDialog
+        open={reviewingTakeover}
+        requesterName={requesterID ? members[requesterID]?.display_name || requesterID : ''}
+        seconds={takeover.interaction.seconds}
+        pending={takeover.decisionPending}
+        error={session.takeoverError}
+        onDecide={takeover.decide}
+      />
     </div>
   )
 }

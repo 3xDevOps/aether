@@ -87,6 +87,7 @@
 }
 
 .terminal-control-border {
+  --control-border: var(--primary);
   position: absolute;
   inset: 0;
   z-index: 40;
@@ -96,7 +97,7 @@
   fill: none;
   stroke: currentColor;
   stroke-width: 1;
-  color: var(--primary);
+  color: var(--control-border);
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
 }

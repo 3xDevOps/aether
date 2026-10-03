@@ -324,6 +324,7 @@ export function TerminalPane({
   surface,
   readingSurface,
   controlAppearance,
+  takeoverProgress,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
@@ -348,6 +349,7 @@ export function TerminalPane({
   readingSurface?: React.RefObject<TerminalReadSurface | null>
   /** Acknowledged local lease state; omitted on surfaces without shared control. */
   controlAppearance?: TerminalControlAppearance
+  takeoverProgress?: number
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
@@ -456,7 +458,12 @@ export function TerminalPane({
         }}
       />
         {surface}
-        {controlAppearance && <TerminalControlBorder appearance={replaying || readingSurface ? 'hidden' : controlAppearance} />}
+        {controlAppearance && (
+          <TerminalControlBorder
+            appearance={replaying || readingSurface ? 'hidden' : controlAppearance}
+            takeoverProgress={takeoverProgress}
+          />
+        )}
       </div>
       {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
       {children}

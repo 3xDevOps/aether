@@ -186,6 +186,9 @@ func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
 // Outbound results carry has_control explicitly, including false; inbound
 // commands continue to use DashAttachControl's compact omitempty encoding.
 func MarshalTerminalControl(control DashAttachControl) ([]byte, error) {
+	if control.Type == DashAttachTakeover {
+		return json.Marshal(control)
+	}
 	type wire DashAttachControl
 	out := wire(control)
 	out.ResumeID, out.Cursor = legacyTerminalPosition(control.Position, control.ResumeID, control.Cursor)

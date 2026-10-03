@@ -4,6 +4,7 @@
 // claim under test is that a phone is not one of them - watching or
 // steering - while still rendering what the desktop viewer sees.
 
+import type { Locator, Page } from '@playwright/test'
 import type { Member } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
@@ -55,6 +56,33 @@ async function attach(
       control_generation: ack.control_generation,
     })),
     close: () => socket.close(),
+  }
+}
+
+/** Raw attach holders cannot answer a dialog, so exercise the real auto grant. */
+async function takeControlFromRawHolder(page: Page, room: Locator): Promise<void> {
+  const button = room.getByRole('button', { name: 'Take control', exact: true })
+  await expect(button).toHaveAttribute('aria-disabled', 'false')
+  await button.scrollIntoViewIfNeeded()
+  const box = await button.boundingBox()
+  if (!box) throw new Error('Run Room control button is missing')
+  const cdp = await page.context().newCDPSession(page)
+  try {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }],
+    })
+    try {
+      // Keep the real contact down until the server acknowledges the 5s hold.
+      await expect(button).toHaveAttribute('aria-disabled', 'true', { timeout: 15_000 })
+    } finally {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    // No holder browser can Accept: wait through the server's 7s decision window.
+    await expect(room.getByRole('button', { name: 'Release', exact: true }))
+      .toBeVisible({ timeout: 15_000 })
+  } finally {
+    await cdp.detach()
   }
 }
 
@@ -113,8 +141,8 @@ done`)
     .getByRole('button', { name: /watched from a phone/ })
     .tap()
 
-  // Alice owns this run. On a desktop that attaches with write; on a phone
-  // steering is a tap she has to make.
+  // Owning the run does not take the desktop's lease: the phone starts
+  // watching until Alice explicitly requests control.
   await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeHidden()
 
@@ -146,17 +174,12 @@ done`)
   await expect(prompt).toHaveCount(1)
   await expect.poll(promptVisible).toBe(true)
 
-  // Taking over through Run Room is explicit because the desktop viewer
-  // still owns the controller lease.
+  // The raw desktop attach still owns the controller lease. Hold through
+  // Run Room, then let its unanswered decision window grant the phone control.
   const room = page.getByRole('dialog', { name: 'Run Room' })
   await page.getByRole('button', { name: 'Open Run Room' }).tap()
   await expect(room.getByText(/Controller: /)).toBeVisible()
-  await room.getByRole('button', { name: 'Take control' }).tap()
-  await page
-    .getByRole('dialog', { name: 'Take control of this run?' })
-    .getByRole('button', { name: 'Take control' })
-    .tap()
-  await expect(room.getByRole('button', { name: 'Release control' })).toBeVisible()
+  await takeControlFromRawHolder(page, room)
   await room.getByRole('button', { name: 'Close Run Room' }).tap()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
@@ -363,10 +386,7 @@ done`)
     const room = page.getByRole('dialog', { name: 'Run Room' })
     await page.getByRole('button', { name: 'Open Run Room' }).tap()
     await expect(room.getByText(/Controller: /)).toBeVisible()
-    await room.getByRole('button', { name: 'Take control' }).tap()
-    await page.getByRole('dialog', { name: 'Take control of this run?' })
-      .getByRole('button', { name: 'Take control' }).tap()
-    await expect(room.getByRole('button', { name: 'Release control' })).toBeVisible()
+    await takeControlFromRawHolder(page, room)
     await room.getByRole('button', { name: 'Close Run Room' }).tap()
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {

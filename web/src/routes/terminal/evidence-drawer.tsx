@@ -28,13 +28,14 @@ export interface EvidenceDrawerProps {
   workspaceID: string
   client?: Api
   onAnswer?: (fact: string) => void
+  deferLayout?: boolean
 }
 
 export function EvidenceDrawer(props: EvidenceDrawerProps) {
   return <EvidenceDrawerSession key={`${props.workspaceID}:${props.runID}`} {...props} />
 }
 
-function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer }: EvidenceDrawerProps) {
+function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, deferLayout = false }: EvidenceDrawerProps) {
   const packets = useStore((state) => state.evidencePackets[runID] ?? emptyPackets)
   const nextBefore = useStore((state) => state.evidenceNextBefore[runID])
   const pagination = useStore((state) => state.evidencePagination[runID])
@@ -47,7 +48,9 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer }: E
   const select = useStore((state) => state.selectEvidence)
   const selectedID = useStore((state) => state.selectedEvidence[runID])
   const [open, setOpen] = useState(false)
-  const narrow = useMediaQuery(belowMd)
+  const viewportNarrow = useMediaQuery(belowMd)
+  const [narrow, setNarrow] = useState(viewportNarrow)
+  if (!deferLayout && narrow !== viewportNarrow) setNarrow(viewportNarrow)
   const trigger = useRef<HTMLButtonElement>(null)
   const answering = useRef(false)
   const [packet, setPacket] = useState<EvidencePacket | null>(null)

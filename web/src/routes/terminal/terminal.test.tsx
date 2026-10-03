@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import type { RoomStatusResult, Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
-import { codeDenied } from '@/routes/terminal/attach'
+import { codeDenied, type TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
 import { alice, bob, run, serverInfo } from '@/test/fixtures'
@@ -86,6 +86,25 @@ function controlAck(
   })
 }
 
+function receiveTakeover(phase: TakeoverState['phase'], over: Partial<TakeoverState> = {}) {
+  const socket = StubSocket.last()
+  const header = socket.frames()[0] as { control_session_id: string }
+  const takeover: TakeoverState = {
+    id: 'takeover-request',
+    requester_member_id: bob.id,
+    requester_session_id: 'requester-session',
+    holder_session_id: header.control_session_id,
+    holder_generation: 7,
+    phase,
+    hold_started_at: '2026-10-03T12:00:00Z',
+    hold_deadline: '2026-10-03T12:00:05Z',
+    decision_deadline: '2026-10-03T12:00:12Z',
+    server_now: phase === 'holding' ? '2026-10-03T12:00:00Z' : '2026-10-03T12:00:05Z',
+    ...over,
+  }
+  act(() => socket.onmessage?.({ data: JSON.stringify({ type: 'takeover', ok: true, takeover }) }))
+}
+
 const occupiedRoom: RoomStatusResult = {
   workspace_id: run().workspace_id,
   run_id: 'run_1',
@@ -134,7 +153,6 @@ describe('terminal view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
     expect(presence.queryByText('(this tab)')).toBeNull()
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Take control' }))
     controlAck(true, 1, 1)
     expect(presence.getByText('(this tab)')).toBeDefined()
     expect(presence.queryByText('(another session)')).toBeNull()
@@ -160,7 +178,6 @@ describe('terminal view', () => {
     const refresh = Promise.withResolvers<typeof occupied>()
     status.mockReturnValue(refresh.promise)
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Take control' }))
     controlAck(true, 1, 1)
     expect(presence.getByText('(this tab)')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Release' }))
@@ -255,67 +272,82 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it.each(['toolbar', 'phone Room'] as const)('requires explicit occupied-lease approval from the %s', async (source) => {
+  it.each(['toolbar', 'phone Room'] as const)('reports an occupied short-click conflict from the %s without transferring control', async (source) => {
     if (source === 'phone Room') atViewport(390, { height: 844, pointer: 'coarse' })
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     const view = mount({}, { member_id: bob.id })
     attached(undefined, undefined, { control_generation: 7 })
     await act(async () => {})
     const socket = StubSocket.last()
-    const frames = socket.frames()
     if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     const controlButton = source === 'phone Room'
       ? within(screen.getByRole('dialog', { name: 'Run Room' })).getByRole('button', { name: 'Take control' })
       : screen.getByRole('button', { name: 'Take control' })
-    controlButton.focus()
-
     fireEvent.click(controlButton)
-    expect(socket.frames()).toEqual(frames)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    expect(socket.frames().at(-1)).not.toHaveProperty('takeover')
+    controlAck(false, 1, 7, { ok: false, error: 'run control is held by another session' })
+    if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Close Run Room' }))
+    expect(screen.getByText('run control is held by another session')).toBeDefined()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(useStore.getState().terminals.run_1.write).toBe(false)
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Take control of this run?' })).getByRole('button', { name: 'Cancel' }))
-    expect(socket.frames()).toEqual(frames)
-    expect(screen.queryByRole('dialog', { name: 'Take control of this run?' })).toBeNull()
-    await waitFor(() => expect(document.activeElement).toBe(controlButton))
-
-    fireEvent.click(controlButton)
-    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Take control of this run?' }), { key: 'Escape' })
-    await waitFor(() => expect(document.activeElement).toBe(controlButton))
-
-    fireEvent.click(controlButton)
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Take control of this run?' })).getByRole('button', { name: 'Take control' }))
-    expect(socket.frames().at(-1)).toMatchObject({
-      type: 'control', request_id: 1, write: true, takeover: true, control_generation: 7,
-    })
-    expect(useStore.getState().terminals.run_1.write).toBe(false)
-    controlAck(true, 1, 8)
-    expect(useStore.getState().terminals.run_1.write).toBe(true)
     expect(StubSocket.last()).toBe(socket)
     view.unmount()
   })
 
-  it.each(['lease', 'authority', 'connection', 'generation', 'lifecycle', 'presence error'] as const)(
-    'invalidates an occupied-lease confirmation after a %s change',
+  it.each(['toolbar', 'phone Room'] as const)('requires a continuous hold from the %s and waits for server ownership', async (source) => {
+    if (source === 'phone Room') atViewport(390, { height: 844, pointer: 'coarse' })
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    const view = mount({}, { member_id: bob.id })
+    attached(undefined, undefined, { control_generation: 7 })
+    await act(async () => {})
+    const socket = StubSocket.last()
+    const header = socket.frames()[0] as { control_session_id: string }
+    if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    const controlButton = source === 'phone Room'
+      ? within(screen.getByRole('dialog', { name: 'Run Room' })).getByRole('button', { name: 'Take control' })
+      : screen.getByRole('button', { name: 'Take control' })
+    vi.useFakeTimers()
+    try {
+      fireEvent.keyDown(controlButton, { key: ' ' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(180) })
+      const start = socket.frames().at(-1) as { takeover_id: string }
+      expect(start).toMatchObject({ type: 'takeover', action: 'start' })
+      const request = { id: start.takeover_id, requester_member_id: alice.id, requester_session_id: header.control_session_id, holder_session_id: 'holder-session' }
+      receiveTakeover('holding', request)
+      await act(async () => { await vi.advanceTimersByTimeAsync(4999) })
+      expect(socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'confirm' }))
+      expect(useStore.getState().terminals.run_1.write).toBe(false)
+      await act(async () => { await vi.advanceTimersByTimeAsync(41) })
+      expect(socket.frames().at(-1)).toMatchObject({ type: 'takeover', action: 'confirm', takeover_id: start.takeover_id })
+      fireEvent.keyUp(controlButton, { key: ' ' })
+      expect(socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
+      receiveTakeover('review', request)
+      expect(controlButton.getAttribute('aria-disabled')).toBe('true')
+      expect(useStore.getState().terminals.run_1.write).toBe(false)
+      receiveTakeover('granted', request)
+      act(() => socket.onmessage?.({ data: JSON.stringify({ type: 'control', ok: true, has_control: true, control_generation: 8 }) }))
+      expect(useStore.getState().terminals.run_1.write).toBe(true)
+      expect(StubSocket.last()).toBe(socket)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['authority', 'connection', 'generation', 'lifecycle'] as const)(
+    'invalidates the holder decision after a %s change',
     async (change) => {
-      const occupied = occupiedRoom
-      vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupied)
-      const view = mount({}, { member_id: bob.id })
+      const view = mount()
       attached(undefined, undefined, { control_generation: 7 })
-      await act(async () => {})
+      receiveTakeover('holding')
+      receiveTakeover('review')
+      const approval = within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Accept' })
       const socket = StubSocket.last()
-      const controlButton = screen.getByRole('button', { name: 'Take control' })
-      controlButton.focus()
-      fireEvent.click(controlButton)
-      const approval = within(screen.getByRole('dialog')).getByRole('button', { name: 'Take control' })
       act(() => {
         switch (change) {
-          case 'lease':
-            useStore.setState({ roomStatus: { run_1: {
-              ...occupied,
-              controller: { ...occupied.controller!, acquired_at: '2026-10-03T12:00:00Z' },
-            } } })
-            break
           case 'authority':
-            useStore.getState().upsertRun(run({ member_id: bob.id, protected: true }))
+            useStore.getState().upsertRun(run({ protected: true }))
             break
           case 'connection':
             socket.onclose?.({ code: 1006, reason: '' })
@@ -323,56 +355,49 @@ describe('terminal view', () => {
           case 'generation':
             socket.onmessage?.({ data: JSON.stringify({
               type: 'control', ok: false, has_control: false,
-              control_generation: 8, error: 'control taken over',
+              control_generation: 7, error: 'control taken over', revocation_reason: 'takeover',
             }) })
             break
           case 'lifecycle':
-            useStore.getState().upsertRun(run({ member_id: bob.id, status: 'completed' }))
-            break
-          case 'presence error':
-            useStore.setState({ roomStatusError: { run_1: 'presence unavailable' } })
+            useStore.getState().upsertRun(run({ status: 'completed' }))
             break
         }
       })
-      expect(screen.queryByRole('dialog')).toBeNull()
-      if (change === 'lease') await waitFor(() => expect(document.activeElement).toBe(controlButton))
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
       fireEvent.click(approval)
-      expect(socket.frames()).not.toContainEqual(expect.objectContaining({ takeover: true }))
-      expect(useStore.getState().terminals.run_1.write).toBe(false)
-      if (change === 'lease') {
-        // Even restoration of the old snapshot cannot resurrect consumed approval.
-        act(() => useStore.setState({ roomStatus: { run_1: occupied } }))
-        expect(screen.queryByRole('dialog')).toBeNull()
-        fireEvent.click(approval)
-        expect(socket.frames()).not.toContainEqual(expect.objectContaining({ takeover: true }))
-      }
+      expect(socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'takeover', action: 'accept' }))
+      expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
       view.unmount()
     },
   )
 
-  it('returns a stale takeover dialog to visible scrollback when its invoker becomes disabled', async () => {
+  it('returns the holder decision to interrupted visible scrollback', async () => {
     vi.spyOn(presentation, 'captureTerminalPresentation').mockReturnValue({
       rows: ['<span>retained output</span>', '<span>second row</span>'],
       cols: 80, viewportY: 0, baseY: 0, cellWidth: 8, cellHeight: 16,
       fontFamily: 'monospace', fontSize: 12, letterSpacing: 0,
     })
-    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     const opened = vi.spyOn(Terminal.prototype, 'open')
-    const view = mount({}, { member_id: bob.id })
+    const view = mount()
     const terminal = opened.mock.contexts[0] as Terminal
     attached(undefined, undefined, { control_generation: 7 })
     const host = terminal.element!.parentElement!
     await waitFor(() => expect(host.hasAttribute('inert')).toBe(false))
     fireEvent.wheel(host, { deltaY: -80 })
     const history = await screen.findByRole('region', { name: 'Terminal scrollback' })
-    const invoker = screen.getByRole('button', { name: 'Take control' })
-    invoker.focus()
-    fireEvent.click(invoker)
-    expect(screen.getByRole('dialog', { name: 'Take control of this run?' })).toBeDefined()
-
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id, status: 'completed' })))
+    act(() => history.focus())
+    receiveTakeover('holding')
+    receiveTakeover('review')
+    const deny = within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Deny' })
+    await waitFor(() => expect(document.activeElement).toBe(deny))
+    fireEvent.click(deny)
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({
+      type: 'takeover', action: 'deny', takeover_id: 'takeover-request', control_generation: 7,
+    })
+    receiveTakeover('denied')
     await waitFor(() => expect(document.activeElement).toBe(history))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(useStore.getState().terminals.run_1.write).toBe(true)
     expect(host.hasAttribute('inert')).toBe(true)
     expect(host.style.visibility).toBe('hidden')
     view.unmount()
@@ -484,8 +509,8 @@ describe('terminal view', () => {
       }),
     )
 
-    const toggle = screen.getByText('Take control') as HTMLButtonElement
-    expect(toggle.disabled).toBe(true)
+    const toggle = screen.getByRole('button', { name: 'Take control' })
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
@@ -509,7 +534,7 @@ describe('terminal view', () => {
         }),
       }),
     )
-    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Take control' }).getAttribute('aria-disabled')).toBe('true')
 
     view.unmount()
     act(() => useStore.getState().upsertRun(run()))
@@ -548,7 +573,7 @@ describe('terminal view', () => {
         }),
       }),
     )
-    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Take control' }).getAttribute('aria-disabled')).toBe('true')
 
     act(() =>
       useStore.setState({
@@ -577,7 +602,7 @@ describe('terminal view', () => {
     attached()
 
     const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
-    expect(toggle.disabled).toBe(false)
+    expect(toggle.getAttribute('aria-disabled')).toBe('false')
     expect(screen.queryByText('no live terminal')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
@@ -1332,7 +1357,7 @@ describe('terminal view', () => {
     attached()
 
     const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
-    expect(toggle.disabled).toBe(false)
+    expect(toggle.getAttribute('aria-disabled')).toBe('false')
     expect(screen.queryByText('This run is not running')).toBeNull()
     view.unmount()
   })

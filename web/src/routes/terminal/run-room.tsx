@@ -11,6 +11,8 @@ import { inModal } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { ControlMetadata } from '@/routes/terminal/attach'
+import { ControlButton } from '@/routes/terminal/control-button'
+import type { TakeoverInteraction } from '@/routes/terminal/use-takeover'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { RoomMessage, RoomMessageKind, Run } from '@/lib/types'
 import { MemberAvatar } from '@/routes/board/member-avatar'
@@ -44,6 +46,8 @@ export interface RunRoomProps {
   onTakeControl: () => void
   onReleaseControl: () => void
   evidenceAnswer?: { fact: string }
+  controlUnavailable?: boolean
+  takeover?: TakeoverInteraction
 }
 
 type PendingPost = {
@@ -65,7 +69,7 @@ function overlapsCached(messages: RoomMessage[], cached: RoomMessage[]): boolean
   return messages.some((message) => cachedIDs.has(message.id))
 }
 
-export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl, evidenceAnswer }: RunRoomProps) {
+export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl, evidenceAnswer, controlUnavailable = false, takeover }: RunRoomProps) {
   const runID = run.id
   const workspaceID = run.workspace_id
   const isPhone = useMediaQuery(phoneScreen)
@@ -528,7 +532,8 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
                 {controllerID && <MemberAvatar member={members[controllerID]} fallback={controllerName ?? controllerID} className="size-5 shrink-0 text-[9px]" />}
                 <span className="min-w-0 break-words">{controllerName ? <>Controller: {controllerName}{!ownsControl && staleController && <span className="text-muted-foreground"> (last known)</span>}</> : status ? staleController ? 'Controller unknown' : 'No controller' : statusError ? 'Controller unavailable' : 'Loading presence…'}</span>
               </div>
-              {ownsControl ? <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={onReleaseControl}>Release control</Button> : <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={() => onTakeControl()}>Take control</Button>}
+              <ControlButton ownsControl={ownsControl} unavailable={!isLive || controlUnavailable}
+                onTakeControl={onTakeControl} onReleaseControl={onReleaseControl} takeover={takeover} />
             </div>
             <div className="flex items-start gap-1.5 text-muted-foreground" aria-live="polite">
               <Users className="mt-0.5 size-3.5 shrink-0" aria-hidden />

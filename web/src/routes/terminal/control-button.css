@@ -1,0 +1,40 @@
+.terminal-control-button {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.terminal-control-label {
+  position: relative;
+  z-index: 0;
+}
+
+.terminal-control-fill,
+.terminal-control-covered {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.terminal-control-fill {
+  z-index: 1;
+  background: var(--destructive);
+}
+
+.terminal-control-covered {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--destructive-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-control-fill,
+  .terminal-control-covered {
+    clip-path: none !important;
+  }
+}

@@ -565,3 +565,53 @@ func TestTryAdmitDefersWithoutWaitingOrChangingController(t *testing.T) {
 		t.Fatalf("optional admission changed existing controller: %v", err)
 	}
 }
+
+func TestInteractiveForceOnlyReplacesExactAuthenticatedSession(t *testing.T) {
+	service := New(Config{})
+	first, _, err := service.Acquire("run", "member", "tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		member, session string
+		generation      uint64
+	}{
+		{"member", "other-tab", first.Generation},
+		{"other-member", "tab", first.Generation},
+		{"member", "tab", 0},
+	} {
+		called := false
+		_, _, err = service.AcquireInteractiveAuthorized("run", tc.member, tc.session, true, tc.generation, func() error {
+			called = true
+			return nil
+		})
+		if !errors.Is(err, ErrTakeoverRequired) || called {
+			t.Fatalf("interactive bypass %+v = %v, admitted=%v", tc, err, called)
+		}
+	}
+	replacement, _, err := service.AcquireInteractiveAuthorized("run", "member", "tab", true, first.Generation, nil)
+	if err != nil || replacement.Generation <= first.Generation {
+		t.Fatalf("same-session replacement = %+v, %v", replacement, err)
+	}
+	select {
+	case <-first.Revoked:
+	default:
+		t.Fatal("replaced lease did not notify its observers")
+	}
+	if _, _, err := service.AcquireInteractiveAuthorized("run", "member", "tab", true, first.Generation, nil); !errors.Is(err, ErrStale) {
+		t.Fatalf("stale reconnect = %v", err)
+	}
+	select {
+	case <-replacement.Revoked:
+		t.Fatal("stale reconnect revoked the replacement")
+	default:
+	}
+	if err := service.Release("run", "member", "tab", replacement.Generation); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-replacement.Revoked:
+	default:
+		t.Fatal("released lease did not notify its observers")
+	}
+}

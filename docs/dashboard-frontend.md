@@ -1400,12 +1400,13 @@ The dashboard-specific state wiring is:
   `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
   the agent terminal and exposes its own control action without duplicating
   room state.
-  The host owns one occupied-lease confirmation shared by the toolbar and
-  Room. Ordinary Take control never forces transfer; confirmation is bound
-  to the captured control metadata, occupied lease, generation and authority.
-  A changed identity or authority invalidates it. Dismissal restores the
-  invoking control, or the visible terminal/scrollback if that control is no
-  longer enabled. Shell and Browser control remain independent leases, not
+  The toolbar and phone Room share `ControlButton` and `useTakeover`; the
+  host renders one `TakeoverDialog` above Room and Evidence for the current
+  holder's decision. `RunDock` defers Evidence's responsive sheet/popover swap
+  during that decision to keep its focus scope stable. The server owns
+  transfer timing and authority, and the dialog restores the interrupted
+  terminal or composer focus. Attachment reopens still invalidate the old
+  decision. Shell and Browser control remain independent leases, not
   authority over the agent terminal.
 - `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
   automatic write requests. Opening a subsession therefore starts as a mirror,

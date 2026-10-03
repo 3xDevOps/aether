@@ -233,24 +233,35 @@ test('two members share comments, moderated steering, and explicit control trans
     await expect(approvedRow).toContainText('Sent')
     await expect(messageRow(bobRoom, approvedSteer)).toContainText('Sent')
 
-    // Occupied control cannot transfer implicitly: Bob must see Alice named
-    // in a confirmation dialog before the takeover attach is sent.
-    await bobControls.getByRole('button', { name: 'Take control', exact: true }).click()
-    const takeover = bobPage.getByRole('dialog', { name: 'Take control of this run?', exact: true })
-    await expect(takeover).toBeVisible()
-    await expect(takeover).toContainText(
-      `${aliceDisplayName} currently controls the run`,
-    )
-    await takeover.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(takeover).toBeHidden()
-    await expect(bobControls.getByRole('button', { name: 'Take control', exact: true })).toBeFocused()
+    // A short occupied click reports the conflict without displacing Alice.
+    const takeControl = bobControls.getByRole('button', { name: 'Take control', exact: true })
+    await takeControl.click()
+    await expect(bobControls.getByText('run control is held by another session', { exact: true })).toBeVisible()
+    await expect(bobPage.getByRole('alertdialog')).toBeHidden()
+    await expect(bobControls.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     await expect(bobControls.getByTitle(`Controller: ${aliceDisplayName}`, { exact: true })).toBeVisible()
-    await bobControls.getByRole('button', { name: 'Take control', exact: true }).click()
-    await expect(takeover).toBeVisible()
-    await takeover.getByRole('button', { name: 'Take control', exact: true }).click()
 
-    // The main toolbar follows the new lease while the rooms remain open.
+    // Hold through the server's five-second threshold; only the holder decides.
+    await takeControl.focus()
+    await bobPage.keyboard.down('Space')
+    const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
+    await expect(takeover).toBeVisible()
+    await bobPage.keyboard.up('Space')
+    await expect(takeover).toContainText(bobDisplayName)
+    await takeover.getByRole('button', { name: 'Deny', exact: true }).click()
+    await expect(takeover).toBeHidden()
+    await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
+    await expect(bobControls.getByTitle(`Controller: ${aliceDisplayName}`, { exact: true })).toBeVisible()
+    await expect(takeControl).toHaveAttribute('aria-disabled', 'false')
+
+    await takeControl.focus()
+    await bobPage.keyboard.down('Space')
+    await expect(takeover).toBeVisible()
+    await bobPage.keyboard.up('Space')
+    await takeover.getByRole('button', { name: 'Accept', exact: true }).click()
+
+    // The host controls follow the new lease while both docked rooms stay open.
     await expect(bobControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     await expect(aliceControls.getByTitle(`Controller: ${bobDisplayName}`, { exact: true })).toBeVisible()
     // Alice remains an observer after the server fences her stale writable

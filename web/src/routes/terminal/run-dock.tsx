@@ -48,7 +48,11 @@ interface StructuralReplayState {
   revision: number
 }
 
-export function RunDock({ runID, onEvidenceAnswer }: { runID: string; onEvidenceAnswer: (fact: string) => void }) {
+export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
+  runID: string
+  onEvidenceAnswer: (fact: string) => void
+  deferLayout?: boolean
+}) {
   const run = useStore((s) => s.runs[runID])
   const dock = useStore((s) => s.shellDocks[runID] ?? initialRunShellDock)
   const runDockHeight = useStore((s) => s.runDockHeight)
@@ -593,7 +597,7 @@ export function RunDock({ runID, onEvidenceAnswer }: { runID: string; onEvidence
         if (expanding && canOpenShell) focusTerminal()
       }}
       containment="parent"
-      persistentActions={run && <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} onAnswer={onEvidenceAnswer} />}
+      persistentActions={run && <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} onAnswer={onEvidenceAnswer} deferLayout={deferLayout} />}
       actions={canOpenShell && dock.tabs.length >= maxShellTabs && dock.terminals.some((item) => item.process.state !== 'running') &&
         <Button size="sm" disabled={busy} onClick={() => void open()}>New terminal</Button>}
     >
