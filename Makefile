@@ -22,6 +22,7 @@ LDFLAGS := -s -w \
 DIST := dist
 BUN  := bun
 NODE := node
+E2E_ARGS ?=
 
 # The companion carries Chromium, its OS libraries and fonts. No host browser
 # or display service participates. Keep these limits aligned with server
@@ -139,7 +140,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
+.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-debug release release-binaries deploy clean
 
 all: build
 
@@ -179,7 +180,7 @@ test-integration:
 # embedded web/dist. It needs Docker, real git, and Playwright's browser
 # (`cd web && bunx playwright install chromium`, once).
 test-e2e: build
-	cd web && $(BUN) run test:e2e
+	cd web && $(BUN) run test:e2e $(E2E_ARGS)
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
@@ -189,6 +190,7 @@ test-scripts:
 	sh scripts/install-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
+	sh scripts/release-ci-check-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
@@ -198,7 +200,7 @@ test-scripts:
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.
 test-native-hooks:
-	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
+	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v1_status_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
 
 vet:
 	go vet ./...
@@ -212,6 +214,13 @@ vet:
 lint:
 	GOTOOLCHAIN=$(or $(GO_TOOLCHAIN),$(error go.mod has no go or toolchain version to pin the linter to)) \
 		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1 run
+
+lint-workflows:
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "make lint-workflows: shellcheck not found - install ShellCheck (https://www.shellcheck.net/) and add it to PATH to check workflow shell scripts" >&2; \
+		exit 1; \
+	}
+	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
 # Advisory: the two Moby CVEs reachable through the Docker SDK have no fixed
 # release, and govulncheck has no suppression flag, so this target exits
@@ -284,13 +293,19 @@ dashboard:
 deploy: dashboard
 	sh scripts/deploy.sh
 
+# Keep the local full release, including Android, while CI builds Go lanes
+# independently with SERVER_PLATFORMS, EDGE_PLATFORMS and CLI_PLATFORMS.
+release: release-binaries
+	@$(MAKE) android
+
 # The Windows .syso files come first because the Windows CLI builds read
 # them. Each build's output is captured so a failure prints whole.
-release: dashboard
+release-binaries: dashboard
 	@mkdir -p $(DIST)
 	@job_dir=$$(mktemp -d); \
 	trap 'rm -rf "$$job_dir" cmd/aether/resource_windows_*.syso' EXIT; \
-	for arch in amd64 arm64; do \
+	for platform in $(filter windows/%,$(CLI_PLATFORMS)); do \
+		arch=$${platform#*/}; \
 		if [ $$arch = arm64 ]; then armflag=-arm; else armflag=; fi; \
 		echo "generating cmd/aether/resource_windows_$$arch.syso"; \
 		go run $(GOVERSIONINFO) -64 $$armflag \
@@ -337,7 +352,6 @@ release: dashboard
 		fi; \
 	done; \
 	exit $$failed
-	@$(MAKE) android
 
 clean:
 	rm -rf $(DIST) cmd/aether/resource_windows_*.syso \

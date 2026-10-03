@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { ThemeEffect } from '@/components/theme'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
-import { useStore, type RootState } from '@/store'
+import { createRootStore, useStore, type RootState } from '@/store'
 import { runLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
 import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
@@ -37,6 +38,7 @@ function seed(extra: Partial<RootState> = {}) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'settings', params: {} },
+    theme: 'system',
     ...extra,
   })
 }
@@ -58,15 +60,73 @@ describe('settings view', () => {
     expect(screen.queryByRole('region', { name: 'Sync' })).toBeNull()
   })
 
-  it('renders the desktop-only empty state on a remote gateway', () => {
-    // The remote descriptor has no local verbs, so there is nothing to manage.
+  it('applies and persists explicit themes on a server without calling local methods', async () => {
+    const client = fakeApi()
+    const root = document.documentElement
+    const previousClass = root.className
+    const previousTheme = root.dataset.theme
+    const previousScheme = root.style.colorScheme
+    const previousPreference = useStore.getState().theme
+    const originalMatchMedia = window.matchMedia
+    const media = Object.assign(new EventTarget(), {
+      matches: false,
+      media: '(prefers-color-scheme: dark)',
+    })
+    const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
+      query === media.media ? media as MediaQueryList : originalMatchMedia(query),
+    )
     seed({
       capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    const view = render(
+      <>
+        <ThemeEffect />
+        <SettingsRoute params={{}} client={client} />
+      </>,
+    )
+    onTestFinished(() => {
+      view.unmount()
+      matchMedia.mockRestore()
+      useStore.setState({ theme: previousPreference })
+      root.className = previousClass
+      if (previousTheme === undefined) delete root.dataset.theme
+      else root.dataset.theme = previousTheme
+      root.style.colorScheme = previousScheme
+    })
+    const changeSystemTheme = (dark: boolean) => act(() => {
+      media.matches = dark
+      media.dispatchEvent(new Event('change'))
+    })
+    const theme = screen.getByLabelText('Theme')
+    expect(root.classList.contains('dark')).toBe(false)
+    changeSystemTheme(true)
+    expect(root.classList.contains('dark')).toBe(true)
 
-    expect(screen.getByText(/aether gui/)).toBeDefined()
+    await pickOption(theme, 'Light')
+    expect(root.dataset.theme).toBe('light')
+    expect(createRootStore().getState().theme).toBe('light')
+    changeSystemTheme(false)
+    changeSystemTheme(true)
+    expect(root.classList.contains('dark')).toBe(false)
+
+    await pickOption(theme, 'Dark')
+    expect(root.dataset.theme).toBe('dark')
+    expect(createRootStore().getState().theme).toBe('dark')
+    changeSystemTheme(false)
+    expect(root.classList.contains('dark')).toBe(true)
+
+    await pickOption(theme, 'System')
+    expect(root.dataset.theme).toBe('light')
+    expect(createRootStore().getState().theme).toBe('system')
+    changeSystemTheme(true)
+    expect(root.dataset.theme).toBe('dark')
+    expect(root.style.colorScheme).toBe('dark')
     expect(screen.queryByRole('region', { name: 'Link' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Sync daemon' })).toBeNull()
+    expect(screen.queryByLabelText('Run')).toBeNull()
+    for (const [method, call] of Object.entries(client)) {
+      if (method.startsWith('local')) expect(call).not.toHaveBeenCalled()
+    }
   })
 
   it('installs the daemon and shows the unit path and enable note', async () => {
@@ -94,7 +154,8 @@ describe('settings view', () => {
     // The prefill came from link.status, through the store mirror.
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
   })
-  it('renders with overlay capability when the daemon is unavailable', () => {
+  it('opens a sync overlay without requesting unavailable daemon methods', async () => {
+    const client = fakeApi()
     seed({
       capabilities: {
         ...localCaps,
@@ -102,12 +163,12 @@ describe('settings view', () => {
       },
       runs: { [active.id]: toRecord(active) },
     })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{}} client={client} />)
 
-    expect(
-      screen.getByRole('heading', { name: 'Mirror run files to your repository' }),
-    ).toBeDefined()
-    expect(screen.queryByText('Machine settings are unavailable here')).toBeNull()
+    await pickOption(screen.getByLabelText('Run'), runLabel(active))
+    expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
+    expect(client.localDaemonStatus).not.toHaveBeenCalled()
+    expect(client.localDaemonInstall).not.toHaveBeenCalled()
   })
 
   it('lists named servers, marks the active one, and shows the switch instruction', async () => {

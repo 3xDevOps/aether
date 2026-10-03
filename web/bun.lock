@@ -25,7 +25,7 @@
         "@xterm/xterm": "^6.0.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
-        "cmdk": "^1.1.1",
+        "cmdk": "1.1.1",
         "http-proxy": "1.18.1",
         "lucide-react": "^0.548.0",
         "next": "16.3.4",
@@ -54,6 +54,9 @@
         "vitest": "^4.0.7",
       },
     },
+  },
+  "patchedDependencies": {
+    "cmdk@1.1.1": "patches/cmdk@1.1.1.patch",
   },
   "packages": {
     "@acemir/cssom": ["@acemir/cssom@0.9.31", "", {}, "sha512-ZnR3GSaH+/vJ0YlHau21FjfLYjMpYVIzTD8M8vIEQvIGxeOXyXdzCI140rrCY862p/C/BbzWsjc1dgnM9mkoTA=="],

@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { KeyboardEvent, PointerEvent } from 'react'
+import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
@@ -26,12 +26,28 @@ import type { BoardMapViewport } from '@/store/ui'
 
 const interactive = 'button, a, input, select, textarea, [role="button"], [data-run-navigation-exempt]'
 
-export function RunMap({ cards, scope }: { cards: BoardCard[]; scope: string }) {
+export function RunMap({
+  cards,
+  scope,
+  renderHeader,
+}: {
+  cards: BoardCard[]
+  scope: string
+  renderHeader: (controls: ReactNode) => ReactNode
+}) {
   const layout = useMemo(() => layoutRunMap(cards), [cards])
-  return <MapViewport key={scope} layout={layout} scope={scope} />
+  return <MapViewport key={scope} layout={layout} scope={scope} renderHeader={renderHeader} />
 }
 
-function MapViewport({ layout, scope }: { layout: RunMapLayout; scope: string }) {
+function MapViewport({
+  layout,
+  scope,
+  renderHeader,
+}: {
+  layout: RunMapLayout
+  scope: string
+  renderHeader: (controls: ReactNode) => ReactNode
+}) {
   const setSavedViewport = useStore((s) => s.setBoardMapViewport)
   const [viewport, setViewport] = useState<BoardMapViewport>(() =>
     normalizeBoardMapViewport(useStore.getState().boardMapViewports[scope]) ?? { x: 0, y: 0, zoom: 1 },
@@ -257,7 +273,7 @@ function MapViewport({ layout, scope }: { layout: RunMapLayout; scope: string })
 
   return (
     <section aria-label="Workspace run map" className="flex min-h-0 min-w-0 flex-1 flex-col border border-border bg-background">
-      <div data-map-controls className="flex min-h-9 shrink-0 flex-wrap items-center gap-1 border-b border-border bg-sidebar px-2 py-1">
+      {renderHeader(<div data-map-controls className="flex shrink-0 items-center gap-1">
         <Button variant="ghost" size="sm" aria-label="Zoom out" aria-disabled={viewport.zoom <= minBoardMapZoom} onClick={() => { if (viewport.zoom > minBoardMapZoom) zoomAt(1 / 1.2) }}>
           <Minus className="size-3.5" aria-hidden /> Zoom out
         </Button>
@@ -268,8 +284,7 @@ function MapViewport({ layout, scope }: { layout: RunMapLayout; scope: string })
         <Button variant="ghost" size="sm" onClick={fit} aria-label="Fit map to view">
           <Maximize2 className="size-3.5" aria-hidden /> Fit
         </Button>
-        <span className="ml-auto hidden text-xs text-muted-foreground lg:inline">Drag to pan · Pinch to zoom</span>
-      </div>
+      </div>)}
       <p id={instructionsId} className="sr-only">
         Drag the empty canvas or use the arrow keys to pan. Scroll to pan; Control or Command plus scroll zooms around the pointer.
         On touch screens, drag to pan or pinch to zoom. Plus and minus zoom; Home or zero fits all runs. Tab reaches each run and its controls.

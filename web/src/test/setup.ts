@@ -1,5 +1,5 @@
 // jsdom implements no media queries; components that ask for the colour
-// scheme (theme toggle, sonner) need one to render at all.
+// scheme (theme effect, sonner) need one to render at all.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
     ({

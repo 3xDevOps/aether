@@ -545,7 +545,12 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if !s.enterRun(run) {
 		return protocol.CoordReportResult{}, runClosing(method)
 	}
-	defer s.leaveRun(run)
+	runHeld := true
+	defer func() {
+		if runHeld {
+			s.leaveRun(run)
+		}
+	}()
 	if p.Outcome != protocol.CoordOutcomeSuccess && p.Outcome != protocol.CoordOutcomeFailure && p.Outcome != protocol.CoordOutcomeBlocked {
 		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", or \"blocked\"")
 	}
@@ -611,7 +616,12 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	lock := s.reportLock(run)
 	lock.Lock()
-	defer lock.Unlock()
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			lock.Unlock()
+		}
+	}()
 	nextAction := "review retained evidence"
 	switch p.Outcome {
 	case protocol.CoordOutcomeFailure:
@@ -686,6 +696,12 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))
 	}
 	if missionReconcile {
+		// Admission may wait behind cancellation's synchronous Release. Only
+		// durable state is needed now; Release leaves this accepted socket open.
+		lock.Unlock()
+		lockHeld = false
+		s.leaveRun(run)
+		runHeld = false
 		if err := s.cfg.Mission.ReconcileReport(ctx, run, report, packet); err != nil {
 			return protocol.CoordReportResult{}, missionRPCError(method, err)
 		}

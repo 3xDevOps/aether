@@ -194,7 +194,7 @@ output is committed. Maskable icons and the iOS icon are square and full-bleed
 because the platform applies its own mask; the rest carry the rounded tile.
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in `web/.bun-version`)
-in jobs that run `make build` or `make release`, plus a dashboard job that
+in jobs that run `make build` or `make release-binaries`, plus a dashboard job that
 typechecks and tests the SPA on its own.
 
 ## The three extension seams
@@ -209,6 +209,10 @@ name and renders it with `route.params`. Navigation is a store action -
 `navigate('terminal', { runId })` - rather than a URL router: Next supplies the
 document and static assets, while the dashboard remains one client screen and
 every surface uses the same action.
+
+The global `overview` route (`src/routes/overview.tsx`) remains the All runs
+view in the palette. Run-detail routes are Terminal, Browser, Diff and Events;
+there is no separate per-run Overview route.
 
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
@@ -246,12 +250,12 @@ lives in
 `src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
 memoizing hooks in `src/store/hooks.ts`. Selectors that build new arrays must
 not be passed to `useStore` directly. A view that owns its own derived shape
-keeps it beside the view instead (`src/routes/board/selectors.ts`). The
-sidebar and board inputs carry the pending-approval run set rather than the
-raw inbox: `usePendingApprovalRuns` derives it once, subscribing on a stable
-string key, so a run holding a pending request presents as needs-attention
-everywhere the selectors are read - the sidebar, the palette, and the run
-lists - while a byte-identical inbox refetch re-renders nothing.
+keeps it beside the view instead (`src/routes/board/selectors.ts`). Execution
+grouping reads only the run lifecycle. `useRunInput` combines structured native
+requests, pending Aether approvals and unanswered Run Room questions for the
+independent **Needs input** indicator. `usePendingApprovalRuns` derives a stable
+run set for the sidebar's request count; an unchanged inbox refetch does not
+invalidate execution grouping.
 
 **Slots** (`src/components/slots.tsx`). Where a route registry is too coarse -
 something belongs *inside* a surface another ticket owns - the surface renders
@@ -262,30 +266,36 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:badges` | `{ run }` | the run card's status row, alongside the paused and unseen markers |
-| `card:warnings` | `{ run }` | reserved collapsed status-row controls, outside the scrolling metadata |
+| `card:badges` | `{ run }` | the run card's status row, alongside state and paused badges |
+| `card:warnings` | `{ run }` | collapsed status-row controls beside Details |
 | `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
 | `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
 | `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
 
-The `statusbar` Slot is mounted once, even when narrow layouts collapse its
-details. The command palette is not a status contributor; it has one
-independent host in `AppShell`.
+The `statusbar` Slot is mounted once outside status details at every width,
+so its refresh and shortcut lifecycles stay alive while the popup is closed.
+Secondary team readouts have one home inside the persistent details popup.
+The command palette has one independent host in `AppShell`.
 
 Card slot content may render its own links and buttons; the article's pointer
 handler ignores interactive descendants, so those controls stay interactive.
-Conflict chips, watcher avatars and approval badges belong in these slots, not
-in `run-card.tsx`.
+Conflict chips and watcher avatars belong in these slots. The shared
+**Needs input** control includes approvals rather than adding a second badge.
 
 ## Sidebar
 
 `src/components/shell/sidebar.tsx` owns the resizable workspace/run sidebar
-beside a persistent 48px activity rail. The rail carries existing navigation,
-capability gates, accessible labels and tooltips, a 2px active indicator and
-overflow when all destinations do not fit. The adjacent sidebar defaults to
-320px and is constrained to 320-520px. Older saved widths below the minimum
-are clamped when rendered. Runs, the attention count, New run, and Status /
-Member stay on one row; a phone drawer remains bounded by its viewport.
+beside a 48px activity rail on desktop. The rail groups destinations under
+**Work** and **Workspace**, with **Admin** at the bottom and **Settings**
+always reachable. A labeled **More** menu takes overflow according to actual
+available height, not a fixed destination count. Capability gates, accessible
+labels, tooltips and the 2px active indicator remain shared with navigation.
+The adjacent sidebar defaults to 320px and is constrained to 320-520px. Older
+saved widths below the minimum are clamped when rendered. Runs, the attention
+count and Status / Member stay on one row; launch belongs in the titlebar.
+Open **Admin → Members** for account sharing. On a local `aether gui` gateway,
+**Admin → Onboarding** returns to setup; an unlinked gateway opens setup
+automatically.
 
 The sidebar scopes runs to the selected workspace and groups them by state or
 owning member (`groupBy`, persisted). A swarm is a mission whose integrator
@@ -318,20 +328,19 @@ starts collapsed and every other status group starts expanded. When grouped by
 starts expanded. Disclosure state is local to the current grouping mode, so a
 collapse in Status does not carry into a Member group with the same key.
 
-At 1000px and narrower the adjacent workspace/run pane collapses into the
-persistent activity rail, which exposes **Expand sidebar** without changing the
-stored preference. The width handle remains a keyboard and pointer window
-splitter (see [Keyboard and focus](#keyboard-and-focus)).
+From 641px through 1000px the adjacent workspace/run pane collapses into the
+activity rail, which exposes **Expand sidebar** without changing the stored
+preference. The width handle remains a keyboard and pointer window splitter
+(see [Keyboard and focus](#keyboard-and-focus)).
 
-At 640px and narrower the expanded pane is a modal drawer instead: a Radix
-`Dialog` over a scrim, dismissed by a tap outside, by Escape, or by any
-navigation it makes, with focus trapped inside it while it is open. The
-activity rail travels inside the drawer, so a surface is still one tap away
-while the run list is up, and the 48px column the drawer leaves behind keeps
-the center view from reflowing under the scrim. The route itself is what
-closes the drawer, so a run row and a rail link both take the drawer away
-without either knowing it exists. There is no splitter in the drawer: the
-viewport sizes it, capped at the width of the screen less the rail.
+At 640px and narrower there is no permanent rail or empty rail-width strip.
+The titlebar opener or `Mod+B` opens a modal drawer: a Radix `Dialog` over a
+scrim, dismissed by a tap outside, Escape or navigation, with focus trapped
+while open and restored to its invoker on closing. The rail travels inside
+the drawer beside the run list. Drawer state is transient, separate from the
+desktop collapse preference, and resets on navigation or a change across the
+phone breakpoint. There is no splitter in the drawer; the viewport bounds
+its combined rail and sidebar width.
 
 Being a dialog, the drawer also stands the shell's global keys down while it
 is open, the same way every other modal does (see
@@ -350,21 +359,22 @@ way.
   `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
   every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
-- **The attention badge counts, it does not navigate.** The runs below are
-  already sorted worst-first, so the number is for a scrolled sidebar or a
-  stall that landed while the member was elsewhere in the app.
-- **The header carries New run and the grouping.** New run opens the launch
-  form (gated on `canLaunch`). Grouping is a two-segment control, Status and
-  Member, with `aria-pressed` on the current one, so the pressed segment is
-  the state and the other one is the action.
-- **The activity rail reaches every other view**, with the active route marked
-  by `aria-current`. Board and All runs lead it, and scope-wide entries keep
-  the method or local-verb capability gates that power their views.
+- **The attention badge counts runs with unresolved input requests, not idle
+  runs.** Each affected row has a compact request icon and count with its
+  question/permission source in the accessible name and tooltip. The row
+  still opens the terminal, and execution grouping is unchanged.
+- **The header carries grouping, not another launch button.** Grouping is a
+  two-segment control, Status and Member, with `aria-pressed` on the current
+  one, so the pressed segment is the state and the other one is the action.
+- **Board leads the activity rail**, with the active route marked by
+  `aria-current`. All runs remains a global route and palette destination,
+  not a duplicate rail entry. Scope-wide entries keep their method or
+  local-verb capability gates, including legacy-read behavior.
 - **The rail and palette share the scope-wide surface list** from
   `src/lib/surfaces.ts`, so a surface cannot be named one thing in navigation
   and another in the palette, and neither can forget its gate. Approvals
-  carries the pending count in its accessible name; the status bar keeps its
-  own copy for when the member is looking elsewhere.
+  carries the pending count in its accessible name; the status bar keeps a
+  phone-only Approvals signal when the rail is not visible.
 - **A nav entry is named what the view it opens is titled**, including
   `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
 
@@ -456,6 +466,12 @@ installed iOS app paints over the page, padding its controls back below it.
 Every inset is 0 on a screen without one, and the Electron traffic light inset
 above wins where it applies.
 
+One filled **New run** action sits on the right when the member can launch and
+the gateway is connected. It opens the shared launch form in the selected
+workspace. The populated Board and sidebar do not repeat it; the empty Board
+keeps its contextual launch action. Native window controls remain far right.
+On phones the titlebar also provides the sidebar drawer opener.
+
 In Electron the window is frameless, so the SPA draws the bar and its native
 controls: on Windows and Linux, minimize, maximize/restore and close are wired
 to `window.aetherDesktop.controls`; macOS keeps its native traffic lights and
@@ -488,9 +504,9 @@ scene's motion details.
 
 ## Window size and overflow
 
-The shell is a fixed column - title and command bar, update prompts, activity
-rail with its adjacent workspace/run sidebar and center view, and a status bar
-- and nothing in its own chrome scrolls sideways. The two bars are 35px and
+The shell is a fixed column - title and command bar, update prompts, center
+view with its desktop rail/sidebar or phone drawer, and a status bar - and
+nothing in its own chrome scrolls sideways. The two bars are 35px and
 22px for a mouse and grow for a finger; see the tokens below. A control pushed
 past an edge is unreachable, not merely off screen, so every row states what
 gives way first.
@@ -507,8 +523,8 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   `env(safe-area-inset-*)`: the title bar sideways and downwards, the status
   bar and its details popup downwards, the sidebar drawer on all three edges
   it reaches, since it is the one surface that spans a screen corner to
-  corner, and the row holding the activity rail on the left, which is the edge
-  a landscape notch covers when the drawer is not up. The top inset is the one
+  corner, and the workbench row on the left, where a landscape notch can
+  cover content. The top inset is the one
   a surface away from that edge also has to read, because an installed iOS app
   asks for a `black-translucent` status bar and gets the whole screen: it is
   `--safe-top` in `src/index.css`, and the title bar's height, the palette's
@@ -532,17 +548,13 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   SPA has applied the member's stored theme, so it follows the OS scheme
   rather than the app setting.
 
-A layout that only changes size belongs in CSS. The ones that mount
-different elements for a finger than for a mouse - the run header's menu, the
-diff timeline's disclosure, the activity filter bar - ask `useMediaQuery` in
-`src/lib/hooks.ts` instead, and every edge it asks about is a named constant
-in the same file: `coarsePointer` is the CSS variant below asked from
-JavaScript, and `belowSm` and `belowMd` are Tailwind's own 640px and 768px a
-pixel short. New code reads an edge from there rather than writing a query,
-so a layout that stacks in CSS and a layout that stacks in JavaScript cannot
-disagree about where. Two call sites predate the hook and still hold their
-own literals - `shell/sidebar.tsx` and `shell/status-bar.tsx` - and move onto
-it in a follow-up.
+A layout that only changes size belongs in CSS. Layouts that mount different
+elements for a finger than for a mouse, such as the diff timeline's disclosure
+and activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
+constants there include `coarsePointer`, Tailwind's `belowSm`/`belowMd`
+breakpoints and `phoneScreen`. Terminal utility controls respond to their
+pane's container width rather than the window width. The shell sidebar and
+titlebar share the inclusive 640px drawer boundary.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -583,23 +595,21 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   Their actions become a narrow-screen grid and return to a desktop flex row;
   technical output is bounded and expandable, and the dismiss control remains
   keyboard reachable.
-- **The status bar** keeps connection state, the theme control and the
-  status-slot contributors reachable at every width. Narrow layouts put
-  secondary readouts in a bounded, keyboard-reachable popup; wide layouts
-  expand them inline. The single status Slot remains mounted while details are
-  collapsed - a contributor owns a keyboard shortcut of its own, which is why
-  the popup is a `Collapsible` with its own dismissal rather than a Radix
-  overlay that unmounts when it closes. It dismisses on Escape and on a
-  pointer down anywhere outside it, unless a dialog above it owns the key;
-  it takes Escape before the shell's own does, so dismissing the popup on a
-  run does not also leave the run (see
+- **The status bar** keeps connection state, shortcuts and its phone-only
+  Approvals signal outside a bounded, keyboard-reachable status-details popup.
+  Version, storage, local status, presence, budget and errors live in that
+  popup at every width; there is no duplicate Activity link or theme toggle.
+  The outer status Slot and team refresh lifecycle stay mounted once. Details
+  use a force-mounted `Collapsible` with closed-state hiding, not an overlay
+  that unmounts its readers. Escape and a pointer down outside dismiss it,
+  unless a dialog above owns the interaction; Escape dismisses details before
+  the shell can leave the current run (see
   [Keyboard and focus](#keyboard-and-focus)).
-  The popup also writes out the facts a pointer reads from a hover: the disk
-  breakdown, the protocol version and what this machine is linked to. Tooltips
+  The popup writes out the facts a pointer reads from a hover: the disk
+  breakdown, protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
-  The bottom-left **Usage** entry is one mounted reader: it remains compact
-  and reachable at narrow widths and sits beside the version readout on wide
-  screens. It calls `account.usage` for the authenticated member, polls only
+  **Usage** has one mounted reader in status details at every width.
+  It calls `account.usage` for the authenticated member, polls only
   while the page is visible and live, and refreshes on reconnect, focus,
   visibility and an explicit Refresh action. Opening the popover loads
   `account.list` for the own/shared account selector; changing that selection
@@ -612,32 +622,25 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   retrying poll loop. Pi, OpenCode, OMP/custom harnesses, API-key usage and
   billing history are explicitly outside this read-only surface; credentials
   remain server-side.
-- **The run header** gives its first section two lines: the title and task
-  disclosure, then state, harness/mode and branch metadata. The title is the
-  agent's last terminal title; a run without one is named by the first line
-  of its prompt, cut at 120 characters. The heading clamps to two lines and
-  keeps the full label in its `title`; the whole prompt is behind
-  **View full task**. The second section
-  holds only the run-detail tabs and actions. Desktop actions all appear from
-  a 512px header width, with icon labels expanding from 1024px; narrower
-  headers retain More. Metadata and tabs scroll inside their own regions
-  before either or the actions become unreachable.
-  On a coarse pointer the action group becomes one **Actions**
-  button and every verb moves into its menu, where each carries its full label
-  at finger size. Six 44px
-  buttons do not fit across a phone, and the mouse answer to a narrow row -
-  22px icons with the label in a hover tooltip - is six unnamed icons to a
-  finger. Hand off is in the same menu.
+- **The run header** gives its first section two lines: the title, then state,
+  harness/mode, the route's subtitle and **Task and details**. The title is the
+  agent's last terminal title; a run without one uses its prompt's first line, cut at
+  120 characters. The heading clamps to two lines and keeps the full label in
+  its `title`; the disclosure keeps the full prompt and run metadata together.
+  The second section holds the run-detail tabs and at most
+  two labeled state-dependent actions plus **More**, at every width and for
+  both pointer modes. Secondary actions live in More; Kill and Delete come
+  last, after a separator, and require confirmation. Metadata and tabs
+  scroll inside their own regions before the actions become unreachable.
 - **The board** offers Cards and Map layouts. Cards stacks its three status
   columns on narrow screens and places them side by side from the
   `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
   keep state labels and run controls available (see [Board](#board)).
-- **The workspace/run sidebar** collapses at 1000px and narrower into the
-  persistent 48px activity rail, which exposes **Expand sidebar** without
-  changing the stored preference. At 640px and narrower its expanded pane is a
-  modal drawer over the main view, taken away by a tap outside, by Escape or
-  by the navigation it makes, rather than a pane that stays over the run it
-  just opened.
+- **The workspace/run sidebar** collapses from 641px through 1000px into the
+  48px activity rail, whose **Expand sidebar** does not change the stored
+  preference. At 640px and narrower the rail disappears from the main layout;
+  the titlebar opens a modal drawer containing rail and run list. A tap
+  outside, Escape or navigation dismisses it.
 
 ## Data flow
 
@@ -802,7 +805,7 @@ base64 in control JSON. The shared browser's observation-only WebSocket is
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
 server-hosted gateway sends no token; WhoIs authenticates each request.
 
-The status bar's disk gauge renders when `server.info` carries a `disk`
+The disk gauge in status details renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
 `server.info`: `protocol.ServerInfoResult` is shared with the CLI and frozen,
 so the gateway serves the number on `GET /api/v1/disk` and the team refresh
@@ -828,30 +831,34 @@ forever.
 
 `src/routes/board/` is the default center view, reached through the activity
 rail's **Board** home icon. Its header shows the active workspace, run count,
-New run, Mark all seen and a **Cards / Map** segmented layout control.
+Mark all seen and a **Cards / Map** segmented layout control. The titlebar
+owns the primary New run action.
 
-**Cards** arranges runs in three status buckets. `needs-attention` is Needs
-You: the agent is waiting for you, or the run stalled, and the reason strip
-says which. `queued`/`provisioning`/`running` is Working; `completed` and final
-statuses are Done. An active run with a pending approval also presents as
-needs-attention on the board and in the sidebar: `runState` takes a pending
-flag from the approval inbox because the domain status alone does not show
-the pause. A run awaiting review (below) is also in Needs you. Every surface
-that decides "needs you" - Cards, Map, the sidebar's Status grouping and sort,
-the attention count, the palette - asks `needsYou(run, state)` in
-`src/lib/status.ts`. Cards sort by last state change, newest first. The flat bordered
+**Cards** arranges runs in three status buckets. `needs-attention` is Idle:
+the agent's turn ended or a run stalled; the reason strip retains that context.
+`queued`/`provisioning`/`running` is Working; `completed` and final statuses
+are Done. Outstanding requests do not override these buckets: a run can be
+**Working** and **Needs input** at the same time. A run awaiting review
+(below) is also in Idle; it does not raise **Needs input**. Every surface
+that lists runs waiting on a human - Cards, Map, the sidebar's Status
+grouping and sort, the palette - asks `waitsOnHuman(run, state)` in
+`src/lib/status.ts`. Cards sort by last execution state change, newest
+first. The flat bordered
 columns stack on narrow screens and sit side by side from the `lg`/1024px
-breakpoint.
+breakpoint, where subgrid keeps their column headers the same height.
 
-Both layouts use uniform-height collapsed run previews. The title has its
-own full-width row with a bounded preview and the full `runLabel` as the
-navigation button's accessible name. Status, owner, harness, timestamp and
-branch-copy controls remain available without expanding the card. Counted
-file-overlap and mission-conflict buttons stay visible beside the status
-metadata and open diagnostic controls in popovers. **Details** reveals the
-full title/task, reason and additional metadata inline in Cards and in a
-dialog in Map, so expansion does not disturb map geometry. The run page also
-exposes the full task through **View full task**.
+Cards uses compact, natural-height rows; Map uses fixed card geometry from
+`map-layout.ts`. Both keep a bounded full-width title preview and the full
+`runLabel` as the navigation button's accessible name. The state badge,
+protection, paused and archival indicators remain, without a redundant state
+dot or New pill. Unseen titles are bold and expose **Unseen** through
+`aria-describedby`. Owner, harness and timestamp stay in the compact preview.
+Counted file-overlap and mission-conflict buttons remain beside the status
+metadata and open diagnostic popovers. **Details** reveals the full task,
+reason, branch/copy control and additional metadata inline in Cards and in a
+dialog in Map, so expansion does not disturb map geometry. Questions remain
+visible as **Needs input**, independently of execution. The run page exposes
+the full task and metadata through **Task and details**.
 
 An empty workspace shows one "Ready for a task" panel and a primary New run
 action rather than three repeated empty columns. Loading uses delayed
@@ -860,9 +867,9 @@ an in-flight request with an empty result.
 
 The card's article remains a pointer surface for noninteractive metadata, while
 interactive descendants and any non-collapsed text selection are ignored by
-the article handler. Branch text is explicitly navigation-exempt so it can be
-selected or copied without opening the run. The branch metadata row shows the
-full branch in its `title` and has a copy button beside it.
+the article handler. The Details content is navigation-exempt, so branch text
+can be selected or copied without opening the run. It shows the full branch
+with a copy button beside it.
 Reaching for the branch is therefore not a way into the run; the rest of the
 card is. Copying goes through `src/lib/clipboard.ts`, shared with
 `CopyableCommand`, because an origin without `navigator.clipboard` - plain
@@ -877,9 +884,10 @@ member's integrator; those cross-owner connectors are dashed. A worker whose
 integrator is not in the current map, for example because it is archived,
 remains visible and is labeled as having an integrator not visible.
 Relationships use the snapshot fields described under [Sidebar](#sidebar),
-not task-text guesses. Deterministic
-rectangular shelf packing arranges the groups into a landscape-oriented map
-rather than a radial graph or a single vertical stack.
+not task-text guesses. Deterministic rectangular shelf packing uses fixed
+dimensions from `map-layout.ts`, not measured card-content heights, to arrange
+the groups into a landscape-oriented map rather than a radial graph or a
+single vertical stack. Zoom/Fit and archived-run controls share the Runs header.
 
 Map navigation stays inside its canvas:
 
@@ -927,7 +935,7 @@ Three things the buckets do not come from the run status alone:
   `aether-internal report --outcome success|failure` (status `completed` or
   `failed`) that its owner has not opened yet. The server owns the flag
   (`outcome_unseen`, below); it is shared by every viewer and survives a
-  reload, unlike the tab-local Unseen ack. The card sits in Needs you but
+  reload, unlike the tab-local Unseen ack. The card sits in Idle but
   keeps its Done or Failed dot and chip, and its reason line reads "The agent
   reported success; open the run to review it." (or failure) in the done or
   failed tone. `runState` is unchanged, so Clear done, archive eligibility and
@@ -976,9 +984,9 @@ toast: "Archived N runs", or "Archived N, M failed: " plus the message of
 the first failure in Done order (newest first), regardless of which call
 settled first.
 
-### Reason and paused on the wire
+### Execution, input and paused on the wire
 
-**The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
+**The Idle reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
 loaded still says why: `waiting for your input` and its siblings when the
@@ -986,9 +994,35 @@ agent reported it, `stalled: ...` when the silence heuristic parked it.
 `toRecord` in `src/store/runs.ts` prefers the wire reason and falls back to
 the previously stored one only when the fetch omits it and the status has
 not changed (a legacy gateway); a live `run.status` event still overwrites
-it with the event payload's reason. An approval pause keeps its fallback: a
-card with an empty reason uses its oldest pending request's action as the
-summary.
+it with the event payload's reason. A pending approval's action or unanswered
+room question remains the card's actionable summary.
+
+**Idle is a display rename, not a new lifecycle.** The persisted/wire status
+remains `needs-attention`. Turn completion, silence, failure, and prose such as
+the legacy `waiting for your input` reason are not evidence of a request.
+
+**Needs input is independent of execution.** A run snapshot's `pending_inputs`
+contains native request identities (`id`, `session_id`, and `kind`: `question`,
+`permission`, `form`, or `extension_ui`), never prompt bodies or answers.
+The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
+an empty list clears it immediately. Closing one request leaves the others
+visible. Run headers, cards, lists and sidebar rows combine this set with
+pending Aether approvals and unanswered Run Room questions, including room
+questions after execution finishes. Counts and tooltips name the source.
+Use the existing Terminal for native prompts, Approvals for Aether approvals,
+or open Run Room from Terminal for room questions; no new answer transport is
+introduced. Unsupported native integrations show no inferred request.
+
+A terminal lifecycle transition also clears native requests if its empty
+`run.input` event is lost. Later native input events cannot revive a request
+on a finished run. This does not clear Aether approvals or Run Room questions.
+
+Hydration is authoritative and queues live events until its snapshot lands.
+Ordinary run upserts preserve a known input set, including an empty one, so
+an older route, room or launch response cannot resurrect a closed request.
+A terminal run upsert clears native requests instead.
+Mission relationship refreshes replace only relationship fields. Input events
+for unknown runs follow the existing fetch-first and ordered-cursor rules.
 
 **Awaiting review is server state.** `Run.outcome_unseen` on `run.get` and
 `run.list` is true while an agent-reported outcome is unopened by the owner;
@@ -1026,41 +1060,47 @@ have an older RPC response overwrite a newer event.
 Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
 `merged`, `abandoned`, `failed`, `interrupted`, never `completed`) plus the
 kill permission and the `run.archive` capability; neither confirms, since
-archiving is reversible. Both join `primaryCommands` in
-`src/components/run-actions.tsx`, so Archive sits on the header next to
-Delete. The palette resolves its focused run from the run map by
-`route.params.runId` rather than the attention list, so an archived run's
-own page still offers Restore even though attention has stopped listing it.
-- **The command palette** (`src/components/palette/`) is the cmdk palette:
-  `⌘K` on macOS and `Ctrl+K` elsewhere, anywhere in the app (see [Keyboard and
-  focus](#keyboard-and-focus)), or the command center in the titlebar. Both
-  entry points use the existing toggle action. The palette is mounted exactly
-  once by `AppShell`, independently of the status Slot, and its quick input is
-  top-centered directly under the 35px titlebar, max 600px, with compact
-  bounded rows before the dialog portals to the document.
-  It jumps to runs and workspaces - opening a workspace also makes it the
-  active scope, so the sidebar and the board follow - and opens a steer request
-  for **the run the center view is showing**, or any run-detail tab, since it
-  keys on `route.params.runId` rather than on a route name. From the board there
-  is none, so reveal a run first. Its "Go to" group is `src/lib/surfaces.ts`,
-  the same gated list the activity rail renders.
+archiving is reversible. Final runs offer Archive as a primary action;
+archived runs offer Restore. The palette resolves its focused run from the
+run map by `route.params.runId` rather than the attention list, so an
+archived run's own page still offers Restore.
+- **The command palette** (`src/components/palette/`) opens from **Search runs
+  and commands** in the titlebar, `⌘K` on macOS or `Ctrl+K` elsewhere;
+  `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`,
+  independently of the status Slot, directly below the titlebar.
+  Navigation comes before run actions, so opening the palette initially
+  selects **Open the board**, not a mutation. The **Runs** group searches
+  complete task text, title, branch, harness, workspace and run ID without
+  clipping the searchable text or limiting the result set.
+  Opening a workspace also makes it the active scope. Run actions apply to
+  the run named by `route.params.runId`, on any run-detail tab; the board has
+  no focused run. The "Go to" group uses the gated `src/lib/surfaces.ts` list.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
-  New run in the sidebar header, in the board header and in the notice an
-  empty board shows in place of its columns; every view in the sidebar nav;
-  and the run action bar (`src/components/run-actions.tsx`) in the header of
-  every run-detail tab, which is where the run verbs live for a member who has
-  not learned `⌘K` yet.
+  New run in the titlebar and the notice an empty Board shows in place of its
+  columns; scope-wide destinations in the rail and its More/Admin menus; and
+  the run action bar (`src/components/run-actions.tsx`) in every run-detail
+  header, with at most two contextual labeled actions plus **More**.
+- **Appearance commands** are explicit: **Use system theme**, **Use light
+  theme** and **Use dark theme** set the same persisted preference as Settings.
+  They are available through every gateway; no cycling theme command is needed.
 
-Two things the buttons add. A `Command` carrying a `confirm` field - kill,
-delete and both close actions - opens a dialog naming the run before it runs;
-the palette does not ask, because a palette item is already several
-deliberate steps (open, type, select) away from an accident, where a button
-is one click. And the bar locks while a verb is in flight, showing a spinner
-on the one running, or on the **More** trigger while any verb is in flight: a pull shells out to `git fetch` over SSH and takes seconds, and a
-second click would race the first for the same ref. Buttons
-also take the command's `short` label and keep the full sentence as their
-tooltip, because the action bar is intentionally compact. The overflow menu
-has the room, so it prints the whole label instead.
+A `Command` carrying a `confirm` field—kill, delete and both close
+actions—opens the same run-naming confirmation dialog from the header or
+palette. Cancel is initially focused. Palette confirmations capture the
+authenticated identity with the run and command; an identity change dismisses
+pending or visible confirmation instead of applying it to another account.
+The action bar locks while a verb is
+in flight, showing a spinner on the running primary action or on **More**.
+This also prevents a second click from racing a branch pull over SSH.
+Primary buttons use the command's `short` label and its full sentence as a
+tooltip; the overflow menu prints the full label.
+
+`src/lib/palette-filter.ts` preserves cmdk's fuzzy scores and ranking while
+avoiding recursive rescans of long task bodies. The pinned local cmdk patch
+in `patches/cmdk@1.1.1.patch` synchronizes initial accessible selection,
+avoids redundant scrolling and DOM reordering, and restores current browse
+order when a query is cleared. Filtering and live data updates keep the
+input focused and its active descendant tied to a visible enabled result.
 
 hand off and protect need the run's owner or an admin. Before hydration the
 caller's own record has not arrived, and the mirror answers yes rather than
@@ -1293,7 +1333,7 @@ of the pattern either way is `onTabListKeyDown`, one function both strips share.
 Those keys move focus and nothing else. Selection does not follow focus here,
 which the ARIA tab list pattern reserves for panels that are cheap to swap:
 behind these tabs are a websocket attach, a patch fetch and an xterm host that
-replays a transcript, so arrowing from Overview to Events must not open the tab
+replays a transcript, so arrowing from Terminal to Events must not open the tab
 it lands on. Enter or Space opens the focused tab, a click opens the tab it
 landed on, and both work because every tab is a real `<button>`.
 Delete or Backspace closes the focused removable dock tab. A close repairs
@@ -1301,20 +1341,19 @@ focus to the next surviving tab, the previous one when closing the last tab, or
 the Add terminal tab when the dock becomes empty.
 Each run route names the body under the strip as its `tabpanel`, through
 `runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
-one carrying `aria-controls`: on the run strip only one of the five routes is
-active at a time, so the other four would be naming a panel that is not active
+one carrying `aria-controls`: on the run strip only one of the four routes is
+active at a time, so the other three would be naming a panel that is not active
 in the tree. An open dock's body is the panel its selected tab names; a shut
 dock has no body, and a dock
 holding no tabs is no tab list at all, so neither names anything.
 
-Opening a run tab swaps the active center view. The previously active view
-unmounts, including its terminal, so the strip the next route draws takes the
-focus back. Otherwise
-every tab press would drop a keyboard reader on `body`. It is armed
-from the activation rather than the key press, and only from one the keyboard
-produced, which carries no click count: a press that is cancelled arms
-nothing, and a pointer click leaves focus where the pointer put it. The dock's
-strip needs none of this, because it is not unmounted by its own tabs.
+Opening a run tab replaces its header and strip with the active center view's.
+The new strip restores keyboard-activation focus so it does not fall to `body`.
+That handoff is armed from the activation rather than the key press, and only
+from one the keyboard produced, which carries no click count: a cancelled
+press arms nothing. Pointer navigation does not steal focus; it scrolls the
+selected tab into view so the run actions cannot leave its label clipped.
+The dock's strip needs no handoff because its own tabs do not unmount it.
 
 **Resize handles are window splitters.** The sidebar's and the docks'
 `separator` handles take Tab, name the pane they size with `aria-controls`,
@@ -1336,32 +1375,33 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 
 `src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
 `/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
-tab strip (`tabs.tsx`), so Overview, Terminal, Browser, Diff and Events are registry
+tab strip (`tabs.tsx`), so Terminal, Browser, Diff and Events are registry
 routes on the same `runId`; the strip is a real tab list, arrow keys included
 (see [Keyboard and focus](#keyboard-and-focus)).
 
 Every way into a run navigates to `terminal`, because that is where the agent
 is: board card, sidebar row, run list, palette, feed entry, approval,
-conflict chip, template, and the launch and onboarding forms. Overview stays a
-tab for the metadata a finished run is read for, which `src/routes/run.tsx`
-renders as one list: the reason, owner, agent account where the run borrowed
-one, the created and changed times, and the last commit. The shared
-`RunHeader` puts run state, harness, mode and branch below the title in its
-first section, leaving the second section to the tab strip and actions.
+conflict chip, template, and the launch and onboarding forms. The shared
+`RunHeader` keeps metadata with those four tabs rather than a per-run Overview:
+**Task and details** contains the full task, owner, borrowed agent account,
+created and changed times, and last commit when its timestamp is present.
+State, harness/mode and the route's subtitle remain in the compact header;
+the branch remains a subtitle where supplied, while protection and archival
+expiry stay by the title. The second section holds the tab strip and actions.
+The run's reason remains readable in the shared header.
 Each active run-detail route renders one `RunHeader`; a parked terminal keeps
 only its primary pane and therefore no header/tab IDs or action portals. This
 lets the run's own state travel with the reader, and `isRunRoute` in `tabs.tsx`
 is what keeps a sidebar
-row lit while they move between the tabs. `RunHeader` keeps long task text
-behind a **View full task** disclosure, so its compact summary never discards
-the task.
+row lit while they move between the tabs. The disclosure keeps long task text
+available without enlarging the compact summary.
 
 ### Run Room and control lease
 
-`RunRoom` is the collaboration view for the current run. It is mounted beside
-`TerminalView` as a collapsed vertical tab; opening loads the durable room
-timeline, while presence refreshes even when collapsed. The tab count is
-derived from the collaboration slice's unanswered questions and queued steers.
+`RunRoom` is the collaboration view for the current run. Its collapsed opener
+sits beside the terminal; opening loads the durable room timeline, while
+presence refreshes even when collapsed. The count comes from the collaboration
+slice's unanswered questions and queued steers.
 
 The server-side lease, reconnect, takeover, steering, protection, attachment,
 and question contract is defined once in
@@ -1389,6 +1429,14 @@ The dashboard-specific state wiring is:
   `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
   the agent terminal and exposes its own control action without duplicating
   room state.
+  The toolbar and phone Room share `ControlButton` and `useTakeover`; the
+  host renders one `TakeoverDialog` above Room and Evidence for the current
+  holder's decision. `RunDock` defers Evidence's responsive sheet/popover swap
+  during that decision to keep its focus scope stable. The server owns
+  transfer timing and authority, and the dialog restores the interrupted
+  terminal or composer focus. Attachment reopens still invalidate the old
+  decision. Shell and Browser control remain independent leases, not
+  authority over the agent terminal.
 - `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
   automatic write requests. Opening a subsession therefore starts as a mirror,
   not a human takeover. `useRunTerminalSession` still gives deliberate per-run
@@ -1405,11 +1453,29 @@ The dashboard-specific state wiring is:
   collaborators-only hint. **Send to agent** uses teal and explains the queued
   instruction and controller approval consequence; colour is not the sole cue.
 
-On desktop the open room is a right-side panel capped at 420px. On a phone it
-is a full-viewport sheet; the terminal and room remain separate surfaces while
-sharing the same server state. Questions and queued steers therefore appear in
-the existing run-level count and **Needs you** grouping instead of creating a
-second dashboard inbox.
+On desktop the open Room is a real flex sibling beside the terminal and dock,
+below the run header, capped at 420px and 40% of the available row. It does not
+overlay the terminal or its controls. The terminal toolbar owns same-run
+controller/presence facts and the header owns protection; Room does not repeat
+them on desktop. On a phone Room is a full-width modal sheet below the
+titlebar, retaining those contextual facts and containing keyboard focus.
+Escape or the Room shortcut closes it and restores focus without discarding
+the draft. Both surfaces share server state: questions and queued steers
+contribute to the Run Room count; unanswered questions also contribute to
+**Needs input** without changing the execution group or creating another inbox.
+
+The Terminal tab's single **Evidence** trigger lives in the dock header through
+`Dock.persistentActions`, including when the shell is collapsed or has no
+tabs. Room does not duplicate it. On desktop Evidence is an anchored Popover
+bounded by the terminal tabpanel; on a phone it is a modal sheet.
+Capture selections, verification notes, candidate drafts and pending mutations
+belong to the open Evidence session, so crossing the phone breakpoint does not
+discard them or create a new retry key. Explicitly closing Evidence clears
+local drafts; it does not cancel a mutation already submitted to the server.
+**Answer with fact** closes Evidence and opens/focuses a Room comment draft.
+Each fresh request object is consumed once, preserves attachments and clears
+question correlation; it never sends automatically. Source availability,
+expiry, partial results and retained-evidence authority remain unchanged.
 
 ### Candidate review in Run evidence
 
@@ -1455,9 +1521,9 @@ The wire methods and bounded records are documented in
 [integration.md](integration.md); this guide records only the dashboard
 surface and its reconnect behavior.
 
-A run id none of the five tabs can find renders one shared `MissingRun`
+A run id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
-five copies of a sentence with nothing to press. What it says is what the
+four copies of a sentence with nothing to press. What it says is what the
 store actually knows. While the server is unreachable it reports that, in
 the same words `run-list.tsx` uses and with the same split - a dead token is
 not a server that is retrying, so that one says what the error recorded -
@@ -1529,14 +1595,14 @@ only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
 back to a compact current-screen bootstrap through the hidden serial
 transaction. A finished run stays read-only until that same run is relaunched.
 
-The Terminal view is a vertical split. The active terminal renders its
-RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`.
-The agent terminal keeps flexible space above a `RunDock` below it. The first
+Below the shared run header, the Terminal view places the agent terminal and
+`RunDock` in one flexible column, with the desktop `RunRoom` beside that column.
+The agent terminal keeps flexible space above the dock. The first
 header section contains the title and metadata on two lines; the next contains
 tabs and actions on one line. The existing terminal toolbar contains connection,
 control and presence alongside its tools, with no extra viewer/controller row.
 It names the controller and all viewers; the viewer list scrolls horizontally,
-and **Terminal tools** takes utility actions at limited widths. **(this tab)** requires
+and **Terminal tools** takes utility actions in narrow or touch panes. **(this tab)** requires
 live acknowledged local control; **(another session)** distinguishes the same
 member's other controller session. Real gateway errors remain readable.
 At narrow widths key and eye icons identify the controller and viewers; full
@@ -1593,6 +1659,11 @@ output; the headless browser suppresses its own native scrollbar in captures.
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
 supplies connection, control and presence in that same toolbar.
+Fine-pointer panes show the tools inline from 42rem without attachment controls
+or 70rem with them; narrower panes and touch use the compact **Terminal tools**
+popover. The shell strip keeps one lease control plus **More** for Screenshot,
+Hide terminal and confirmed Stop terminal. These actions belong to the
+selected shell, not a global terminal lease.
 Terminal tools delegate key behavior to the xterm controller and clipboard
 helpers rather than putting those actions in each dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
@@ -1690,8 +1761,9 @@ reload starts collapsed again, and the run dock's is per run because
 `shellDocks` is keyed by run id. The header strip stays live while a dock is
 shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
 xterm host and would never attach. Expanded-only dock actions are omitted while
-the dock is collapsed. `TerminalDock` mounted with `openOnMount` expands itself
-once, because the Agents and GitHub steps type into it.
+collapsed, but `persistentActions` keeps Evidence reachable even with no shell.
+`TerminalDock` mounted with `openOnMount` expands itself once, because the
+Agents and GitHub steps type into it.
 
 Run-shell tab state and its socket registry live in `src/store/terminal.ts`;
 the environment dock has the corresponding state and socket registry in
@@ -1713,18 +1785,20 @@ The primary agent attach closes when its route unmounts. A return visit
 opens a new compact current-screen attach rather than revealing a retained
 terminal.
 
-The board's `TerminalDock` exposes **Save environment** while the member's
-terminal is running. Stopping the container and discarding the saved image
-are different decisions, so they are separate actions with separate
-confirmations: **Stop environment** is the primary action in the dock and
-confirms with a plain primary button, saying the saved image is kept, while
-**Reset to standard** appears only when there is a `saved_image` to throw
-away, is an outline action, and confirms with the image's own name and
-carries the only destructive button either dialog has. That confirmation
+The board's `TerminalDock` exposes **Save environment** as its primary action
+while the member's terminal is running. **More** contains capability-gated
+**Forward port**, **Stop environment** and **Reset to standard**. Stopping the
+container and discarding the saved image remain separate decisions with
+separate confirmations: Stop confirms with a plain primary button and says
+the saved image is kept. Reset appears only when there is a `saved_image` to
+throw away, confirms with the image's own name and carries the only destructive
+button either dialog has. That confirmation
 names the container only while there is one to stop, because Reset outlives
 it. Stopping therefore carries the rest of the status forward rather than
 replacing it, so the image survives the container in what the dock knows as
 well as on the server, and Reset stays on offer with the environment stopped.
+Closing a dialog opened from **More** returns focus to that menu trigger, or
+to **Open** if stopping or resetting removed the menu.
 When the terminal is running and `saved_image` is empty, it shows the hint
 **Installs here reach agents after you save.** From the moment a tab opens until
 its attach is acked, a spinner covers the terminal. Once a dashboard run ack
@@ -1778,7 +1852,7 @@ because the page cannot tell whether the terminal predates the first one.
   Starting runs keep their spinner; ended runs say **This run is not running**.
   Whether a member may steer is the server's answer:
   `-32001` downgrades the attach to a mirror and disables the toggle. An
-  occupied write request is a conflict and needs the Run Room's confirmed
+  occupied write request is a conflict and needs the host's shared confirmed
   takeover.
 
   The attach ack's `replay` count is the exact bootstrap/live byte boundary,
@@ -1829,8 +1903,8 @@ because the page cannot tell whether the terminal predates the first one.
   client cannot drift from the server gate. A run waiting for a human is not
   finished, so it keeps both its retry and the gateway's own words. A run
   that never started has no transcript either, and its `run.reason` carries
-  the provisioning failure, so the tab shows that reason rather than sending
-  the reader to the Overview tab for it. That substitution is keyed on the
+  the provisioning failure, so the tab shows that reason directly alongside the
+  shared run header. That substitution is keyed on the
   refusal's own code: only a missing session says anything about the run, so
   a revoked token or a withdrawn membership still shows the gateway's own
   message.
@@ -1909,19 +1983,21 @@ the app in the run, not the phone or laptop. No debugging/CDP endpoint is
 exposed to the dashboard.
 
 Opening the tab reads status, pages and ownership; it does not create a
-session. Enter the app address and press **Open browser** to launch explicitly.
-**New page** opens another page in the existing context. **Go**, **Back**,
-**Forward** and **Reload page** operate on the selected shared page. The
-**Page** selector includes popups and changes the selected page for the agent
-and other viewers, so it requires control. **Viewport** offers desktop
-1280 × 800, phone 390 × 844 and landscape phone 844 × 390; these change the
-real remote viewport, not just the displayed image. They do not emulate a
-different user agent, operating system or hardware.
+session. Before a page is selected, the URL field and **Open browser** are the
+primary path to launching explicitly. A selected page exposes **Go**, **Back**,
+**Forward** and **Reload page** beside the URL. **Browser tools** contains the
+secondary page, viewport, capture, reconnect and destructive controls.
+**New page** opens another page in the existing context. The **Page** selector
+includes popups and changes the selected page for the agent and other viewers,
+so it requires control. **Viewport** offers desktop 1280 × 800, phone
+390 × 844 and landscape phone 844 × 390; these change the real remote
+viewport, not just the displayed image. They do not emulate a different user
+agent, operating system or hardware.
 
 The pane uses shared 13px inputs and buttons and native selectors styled with
-`field`: 26px high for mouse input and 44px for coarse pointers. Navigation,
-address/actions, page/viewport, capture and destructive controls wrap in
-responsive groups; long addresses, page titles and errors stay within the pane.
+`field`: 26px high for mouse input and 44px for coarse pointers. Primary
+controls wrap responsively; secondary controls stay in Browser tools. Long
+addresses, page titles and errors stay within the pane.
 
 The header identifies the browser incarnation, lifecycle state and current
 member or run-agent controller. **Acquire control** claims an unoccupied
@@ -1963,10 +2039,15 @@ only. The app, pages and login continue according to the run's lifetime.
 a fresh session. Reloading the dashboard creates a new tab-local control
 identity and initially watches the surviving owner; taking over is explicit.
 Stream failures, lifecycle unavailability and mutation refusals remain visible.
-**Close page** explicitly closes the selected page
-for everyone. **Reset session** requires confirmation and current control;
-it destroys the shared pages/cookies and requires acquiring the new session
-before opening pages. Closing the run owns stopping the companion itself.
+**Close page** and **Reset session** both require current control and use the
+shared `AlertDialog` confirmation primitive. Close removes the selected page
+for everyone while leaving the other pages and session; Reset destroys shared
+pages/cookies and requires acquiring the new session before opening pages.
+Each confirmation captures the session and control identity/generation, plus
+the page and revision for Close. A replacement page, session or authority
+invalidates it rather than retargeting the mutation. Cancel restores focus to
+Browser tools, and raw failures remain readable in the confirmation. Closing
+the run owns stopping the companion itself.
 
 **Screenshot** calls the real capture API at its own recorded boundary, not
 a canvas copy or the last received frame. It creates a private transient
@@ -2092,9 +2173,9 @@ routes (`approvals`, `timeline`), reached from the sidebar nav and the palette
 like every other view, and gated on the same method the nav gates them on.
 
 The approval inbox is for agent permission and plan approvals. Run Room
-questions and queued steer requests stay contextual to their run. Questions
-contribute to the existing **Needs you** projection, both contribute to the Run
-Room tab count, and neither creates a second action inbox.
+questions and queued steer requests stay contextual to their run. Unanswered
+questions contribute to **Needs input**; both contribute to the Run Room
+count, and neither creates a second action inbox.
 
 - **They refresh from the event cursor, not a timer.** Every event the store
   applies advances `lastSeq`, and that is the only signal available that a
@@ -2136,6 +2217,8 @@ Room tab count, and neither creates a second action inbox.
   themselves rather than a count.
   Each row names the workspace the request belongs to, since the list crosses
   them.
+  **Show decided / Hide decided** belongs in `ViewHeader.actions`, beside the
+  inbox heading, not a second toolbar.
   Decisions go through `approval.decide` with the run the request belongs to,
   so the server attributes them and applies the steer check: a refusal is
   rendered as the server's answer, never predicted by the form. A request the
@@ -2174,7 +2257,7 @@ Room tab count, and neither creates a second action inbox.
   a **Filters** disclosure. Its caption counts the three that are set, so a
   feed narrowed by a filter the member cannot see is not read as an empty
   log.
-- **A budget warns, it never stops anything.** The status bar shows the spend
+- **A budget warns, it never stops anything.** Status details show the spend
   and the worst state any workspace is in (`ok`, `warn`, `exceeded`) - every
   workspace, ones with nothing running included, which is what the wide read
   above is for - and says so in those words, naming each workspace and its cap
@@ -2211,10 +2294,10 @@ the code typed in from that device, which no row shows: **Review** looks the
 code up with `member.device.lookup`, and a dialog shows the device, the
 account it signed in as, and the member and role approving admits it as,
 before **Approve** sends `member.device.approve` with that device's id. It
-revokes a device too, and shows every server refusal verbatim. It is its own view, not part of Settings, because
-Settings is local-gateway only and the tailnet server gateway serves the
-same methods; the sidebar and palette show it whenever the gateway serves
-`member.device.list`.
+revokes a device too, and shows every server refusal verbatim. Device management
+is its own capability-gated view rather than a machine-local Settings section:
+both gateways can serve it, and the sidebar and palette show it whenever the
+gateway serves `member.device.list`.
 
 The Members view carries an admin-only **Invitations** section
 (`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
@@ -2251,10 +2334,17 @@ their selection and any open deleted workspace or run.
 
 ## Settings
 
-`src/routes/settings/` is a local-gateway surface. It shows the local link,
-the sync daemon and **Mirror run files to your repository** in flat bordered
-sections. That section starts and stops a live run's sync overlay. The
-server-hosted dashboard omits these machine-local settings and controls.
+`src/routes/settings/` is available through every gateway. **Appearance**
+provides explicit **System**, **Light** and **Dark** choices, backed by the
+existing persisted theme preference and live system-scheme effect. The palette
+offers the same choices; the status bar has no theme-cycle control.
+
+Machine settings keep their exact local capability gates. The machine section
+requires `daemon.status` or `sync.status`; within it, the local link requires
+`link.status`, the daemon requires `daemon.status`, and **Mirror run files to
+your repository** requires `sync.status`. The latter starts and stops a live
+run's sync overlay. The server-hosted dashboard omits these machine-local
+controls, not Appearance.
 Workspace base freshness and Source control live on the workspace page. A
 configured mirror is refreshed there with **Verify/Refresh**; a local-only
 workspace uses its local base. There is no recurring base-refresh button.
@@ -2494,9 +2584,9 @@ image command at all. A member on their own saved image is
 offered the install-and-save that keeps it first, and told that `aether env
 reset` removes it. A member on the server's standard image is told an admin
 runs the command, or just to reopen the terminal when the image has already
-moved without them. Every remedy the copy names is a button on the dock
-right below: **Save environment**, **Reset to standard**, **Stop
-environment**. **Check again** re-runs the probe, because none of those
+moved without them. Every remedy the copy names is reachable from the dock
+right below: **Save environment**, or **More** for **Reset to standard** and
+**Stop environment**. **Check again** re-runs the probe, because none of those
 three restarts the container by itself.
 
 A probe that fails, or a dock that never got a terminal at all, puts the
@@ -2685,7 +2775,7 @@ about itself and appears wherever the member is an admin.
   the activity feed too, filterable as *Server updates*.
 - **Everyone else gets one line.** A member who is not an admin sees
   *server update scheduled, terminals will reconnect briefly* (or *applying*)
-  in the status bar while one is in flight, so a restart nobody explained
+  in status details while one is in flight, so a restart nobody explained
   does not read as an outage. A server that does not answer costs the CLI
   banner nothing: `update.check` still returns the CLI half with the failure
   in `server_error`, because the CLI is a binary on this machine and a dead
@@ -2697,10 +2787,10 @@ about itself and appears wherever the member is an admin.
   when a re-check is what brings that release in. It silences the offer,
   not an update already moving: a scheduled or applying server comes back
   regardless, because that banner is why the server is about to restart.
-- **The status bar carries the badge.** The `aether {version}` label gets a dot
+- **Status details carry the badge.** The `aether {version}` label gets a dot
   when either update is available, and clicking it clears the dismissals so the
-  banner comes back - the label is the only always-visible surface, so it is
-  the way back to a banner someone dismissed by reflex.
+  banner comes back. It remains reachable through **Show status details** at
+  every width, including after a banner was dismissed.
 - **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
   but the Electron shell around it is whatever `aether gui build` last
   produced. That build records the complete CLI version and its executable
@@ -2721,26 +2811,30 @@ about itself and appears wherever the member is an admin.
   `--state-*` tokens, geometry, radii, fonts and the one inline-colour
   exception for member attributes. Components use semantic token classes rather
   than route-specific colour literals.
-- **Dark, light, system.** The preference is stored, and `system` follows
-  `prefers-color-scheme` live. There is no additional theme mode.
+- **Dark, light, system.** Settings > Appearance and explicit palette commands
+  set the stored preference; `system` follows `prefers-color-scheme` live.
+  There is no additional theme mode or cycling status icon.
 - **Typography and density.** The system UI stack is 13px with 12px
   supporting copy and 1.4 line height. JetBrainsMono NFM remains terminal and
   code; VT323 remains only the Aether wordmark and original startup. Use the
   35/48/35/22/26/22px workbench geometry and avoid promotional titles or
   oversized cards.
-- **Flat shell and palette host.** Use a 35px title/command bar, persistent
-  48px activity rail and adjacent 200-520px workspace/run sidebar. Mount the
-  command palette once in `AppShell`; keep one status Slot for other live
-  contributors.
-- **Two glyphs, two layers.** The harness glyph says who is running, the state
-  dot says what state - never merged into one mark. Presentation states
-  (`working`, `waiting`, `needs-attention`, `failed`, `done`, `idle`) are
-  derived in `src/lib/status.ts`; the domain status enum is untouched. A group
-  header shows the worst state of the runs under it.
-- **A working run moves.** `StateIndicator` swaps the static dot for three
-  dots bouncing in `--state-working` on board cards, run headers and run lists.
-  Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
-  The fixed dot box prevents a row shifting when a run starts or stops.
+- **Flat shell and palette host.** Use a 35px title/command bar, a 48px desktop
+  activity rail and adjacent 320-520px workspace/run sidebar. On phones the
+  rail belongs inside the transient drawer, not the main layout. Mount the
+  command palette once in `AppShell`; keep one outer status Slot and one
+  persistent status-details surface for live contributors.
+- **Harness and state are separate.** The harness glyph says who is running;
+  the state indicator or badge says what state. Board cards use a labeled
+  state badge without a duplicate dot. Presentation states (`working`,
+  `waiting`, `needs-attention`, `failed`, `done`, `idle`) are derived in
+  `src/lib/status.ts`; the domain status enum is untouched. A group header
+  shows the worst state of the runs under it.
+- **A working run moves where an indicator is used.** `StateIndicator` swaps
+  the static dot for three dots bouncing in `--state-working` in run headers
+  and run lists. Sidebar rows keep one dot and pulse its opacity; palette rows
+  stay static. The fixed dot box prevents a row shifting when a run starts or
+  stops.
 - **Motion is optional.** The controlling terminal's 1px teal outline is always
   static. Working dots and the sidebar pulse stop moving under
   `prefers-reduced-motion: reduce`. The original
@@ -2840,9 +2934,10 @@ its actual input and that an Input ref reaches the field DOM node. These are
 behavior assertions against rendered controls; source scans, literal class
 assertions and CSS text checks are not behavior coverage.
 
-Route tests cover the board, run detail, terminal, diff, files, workspace,
-onboarding, team, members, settings, agents, templates, palette and update
-surfaces. Keep assertions on what a member can observe: a route or control
+Route and shared-header tests cover the board, global overview, terminal,
+Browser, diff, files, workspace, onboarding, team, members, settings, agents,
+templates, palette and update surfaces. Keep assertions on what a member can
+observe: a route or control
 appears or disappears under its capability and role, a focus or navigation
 action lands in the expected view, a loading or error message is shown, or the
 API receives the mutation only after the relevant confirmation. Preserve
@@ -2864,14 +2959,27 @@ two apart sits at the top rather than the middle, and that the launch form
 keeps its footer on screen on a viewport as short as a keyboard leaves;
 and `toast-clearance.mobile.spec.ts` checks that a toast comes to rest above
 the status bar rather than on top of it. `run-views.mobile.spec.ts` steers a
-real run from the header's Actions menu and then reads its diff. `sidebar-drawer.spec.ts` stays on the desktop project because its keyboard contract -
-`Mod+B` closing the drawer and the palette coming back once it is gone - needs
+real run from the header's labeled actions and More menu, then reads its diff.
+`sidebar-drawer.spec.ts` stays on the desktop project because its keyboard
+contract - `Mod+B` closing the drawer and the palette coming back once it is gone - needs
 a narrow window with a keyboard rather than a phone. `board-card`, `run-switch`,
 `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
 setup details live in [testing.md](testing.md).
+
+Room scenarios (`run-room.spec.ts` and `run-room.mobile.spec.ts`) cover shared
+comments, moderation, explicit control transfer and the phone sheet.
+`run-evidence.spec.ts`, `run-evidence.mobile.spec.ts` and the Room phone
+scenario cover retained evidence and bounded, tappable phone presentation.
+`src/routes/terminal/run-dock.test.tsx` covers Evidence access from an empty,
+collapsed dock without starting a process; `run-room.test.tsx` covers its
+comment-draft handoff, and `terminal.test.tsx` covers occupied-lease
+confirmation fencing. `src/routes/browser/index.test.tsx` covers progressive page
+controls, close/reset identity fencing and raw refusals.
+`src/routes/settings/settings.test.tsx` covers universal Appearance without local
+RPCs.
 
 Use the browser workflow for real computed geometry, titlebar and activity-rail
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.
@@ -2894,10 +3002,10 @@ sudo systemctl restart aether-server
 
 Then open `https://<the server's MagicDNS name>/` on a phone joined to the
 same tailnet. Expect the board as the first screen, already identified by
-WhoIs: no onboarding wizard, no Settings, no link chip, no update banner, and
-no pull, forward or sync controls, because the descriptor carries no `local`
-verbs. Files and configuration editing remain available through the
-server-hosted gateway.
+WhoIs: no onboarding wizard, link chip, update banner, pull, forward or sync
+controls, because the descriptor carries no `local` verbs. Settings remains
+available for Appearance. Files and configuration editing also remain
+available through the server-hosted gateway.
 
 The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,

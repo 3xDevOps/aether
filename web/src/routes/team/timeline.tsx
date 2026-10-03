@@ -1,4 +1,3 @@
-import { History } from 'lucide-react'
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
@@ -7,7 +6,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { Tooltip } from '@/components/ui/heroui'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -21,15 +19,14 @@ import { api, type Api } from '@/lib/api'
 import { eventLabel, type EventType } from '@/lib/events'
 import { belowSm, useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
-import { cn, focusRing } from '@/lib/utils'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
 
 /** The event types worth offering as a filter; empty means everything. */
 const filterTypes: EventType[] = [
   'run.status',
+  'run.input',
   'run.title',
   'run.agent',
   'run.diff',
@@ -50,34 +47,6 @@ const types: [string, string][] = [
   ...filterTypes.map((type): [string, string] => [type, eventLabel[type]]),
 ]
 
-/** The way into the feed, from the status bar. */
-export function TimelineStatus() {
-  const navigate = useStore((s) => s.navigate)
-  if (!useCapability().hasMethod('workspace.timeline')) return null
-  return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              navigate('timeline')
-            }}
-            className={cn(
-              focusRing,
-              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
-            )}
-          >
-            <History className="size-3.5" aria-hidden />
-            Activity
-          </button>
-        )}
-      />
-      <Tooltip.Content>Open Activity</Tooltip.Content>
-    </Tooltip>
-  )
-}
 
 /**
  * One workspace's history, newest first, filterable by run, member and type.

@@ -141,7 +141,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 		return nil, templateError(err)
 	}
 	out := protocol.TemplateLaunchResult{
-		Run:        protocol.RunFromDomain(launched.Run),
+		Run:        s.runSnapshot(launched.Run),
 		BaseCommit: launched.Run.BaseCommit,
 		BaseBranch: launched.Run.BaseBranch,
 		BaseSource: launched.Run.BaseSource,

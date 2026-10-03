@@ -20,6 +20,7 @@ import (
 
 const (
 	retainedCloseReason       = "closed; retained container"
+	retainedCompletionReason  = "worker finished; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
@@ -113,8 +114,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.mu.Unlock()
 		return nil, ferr
 	}
-	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending &&
-		fresh.Mode == domain.LaunchTUI && retainedReason(fresh.Status, fresh.Reason) &&
+	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
+		fresh.Mode == domain.LaunchTUI && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
 		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
@@ -207,6 +208,14 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.publishArchived(ctx, &runningRow, actor)
 	}
 	s.archiveMu.Unlock()
+	// A relaunch is a new execution lifetime even when the same container is
+	// thawed. Its callbacks must not inherit an idle hold or unanswered input.
+	s.mu.Lock()
+	entry.agentReport = agentstatus.Report{}
+	entry.pendingInputs = nil
+	entry.inputPublishPending = false
+	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+	s.mu.Unlock()
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
@@ -562,10 +571,9 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	return nil
 }
 
-// cleanupTerminalSidecars reconciles terminal sidecars. An unexpired retained
-// TUI sidecar is adopted as dormant supervision; every other sidecar is
-// destroyed idempotently. A failed destroy is itself adopted so terminal rows
-// never lose runtime, credential, or coordination ownership during recovery.
+// cleanupTerminalSidecars reconciles terminal sidecars. Unexpired retained
+// closes and completed workers keep exact-container ownership; other sidecars
+// are destroyed idempotently. Failed destruction never releases ownership.
 func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 	entries, err := os.ReadDir(s.cfg.StateDir)
 	if err != nil {
@@ -630,7 +638,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 			mode = r.Mode
 		}
 		retained := sc.Retained || sc.RetainedUntil != nil
-		if mode != domain.LaunchTUI || !retained || !retainedReason(r.Status, r.Reason) {
+		if !retained || !retentionValid(mode, sc.MissionAssigned, r.Status, r.Reason) {
 			// Invalid terminal markers are not relaunchable, but their
 			// container may still be live. Keep durable ownership while
 			// the first cleanup Destroy is uncertain, then let the normal
@@ -678,7 +686,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		_, waitErr := s.cfg.Runtime.Wait(probeCtx, runtime.ID(sc.ContainerID))
 		cancel()
 		switch {
-		case waitErr == nil, errors.Is(waitErr, runtime.ErrNotFound):
+		case errors.Is(waitErr, runtime.ErrNotFound), waitErr == nil && !sc.MissionAssigned:
 			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
 				owner := s.installRetainedDestroyOwner(ctx, r, sc)
 				if owner != nil {
@@ -707,7 +715,7 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 				slog.Warn("scheduler: reload retained run after probe", "run", run, "error", ferr)
 				continue
 			}
-			if fresh.Mode != domain.LaunchTUI || !retainedReason(fresh.Status, fresh.Reason) {
+			if !fresh.Status.Terminal() || !retentionValid(mode, sc.MissionAssigned, fresh.Status, fresh.Reason) {
 				s.mu.Unlock()
 				continue
 			}
@@ -715,7 +723,16 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 
 			s.mu.Unlock()
 			if entry != nil {
-				s.startSupervision(entry)
+				if waitErr != nil {
+					s.startSupervision(entry)
+				}
+				if sc.EvidencePending {
+					entry.lifecycleMu.Lock()
+					if err := s.settleRetainedCompletion(ctx, entry); err != nil {
+						slog.Warn("scheduler: recover retained completion", "run", run, "error", err)
+					}
+					entry.lifecycleMu.Unlock()
+				}
 			}
 		}
 	}
@@ -932,8 +949,7 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		return err
 	}
 	if fresh.Status.Terminal() {
-		if entry.retained && retainedReason(fresh.Status, fresh.Reason) {
-			released, _ := releasedReason(fresh.Status, fresh.Reason, retainedExpiredReason)
+		if released, ok := releasedReason(fresh.Status, fresh.Reason, retainedExpiredReason); entry.retained && ok {
 			if err := s.relabelLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, released, ""); err != nil {
 				s.mu.Unlock()
 				return err
@@ -1329,6 +1345,8 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 	s.syncRunUserReservationsLocked()
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: persist recovered run owner", "run", r.ID, "error", werr)
+	} else if perr := s.publishPendingInputLocked(ctx, entry); perr != nil {
+		slog.Warn("scheduler: recover run input publication", "run", r.ID, "error", perr)
 	}
 	s.mu.Unlock()
 	return entry, true
@@ -1487,11 +1505,23 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if r.StartedAt != nil {
 		started = *r.StartedAt
 	}
+	var pendingInputs []domain.RunInputRequest
+	var inputPublishPending bool
+	if !r.Status.Terminal() && !sc.ExitObserved && !sc.DestroyPending &&
+		r.StartedAt != nil && sc.InputStartedAt != nil && sc.InputStartedAt.Equal(*r.StartedAt) {
+		updates := []domain.RunInputUpdate{{Operation: "replace", Requests: sc.PendingInputs}}
+		if err := domain.ValidateRunInputUpdates(updates); err == nil {
+			pendingInputs, _ = reduceRunInputs(nil, updates)
+			inputPublishPending = sc.InputPublishPending
+		} else {
+			slog.Warn("scheduler: discard invalid input sidecar", "run", r.ID, "error", err)
+		}
+	}
 	// The sidecar does not carry when the report parked the run, and it
 	// does not need to: nothing has been observed on the terminal since the
 	// restart, so the park effectively begins again here.
 	var parked, reportedAt time.Time
-	if sc.agentReport().State == agentstatus.Waiting {
+	if sc.agentReport().State == agentstatus.Idle {
 		parked = time.Now().UTC()
 	}
 	// The finish deadline restarts with the server, like the park above.
@@ -1499,7 +1529,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	// turn-end wait will come to finish it.
 	if sc.ReportedOutcome != "" {
 		reportedAt = time.Now().UTC()
-		if sc.agentReport() == (agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}) {
+		if turnEnd(sc.agentReport()) && len(pendingInputs) == 0 {
 			reportedAt = reportedAt.Add(-reportFinishDeadline)
 		}
 	}
@@ -1531,34 +1561,37 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// agent repaints at once - and without the report that repaint
 		// would read as work resuming and hand the run back to an agent
 		// that is still waiting for their member.
-		reporter:         sc.Reporter,
-		agentReport:      sc.agentReport(),
-		parkedAt:         parked,
-		reported:         sc.ReportedOutcome,
-		reportedAt:       reportedAt,
-		blockedReason:    sc.BlockedReason,
-		blockedShown:     sc.BlockedShown,
-		blockedReportID:  sc.BlockedReportID,
-		blockedReportAt:  blockedAt,
-		launchMode:       mode,
-		status:           r.Status,
-		startedAt:        started,
-		relaunchedAt:     relaunched,
-		paused:           sc.Paused,
-		killRequested:    sc.KillRequested,
-		retained:         sc.Retained,
-		retainedUntil:    sc.RetainedUntil,
-		destroyPending:   sc.DestroyPending,
-		evidencePending:  sc.EvidencePending,
-		runUser:          sc.RunUser,
-		home:             sc.Home,
-		exitObserved:     sc.ExitObserved,
-		exitCode:         sc.ExitCode,
-		evidenceIdentity: sc.EvidenceIdentity,
-		bridgeDigest:     sc.BridgeDigest,
-		bridgePath:       sc.BridgePath,
-		coordDir:         sc.CoordDir,
-		gitAuthorEmail:   sc.GitAuthorEmail,
-		done:             make(chan struct{}),
+		reporter:            sc.Reporter,
+		agentReport:         sc.agentReport(),
+		pendingInputs:       pendingInputs,
+		inputPublishPending: inputPublishPending,
+		parkedAt:            parked,
+		reported:            sc.ReportedOutcome,
+		reportedAt:          reportedAt,
+		blockedReason:       sc.BlockedReason,
+		blockedShown:        sc.BlockedShown,
+		blockedReportID:     sc.BlockedReportID,
+		blockedReportAt:     blockedAt,
+		launchMode:          mode,
+		missionAssigned:     sc.MissionAssigned,
+		status:              r.Status,
+		startedAt:           started,
+		relaunchedAt:        relaunched,
+		paused:              sc.Paused,
+		killRequested:       sc.KillRequested,
+		retained:            sc.Retained,
+		retainedUntil:       sc.RetainedUntil,
+		destroyPending:      sc.DestroyPending,
+		evidencePending:     sc.EvidencePending,
+		runUser:             sc.RunUser,
+		home:                sc.Home,
+		exitObserved:        sc.ExitObserved,
+		exitCode:            sc.ExitCode,
+		evidenceIdentity:    sc.EvidenceIdentity,
+		bridgeDigest:        sc.BridgeDigest,
+		bridgePath:          sc.BridgePath,
+		coordDir:            sc.CoordDir,
+		gitAuthorEmail:      sc.GitAuthorEmail,
+		done:                make(chan struct{}),
 	}
 }

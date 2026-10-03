@@ -356,6 +356,71 @@ them rather than choosing an arbitrary parent; repeated attempts within one
 mission retain that mission. These fields come from durable relationships,
 not task text, and confer no authorization.
 
+#### Independent execution and input state
+
+`run.get` and `run.list` always include `pending_inputs`, an array of
+`{"id":"request-1","session_id":"session-a","kind":"question"}` objects.
+An empty set is `[]`, never `null`. Execution remains in `status`: `running`
+means Working and `needs-attention` means Idle. A Working run can have pending
+input while another session continues working; an Idle run need not need input.
+The dashboard's separate **Needs input** indicator is not a new execution
+status and does not provide a new answer transport.
+
+Native reporters send `run.report` through their run-scoped coordination
+socket, not the member's gateway control endpoint. The socket supplies the run
+identity. The report accepts the existing `state` (`working` or `waiting`),
+optional `reason`, and optional `input_updates`:
+
+```json
+{
+  "state": "working",
+  "input_updates": [
+    {"operation":"open","session_id":"session-a","kind":"question","id":"request-1"}
+  ]
+}
+```
+
+`waiting` reports idle execution, not an unresolved question. `state` can be
+omitted only when `input_updates` is nonempty; an input-only report preserves
+execution, including when the last request closes. `reason` is execution
+metadata, not a prompt body or evidence of input.
+
+| Operation | Fields | Meaning |
+| --- | --- | --- |
+| `open` | `session_id`, `kind`, `id` | Add this exact unresolved request. |
+| `close` | `session_id`, `kind`, `id` | Remove only this identity; the same ID in another session or kind is unaffected. |
+| `clear` | `session_id` | Remove one session's requests when the adapter has evidence that the session terminated. |
+| `replace` | `requests` | Replace the adapter's complete pending set; `[]` clears it. Each entry has `session_id`, `kind`, `id`. |
+
+Kinds are `question`, `permission`, `form`, and `extension_ui`. IDs and session
+IDs must be valid UTF-8, nonblank, control-free strings of 1–256 bytes. There
+are at most 128 updates per report, 128 requests per replacement, and 128
+pending requests per run. Unknown operations/kinds, missing identities, and
+conflicting operation fields are rejected rather than normalized or truncated.
+`open`/`close` do not accept nonempty `requests`; `clear` accepts no request
+identity or request list; `replace` accepts no top-level request identity.
+Reports carry only correlation metadata, never prompts, answers, paths, or
+transcripts.
+
+Repeated opens, closes, and unchanged replacements are idempotent. Turn
+completion, silence, prose, and idle execution do not clear outstanding input.
+The pending set is persisted independently from the last execution report and
+survives server restart for still-live runs. Actual terminated or relaunched
+run lifetimes discard it; stale saved snapshots cannot restore a previous
+lifetime's requests. Persistence errors are returned to the reporter rather than
+announcing input state that was not saved.
+
+Each actual change publishes a durable `run.input` event with payload
+`{"pending_inputs":[...]}`; closing the last request publishes
+`{"pending_inputs":[]}`. This is a complete replacement snapshot, independent
+of `run.status`, and uses the existing event envelope and replay sequence on
+`/ws/events`. An unchanged set emits no event unless a previous publication
+failed: retrying the report or recovering the live run publishes the current
+set, including an empty set after the last close. Clients must preserve
+events received after a snapshot request began when merging that response,
+so an older `run.get`/`run.list` response cannot resurrect closed input.
+
+
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
 waits for supervision to publish the final branch before removing the
@@ -1458,15 +1523,74 @@ resize, control, geometry, and acknowledgements.
    {"type":"resize","cols":132,"rows":50}
    {"type":"control","request_id":17,"write":true}
    {"type":"control","request_id":18,"write":false,"control_generation":8}
-   {"type":"control","request_id":19,"write":true,"takeover":true,
-    "control_generation":8}
+   {"type":"takeover","request_id":19,"action":"start",
+    "takeover_id":"3c108774-c2e6-40e0-af51-2825ca226135"}
+   {"type":"takeover","request_id":20,"action":"confirm",
+    "takeover_id":"3c108774-c2e6-40e0-af51-2825ca226135"}
    ```
 
    `control` changes the lease on this same WebSocket; it does not reconnect
-   or replay. The optional `takeover:true` explicitly displaces the current
-   controller. Include the current `control_generation` when fencing a
-   release, takeover, or input. Read-only input is ignored and stale input is
-   rejected rather than reaching the PTY.
+   or replay. An occupied primary terminal uses the timed `takeover` exchange
+   below, not an immediate forced acquisition. Interactive `takeover:true`
+   is accepted only for reconnect replacement of the exact authenticated
+   member, session, and nonzero `control_generation`; it cannot displace
+   another session. Raw legacy attaches keep their existing explicit takeover
+   behavior. Include the current `control_generation` for release and input.
+   Read-only input is ignored and stale input never reaches the PTY.
+
+   Takeover actions share the attach's increasing `request_id` sequence with
+   ordinary control requests. `start` supplies a fresh UUID `takeover_id` and
+   snapshots the occupied holder. The server refuses unoccupied or already-owned
+   targets, concurrent requests, and requesters without current Steer authority.
+   Disconnected holders and interactive holders still awaiting their control
+   acknowledgement are also refused.
+   After a continuous five-second hold, the exact requesting attachment sends
+   `confirm` with the same ID. Early or foreign confirms are refused. Nothing
+   is granted without confirmation, even if the hold deadline has passed.
+   Early release sends `cancel`; release after confirmation does not. Escape,
+   blur, or leaving the terminal may explicitly cancel either phase.
+
+   Confirmation starts a seven-second server-timed review. The targeted holder
+   sends `accept` or `deny` with the same takeover ID and its exact
+   `control_generation`. Only that authenticated attachment can decide;
+   knowing another session's ID is insufficient. Acceptance or expiry grants
+   only after the server atomically rechecks the captured holder generation
+   and live connection, current requester authority, terminal readiness, and
+   mission admission. A raw CLI holder cannot answer the dashboard dialog;
+   the same deadline still applies. Either participant disconnecting, holder
+   replacement/release, or lost run/member authority cancels the request.
+   Reconnecting the same generation does not revive an old request.
+
+   Both interactive participants receive prompt `type:"takeover"` snapshots:
+
+   ```json
+   {
+     "type":"takeover","request_id":20,"ok":true,
+     "takeover":{
+       "id":"3c108774-c2e6-40e0-af51-2825ca226135",
+       "requester_member_id":"member-2","requester_session_id":"tab-8",
+       "holder_session_id":"tab-7","holder_generation":8,
+       "phase":"review","hold_started_at":"2026-10-03T12:00:00Z",
+       "hold_deadline":"2026-10-03T12:00:05Z",
+       "decision_deadline":"2026-10-03T12:00:12Z",
+       "server_now":"2026-10-03T12:00:05Z"
+     }
+   }
+   ```
+
+   Phases are `holding`, `review`, `cancelled`, `denied`, and `granted`.
+   `decision_deadline` appears only once review begins; times are UTC RFC3339
+   with optional fractional seconds. `server_now` is refreshed for each
+   snapshot so clients can derive remaining time without matching wall clocks.
+   Unsolicited snapshots omit `request_id`. Refusals include `ok:false`, `code`,
+   and `error`; an invalidated request also carries its terminal snapshot.
+   A successful takeover queues the ordinary unsolicited `type:"control"`
+   acknowledgement with `ok:true` and `has_control:true` before `granted`.
+   The server reserves queue capacity for that acknowledgement before changing
+   ownership. A full requester control queue cancels the request and leaves
+   the holder in control. Once queued, a later transport failure does not
+   retroactively cancel the grant.
+   Takeover progress itself never grants input authority.
 
 5. The server answers each requested control change on the same ordered
    stream:
@@ -1483,9 +1607,13 @@ resize, control, geometry, and acknowledgements.
    `error`; it also reports the authoritative `has_control`,
    `control_session_id`, and `control_generation`. A lease revocation that
    was not requested is an unsolicited `type:"control"` frame with no
-   `request_id`; the displaced client remains a read-only observer. The
-   browser changes its input state only from this acknowledged metadata, not
-   from the requested `write` bit.
+   `request_id`; the displaced client remains a read-only observer.
+   `revocation_reason` identifies `takeover` by another control session,
+   `permission` loss (including protection), or generic `revoked` invalidation.
+   The browser applies it only to its exact control session and generation;
+   only `takeover` triggers the red control-border exit animation. Input is
+   disabled immediately, without waiting for that animation. The browser changes
+   its input state from acknowledged metadata, not the requested `write` bit.
 
 6. Server sends one **text** geometry frame whenever the runtime accepts a
    changed shared PTY size:
@@ -1501,8 +1629,9 @@ resize, control, geometry, and acknowledgements.
 
 7. The server re-checks authorization periodically. On an interactive attach,
    losing **steer** sends an unsolicited `type:"control"` notification on the
-   same WebSocket, with `ok:false`, `has_control:false`, the authoritative
-   `control_session_id`, and the exact `control_generation` that was revoked.
+   same WebSocket, with `ok:false`, `has_control:false`,
+   `revocation_reason:"permission"`, the authoritative `control_session_id`,
+   and the exact `control_generation` that was revoked.
    The socket stays open as a read-only mirror; the dashboard disables input
    without replaying or reconnecting. A raw legacy (non-interactive) attach
    keeps the named close behavior: **1008**, reason `steer permission

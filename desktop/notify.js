@@ -110,7 +110,7 @@ function show(runId, payload) {
   // run.status payloads carry {from, to, reason} - no task name; the run id
   // (shortened) is the best stable identifier we have.
   const n = new Notification({
-    title: 'Run needs attention',
+    title: 'Run idle',
     body: payload.reason || runId.slice(0, 12),
   })
   n.on('click', () => focusWindow())

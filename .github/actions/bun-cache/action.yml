@@ -2,11 +2,10 @@ name: Bun install cache
 description: >
   Restore bun's global install cache (~/.bun/install/cache) on every run,
   and save it only after a push to main. Separate from setup-bun's own
-  cache, which covers only the downloaded bun binary. One Linux job may
-  save a given key, and a pull-request cache can evict the default-branch
-  cache, so a pull request restores and does not save. The key includes
-  runner.environment so a self-hosted archive is never restored onto a
-  hosted VM.
+  cache, which covers only the downloaded bun binary. One job per host
+  platform saves a given key; pull requests only restore. The key includes
+  runner architecture, environment, pinned Bun version, and lockfile.
+  Version-specific fallbacks never cross host platforms or Bun versions.
 inputs:
   mode:
     description: "restore or save"
@@ -19,12 +18,20 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('web/bun.lock') }}
+        key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-${{ hashFiles('web/bun.lock') }}
         restore-keys: |
-          bun-${{ runner.os }}-${{ runner.environment }}-
+          bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-
+    - name: Check for saved bun cache
+      id: saved-cache
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-${{ hashFiles('web/bun.lock') }}
+        lookup-only: true
     - name: Save bun cache
-      if: inputs.mode == 'save' && github.event_name == 'push'
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('web/bun.lock') }}
+        key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-${{ hashFiles('web/bun.lock') }}

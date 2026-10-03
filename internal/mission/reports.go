@@ -12,11 +12,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// EvidenceReader is the narrow durable lookup used when a report refers to
-// another retained packet. A report must never infer availability from an
-// opaque caller-provided string.
+// EvidenceReader resolves retained metadata and revalidates submission sources
+// under the evidence locks. The callback must finish acceptance before returning
+// so expiry cleanup cannot remove a source between validation and persistence.
 type EvidenceReader interface {
 	Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error)
+	WithSubmissionSources(context.Context, domain.WorkspaceID, []string, func([]protocol.EvidencePacket) error) error
 }
 
 // ValidateReport performs the authority check before coord.report reserves a
@@ -30,9 +31,9 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 
 // ReconcileReport is called for every finalized report outbox row, including
 // ordinary runs and historical mission identities. Only the current worker
-// assignment can create a mission submission. A failure report still cancels
-// that worker after the attempt is terminal so cancellation and publication
-// can retry; other identities remain no-ops.
+// assignment can create a mission submission. A failure report retains that
+// worker before releasing its attempt capacity; other identities remain no-ops.
+// Callers must release coordination run references before waiting for admission.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
 	if report == nil {
 		return errors.New("mission: report is required for worker reconciliation")
@@ -83,25 +84,6 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		changed = append(changed, fact.Path)
 	}
 	violations := scopeViolations(task.Revision.Scope, changed)
-	// Reconciliation is replayed both by coord.report retries and by the
-	// durable outbox. A submitted attempt is already the exact durable
-	// result; never create a second submission row for the same attempt.
-	submissions, listErr := s.cfg.Missions.ListSubmissions(ctx, m.ID, attempt.TaskID)
-	if listErr != nil {
-		return listErr
-	}
-	for _, prior := range submissions {
-		if prior == nil || prior.AttemptID != attempt.ID {
-			continue
-		}
-		if prior.Ref.WorkspaceID != report.WorkspaceID || prior.Ref.RunID != run || prior.Ref.EvidenceRef != packet.ID {
-			return errors.New("mission: existing submission identity does not match report")
-		}
-		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
-			return publishErr
-		}
-		return nil
-	}
 	switch report.Outcome {
 	case store.CoordOutcomeBlocked:
 		// The durable coord.report already exists; keep the worker running.
@@ -110,7 +92,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		}
 		return nil
 	case store.CoordOutcomeFailure:
-		// A replay finds the attempt already failed and only re-cancels.
+		// Replays finish any incomplete retention without creating a submission.
 		return s.failAssignedWorker(ctx, m, attempt, report.Summary)
 	case store.CoordOutcomeSuccess:
 	default:
@@ -120,13 +102,26 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if len(evidence) == 0 {
 		return errors.New("mission: evidence packet has no durable facts")
 	}
-	// A direct coord.report still owns a run reference. Waiting for mission
-	// admission could deadlock cancellation's synchronous coord.Release.
-	// Leave the durable outbox pending on contention so it can retry.
-	if !s.cfg.AuthorizationMu.TryLock() {
-		return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
+	// Direct retries and the durable outbox must serialize their replay lookup
+	// with submission, not merely serialize the insert after a stale lookup.
+	s.cfg.AuthorizationMu.Lock()
+	submissions, err := s.cfg.Missions.ListSubmissions(ctx, m.ID, attempt.TaskID)
+	replayed := false
+	if err == nil {
+		for _, prior := range submissions {
+			if prior == nil || prior.AttemptID != attempt.ID {
+				continue
+			}
+			replayed = true
+			if prior.Ref.WorkspaceID != ref.WorkspaceID || prior.Ref.RunID != ref.RunID || prior.Ref.EvidenceRef != ref.EvidenceRef {
+				err = errors.New("mission: existing submission identity does not match report")
+			}
+			break
+		}
 	}
-	_, err = s.cfg.Missions.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, ref, evidence, violations)
+	if err == nil && !replayed {
+		_, err = s.cfg.Missions.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, ref, evidence, violations)
+	}
 	s.cfg.AuthorizationMu.Unlock()
 	if errors.Is(err, store.ErrMissionStale) {
 		// A retry raced a superseding attempt or coordinator state. It is no
@@ -176,52 +171,33 @@ func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.Run
 	return s.failAssignedWorker(ctx, m, attempt, report.Summary)
 }
 
-// A concurrent replay can find an already-failed attempt; cancellation remains
+// A concurrent replay can find an already-failed attempt; retention remains
 // idempotent even when the state transition lost the race.
 func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, detail string) error {
 	if m == nil || attempt == nil || attempt.RunID == "" {
 		return errors.New("mission: failed worker assignment is required")
 	}
-	if s.cfg.Cancel == nil {
-		return errors.New("mission: scheduler cancel unavailable")
+	if s.cfg.Complete == nil {
+		return errors.New("mission: scheduler completion unavailable")
+	}
+	// Never release attempt capacity while the worker can still execute.
+	// Scheduler cleanup can need authorization; acquire it for the state write afterward.
+	if completeErr := s.cfg.Complete.CompleteMission(s.operationContext(ctx), attempt.RunID, domain.RunFailed); completeErr != nil {
+		return fmt.Errorf("mission: retain failed worker %s: %w", attempt.RunID, completeErr)
 	}
 	if attempt.State.HoldsConcurrency() {
-		if !s.cfg.AuthorizationMu.TryLock() {
-			return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
-		}
+		s.cfg.AuthorizationMu.Lock()
 		stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail)
 		s.cfg.AuthorizationMu.Unlock()
 		if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 			return stateErr
 		}
 	}
-	if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
-		return fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
-	}
 	return s.publishMissionChanged(ctx, m.ID)
 }
 
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
-	available, detail := packetEvidenceState(s.cfg.Now, packet)
-	facts := make([]domain.SubmissionEvidence, 0, len(packet.Sources)+len(report.InputEvidenceRefs)+1)
-	facts = append(facts, domain.SubmissionEvidence{Kind: "retained_packet", Ref: packet.ID, Available: available, Detail: detail})
-	for _, source := range packet.Sources {
-		kind := strings.TrimSpace(source.Name)
-		if kind == "" {
-			kind = "source"
-		}
-		ref := packet.ID
-		sourceAvailable := available && source.Available && !source.Truncated
-		sourceDetail := source.Reason
-		if source.Truncated && sourceDetail == "" {
-			sourceDetail = "source is truncated"
-		} else if !source.Available && sourceDetail == "" {
-			sourceDetail = "source is unavailable"
-		} else if !available && sourceDetail == "" {
-			sourceDetail = detail
-		}
-		facts = append(facts, domain.SubmissionEvidence{Kind: kind, Ref: ref, Available: sourceAvailable, Detail: sourceDetail})
-	}
+	facts := packetSubmissionEvidence(s.cfg.Now, packet)
 	for _, ref := range report.InputEvidenceRefs {
 		ref = strings.TrimSpace(ref)
 		if ref == "" {
@@ -238,6 +214,31 @@ func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport,
 			}
 		}
 		facts = append(facts, fact)
+	}
+	return facts
+}
+
+func packetSubmissionEvidence(now func() time.Time, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
+	available, detail := packetEvidenceState(now, packet)
+	facts := make([]domain.SubmissionEvidence, 0, len(packet.Sources)+1)
+	facts = append(facts, domain.SubmissionEvidence{Kind: "retained_packet", Ref: packet.ID, Available: available, Detail: detail})
+	for _, source := range packet.Sources {
+		kind := strings.TrimSpace(source.Name)
+		if kind == "" {
+			kind = "source"
+		}
+		sourceDetail := source.Reason
+		if source.Truncated && sourceDetail == "" {
+			sourceDetail = "source is truncated"
+		} else if !source.Available && sourceDetail == "" {
+			sourceDetail = "source is unavailable"
+		} else if !available && sourceDetail == "" {
+			sourceDetail = detail
+		}
+		facts = append(facts, domain.SubmissionEvidence{
+			Kind: kind, Ref: packet.ID, Available: available && source.Available,
+			Truncated: source.Truncated, Detail: sourceDetail,
+		})
 	}
 	return facts
 }
@@ -297,7 +298,7 @@ func submissionWire(s *domain.Submission) protocol.Submission {
 	}
 	out.Evidence = make([]protocol.SubmissionEvidence, 0, len(s.Evidence))
 	for _, e := range s.Evidence {
-		out.Evidence = append(out.Evidence, protocol.SubmissionEvidence{Kind: e.Kind, Ref: e.Ref, Available: e.Available, Detail: e.Detail})
+		out.Evidence = append(out.Evidence, protocol.SubmissionEvidence{Kind: e.Kind, Ref: e.Ref, Available: e.Available, Truncated: e.Truncated, Detail: e.Detail})
 	}
 	if s.Acceptance != nil {
 		a := s.Acceptance

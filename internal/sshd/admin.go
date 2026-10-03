@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -176,7 +177,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	} else {
 		removed := false
 		for _, run := range activeRuns {
-			if _, removeErr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+			if _, removeErr := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, func() error {
 				if removed {
 					return nil
 				}

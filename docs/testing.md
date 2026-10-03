@@ -22,17 +22,30 @@ Layers, per the design spec's testing strategy:
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
   GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
-  job log. The `integration` matrix in `.github/workflows/ci.yml`
-  gives `internal/server` five shards: `server-chaos`
-  (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
-  (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
-  (`INTEGRATION_RUN=^TestIntegrationMission`), `server-heavy`
-  (`INTEGRATION_RUN=^TestIntegration(EndToEnd|MultiMember|ServerUpdate)`),
-  and `server-rest` (`INTEGRATION_SKIP_PATTERN` of the other four shards' tests).
-  `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
-  `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
-  `./internal/server`. The `smoke` job runs `internal/harness` on the images
-  it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  job log. Six browser-independent shards in the `integration` matrix in
+  `.github/workflows/ci.yml` start without waiting for browser images:
+  `server-chaos` (`INTEGRATION_RUN=^TestIntegrationChaos`),
+  `server-coordination` (`INTEGRATION_RUN=^TestIntegrationCoordination`),
+  `server-mission` (`INTEGRATION_RUN=^TestIntegrationMission`),
+  `server-heavy`
+  (`INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'`),
+  `scheduler` (`INTEGRATION_PKGS=./internal/scheduler`), and `rest`.
+  The four named server shards use `INTEGRATION_PKGS=./internal/server`.
+  `rest` dynamically discovers integration packages, excluding
+  `./internal/harness`, `./internal/scheduler`, and `./internal/server`;
+  it skips `^TestDockerBrowser`, whose coverage belongs to the native
+  amd64/arm64 `browser` jobs. The separate `integration-server-rest` job
+  loads `browser-image-amd64` and runs `./internal/server` with
+  `INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'`.
+  This catch-all retains tests that do not start with `TestIntegration`.
+  Both integration job families use `sudo env`, preserving `PATH`, `HOME`,
+  `GOFLAGS`, `AETHER_BROWSER_TEST_IMAGE`, and `AETHER_BROWSER_IMAGE`.
+  The separate unit suites remain unprivileged: the root-only
+  `TestApplyRunOwnershipHardlinkSafe` and both privilege branches of
+  `TestRecoveredTerminalUsesCapturedUserAndHomeForImages` must stay covered.
+  The `smoke` job runs `internal/harness` on the images it builds natively
+  on amd64 and arm64, alongside `scripts/standard-image-smoke.sh` toolchain
+  and native Git checks. A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
   the release matrix. A markdown file anywhere else, including a dashboard
   end-to-end fixture, does not. The `changes` job runs
@@ -78,8 +91,24 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
-  job.
+  no Go test and no jsdom test reaches. CI runs four isolated
+  `dashboard-e2e` runners, each with its own Docker daemon and Playwright
+  `workers: 1`; `fullyParallel` remains `false`. Each runner loads the tested
+  browser and standard images and runs `make test-e2e` with
+  `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
+  `make test-e2e` remains unsharded and still builds the embedded dashboard
+  and binaries first. The four shards partition the same 66 registered cases
+  once each: 50 desktop and 16 mobile. File boundaries can make shard sizes
+  unequal.
+  The `chromium` project excludes `**/*.mobile.spec.ts`; only the `mobile`
+  project owns those specs. The opt-in real-GitHub case keeps its existing
+  credential gate; listing or sharding it does not prove it ran.
+  Each shard retains `playwright-report-<shard>` (from
+  `web/playwright-report/`) and `playwright-results-<shard>` (from
+  `web/test-results/`) for seven days on success or failure, including phone
+  screenshots and failure evidence. Only shard 1 may save the shared
+  Playwright browser cache, on a non-cancelled push to `main`; a cache miss
+  never skips browser installation or tests.
   Remote-development scenarios live in `web/e2e/development-browser/`
   (shared real companion, login, live app update, popups, takeover and phone
   viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
@@ -88,19 +117,25 @@ Layers, per the design spec's testing strategy:
   and push, plus opt-in actual GitHub PR publication). These use deterministic
   harness fixtures, not authenticated vendor-agent loops.
 
-Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
-install and reinstall must preserve the CLI and unrelated files in the
-documented CLI directory and detect only the desktop directory as an installed
-app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real shortcut
-launcher with a target path containing spaces, an ampersand, and non-ASCII
-characters, and checks the launched process's working directory. These checks
-run before desktop packaging.
+CI's native `windows` job builds, vets, and tests the full Windows client
+package closure (`./cmd/aether` and its repository dependencies). It owns
+the selected `internal/localops` regressions rather than repeating them in
+the `Windows install` workflow. `TestInstallDesktopWindowsPreservesCLI`
+requires install and reinstall to preserve the CLI and unrelated files in
+the documented CLI directory and detect only the desktop directory as an
+installed app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real
+shortcut launcher with a target path containing spaces, an ampersand, and
+non-ASCII characters, and checks the launched process's working directory.
+Moving their invocation does not remove either regression or either
+installer lane.
 
 The `Windows install` workflow runs `scripts/install-test.ps1` under Windows
 PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
 before replacement, upgrade and locked-file boundaries, `PATH` preservation,
 CLI-only installation, unsupported releases, and desktop-build failures.
 They use temporary files and restore the user's environment after running.
+Changes to `.github/actions/go-cache/` or `.github/actions/bun-cache/`
+trigger both lanes on pull requests and pushes to `main`.
 
 The same workflow builds the real CLI with the release's Windows metadata
 and embedded dashboard, removes the hosted runner's inherited exclusions,
@@ -110,13 +145,66 @@ exact bytes and their checksum so the scenario tests the checkout, not the
 latest published release. It installs and rebuilds the desktop, verifies
 the unchanged CLI, and launches the installed Start Menu shortcut with the
 pre-install `PATH`. Playwright checks that window's onboarding screen
-and saves a screenshot. Windows PowerShell uses system Node; PowerShell 7 hides
-system Node to exercise the verified private download. Defender scans the
+and saves a screenshot. Windows PowerShell 5.1 uses system Node; PowerShell 7
+(`pwsh`) hides system Node to exercise the verified private download.
+The seven-day screenshot artifacts are `windows-desktop-powershell-system`
+and `windows-desktop-pwsh-downloaded`, uploaded even after failure when a
+screenshot exists. Defender scans the
 download and install tree without exclusions or disabled remediation. The
 gate rejects new detections even when Defender has already remediated them,
 and checks that installation changed neither protection settings nor exclusions.
 This is a detection gate, not a guarantee that an unsigned release will
 never receive a false positive on another machine.
+
+## Workflow and release-build gates
+
+`make lint-workflows` runs pinned actionlint v1.7.12 and requires ShellCheck
+on `PATH` so embedded shell commands are checked locally as well as in CI.
+On Linux, install it with `sudo apt-get install shellcheck`; GitHub's Ubuntu
+runners already provide it. CI invokes this target in the `lint` job.
+`make test-scripts` includes
+`sh scripts/release-ci-check-test.sh`, which exercises the real release
+checker's run selection and rejection behavior with only the GitHub API
+boundary replaced. The checker requires the latest matching run/current
+attempt of this repository's `.github/workflows/ci.yml` to be a completed,
+successful `push` on `main` for the exact full release commit SHA. Missing,
+malformed, or failed API responses and a newer pending or failed run reject
+publication; an older success, PR run, or merge-group run cannot substitute.
+See [release instructions](install.md#releases) for the publishing gate.
+
+CI's `release-build` matrix has six Go lanes: Linux, Darwin, and Windows,
+each for amd64 and arm64. They call `make release-binaries` with
+`SERVER_PLATFORMS`, `EDGE_PLATFORMS`, and `CLI_PLATFORMS` selecting one
+target: Linux builds server, edge, and CLI; Darwin and Windows build CLI
+only. Each lane uploads `binaries-go-<goos>-<goarch>`. The independent
+`android` job validates the Gradle wrapper and runs `make android`, uploading
+`aether-android-unsigned.apk` and `aether-android-unsigned.aab` in
+`binaries-android`. All seven artifacts have seven-day retention and missing
+outputs fail upload. Locally, `make release-binaries` builds all ten Go
+assets by default without Android or Docker; `make release` still adds
+Android. Go builds still need the dashboard's Bun and Node toolchain.
+
+`windows-defender` depends on the Go matrix, not Android. It downloads only
+`binaries-go-windows-*`, merges their contents, and requires both
+`aether-windows-amd64.exe` and `aether-windows-arm64.exe` for scanning.
+It enables realtime and cloud protection and updates signatures before
+scanning; missing, quarantined, or detected executables fail the gate.
+This static scan supplements, rather than replaces, the runtime installer
+Defender scenarios above. Android and every Go lane remain required CI
+coverage.
+
+Go caches separate module downloads from compiled objects. Both are scoped
+to host OS/architecture, runner environment, resolved toolchain, and module
+digest; compiler caches also isolate the lane and commit, with fallback only
+within the same lane. Only pushes to `main` write: `build-and-test`,
+`windows`, and arm64 `smoke` own their respective host's module/native
+compiler archives; each Go release-build lane owns its
+`release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
+The installer uses a separate `windows-install` compiler lane; only its
+PowerShell/system-Node main lane saves that cache and its Bun dependency
+cache, leaving Windows module writes to CI's `windows` job. Before compressing
+an archive, each writer checks whether its exact key already exists and skips
+the save on a hit. Cache reuse does not replace any build or validation gate.
 
 ## Headless browser and remote-development acceptance
 
@@ -316,8 +404,9 @@ Scenarios:
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: the run socket and both verified read-only executable binds are realized, no Aether-managed `mcp.json` is installed, `co-authors` is found at `0444`, the staged binary executes as `/opt/aether/aether-server mcp` by a non-root agent when manually configured, and a status/send/inbox round trip works between two overlapping runs |
-| `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --event ...` against the run's own socket, and each run parking at needs-attention with `waiting for your input` seconds after the agent's turn ends - not after the stall threshold - then returning to running with `agent resumed` on the agent's next turn |
-| `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The same path for a harness that has no flag to point at its reporter: the plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with the launch command left exactly as it was, the staged binary running `aether-server report opencode --event session.idle` against the run's own socket, the run parking at needs-attention with `waiting for your input` seconds after the turn ends, and returning to running with `agent resumed` when the agent takes the steer |
+| `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --json ...` against the run's own socket, and each run becoming Idle immediately after the turn ends, then returning to Working on the agent's next turn |
+| `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with native hosting unchanged, the staged binary running `aether-server report opencode --json ...` against the run's own socket, and execution changing from Idle to Working when the agent takes the steer |
+| `TestIntegrationRunInputReports` (`agentstatus_integration_test.go`) | The assembled server receives real socket `run.report` calls and exposes Working with independent input through SSH get/list and mutation snapshots; exact session/kind/id closes, last-close, duplicate suppression, Idle without input, and durable `run.input` replay are checked without requiring Docker or a vendor CLI |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to an active surviving container; an explicitly closed TUI run survives with the same row, paused container, and checkout and can relaunch that exact retained identity; a lost active container becomes `interrupted` after its `wip:` commit and published branch, with no replacement relaunch |
 | `TestIntegrationChaosDiskPressure`, `TestIntegrationChaosStallUX` (`chaos_pressure_integration_test.go`) | Worktree TTL GC under load with branches surviving, the gauge's three-way breakdown following reclaim, new runs refused below the free-space floor while an eligible retained TUI relaunch uses no new admission, and a silent agent parking at needs-attention, returning when the agent answers a steer, and staying parked when it does not |
 
@@ -385,8 +474,14 @@ human approval, and exact delivery. It also checks failed verification,
 stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
 `omp` executables are scripted fixtures, not genuine vendor-agent runs.
 `web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
-control, and mission candidate preparation in a real browser and attaches a
-successful screenshot for visual inspection.
+control, and mission candidate preparation in a real browser. After a
+successful worker report, it checks that the same Docker container remains
+paused. It attaches a successful screenshot for visual inspection.
+
+`web/e2e/run-room.spec.ts` sends structured request snapshots through the
+staged reporter in a real container. Both members' browsers must add and
+clear **Needs input** without changing **Working**. The callback payloads
+are scripted fixtures, not evidence of a live vendor harness emitting them.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container
@@ -718,11 +813,47 @@ containers by name, along with the `aether/member-<member-id>` images an
 environment save commits. A failed test keeps its scratch directory and
 attaches the server's output to the report.
 
+### Command palette performance
+
+From `web/`, build the ordinary static export with `bun run build`. Use
+`bun run build --profile` for a separate React production-profiling export;
+do not substitute a development-server measurement for either.
+
+Compare the same browser, viewport, pointer mode and datasets on both revisions:
+50 and 500 runs, with short tasks and varied natural-prose tasks around 1,600
+characters. Preserve complete task bodies, branch names, harnesses, workspace
+names and IDs. Record synthetic fixtures separately from live workspace data,
+and keep fixtures and raw traces outside the source tree.
+
+Measure the first opening separately from at least 20 warm reopens. Use trusted
+keyboard and titlebar input, repeated queries, backspacing and clearing.
+Report scorer time separately from input-to-results and opening latency, plus
+result counts, long tasks, requests and focus/selection behavior. An
+event-to-`requestAnimationFrame`-plus-timer measurement is a paint-opportunity
+proxy, not compositor latency. Compare ordinary and profiling builds separately.
+
+Check full-text membership and ranking against cmdk's scorer, live run updates,
+offscreen keyboard selection, modal focus and Escape restoration. Filtering
+must not issue a search RPC. Score-disabled or hidden-Board ablations can locate
+a bottleneck; they do not prove the shipped behavior or its speed.
+
 ### Scenarios
+
+This inventory describes authored scenarios and their report attachments, not
+evidence that they have been executed or passed on a particular checkout.
+
+The committed visual references use a production export in Chromium with a
+read-only synthetic API, not a real PTY, agent or browser companion:
+[wide Board](media/dashboard-board-wide.png),
+[phone Board](media/dashboard-board-phone.png),
+[docked Room](media/dashboard-room-docked.png) and
+[phone Room](media/dashboard-room-phone.png). They show layout and focus
+surfaces; the server-backed scenarios below verify interaction with real
+runtime state.
 
 | Spec | Scenario |
 | --- | --- |
-| `board-card` | What a board card gives up without opening the run: the branch name's `title` resolving under the card's click overlay, the name selectable, and the copy control copying rather than navigating - all of which only a browser that hit-tests can check |
+| `board-card` | Opening a card's Details without opening the run, then selecting the visible full branch name and using its copy control without navigating - all of which require real browser hit testing |
 | `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
@@ -734,20 +865,26 @@ attaches the server's output to the report.
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration, the query is gone from the address bar afterwards, and a reload lands back on the board |
-| `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
+| `run-room.spec.ts` | Two members on separate gateways share comments, queued steering, moderation and explicit occupied-control transfer. Desktop Room is a bounded sibling beside the terminal, not an overlay: header/attachment/tools controls remain hit-testable, controller and viewers stay in the toolbar, and Evidence has one trigger outside Room. Opening and closing Room changes terminal columns, preserves the draft and restores terminal focus; More supports keyboard dismissal/focus return. The scenario attaches `desktop-run-room-docked` and `desktop-run-room-observer` screenshots |
+| `run-evidence.spec.ts` | Retained finish evidence after run cleanup: one dock trigger even with Room open, a desktop popover bounded by the Terminal tabpanel, retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape restoring trigger focus |
+| `terminal-tools` | The Board's terminal dock opens on request with a real environment container. Wide fine-pointer panes expose inline tools; narrow panes use a keyboard-accessible Terminal tools popover, and even a wide touch viewport keeps the popover. The scenario searches through both presentations, checks `Ctrl+=` zoom across reload, native `Ctrl+Shift+V` paste, `Ctrl+Shift+F` search and new shell output after collapsing and reopening |
 | `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: shared-grid growth, the same pinned row and relative pixel offset through shared font zoom, return-live in mirror mode and reattach; a large redraw archive opens at a bounded current screen rather than replaying older output |
 | `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
-| `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport; the phone behavior is covered by `status-bar.mobile.spec.ts` below |
+| `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: status details opens at wide and compact desktop widths, secondary readouts remain keyboard-reachable, long member/error rows wrap without overlap, and the bounded popup scrolls to Usage without pushing the shell off-screen; touch behavior is covered by `status-bar.mobile.spec.ts` below |
 | `files-browser.mobile.spec.ts` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
-| `sidebar-drawer.spec.ts` | In a 600px desktop window, the sidebar drawer answering `Mod+B` itself and handing the palette back once it closes |
-| `keyboard-focus` | Real browser checks that Escape closes a dialog on a run without leaving the run, and that a focused control paints the app's outline with computed style and contrast against the actual background |
+| `sidebar-drawer.spec.ts` | In a 600px desktop window, the titlebar-opened sidebar drawer answers `Mod+B` itself and hands the palette back once it closes |
+| `keyboard-focus` | Escape closes a dialog or the status popup on a run without leaving the run; focused shell controls paint the app's outline with computed style and contrast against the actual background |
+| `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. Browser tools owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-deep-link`, `run-provisioning`, `run-switch`, `run-views.mobile.spec.ts`,
-`shell-drawer.mobile.spec.ts`, `terminal-geometry`, `terminal-images` and `terminal-tools` need a
+`run-deep-link`, `run-provisioning`, `run-switch`, `run-room.spec.ts`,
+`run-evidence.spec.ts`, `run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
+`run-evidence.mobile.spec.ts`, `shell-drawer.mobile.spec.ts`,
+`development-browser/browser.spec.ts`, `terminal-geometry`, `terminal-images`
+and `terminal-tools` need a
 reachable Docker daemon and skip without one. That skip is specific to the
 dashboard suite: `make test-integration` requires its real Docker setup and
 fails when Docker is unavailable. The rest need only git, except
@@ -785,14 +922,16 @@ covered - WebKit is not installed.
 
 | Spec | Scenario |
 | --- | --- |
-| `files-browser.mobile.spec.ts` | On a phone, opening a real repository file from the sidebar rail, returning with Browse, and opening another file without losing the tree - every control tapped |
+| `files-browser.mobile.spec.ts` | On a phone, opening Files through the titlebar's sidebar drawer, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
 | `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach |
-| `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: the details popup opens on a tap and keeps every control, the long member name and the unreachable notice inside the viewport; on a screen too short for its own readouts it scrolls to them rather than cutting them off, and the theme toggle answers a tap on the bottom edge |
-| `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the rail, its rows are finger-sized, and tapping a run leaves the drawer closed with that run on screen |
+| `status-bar.mobile.spec.ts` | A phone-width status bar after the server has gone: status details opens on a tap and keeps the controls, long member name and unreachable notice inside the viewport; a short-screen popup scrolls to Usage rather than cutting it off. After closing it, Keyboard shortcuts remains independently tappable |
+| `shell-drawer.mobile.spec.ts` | On a phone, the run list as a modal drawer: it opens from the titlebar, its rows are finger-sized, and tapping a run closes the drawer onto that run without page overflow; the status-details trigger remains touch-sized |
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
-| `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
-| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: tap through Patch and Summary, keep retained file content readable, and close both Evidence and Run Room; the report includes the open evidence sheet |
+| `run-views.mobile.spec.ts` | On a phone, protecting a real run through the header's More menu, keeping the selected Browser, Events and Diff tabs fully visible after touch navigation, then reading the diff: menu items are finger-sized, protection shows in the header, and a file section wider than the screen scrolls sideways only once wrap is off |
+| `run-room.mobile.spec.ts` | A full-width modal Room below the titlebar leaves the desktop-controlled PTY geometry unchanged, contains keyboard focus, restores opener focus and preserves the draft. A short tap does not request occupied control. Separate scenarios read retained evidence and use two real sessions to deny incoming control over Room and Evidence: the decision remains visible and keyboard/pointer-operable at 390×524 and across Evidence's 700→960 layout breakpoint, then restores the interrupted focus and draft without transferring control. Screenshots: `phone-run-room`, `phone-retained-evidence`, and `holder-over-{room,evidence}-{390,700}` for the exercised combinations |
+| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: use the sole dock trigger without opening Room, tap through Patch and Summary, read retained file content, and close Evidence with focus returned to its trigger. The scenario attaches `short phone evidence sheet` |
+| `development-browser/browser.mobile.spec.ts` | Shared login and live app update on a phone viewport, control handoff, cancellation of Reset session from Browser tools without losing the login, expanded browser input, Chromium composition and multi-touch without horizontal page overflow. The scenario attaches `phone shared app`; viewport and CDP input do not prove a physical phone keyboard |
 | `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
 | `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
 
@@ -824,8 +963,10 @@ way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
 The phone specs need git; `shell-drawer.mobile.spec.ts`,
-`run-views.mobile.spec.ts`, `run-evidence.mobile.spec.ts` and
-`terminal-phone.mobile.spec.ts` also need Docker, because they open a real run,
+`run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
+`run-evidence.mobile.spec.ts`, `terminal-phone.mobile.spec.ts` and
+`development-browser/browser.mobile.spec.ts` also need Docker,
+because they open a real run,
 and skip without it. Run them alone
 against the binaries `make build` produced:
 
@@ -903,8 +1044,10 @@ layer that owns them.
 | Failure | Covered by |
 | --- | --- |
 | Agent crashes or hangs | Multi-member E2E (crash -> `failed`, `wip:` commit); stall chaos E2E (park at needs-attention with a `stalled:` reason, surfaced on the run listing, then back to running when the steered agent answers, and still parked when it does not); `TestAgentCrash`, `TestTUIWrapperKeepsNormalShellsAndForwardsStop`, and `TestTUIWrapperForwardsTERMToHarness` in `internal/scheduler`; stall detection matrix in `internal/scheduler` unit tests; the dashboard badge in `web`'s sidebar tests |
-| Agent waiting for a human | Both status reporter E2Es in a real container (`claude` pointed at its hooks and `pi` at its extension by flag, `opencode` at its plugin by environment); the park/un-park matrix in `internal/scheduler` unit tests (a waiting report replaces a stall reason, a repaint does not un-park a harness that reports both ends, activity still un-parks one that only reports turn ends, silence still parks a working one, and a waiting report survives a server restart); the per-harness mapping tables in `internal/agentstatus`, where the opencode plugin is also driven through a turn under `node` (skipped where there is none); `run.report` dispatch and its refusals in `internal/coord`; the `report` subcommand's four callback shapes against a real socket in `cmd/aether-server` |
+| Agent becomes idle or stalls | Status reporter container E2Es; scheduler report/activity/restart tests distinguish explicit idle from terminal repaint and silence-based stalls |
+| Outstanding human request | `TestIntegrationRunInputReports` covers socket reports, exact request correlation, independent execution, snapshots, and durable replay; `run-room.spec.ts` crosses the real reporter, server, gateway, and two browser stores; native adapter regressions cover request resolution and interrupted cleanup |
 | Server reboot | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, and `TestIntegrationChaosRebootLostContainer` (SIGKILL, active-container reattachment, exact retained TUI identity, and lost-container interruption); `TestRebootRecoveryResumesSupervision`, `TestRebootRecoveryContainerGone`, `TestRecoveryProbeErrorRetainsRunAndContainer`, `TestRecoveryReissuesPersistedKill`, `TestTUICloseRelaunchKeepsExactRunAndContainer`, `TestRetainedExpiryDestroysContainerAndHidesRelaunch`, `TestNegativeRetentionDestroysAndRejectsRelaunch`, `TestBootRetainedDestroyFailureRetriesOnSweep`, `TestRetainedTUIRebootsAndReopensSameContainer`, and `TestStartCancelledDuringRecoveryIsACleanStop` (a shutdown landing inside recovery is a clean stop, not a failed start) in `internal/scheduler`; recovery also exercises runtime error paths |
+| Agent update fails before launch | `TestHarnessUpdateFailureStillLaunches`, `TestHarnessUpdateTimeoutStillLaunches`, `TestHarnessUpdateCreateFailureStillLaunches`, `TestHarnessUpdateWaitExpiresAndResultLandsLater`, `TestHarnessUpdateKillDoesNotStopUpdate`, and `TestHarnessUpdateSurvivesCancelledLaunch` in `internal/scheduler` |
 | Laptop offline | `internal/syncd` daemon tests (refs-only catch-up) |
 | SSH drop mid-attach | Solo E2E detach/reattach; `FuzzAttachDropMidInput`, the post-unwind straggler test and the reattach-leak test in `internal/ptyhost` |
 | Live overlay conflict | `internal/sshd` sync overlay tests |

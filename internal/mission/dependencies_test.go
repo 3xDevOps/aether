@@ -102,6 +102,7 @@ func TestDependencyHoldsTheDependentUntilTheDependencyIsAccepted(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
 	f.evidence.packet = protocol.EvidencePacket{
 		ID: "packet-1", WorkspaceID: string(f.workspace.ID), RunID: string(attempts[0].RunID),
+		Origin:       protocol.EvidenceOrigin{Kind: protocol.EvidenceOriginRun, ID: string(attempts[0].RunID)},
 		Availability: protocol.EvidenceAvailable, RetainedRevision: "revision-1", ExpiresAt: &expires,
 	}
 	submission, err := f.db.SubmitAttempt(ctx, attempts[0].ID, f.mission.IntegratorGeneration, f.mission.IntegratorGeneration,

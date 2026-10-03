@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-install.yml'
+      - '.github/actions/go-cache/**'
+      - '.github/actions/bun-cache/**'
       - 'scripts/install*.ps1'
       - 'cmd/aether/**'
       - 'internal/localops/**'
@@ -15,6 +17,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/windows-install.yml'
+      - '.github/actions/go-cache/**'
+      - '.github/actions/bun-cache/**'
       - 'scripts/install*.ps1'
       - 'cmd/aether/**'
       - 'internal/localops/**'
@@ -56,19 +60,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Native Windows shortcut regression
-        run: |
-          go test ./internal/localops -run '^(TestShellLink|TestInstallDesktopWindowsPreservesCLI)' -count=1 -timeout 3m
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          variant: windows-install
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: ./.github/actions/bun-cache
+        with:
+          mode: restore
       - name: Installer regression scenarios
         run: ./scripts/install-test.ps1
       - name: Build the embedded dashboard
@@ -117,3 +126,15 @@ jobs:
           path: ${{ runner.temp }}/windows-desktop.png
           if-no-files-found: ignore
           retention-days: 7
+      # CI's native Windows job owns module-cache writes and the localops
+      # unit regressions. Only this lane writes the shared installer caches.
+      - uses: ./.github/actions/go-cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
+        with:
+          mode: save
+          variant: windows-install
+          save-modules: 'false'
+      - uses: ./.github/actions/bun-cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
+        with:
+          mode: save

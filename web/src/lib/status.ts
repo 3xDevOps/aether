@@ -13,15 +13,8 @@ export type PresentationState =
   | 'done'
   | 'idle'
 
-/**
- * A plan or approval pause is invisible in the domain status - the run still
- * reads `running` while the agent sits on a pending request - so an active
- * run with one presents as needs-attention.
- */
-export function runState(status: RunStatus, pendingApproval = false): PresentationState {
-  // A question or approval remains actionable after execution stops. Attention
-  // is a presentation overlay; the domain lifecycle below stays untouched.
-  if (pendingApproval) return 'needs-attention'
+/** Execution only. Outstanding requests are shown independently. */
+export function runState(status: RunStatus): PresentationState {
   switch (status) {
     case 'queued':
     case 'provisioning':
@@ -43,14 +36,17 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
 /**
  * An agent report finished the run and its owner has not opened it yet. The
  * run keeps its done or failed presentation state, so finished-run checks
- * still hold; only where it is listed changes (`needsYou`).
+ * still hold; only where it is listed changes (`waitsOnHuman`).
  */
 export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
   return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
 }
 
-/** Whether a run is listed with the runs waiting on a human. */
-export function needsYou(
+/**
+ * Whether a run is listed with the runs waiting on a human: the Idle bucket.
+ * Separate from Needs input, which only structured requests raise.
+ */
+export function waitsOnHuman(
   run: Pick<Run, 'status' | 'outcome_unseen'>,
   state: PresentationState,
 ): boolean {
@@ -110,7 +106,7 @@ export function rollup(states: PresentationState[]): PresentationState {
 }
 
 export const stateLabel: Record<PresentationState, string> = {
-  'needs-attention': 'Needs you',
+  'needs-attention': 'Idle',
   failed: 'Failed',
   working: 'Working',
   waiting: 'Waiting',

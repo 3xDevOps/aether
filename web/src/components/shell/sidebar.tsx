@@ -3,16 +3,23 @@ import {
   ChevronRight,
   FolderGit2,
   House,
-  List,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  Rocket,
+  Users,
 } from 'lucide-react'
-import { Dialog as DialogPrimitive } from 'radix-ui'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Dialog as DialogPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Button } from '@/components/ui/button'
 import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import {
   Select,
@@ -22,7 +29,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { canLaunch } from '@/lib/commands'
 import { useDelayed, useDrag } from '@/lib/hooks'
 import { inModal, keyboardBusy, splitterTarget } from '@/lib/keys'
 import { runLabel } from '@/lib/status'
@@ -35,7 +41,7 @@ import { isUnseen } from '@/store/board'
 import {
   useAttentionCount,
   useCapability,
-  useSelfRole,
+  useRunInput,
   useSidebarGroups,
 } from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
@@ -55,6 +61,9 @@ export function Sidebar() {
   const width = useStore((s) => Math.max(minSidebarWidth, s.sidebarWidth))
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  const drawerOpen = useStore((s) => s.sidebarDrawerOpen)
+  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
+  const drawerOpener = useRef<HTMLElement | null>(null)
   const [autoCollapsed, setAutoCollapsed] = useState(
     () => window.matchMedia?.(narrowQuery).matches ?? false,
   )
@@ -79,17 +88,24 @@ export function Sidebar() {
   useEffect(() => {
     const media = window.matchMedia?.(mobileQuery)
     if (!media) return
-    const apply = (e: MediaQueryListEvent) => setMobile(e.matches)
+    const apply = (e: MediaQueryListEvent) => {
+      setMobile(e.matches)
+      setExpandedNarrow(false)
+      setDrawerOpen(false)
+    }
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
-  }, [])
+  }, [setDrawerOpen])
 
-  const rail = autoCollapsed ? !expandedNarrow : collapsed
+  useEffect(() => () => setDrawerOpen(false), [setDrawerOpen])
+
+  const rail = !mobile && (autoCollapsed ? !expandedNarrow : collapsed)
 
   const toggle = useCallback(() => {
-    if (autoCollapsed) setExpandedNarrow((v) => !v)
+    if (mobile) setDrawerOpen(!useStore.getState().sidebarDrawerOpen)
+    else if (autoCollapsed) setExpandedNarrow((v) => !v)
     else toggleSidebar()
-  }, [autoCollapsed, toggleSidebar])
+  }, [mobile, autoCollapsed, setDrawerOpen, toggleSidebar])
 
   // Either direction unmounts the control that was pressed, so its opposite
   // takes the focus. They are different elements, which is why this waits for
@@ -102,9 +118,9 @@ export function Sidebar() {
     toggleControl.current?.focus()
   }, [rail])
   const toggleAndFollow = useCallback(() => {
-    takeToggle.current = true
+    takeToggle.current = !mobile
     toggle()
-  }, [toggle])
+  }, [mobile, toggle])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (
@@ -131,15 +147,13 @@ export function Sidebar() {
   // compared by the dependency list - opening the drawer re-runs this effect
   // and must not close it again.
   const route = useStore((s) => s.route)
-  const drawerOpen = mobile && !rail
   const lastRoute = useRef(route)
   useEffect(() => {
     if (lastRoute.current === route) return
     lastRoute.current = route
     if (!drawerOpen) return
-    takeToggle.current = true
-    setExpandedNarrow(false)
-  }, [drawerOpen, route])
+    setDrawerOpen(false)
+  }, [drawerOpen, route, setDrawerOpen])
 
   const beginDrag = useDrag()
 
@@ -185,7 +199,7 @@ export function Sidebar() {
       id="sidebar"
       style={{
         width,
-        maxWidth: mobile ? 'calc(100vw - 3rem)' : undefined,
+        maxWidth: mobile ? 'calc(100vw - 3rem - env(safe-area-inset-left))' : undefined,
       }}
       className="relative flex min-w-0 shrink-0 flex-col border-r border-border bg-sidebar"
       aria-label="Runs"
@@ -227,27 +241,28 @@ export function Sidebar() {
     />
   )
 
-  // On a phone the expanded pane is a modal drawer rather than a pane the
-  // center view keeps living beside: Radix gives it the scrim, the
-  // tap-outside and Escape dismissal and the focus trap. The rail travels
-  // inside it so a surface is still one tap away while it is open, and the
-  // strip left behind holds the shell's 48px column so the center view does
-  // not reflow behind the scrim.
-  if (drawerOpen) {
+  // The phone rail exists only inside the modal: the center owns the full
+  // available width while it is closed and never reflows behind the scrim.
+  if (mobile) {
     return (
-      <div className="relative flex h-full min-h-0 shrink-0">
-        <div aria-hidden className="h-full w-12 shrink-0 border-r border-border bg-sidebar" />
-        <DialogPrimitive.Root
-          open
-          onOpenChange={(open) => {
-            if (!open) toggleAndFollow()
-          }}
-        >
+        <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <DialogPortal>
             <DialogOverlay />
             <DialogPrimitive.Content
+              id="sidebar-drawer"
               aria-describedby={undefined}
-              onCloseAutoFocus={(event) => event.preventDefault()}
+              onOpenAutoFocus={() => {
+                drawerOpener.current =
+                  document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null
+              }}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                const opener = drawerOpener.current
+                if (opener?.isConnected && opener !== document.body) opener.focus()
+                else document.getElementById('sidebar-drawer-trigger')?.focus()
+              }}
               // A dialog stands the shell's global keys down inside itself,
               // and Mod+B is the pair of the key that opened this one, so the
               // drawer answers it here. Preventing the default is what stops
@@ -274,7 +289,6 @@ export function Sidebar() {
             </DialogPrimitive.Content>
           </DialogPortal>
         </DialogPrimitive.Root>
-      </div>
     )
   }
 
@@ -348,10 +362,6 @@ function WorkspaceSwitcher({
 }
 
 function SidebarHeader() {
-  const openDialog = useStore((s) => s.openPaletteDialog)
-  // The launch form is hosted app-wide, so the sidebar only has to ask for
-  // it. A member who cannot start a run is not offered the way in.
-  const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
     <div className="flex min-h-[var(--title-bar-height)] shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-0.5">
       <span className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -359,27 +369,6 @@ function SidebarHeader() {
       </span>
       <AttentionBadge />
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        {launchable && (
-          <Tooltip>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <Button
-                  {...triggerProps}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    openDialog('launch')
-                  }}
-                  className="h-[26px] rounded-sm px-2 text-[12px] coarse:h-11"
-                >
-                  <Rocket className="size-3.5" />
-                  New run
-                </Button>
-              )}
-            />
-            <Tooltip.Content>Launch a run</Tooltip.Content>
-          </Tooltip>
-        )}
         <GroupByControl />
       </div>
     </div>
@@ -423,18 +412,14 @@ function GroupByControl() {
   )
 }
 
-/**
- * How many runs are waiting on a human. The runs below are already sorted
- * worst-first, so this is not navigation - it is the count a member needs
- * when the sidebar is scrolled, or when a stall lands while they are
- * elsewhere in the app.
- */
+/** Count unresolved requests without changing execution grouping. */
 function AttentionBadge() {
   const count = useAttentionCount()
   if (count === 0) return null
   return (
     <span
-      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
+      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
+      title={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
       role="img"
       className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
@@ -524,7 +509,7 @@ function approvalsLabel(label: string, waiting: number, error: string | null): s
   return waiting > 0 ? `${label}, ${waiting} waiting on a decision` : label
 }
 
-/** Existing routes live in a persistent 48px activity rail. */
+/** Work and workspace navigation stay visible or explicitly reachable in More. */
 export function ActivityRail({
   sidebarCollapsed,
   onToggleSidebar,
@@ -542,70 +527,141 @@ export function ActivityRail({
   const waiting = pendingApprovals(inbox).length
   const surfaceLinks = surfaces(cap)
   const primaryLinks: Surface[] = [
-    { name: 'board', label: 'Board', Icon: House },
-    { name: 'overview', label: 'All runs', Icon: List },
-    ...surfaceLinks.filter(
-      ({ name }) => name !== 'onboarding' && name !== 'settings',
-    ),
+    { name: 'board', label: 'Board', Icon: House, group: 'Work' },
+    ...surfaceLinks.filter(({ group }) => group === 'Work' || group === 'Workspace'),
   ]
-  const utilityLinks = surfaceLinks.filter(
-    ({ name }) => name === 'onboarding' || name === 'settings',
+  const adminLinks = surfaceLinks.filter(({ group }) => group === 'Admin')
+  const settingsLinks = surfaceLinks.filter(({ group }) => group === 'Settings')
+  const railRef = useRef<HTMLElement>(null)
+  const [height, setHeight] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    const element = railRef.current
+    if (!element) return
+    const measure = () => {
+      const next = element.getBoundingClientRect().height
+      if (next > 0) setHeight(next)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  // Rows are 48px and each nonempty group has a 20px heading. Measure the
+  // containing rail, not the viewport: update banners also consume shell space.
+  const available = height === null
+    ? Infinity
+    : height - (sidebarCollapsed ? 48 : 0) - 48 - (adminLinks.length ? 48 : 0) - 1
+  const groupHeight = (count: number) => {
+    let groups = 0
+    for (let i = 0; i < count; i++) {
+      if (i === 0 || primaryLinks[i].group !== primaryLinks[i - 1].group) groups++
+    }
+    return count * 48 + groups * 20
+  }
+  let visibleCount = primaryLinks.length
+  if (groupHeight(visibleCount) > available) {
+    while (visibleCount > 0 && groupHeight(visibleCount) + 48 > available) visibleCount--
+  }
+  const visibleLinks = primaryLinks.slice(0, visibleCount)
+  const overflowLinks = primaryLinks.slice(visibleCount)
+  const railButton = cn(
+    focusRing,
+    'focus-visible:-outline-offset-2 relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
+  )
+  const labelFor = ({ name, label }: Surface) =>
+    name === 'approvals' ? approvalsLabel(label, waiting, inboxError) : label
+  const approvalBadge = (waiting > 0 || inboxError !== null) && (
+    <span aria-hidden className="absolute bottom-1 right-1 flex">
+      <Chip
+        color="warning"
+        variant="soft"
+        size="sm"
+        className="!h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
+      >
+        <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
+      </Chip>
+    </span>
   )
 
-  const renderLinks = (links: Surface[]) =>
-    links.map(({ name, label, Icon }) => {
-      const current = route.name === name
-      const accessibleLabel =
-        name === 'approvals'
-          ? approvalsLabel(label, waiting, inboxError)
-          : label
-      return (
-        <Tooltip key={name}>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <button
-                {...triggerProps}
-                type="button"
-                aria-label={accessibleLabel}
-                aria-current={current ? 'page' : undefined}
-                onClick={() => navigate(name)}
-                className={cn(
-                  focusRing,
-                  'focus-visible:-outline-offset-2',
-                  'relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
-                  current && 'border-primary text-foreground',
-                )}
-              >
-                <Icon className="size-6" aria-hidden />
-                <span className="sr-only">{label}</span>
-                {name === 'approvals' && (waiting > 0 || inboxError !== null) && (
-                  <span
-                    aria-hidden
-                    className="absolute bottom-1 right-1 flex"
+  const renderLink = (surface: Surface) => {
+    const { name, label, Icon } = surface
+    return (
+      <Tooltip key={name}>
+        <Tooltip.Trigger<'button'>
+          render={(triggerProps) => (
+            <button
+              {...triggerProps}
+              type="button"
+              aria-label={labelFor(surface)}
+              aria-current={route.name === name ? 'page' : undefined}
+              onClick={() => navigate(name)}
+              className={cn(railButton, route.name === name && 'border-primary text-foreground')}
+            >
+              <Icon className="size-6" aria-hidden />
+              <span className="sr-only">{label}</span>
+              {name === 'approvals' && approvalBadge}
+            </button>
+          )}
+        />
+        <Tooltip.Content>{labelFor(surface)}</Tooltip.Content>
+      </Tooltip>
+    )
+  }
+
+  const renderMenu = (label: string, links: Surface[], Icon: Surface['Icon']) => {
+    const current = links.find(({ name }) => name === route.name)
+    const hasApprovals = links.some(({ name }) => name === 'approvals')
+    const accessibleLabel = [
+      label,
+      current?.label,
+      hasApprovals && (waiting > 0 || inboxError) ? approvalsLabel('Approvals', waiting, inboxError) : null,
+    ].filter(Boolean).join(', ')
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={accessibleLabel}
+            className={cn(railButton, 'flex-col gap-0.5', current && 'border-primary text-foreground')}
+          >
+            <Icon className="size-5" aria-hidden />
+            <span className="text-[10px] leading-3">{label}</span>
+            {hasApprovals && approvalBadge}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" aria-label={label}>
+          {(['Work', 'Workspace', 'Admin'] as const).map((group) => {
+            const entries = links.filter((surface) => surface.group === group)
+            if (!entries.length) return null
+            return (
+              <DropdownMenuPrimitive.Group key={group} aria-label={group}>
+                <div aria-hidden className="px-2 py-1 text-[11px] text-muted-foreground">{group}</div>
+                {entries.map((surface) => (
+                  <DropdownMenuItem
+                    key={surface.name}
+                    aria-label={labelFor(surface)}
+                    aria-current={route.name === surface.name ? 'page' : undefined}
+                    onSelect={() => navigate(surface.name)}
                   >
-                    <Chip
-                      color="warning"
-                      variant="soft"
-                      size="sm"
-                      className="!h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
-                    >
-                      <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
-                    </Chip>
-                  </span>
-                )}
-              </button>
-            )}
-          />
-          <Tooltip.Content>{accessibleLabel}</Tooltip.Content>
-        </Tooltip>
-      )
-    })
+                    <surface.Icon aria-hidden />
+                    {surface.label}
+                    {surface.name === 'approvals' && (waiting > 0 || inboxError !== null) && (
+                      <span aria-hidden className="ml-auto text-state-needs-attention">{inboxError ? '?' : waiting}</span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuPrimitive.Group>
+            )
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
 
   return (
-    <nav
-      aria-label="Surfaces"
-      className="flex h-full w-12 shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar"
-    >
+    <nav ref={railRef} aria-label="Surfaces" className="flex h-full w-12 shrink-0 flex-col border-r border-border bg-sidebar">
       {sidebarCollapsed && (
         <Tooltip>
           <Tooltip.Trigger<'button'>
@@ -616,28 +672,34 @@ export function ActivityRail({
                 type="button"
                 aria-label="Expand sidebar"
                 onClick={onToggleSidebar}
-                className={cn(
-                  focusRing,
-                  'focus-visible:-outline-offset-2',
-                  'relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
-                )}
+                className={railButton}
               >
                 <PanelLeftOpen className="size-5" aria-hidden />
-                <span className="sr-only">Expand sidebar</span>
               </button>
             )}
           />
           <Tooltip.Content>Expand sidebar</Tooltip.Content>
         </Tooltip>
       )}
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex min-h-max flex-col py-1">{renderLinks(primaryLinks)}</div>
+      <div className="min-h-0 flex-1">
+        {(['Work', 'Workspace'] as const).map((group) => {
+          const links = visibleLinks.filter((surface) => surface.group === group)
+          if (!links.length) return null
+          return (
+            <div key={group} role="group" aria-label={group}>
+              <div aria-hidden className="flex h-5 items-center justify-center border-t border-border text-[8px] leading-none text-muted-foreground">
+                {group}
+              </div>
+              {links.map(renderLink)}
+            </div>
+          )
+        })}
+        {overflowLinks.length > 0 && renderMenu('More', overflowLinks, MoreHorizontal)}
       </div>
-      {utilityLinks.length > 0 && (
-        <div className="flex shrink-0 flex-col py-1">
-          {renderLinks(utilityLinks)}
-        </div>
-      )}
+      <div className="flex shrink-0 flex-col border-t border-border">
+        {adminLinks.length > 0 && renderMenu('Admin', adminLinks, Users)}
+        {settingsLinks.map(renderLink)}
+      </div>
     </nav>
   )
 }
@@ -704,10 +766,11 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
   const unseen = useStore((s) => isUnseen(s.acked, entry.run))
   const selected = isRunRoute(route, entry.run.id)
   const label = runLabel(entry.run)
+  const input = useRunInput(entry.run)
   const role = entry.run.mission_role === 'integrator'
     ? 'Integrator'
     : entry.run.mission_role === 'worker' ? 'Subsession' : undefined
-  const description = [label, role, entry.run.harness].filter(Boolean).join(' · ')
+  const description = [label, role, entry.run.harness, input.count > 0 && `Needs input: ${input.summary}`].filter(Boolean).join(' · ')
   return (
     <button
       type="button"
@@ -741,6 +804,7 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
         className={cn(entry.state === 'working' && 'state-pulse')}
       />
       <span className="min-w-0 truncate">{label}</span>
+      <RunInputIndicator run={entry.run} compact />
       {role && !branch && (
         <span className={cn(
           'shrink-0 rounded-sm border px-1 text-[10px] font-medium leading-4',

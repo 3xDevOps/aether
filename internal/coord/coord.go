@@ -101,7 +101,7 @@ type Peers interface {
 }
 
 // Config wires the service. Dir, Store, Mail, Bus, and Peers are required.
-// RetainsContainer may be nil; when set, it identifies terminal TUI runs whose
+// RetainsContainer may be nil; when set, it identifies terminal runs whose
 // retained container still owns this coordination directory during recovery.
 type Config struct {
 	// Dir is the coordination state root, <data>/coord.

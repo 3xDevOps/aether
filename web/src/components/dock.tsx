@@ -32,6 +32,7 @@ export interface DockProps {
    */
   containment?: DockContainment
   actions?: React.ReactNode
+  persistentActions?: React.ReactNode
   children: React.ReactNode
 }
 
@@ -62,6 +63,7 @@ export function Dock({
   onToggleCollapse,
   containment = 'viewport',
   actions,
+  persistentActions,
   children,
 }: DockProps) {
   const atLimit = tabs.length >= maxTabs
@@ -374,6 +376,7 @@ export function Dock({
             </span>
           )}
         </div>
+        {persistentActions}
         {!collapsed && actions && (
           <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
             {actions}

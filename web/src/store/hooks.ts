@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
-import type { GatewayCapabilities, Member } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
+import { approvalsForRun } from '@/store/approvals'
 import { isArchivable } from '@/store/runs'
 import { useStore } from '@/store'
 import {
@@ -24,13 +25,11 @@ export function usePendingApprovalRuns(): Set<string> {
 function useSidebarInput() {
   const workspace = useStore((s) => s.activeWorkspace)
   const runs = useStore((s) => s.runs)
-  const roomMessages = useStore((s) => s.roomMessages)
   const members = useStore((s) => s.members)
   const groupBy = useStore((s) => s.groupBy)
-  const pending = usePendingApprovalRuns()
   return useMemo(
-    () => ({ workspace, runs, roomMessages, members, groupBy, pending }),
-    [workspace, runs, roomMessages, members, groupBy, pending],
+    () => ({ workspace, runs, members, groupBy }),
+    [workspace, runs, members, groupBy],
   )
 }
 
@@ -39,39 +38,48 @@ export function useSidebarGroups(): SidebarGroup[] {
   return useMemo(() => sidebarGroups(input), [input])
 }
 
-/**
- * How many runs are waiting on a human right now - the count behind the
- * sidebar's badge. Stalls, clean exits, pending approvals and unreviewed
- * agent outcomes all need you, so one number covers the whole notification
- * path.
- */
+/** Runs with a genuine unresolved request, independent of execution. */
 export function useAttentionCount(): number {
   const input = useSidebarInput()
+  const pending = usePendingApprovalRuns()
+  const roomMessages = useStore((s) => s.roomMessages)
   return useMemo(() => {
-    const attentionRunIDs = new Set(
-      sidebarRuns(input)
-        .filter((run) => run.needsYou)
-        .map((run) => run.run.id),
-    )
+    let count = 0
     for (const run of Object.values(input.runs)) {
       if (input.workspace && run.workspace_id !== input.workspace) continue
-      // Same hide guard as sidebarRuns and board(): an archived, final run
-      // is off both lists, so it must not keep the attention badge stuck.
       if (run.archived_at && isArchivable(run.status)) continue
-      if (run.unanswered_questions !== undefined) {
-        // A modern snapshot is authoritative, including zero: do not let a
-        // stale room cache keep attention alive after a reply.
-        if (run.unanswered_questions > 0) attentionRunIDs.add(run.id)
-        continue
-      }
-      // Older gateways omit the count, so retain the room-history fallback
-      // for rooms that have already been opened.
-      if (unansweredQuestions(input.roomMessages[run.id] ?? []).length > 0) {
-        attentionRunIDs.add(run.id)
-      }
+      const questions = run.unanswered_questions ??
+        unansweredQuestions(roomMessages[run.id] ?? []).length
+      if (pending.has(run.id) || (run.pending_inputs?.length ?? 0) > 0 || questions > 0) count++
     }
-    return attentionRunIDs.size
-  }, [input])
+    return count
+  }, [input, pending, roomMessages])
+}
+
+export function useRunInput(run: Run) {
+  const approvals = useStore((s) => approvalsForRun(s.inbox, run.id).length)
+  const questions = useStore((s) => run.unanswered_questions ??
+    unansweredQuestions(s.roomMessages[run.id] ?? []).length)
+  const requests = run.pending_inputs ?? []
+  const native = requests.length
+  const parts: string[] = []
+  for (const [kind, label] of [
+    ['question', 'question'],
+    ['permission', 'permission request'],
+    ['form', 'form'],
+    ['extension_ui', 'extension dialog'],
+  ] as const) {
+    const count = requests.filter((request) => request.kind === kind).length
+    if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
+  }
+  if (approvals > 0) parts.push(`${approvals} approval${approvals === 1 ? '' : 's'} in Approvals`)
+  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in Run Room`)
+  return {
+    count: native + approvals + questions,
+    questions,
+    summary: parts.join('; '),
+    destination: native === 0 && approvals > 0 ? 'approvals' : 'terminal',
+  }
 }
 
 /** Every run in the active workspace, worst state and most recent change first. */

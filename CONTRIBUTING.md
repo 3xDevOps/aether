@@ -43,7 +43,9 @@ Run the fast checks before opening a change:
 make fmt-check
 make vet
 make lint
+make lint-workflows
 make test
+make test-scripts
 make public-audit
 ```
 
@@ -57,6 +59,15 @@ make android
 Go version CI uses. Without that pin, a host whose default Go is newer fails
 with `export data version 4 is greater than maximum supported version 2`
 before linting anything.
+
+`make lint-workflows` uses pinned actionlint v1.7.12, matching CI's workflow
+lint gate without adding a tool dependency to `go.mod`. It requires
+ShellCheck on `PATH`: on Linux, run `sudo apt-get install shellcheck`.
+GitHub's Ubuntu runners already provide it; the prerequisite ensures
+embedded shell commands are checked locally too. `make test-scripts`
+includes `sh scripts/release-ci-check-test.sh`: it checks exact-commit main
+CI authorization and fail-closed rejection using API fixtures, without
+publishing a release or contacting GitHub.
 
 The integration suite uses real Docker and git:
 
@@ -72,6 +83,13 @@ Playwright's browser:
 (cd web && bunx playwright install chromium)   # once, from the repo root
 make test-e2e
 ```
+
+CI partitions the unchanged case set across four isolated runners, each
+with one Playwright worker. To select the first shard locally, with the same
+image prerequisites, use `make test-e2e E2E_ARGS='--shard=1/4'`; omit
+`E2E_ARGS` for the full suite. See [the testing guide](docs/testing.md) for
+integration shard ownership, root/non-root coverage, and per-shard reports
+and screenshots.
 
 The dashboard checks run from `web/`:
 
@@ -367,7 +385,12 @@ do not mark them as GitHub prereleases. The installer and `aether update`
 resolve `/releases/latest`, which requires the alpha release to be published
 through the normal latest-release endpoint.
 
-Release tags are built by the repository workflow. Keep the installer,
-`aether update` (`internal/selfupdate`), release asset names, checksums, and
-documentation synchronized when changing packaging. See
-[docs/install.md](docs/install.md#releases) for the publish commands.
+Release tags are built by the repository workflow only after the latest
+matching main-push CI run/current attempt has succeeded for the exact tagged
+commit. An older green run, a PR run, or a merge-group run is not a substitute.
+Local `make release-binaries` builds the dashboard and ten Go assets without
+Android; `make android` builds Android separately, and `make release` still
+builds both. Keep the installer, `aether update` (`internal/selfupdate`),
+release asset names, checksums, and documentation synchronized when changing
+packaging. See [docs/install.md](docs/install.md#releases) for the publish
+commands.

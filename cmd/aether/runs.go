@@ -18,14 +18,13 @@ import (
 func init() {
 	register(command{
 		name:  "runs",
-		short: "list runs (--attention: waiting on a human; --archived: only archived)",
+		short: "list runs (--attention: idle runs; --archived: only archived)",
 		run:   runRuns,
 	})
 }
 
-// needsAttention is the CLI's half of the stall notification path: a run
-// the scheduler parked because its agent went quiet, or one whose agent
-// exited and left results to look at, both land here.
+// needsAttention selects the execution status displayed as Idle, not the
+// independent set of outstanding input requests.
 func needsAttention(r protocol.Run) bool {
 	return r.Status == string(domain.RunNeedsAttention)
 }
@@ -80,7 +79,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	attention := fs.Bool("attention", false, "list only runs waiting on a human")
+	attention := fs.Bool("attention", false, "list only idle runs (needs-attention status)")
 	archived := fs.Bool("archived", false, "list only archived runs, with their deletion date")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -138,7 +137,7 @@ func runRuns(args []string) error {
 		// The notice goes to stderr so it never lands in a pipeline reading
 		// the table, and it is skipped when the table already is the answer.
 		if waiting > 0 && !*attention && !*archived {
-			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting on you: aether runs --attention\n",
+			_, _ = fmt.Fprintf(os.Stderr, "\n%s idle: aether runs --attention\n",
 				plural(waiting, "run"))
 		}
 		return nil

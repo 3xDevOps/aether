@@ -1,7 +1,7 @@
 import { Archive, ChevronDown, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
-import { StateIndicator } from '@/components/state-dot'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -10,17 +10,19 @@ import { deletesInLabel, timeAgo } from '@/lib/format'
 import { awaitingReview, runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
+import { mapCardHeight } from '@/routes/board/map-layout'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { approvalsForRun } from '@/store/approvals'
+import { useRunInput } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 const lifecycleLabel: Record<RunRecord['status'], string> = {
   queued: 'Queued',
   provisioning: 'Provisioning',
   running: 'Running',
-  'needs-attention': 'Needs attention',
+  'needs-attention': 'Idle',
   completed: 'Completed',
   merged: 'Merged',
   abandoned: 'Abandoned',
@@ -50,8 +52,9 @@ export function RunCard({
   const branchRef = useRef<HTMLSpanElement>(null)
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
-  const unansweredCount =
-    state === 'needs-attention' ? Math.max(0, run.unanswered_questions ?? 0) : 0
+  const unseenId = unseen ? `${detailsId}-unseen` : undefined
+  const input = useRunInput(run)
+  const unansweredCount = input.questions
   const questionAction =
     unansweredCount > 0
       ? `${unansweredCount} unanswered ${
@@ -71,10 +74,7 @@ export function RunCard({
   // run can also carry a lifecycle reason, but that reason belongs below the
   // action rather than replacing it.
   const summary = useStore((s) =>
-    questionAction ||
-    (state === 'needs-attention' && !run.reason
-      ? (approvalsForRun(s.inbox, run.id)[0]?.action ?? '')
-      : run.reason ?? ''),
+    questionAction || approvalsForRun(s.inbox, run.id)[0]?.action || input.summary || run.reason || '',
   )
   const handleCardClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target
@@ -99,7 +99,7 @@ export function RunCard({
       aria-expanded={expanded}
       aria-controls={expanded ? detailsId : undefined}
       onClick={variant === 'cards' ? () => setExpanded((open) => !open) : undefined}
-      className="ml-auto shrink-0"
+      className="ml-auto h-[22px] min-h-[22px] shrink-0 px-1.5 text-xs"
     >
       Details
       <ChevronDown className={cn('size-3', expanded && 'rotate-180')} aria-hidden />
@@ -125,9 +125,21 @@ export function RunCard({
         <p className="whitespace-pre-wrap break-words text-muted-foreground">{run.reason}</p>
       )}
       {run.branch && (
-        <p className="break-all select-text font-mono text-muted-foreground">
-          <span className="font-sans">Branch: </span>{run.branch}
-        </p>
+        <div className="flex items-start gap-1 text-muted-foreground">
+          <GitBranch className="mt-1 size-3.5 shrink-0" aria-hidden />
+          <span ref={branchRef} className="min-w-0 flex-1 break-all select-text font-mono">
+            {run.branch}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Copy branch ${run.branch}`}
+            onClick={() => void copyText(run.branch, branchRef.current)}
+          >
+            <Copy className="size-3" aria-hidden />
+          </Button>
+        </div>
       )}
       {run.last_commit && (
         <p className="flex items-start gap-1 text-muted-foreground">
@@ -137,6 +149,9 @@ export function RunCard({
           </span>
         </p>
       )}
+      <p className="break-words text-muted-foreground">
+        Owner: {owner?.display_name ?? run.member_id} · Harness: {run.harness} ({run.mode})
+      </p>
       <p className="text-muted-foreground">{timestamps(card)}</p>
       <CardSlot name="card:chips" run={run} />
       <CardSlot name="card:footer" run={run} />
@@ -148,25 +163,17 @@ export function RunCard({
       <article
         data-run-id={run.id}
         onClick={handleCardClick}
-        style={{ borderLeftColor: owner?.color }}
+        style={{ borderLeftColor: owner?.color, height: variant === 'map' ? mapCardHeight : undefined }}
         className={cn(
           'group min-w-0 cursor-pointer border border-l-2 border-border bg-background transition-colors duration-100 hover:bg-toolbar-hover motion-reduce:transition-none',
           unseen && 'border-foreground/25',
         )}
       >
-        <div className="grid h-[190px] min-w-0 grid-rows-[22px_40px_32px_20px_1fr] gap-1 px-3 py-2 coarse:grid-rows-[44px_40px_16px_20px_1fr] coarse:gap-0.5">
-          <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-col gap-0.5 px-3 py-1">
+          <div className="flex h-[22px] min-w-0 items-center gap-1 coarse:h-11">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
-              <StateIndicator state={state} decorative className="shrink-0" />
               <StateChip state={state} />
-              {finishedQuestion && (
-                <span className="shrink-0 text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}</span>
-              )}
-              {unseen && (
-                <Chip color="accent" variant="soft" size="sm" aria-label="Unseen">
-                  <Chip.Label>New</Chip.Label>
-                </Chip>
-              )}
+              <RunInputIndicator run={run} />
               {paused && (
                 <span title="Paused" className="shrink-0">
                   <Chip color="warning" variant="soft" size="sm">
@@ -196,72 +203,41 @@ export function RunCard({
               <CardSlot name="card:badges" run={run} />
             </div>
             <CardSlot name="card:warnings" run={run} />
+            {variant === 'map' ? <DialogTrigger asChild>{disclosure}</DialogTrigger> : disclosure}
           </div>
           <button
             type="button"
             aria-label={runLabel(run)}
+            aria-describedby={unseenId}
             onClick={() => navigate('terminal', { runId: run.id })}
-            className={cn(focusRing, 'min-w-0 self-start text-left text-sm leading-5')}
+            className={cn(focusRing, 'h-10 min-w-0 shrink-0 text-left text-sm leading-5')}
           >
             <span className={cn('line-clamp-2 break-words font-medium', unseen && 'font-semibold')}>
               {runLabel(run)}
             </span>
+            {unseen && <span id={unseenId} className="sr-only">Unseen</span>}
           </button>
-          <div className="min-w-0 overflow-hidden">
-            {state === 'needs-attention' && summary ? (
-              <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
-                {summary}
-              </p>
-            ) : awaitingReview(run) && (
-              <p
-                className={cn(
-                  'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 text-muted-foreground coarse:line-clamp-1',
-                  run.status === 'failed' ? 'border-state-failed/60' : 'border-state-done/60',
-                )}
-              >
-                The agent reported {run.status === 'failed' ? 'failure' : 'success'}; open the run to review it.
-              </p>
-            )}
-          </div>
-          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          {(input.count > 0 || state === 'needs-attention') && summary ? (
+            <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
+              {summary}
+            </p>
+          ) : awaitingReview(run) && (
+            <p
+              className={cn(
+                'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 text-muted-foreground coarse:line-clamp-1',
+                run.status === 'failed' ? 'border-state-failed/60' : 'border-state-done/60',
+              )}
+            >
+              The agent reported {run.status === 'failed' ? 'failure' : 'success'}; open the run to review it.
+            </p>
+          )}
+          <div className="flex h-5 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
             <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
             <span className="min-w-0 truncate" title={owner?.display_name ?? run.member_id}>{owner?.display_name ?? run.member_id}</span>
             <time className="ml-auto shrink-0 tabular-nums" title={timestamps(card)}>
               {timeAgo(run.stateChangedAt)}
             </time>
-          </div>
-          <div className="flex min-w-0 items-center gap-1 border-t border-border text-xs text-muted-foreground">
-            {run.branch && (
-              <span
-                data-run-navigation-exempt
-                className="flex min-w-0 flex-1 items-center gap-1"
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <GitBranch className="size-3.5 shrink-0" aria-hidden />
-                <span
-                  ref={branchRef}
-                  className="min-w-0 truncate select-text font-mono text-xs"
-                  title={run.branch}
-                >
-                  {run.branch}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Copy branch ${run.branch}`}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void copyText(run.branch, branchRef.current)
-                  }}
-                >
-                  <Copy className="size-3" aria-hidden />
-                </Button>
-              </span>
-            )}
-            {variant === 'map' ? <DialogTrigger asChild>{disclosure}</DialogTrigger> : disclosure}
           </div>
         </div>
         {variant === 'cards' && expanded && (

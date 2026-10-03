@@ -68,11 +68,11 @@ test('the first run completes', async ({ page, aether }) => {
 
   const header = page.locator('header').filter({ hasText: 'write the result file' })
   await expect(header).toContainText('Working')
-  await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible()
 
   // Closing is an explicit user action for an interactive run. The agent
   // committed its work, so record the successful outcome through the real UI.
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await header.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Close run...', exact: true }).click()
   const closeDialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(closeDialog).toBeVisible()
   await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()

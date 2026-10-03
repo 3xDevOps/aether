@@ -109,16 +109,23 @@ export interface CandidateReviewProps {
   initialExpanded?: boolean
 }
 
-export function CandidateReview({
+export function CandidateReview(props: CandidateReviewProps) {
+  return useCandidateReview(props)
+}
+
+// The responsive evidence surface owns this hook above its Dialog/Popover
+// branch, so changing presentation cannot cancel mutations or discard drafts.
+export function useCandidateReview({
   workspaceID,
   currentRunID,
   client = api,
   missionID,
   missionSubmissions = [],
   initialExpanded = false,
-}: CandidateReviewProps) {
+}: CandidateReviewProps, active = true) {
   const missionMode = Boolean(missionID)
-  const [expanded, setExpanded] = useState(initialExpanded)
+  const [expandedState, setExpanded] = useState(initialExpanded)
+  const expanded = active && expandedState
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine)
   const gatewayConnection = useStore((state) => state.connection)
   const [authorityReady, setAuthorityReady] = useState(false)
@@ -204,6 +211,20 @@ export function CandidateReview({
     setError(undefined)
     setArgvError(undefined)
   }, [invalidateAuthority])
+
+  useEffect(() => {
+    if (active) return
+    clearAuthority()
+    setExpanded(initialExpanded)
+    setArgvText(defaultArgv)
+    setTimeoutSeconds('300')
+    setDeliveryAction('update_ref')
+    mutationKeys.current.clear()
+  }, [active, clearAuthority, initialExpanded])
+
+  useEffect(() => () => {
+    loadGeneration.current += 1
+  }, [])
 
   const loadWorkspacePackets = useCallback(async () => {
     if (!expanded) return
@@ -353,8 +374,8 @@ export function CandidateReview({
     setError(undefined)
     try {
       const result = await client.integrationPrepare(params)
-      forgetIdempotencyKey('prepare', params, mutationKeys)
       if (generation !== loadGeneration.current) return
+      forgetIdempotencyKey('prepare', params, mutationKeys)
       if (!applyCandidate(result.candidate)) return
       setPatch(null)
       setSummaries((current) => [result.candidate, ...current.filter((item) => item.candidate_id !== result.candidate.candidate_id)])
@@ -429,8 +450,8 @@ export function CandidateReview({
     setError(undefined)
     try {
       const result = await client.integrationResolve(params)
-      forgetIdempotencyKey('resolve', params, mutationKeys)
       if (generation !== loadGeneration.current) return
+      forgetIdempotencyKey('resolve', params, mutationKeys)
       const preserveUntouchedDrafts = candidate.candidate_id === result.candidate.candidate_id
         && candidate.applied_inputs === result.candidate.applied_inputs
       if (!applyCandidate(result.candidate, preserveUntouchedDrafts)) return
@@ -485,8 +506,8 @@ export function CandidateReview({
     setError(undefined)
     try {
       const result = await client.integrationVerify(params)
-      forgetIdempotencyKey('verify', params, mutationKeys)
       if (generation !== loadGeneration.current) return
+      forgetIdempotencyKey('verify', params, mutationKeys)
       if (!applyCandidate(result.candidate)) return
       setSelectedVerificationIDs([])
     } catch (cause) {
@@ -510,8 +531,8 @@ export function CandidateReview({
     setBusy('request_delivery')
     try {
       const result = await client.integrationRequestDelivery(params)
-      forgetIdempotencyKey('request_delivery', params, mutationKeys)
       if (generation !== loadGeneration.current) return
+      forgetIdempotencyKey('request_delivery', params, mutationKeys)
       if (!applyCandidate(result.candidate)) return
     } catch (cause) {
       if (generation === loadGeneration.current) setError(message(cause))

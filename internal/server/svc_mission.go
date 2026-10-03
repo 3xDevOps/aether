@@ -26,12 +26,13 @@ func init() {
 		var launcher interface {
 			mission.Launcher
 			mission.Canceller
+			mission.Completer
 		}
 		if d.Runs != nil {
 			launcher = schedulerLauncher{runs: d.Runs}
 		}
 		cfg := mission.Config{
-			Store: d.Store, Missions: ms, Runs: launcher, Cancel: launcher,
+			Store: d.Store, Missions: ms, Runs: launcher, Cancel: launcher, Complete: launcher,
 			AuthorizationMu: d.SSH.AuthorizationMu, Cost: d.SSH.Services.Costs,
 			Evidence: d.Evidence, ScopeSnapshot: lazyMissionScope{ssh: d.SSH}.Snapshot,
 			Bus: d.Bus,
@@ -129,6 +130,13 @@ func (l schedulerLauncher) CancelMission(ctx context.Context, run domain.RunID) 
 		return errors.New("mission: scheduler unavailable")
 	}
 	return l.runs.CancelMission(ctx, run)
+}
+
+func (l schedulerLauncher) CompleteMission(ctx context.Context, run domain.RunID, outcome domain.RunStatus) error {
+	if l.runs == nil {
+		return errors.New("mission: scheduler unavailable")
+	}
+	return l.runs.CompleteMission(ctx, run, outcome)
 }
 
 type lazyMissionScope struct{ ssh *sshd.Config }

@@ -1048,10 +1048,11 @@ uses the default; negative values have the semantics in the table.
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
+| `--harness-update` | on | Update a shipped agent installed in the member home before launching it; see [harnesses.md](harnesses.md#updates-before-launch). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, or one its agent's report finished, retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed mission run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
 | `--harness-definitions` | none | Inline JSON custom harness definitions via this flag or `AETHER_HARNESS_DEFINITIONS`; see [harnesses.md](harnesses.md). |
 
@@ -1202,12 +1203,12 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees. A retained TUI run (closed, or finished by its agent's report) keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
+| `checkouts/` | Per-run worktrees. A retained TUI run (closed, or finished by its agent's report) and a completed mission run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
 | `transcripts/` | Per-run PTY transcripts (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
-| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained TUI runs retain this mount until expiry/deletion. |
+| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed mission runs retain this mount until expiry/deletion. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes and mirror credentials are server-owned state. Back up the
@@ -1376,11 +1377,15 @@ paused. Delete them once you have salvaged what you want.
 
 ## Releases
 
-Push the tag, then publish an ordinary, non-draft GitHub release for it. Alpha
-versions use the same tag syntax, for example `v0.4.0-alpha.1`:
+Choose a tag whose exact commit has passed the full `CI` workflow on a push to
+`main` in this repository. From a trusted `main` checkout, with `gh`
+authenticated and `jq` installed, check an existing local tag before pushing
+it and publishing an ordinary, non-draft GitHub release. Alpha versions use
+the same procedure, for example `v0.4.0-alpha.1`:
 
 ```sh
-git push origin v0.4.0-alpha.1
+sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.4.0-alpha.1^{commit}')" &&
+git push origin v0.4.0-alpha.1 &&
 gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes
 ```
 
@@ -1389,15 +1394,73 @@ Publish alpha tags as normal releases, not GitHub prereleases, because
 `/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
 
 Publishing the release runs
-[`.github/workflows/release.yml`](../.github/workflows/release.yml): it checks
-the four signing secrets, rejects a tag that is not a release tag, vets, runs
-the unit tests, cross-compiles the full matrix with `make release`, writes
-`checksums.txt`, and uploads the binaries and standard image. The first two
-steps run before any toolchain is installed, so a missing secret or a tag such
-as `v0.5` ends the release in seconds instead of after the whole matrix is
-built - which used to leave the published release with no assets and
-`/releases/latest` pointing at it. Only an admin publisher runs the release
-job on a GitHub-hosted runner; other publishers are skipped.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). Only an
+admin publisher passes `publisher-policy`; other publishers and failed
+permission lookups skip the downstream jobs. `release-policy` checks out
+trusted `refs/heads/main`, validates the tag syntax, resolves the tag's full
+commit SHA and requires it to match the release event's SHA. It runs the
+checker from that trusted checkout, not from the tag's code.
+
+[`scripts/release-ci-check.sh`](../scripts/release-ci-check.sh) accepts only
+this repository's `.github/workflows/ci.yml` (`CI`), with event `push`, branch
+`main` and that exact full SHA. It selects the newest matching run and reads
+its current attempt; both completion and a `success` conclusion are required.
+Missing, pending or failed CI, malformed or incomplete API results and lookup
+errors fail closed. A PR run, another commit's green run or an older successful
+attempt cannot authorize a release. The accepted run URL and SHA appear in the
+release job summary. If CI is still running, wait for it to finish successfully
+and rerun the release workflow.
+
+The release workflow reuses that full main CI result instead of rerunning Go
+vet and unit tests. After policy succeeds, every source-building producer
+checks out the authorized SHA and runs independently:
+
+- `release-binaries` has six Go lanes: Linux, macOS (`darwin`) and Windows,
+  each for amd64 and arm64. Each Linux lane builds server, edge and CLI;
+  each macOS or Windows lane builds only its CLI. They call
+  `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
+  and upload `binaries-go-<goos>-<goarch>`.
+- `android` separately builds and verifies the signed APK and AAB with
+  `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
+  It is the only job that receives the Android signing secrets.
+- `browser-image`, `edge-image` and `standard-image` each build on native
+  amd64 (`ubuntu-latest`) and arm64 (`ubuntu-24.04-arm`) runners. Each loads,
+  smoke-tests and pushes the same local image as `<tag>-<arch>`; standard
+  arm64 builds do not use QEMU. Browser runs `make browser-smoke`, edge runs
+  `sh scripts/edge-image-smoke.sh "$EDGE_IMAGE"`, and standard runs
+  `sh scripts/standard-image-smoke.sh "$STANDARD_IMAGE"` for its toolchain
+  and native Git checks.
+
+The manifest jobs join the tested architectures and verify their digests.
+Browser publishes `ghcr.io/3xdevops/aether-browser:<tag>`; standard publishes
+`ghcr.io/3xdevops/aether-standard` under the release tag, full commit SHA and
+`sha-<first-seven-SHA-characters>`. Both require anonymous manifest access and
+pulls of the tested architecture digests. Edge's private-package exception is
+described below.
+
+The final `release` job requires all six Go lanes, signed Android and all three
+verified image manifests. It downloads artifacts from this workflow run only,
+never promotes unsigned CI builds, and requires exactly these twelve nonempty,
+regular, non-symlink files in `dist/`:
+
+```text
+aether-server-linux-amd64  aether-server-linux-arm64
+aether-edge-linux-amd64    aether-edge-linux-arm64
+aether-linux-amd64         aether-linux-arm64
+aether-darwin-amd64        aether-darwin-arm64
+aether-windows-amd64.exe   aether-windows-arm64.exe
+aether-android.apk        aether-android.aab
+```
+
+Missing or unexpected files, including unsigned Android names, stop the upload.
+The job writes and verifies `checksums.txt` with SHA-256, then uploads all twelve
+assets plus the checksum file. Only after that succeeds do `standard-latest`
+and `edge-latest` move their respective `latest` tags to the verified images;
+each checks that `latest` carries the expected architecture digests. Releases
+share one workflow-wide concurrency group. The GitHub release itself is
+already published when the workflow starts, so a failed run can still leave
+`/releases/latest` pointing at a release without assets; image `latest` is not
+moved by a failed pre-upload run.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
@@ -1411,16 +1474,16 @@ binaries. Nothing reaches a tag before it is tested:
 2. `edge-manifest` joins those two under the immutable tags: the release
    tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
    names one index digest and that the index carries the two tested images,
-   pulls each architecture by tag and by digest, and lists the digests in
-   the job summary. The release job waits for it, so a failed edge image
-   uploads no assets.
+   resolves the tags at the registry, pulls each architecture by its own
+   digest, and lists the digests in the job summary. The release job waits
+   for it, so a failed edge image uploads no assets.
 3. `edge-latest` moves `latest` to that digest only after the release job
    has uploaded the assets. A release that fails earlier leaves `latest` on
    the previous release.
 
-A new GHCR package starts private. The workflow does not fail on that, by
-design: the image is published and pullable with credentials, and only an
-administrator can change the visibility. After the first release that
+A new GHCR package starts private. For **edge only**, the workflow does not fail
+on that, by design: the image is published and pullable with credentials, and
+only an administrator can change the visibility. After the first release that
 publishes `aether-edge`, a repository administrator opens
 <https://github.com/orgs/3xDevOps/packages/container/package/aether-edge>,
 chooses Package settings, and sets Danger Zone > Change visibility to
@@ -1428,17 +1491,18 @@ Public; if the package page does not show the repository, **Connect
 repository** links it. Until then `edge-manifest` ends with the warning
 `aether-edge is not public` and the release still completes.
 
-`make release` also builds and signs the [Android app](#android-app), the
-APK and the app bundle, in a pinned SDK container, so the release needs
-Docker on the runner and four repository secrets: `ANDROID_KEYSTORE_B64`
-(the release keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`,
-`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. The workflow decodes the
-keystore into the runner's
-temp directory and deletes it when the build ends. It checks all four in its
-first step, so a missing one ends the release in seconds rather than after a
-build - an unsigned APK is worse than no APK, because nothing can update over
-it. A PKCS12 keystore, which is what `keytool` writes, holds one password for
-the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
+The separate `android` release job builds and signs the [Android app](#android-app),
+both APK and app bundle, in a pinned SDK container. It needs Docker on its runner
+and four repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
+base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
+`ANDROID_KEY_PASSWORD`. Its first step, **after release policy succeeds but
+before checkout or signing-toolchain setup**, checks that all four are present
+and decodes the keystore into the runner's temp directory, outside checkout.
+Cleanup runs even on failure. Missing secrets prevent Android from building
+and block the final asset upload, but other authorized producers may already
+be running. An unsigned APK is worse than no APK, because nothing can update
+over it. A PKCS12 keystore, which is what `keytool` writes, holds one password
+for the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
 `ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. Generate it
 with `-validity 10950`: `keytool` defaults to 90 days, and Google Play needs
 an upload key whose certificate is still valid after 22 October 2033, with 25
@@ -1478,9 +1542,10 @@ where rank orders the pre-releases of a version below its final release -
 `alpha.N` is 100 + N, `beta.N` is 300 + N, `rc.N` is 500 + N, a final release
 is 999. So `v0.4.0-alpha.6` is 400106, `v0.4.0-rc.1` is 400501, `v0.4.0` is
 400999, and `v0.4.1-alpha.1` is 401101. Every release scores above the one
-before it whatever branch it was tagged from, which a commit count does not:
-a hotfix tagged off a shorter branch would score below the release it fixes,
-and Android would refuse the correctly signed APK as a downgrade.
+before it without depending on branch history, which a commit count does not:
+a hotfix on a shorter history could otherwise score below the release it fixes,
+and Android would refuse the correctly signed APK as a downgrade. Release
+authorization still requires successful exact-commit main push CI.
 
 So a release tag has to be `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. A signed build refuses anything else before
@@ -1499,11 +1564,40 @@ store listing and Android prints it in the phone's app info, where `v0.4.0`
 reads as part of the number. `v0.4.0-alpha.6` ships as versionName
 `0.4.0-alpha.6` and versionCode 400106.
 
-If the release workflow fails after building, rerun it for the published
-release. The publisher uploads missing assets to the existing release and
-replaces same-named assets without changing its release notes.
+If the release workflow fails, rerun it for the published release after fixing
+the cause. The publisher uploads missing assets to the existing release and
+replaces same-named assets with `gh release upload --clobber`, without changing
+its release notes. Producer artifact uploads also allow replacement on rerun.
 
-The release workflow stamps the binaries with the release tag itself
-(`make release VERSION="$GITHUB_REF_NAME"`), not with `git describe`, which
-picks one of two tags on the same commit at random. A local build still
-versions itself from `git describe`, so the checkout keeps full history.
+Every version-bearing release producer uses the release tag explicitly: Go
+uses `make release-binaries VERSION="$GITHUB_REF_NAME"` (including Windows
+resources), Android uses `make android VERSION="$GITHUB_REF_NAME"`, and edge
+passes `VERSION=${{ github.ref_name }}` and the authorized checkout's short
+`COMMIT` as Docker build arguments. Browser uses the release tag in image
+references; standard uses it in image references and its OCI version label,
+not a Make `VERSION` override. This avoids letting `git describe` choose
+between multiple tags on the same commit.
+
+For local builds, `make release-binaries` retains the dashboard build and the
+default ten Go binaries but does not invoke Android or Docker. Command-line
+`SERVER_PLATFORMS`, `EDGE_PLATFORMS` and `CLI_PLATFORMS` overrides select targets;
+an empty value disables that binary family. Windows resources are generated
+only for selected Windows CLI targets. For example, from the intended source
+checkout:
+
+```sh
+# Linux arm64 server, edge and CLI only.
+make release-binaries VERSION=v0.4.0-alpha.1 \
+  SERVER_PLATFORMS=linux/arm64 EDGE_PLATFORMS=linux/arm64 CLI_PLATFORMS=linux/arm64
+
+# Windows arm64 CLI only.
+make release-binaries VERSION=v0.4.0-alpha.1 \
+  SERVER_PLATFORMS= EDGE_PLATFORMS= CLI_PLATFORMS=windows/arm64
+```
+
+These targets write to `dist/` without clearing files from previous builds.
+The full local `make release VERSION=v0.4.0-alpha.1` is unchanged: by default
+it builds all ten Go binaries, then Android APK and AAB with the existing
+signing environment (unsigned when none is configured). It still needs
+Docker for Android. Without an explicit `VERSION`, local builds continue to
+use `git describe`; full history also keeps short commit stamping consistent.

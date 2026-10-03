@@ -13,6 +13,7 @@ import type {
   OverlapPayload,
   RunArchivedPayload,
   RunDiffPayload,
+  RunInputPayload,
   RunProtectedPayload,
   RunStatusPayload,
   RunTitlePayload,
@@ -423,6 +424,21 @@ export async function applyEvent(
     case 'run.outcome_seen':
       store.getState().applyOutcomeSeen(ev.run_id)
       break
+    case 'run.input': {
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          if (!(err instanceof ApiError && err.status === 404)) {
+            store.getState().setUnreachable(classifyUnreachable(err, store))
+            return false
+          }
+        }
+      }
+      const p = ev.payload as RunInputPayload
+      store.getState().applyRunInput(ev.run_id, p.pending_inputs)
+      break
+    }
     case 'run.title': {
       const p = ev.payload as RunTitlePayload
       if (!store.getState().runs[ev.run_id]) {

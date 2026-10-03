@@ -76,8 +76,7 @@ func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport
 	return nil
 }
 
-// Report answers run.report for run: the agent behind this socket says it
-// is working, or that it needs its member and why.
+// Report answers run.report for run with independent execution and input updates.
 func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunReportParams) (protocol.RunReportResult, *protocol.Error) {
 	const method = protocol.MethodRunReport
 	if s.cfg.Disabled {
@@ -87,15 +86,22 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 		return protocol.RunReportResult{}, runClosing(method)
 	}
 	defer s.leaveRun(run)
-	state, ok := agentstatus.ParseState(p.State)
-	if !ok {
-		return protocol.RunReportResult{}, invalidParams(method,
-			"state must be \""+string(agentstatus.Working)+"\" or \""+string(agentstatus.Waiting)+"\"")
+	if err := domain.ValidateRunInputUpdates(p.InputUpdates); err != nil {
+		return protocol.RunReportResult{}, invalidParams(method, err.Error())
+	}
+	var state agentstatus.State
+	if p.State != "" || len(p.InputUpdates) == 0 {
+		var ok bool
+		state, ok = agentstatus.ParseState(p.State)
+		if !ok {
+			return protocol.RunReportResult{}, invalidParams(method,
+				"state must be \""+string(agentstatus.Working)+"\" or \""+string(agentstatus.Idle)+"\", or omitted with input_updates")
+		}
 	}
 	if s.cfg.Reports == nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, ErrNoReportSink)
 	}
-	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason)}
+	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason), InputUpdates: p.InputUpdates}
 	if err := s.cfg.Reports.ReportAgentState(ctx, run, report); err != nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, err)
 	}

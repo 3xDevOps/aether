@@ -151,8 +151,10 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(page.getByRole('group', { name: 'Run viewers', exact: true }).getByRole('img')).toHaveCount(1, { timeout: terminalTimeout })
   const viewing = await inspectWorker()
   expect(viewing.takeover_active ?? false).toBe(false)
-  await room.getByRole('button', { name: 'Take control', exact: true }).click()
-  await expect(room.getByRole('button', { name: 'Release control', exact: true })).toBeVisible({ timeout: 30_000 })
+  const controls = page.getByRole('group', { name: 'Terminal attachment controls', exact: true })
+  await expect(controls.getByText('Nobody', { exact: true })).toBeVisible()
+  await controls.getByRole('button', { name: 'Take control', exact: true }).click()
+  await expect(controls.getByRole('button', { name: 'Release', exact: true })).toBeVisible({ timeout: 30_000 })
   const controlled = await inspectWorker()
   expect(controlled.takeover_active).toBe(true)
   expect(controlled.takeover_member_id).toBe(aliceID)
@@ -167,6 +169,12 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
   const released = await inspectWorker()
   expect(released.takeover_active ?? false).toBe(false)
+
+  const workerContainerID = execFileSync(
+    'docker',
+    ['inspect', '--format', '{{.Id}}', runContainer(started.attempt.run_id)],
+    { encoding: 'utf8', timeout: 10_000 },
+  ).trim()
 
   // The real worker reports through its mounted CLI. Reconciliation creates
   // the proposed submission; the integrator fixture then accepts it with the
@@ -186,6 +194,16 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
       { timeout: terminalTimeout, intervals: [250, 500, 1_000, 2_000] },
     )
     .toBe('proposed')
+  await expect
+    .poll(
+      () => execFileSync(
+        'docker',
+        ['inspect', '--format', '{{.Id}} {{.State.Paused}} {{.State.Running}}', runContainer(started.attempt.run_id)],
+        { encoding: 'utf8', timeout: 10_000 },
+      ).trim(),
+      { timeout: terminalTimeout, intervals: [250, 500, 1_000, 2_000] },
+    )
+    .toBe(`${workerContainerID} true true`)
   if (!submission) throw new Error('worker report did not create a mission submission')
   runCoordCLI<TaskMutation>(mission.current_integrator_run_id, [
     'task', 'accept-submission',

@@ -1929,7 +1929,7 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 		cfg.PollInterval = 10 * time.Millisecond
 	})
 	run, c := e.launchReporting(t)
-	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	waiting := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
 		t.Fatalf("report waiting: %v", err)
 	}
@@ -1948,8 +1948,8 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
-		t.Fatalf("recovered run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonInput)
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("recovered run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonIdle)
 	}
 
 	if rerr := s2.ReportAgentState(t.Context(), run.ID, waiting); rerr != nil {
@@ -1981,7 +1981,7 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 		cfg.PollInterval = 10 * time.Millisecond
 	})
 	run, c := e.launchReporting(t)
-	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	waiting := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
 		t.Fatalf("report waiting: %v", err)
 	}
@@ -2006,9 +2006,9 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
 		t.Fatalf("run = %s because %q after a repaint, want it still parked because %q: the waiting report survives a restart",
-			r.Status, r.Reason, agentstatus.ReasonInput)
+			r.Status, r.Reason, agentstatus.ReasonIdle)
 	}
 
 	// The agent's own next turn still releases it.
@@ -2032,7 +2032,7 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 		cfg.PollInterval = 10 * time.Millisecond
 	})
 	run, c := e.launchOn(t, "codex")
-	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	waiting := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
 		t.Fatalf("report waiting: %v", err)
 	}
@@ -2056,9 +2056,9 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
 		t.Fatalf("run = %s because %q after a recovered repaint, want it still parked because %q",
-			r.Status, r.Reason, agentstatus.ReasonInput)
+			r.Status, r.Reason, agentstatus.ReasonIdle)
 	}
 
 	// Output still arriving well past the redraw is the agent working.

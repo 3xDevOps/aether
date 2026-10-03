@@ -515,7 +515,7 @@ func (d *DB) enrichSubmissionAcceptance(ctx context.Context, s *domain.Submissio
 	return nil
 }
 
-func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, acceptedBy domain.RunID, expectedGeneration, expectedSet uint64, scopeDisposition, key string) (*domain.Acceptance, error) {
+func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, acceptedBy domain.RunID, expectedGeneration, expectedSet uint64, scopeDisposition, key string, validated *SubmissionEvidenceValidation) (*domain.Acceptance, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -528,10 +528,12 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	var state string
 	var subGen uint64
 	var retained, evidenceRef string
+	var workspace domain.WorkspaceID
+	var run domain.RunID
 	var requiredJSON, evidenceJSON, scopeJSON string
 	var currentRun sql.NullString
 	var generation, setVersion uint64
-	if submissionErr := tx.QueryRowContext(ctx, `SELECT s.mission_id,s.task_id,s.task_revision,s.attempt_id,s.state,s.integrator_generation,s.retained_revision,s.evidence_ref,s.evidence,s.scope_violations,m.integrator_generation,m.accepted_set_version,m.current_integrator_run_id,r.evidence_requirements FROM mission_submissions s JOIN missions m ON m.id=s.mission_id JOIN mission_task_revisions r ON r.task_id=s.task_id AND r.revision=s.task_revision WHERE s.id=?`, id).Scan(&missionID, &taskID, &taskRevision, &attemptID, &state, &subGen, &retained, &evidenceRef, &evidenceJSON, &scopeJSON, &generation, &setVersion, &currentRun, &requiredJSON); errors.Is(submissionErr, sql.ErrNoRows) {
+	if submissionErr := tx.QueryRowContext(ctx, `SELECT s.mission_id,s.task_id,s.task_revision,s.attempt_id,s.state,s.integrator_generation,s.retained_revision,s.evidence_ref,s.evidence,s.scope_violations,m.integrator_generation,m.accepted_set_version,m.current_integrator_run_id,r.evidence_requirements,s.workspace_id,s.run_id FROM mission_submissions s JOIN missions m ON m.id=s.mission_id JOIN mission_task_revisions r ON r.task_id=s.task_id AND r.revision=s.task_revision WHERE s.id=?`, id).Scan(&missionID, &taskID, &taskRevision, &attemptID, &state, &subGen, &retained, &evidenceRef, &evidenceJSON, &scopeJSON, &generation, &setVersion, &currentRun, &requiredJSON, &workspace, &run); errors.Is(submissionErr, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if submissionErr != nil {
 		return nil, submissionErr
@@ -585,12 +587,37 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	if retained == "" {
 		return nil, ErrMissionNotReady
 	}
+	if validated == nil {
+		return nil, ErrMissionNotReady
+	}
+	if validated.Ref != (domain.SubmissionRef{WorkspaceID: workspace, RunID: run, EvidenceRef: evidenceRef, RetainedRevision: retained}) {
+		return nil, ErrMissionStale
+	}
+	if len(validated.Evidence) != len(evidence) {
+		return nil, ErrMissionNotReady
+	}
+	for i, fact := range validated.Evidence {
+		if fact.Kind != evidence[i].Kind || fact.Ref != evidence[i].Ref {
+			return nil, ErrMissionNotReady
+		}
+	}
+	evidence = validated.Evidence
+	evidenceJSON, err = missionJSON(evidence, "[]")
+	if err != nil {
+		return nil, err
+	}
 	facts := make(map[string]bool, len(evidence))
 	matchedEvidence := false
 	baseline := false
 	for _, fact := range evidence {
+		if fact.Ref != evidenceRef && fact.Kind != "input" {
+			if fact.Available {
+				return nil, ErrMissionNotReady
+			}
+			continue
+		}
 		facts[fact.Kind] = facts[fact.Kind] || (fact.Available && fact.Ref != "")
-		if fact.Kind == "retained_packet" && fact.Available && fact.Ref != "" {
+		if fact.Kind == "retained_packet" && fact.Available && fact.Ref == evidenceRef {
 			baseline = true
 		}
 		if fact.Ref == evidenceRef && fact.Available {
@@ -615,7 +642,7 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
 	newVersion := setVersion + 1
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_submissions SET state='accepted', decided_at=?, decision_by_run_id=? WHERE id=? AND state='proposed'`, n, acceptedBy, id); updateErr != nil {
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_submissions SET state='accepted', evidence=?, decided_at=?, decision_by_run_id=? WHERE id=? AND state='proposed'`, evidenceJSON, n, acceptedBy, id); updateErr != nil {
 		return nil, updateErr
 	}
 	if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, scope_disposition, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, missionID, taskID, taskRevision, newVersion, generation, acceptedBy, scopeDisposition, n); insertErr != nil {

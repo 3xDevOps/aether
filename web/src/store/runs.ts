@@ -1,11 +1,7 @@
-import type { Run, RunStatus } from '@/lib/types'
+import type { Run, RunInputRequest, RunStatus } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
-/**
- * A run plus the two things only the event stream knows: why it is in its
- * current status, and when it last changed. Both drive sorting and the
- * needs-attention copy in the UI.
- */
+/** A run plus its last execution-status change time, for sorting and acknowledgments. */
 export type RunRecord = Run & {
   reason?: string
   stateChangedAt: string
@@ -41,6 +37,7 @@ export interface RunsSlice {
   setRuns: (runs: Run[]) => void
   upsertRun: (run: Run) => void
   removeRun: (runID: string) => void
+  applyRunInput: (runID: string, requests: RunInputRequest[]) => void
   applyRunStatus: (
     runID: string,
     to: RunStatus,
@@ -75,7 +72,13 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       }
     }),
   upsertRun: (run) =>
-    set((s) => ({ runs: { ...s.runs, [run.id]: toRecord(run, s.runs[run.id]) } })),
+    set((s) => {
+      const current = s.runs[run.id]
+      // A late route/launch snapshot must not resurrect a resolved request.
+      const next = toRecord(run, current)
+      next.pending_inputs = isTerminal(next.status) ? [] : current?.pending_inputs ?? run.pending_inputs
+      return { runs: { ...s.runs, [run.id]: next } }
+    }),
   removeRun: (runID) =>
     set((s) => {
       const other = (id: string) => id !== runID
@@ -97,7 +100,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         outcome_unseen: outcomeUnseen,
       }
       if (to === 'running' && !next.started_at) next.started_at = time
-      if (isTerminal(to)) next.finished_at = time
+      if (isTerminal(to)) {
+        next.finished_at = time
+        next.pending_inputs = []
+      }
       return { runs: { ...s.runs, [runID]: next } }
     }),
   applyOutcomeSeen: (runID) =>
@@ -105,6 +111,13 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current?.outcome_unseen) return {}
       return { runs: { ...s.runs, [runID]: { ...current, outcome_unseen: false } } }
+    }),
+
+  applyRunInput: (runID, requests) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || isTerminal(current.status)) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, pending_inputs: requests } } }
     }),
 
   applyLastCommit: (runID, commit, time) =>

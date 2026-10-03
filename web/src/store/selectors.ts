@@ -2,10 +2,10 @@
 // things that need a human come first.
 
 import {
-  needsYou,
   runState,
   stateLabel,
   stateRank,
+  waitsOnHuman,
   type PresentationState,
 } from '@/lib/status'
 import type { Member } from '@/lib/types'
@@ -15,10 +15,7 @@ import type { GroupBy } from '@/store/ui'
 /**
  * The slice of the root state the sidebar derives from. Narrow on purpose:
  * components subscribe to exactly these fields and memoize, so a derived
- * array is never recomputed on unrelated store writes. The pending set is
- * here because a run holding a pending approval presents as needs-attention;
- * it arrives pre-derived (usePendingApprovalRuns) so an inbox refetch that
- * changed nothing keeps its identity.
+ * array is never recomputed on unrelated store writes.
  *
  * An empty workspace shows every run: that is what the board falls back to
  * before hydration has named one.
@@ -28,20 +25,19 @@ export interface SidebarInput {
   runs: Record<string, RunRecord>
   members: Record<string, Member>
   groupBy: GroupBy
-  pending: Set<string>
 }
 
 export interface SidebarRun {
   run: RunRecord
   state: PresentationState
-  /** Listed with the runs waiting on a human; see `needsYou`. */
-  needsYou: boolean
+  /** Listed with the runs waiting on a human; see `waitsOnHuman`. */
+  waitsOnHuman: boolean
   owner?: Member
 }
 
-/** The state a run is ranked and grouped by: its own, or needs-attention while it needs you. */
+/** The state a run is ranked and grouped by: its own, or needs-attention while it waits on a human. */
 function standing(entry: SidebarRun): PresentationState {
-  return entry.needsYou ? 'needs-attention' : entry.state
+  return entry.waitsOnHuman ? 'needs-attention' : entry.state
 }
 
 export interface SidebarRunTree extends SidebarRun {
@@ -80,14 +76,11 @@ export function sidebarRuns(s: SidebarInput): SidebarRun[] {
     // A live run can never be hidden, so the archive check only applies
     // once the run has actually stopped.
     if (run.archived_at && isArchivable(run.status)) continue
-    const state = runState(
-      run.status,
-      s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
-    )
+    const state = runState(run.status)
     entries.push({
       run,
       state,
-      needsYou: needsYou(run, state),
+      waitsOnHuman: waitsOnHuman(run, state),
       owner: s.members[run.member_id],
     })
   }

@@ -70,11 +70,31 @@ keep automatic acquisition; other members and phones start as mirrors.
 The server grants an unoccupied lease only with Steer permission. A write
 request that cannot acquire the lease is refused rather than silently becoming
 a second writer. `aether attach` asks for control by default; use
-`aether attach --read-only <run>` to watch deliberately. An occupied attach
-does not silently displace the current controller. Open the Run Room and
-confirm **Take control** to perform an occupied takeover. The confirmation
-names the current controller; takeover ends that writable session and notifies
-it.
+`aether attach --read-only <run>` to watch deliberately. In either the terminal
+toolbar or Run Room, clicking **Take control** acquires an unoccupied terminal.
+An occupied click reports `run control is held by another session` and leaves
+the current controller in place.
+
+To request an occupied terminal, hold **Take control** for five seconds with
+the pointer, touch, Space, or Enter. A red fill with a forward-slash leading
+edge advances across the button; covered and uncovered text retain separate
+contrast. The holder sees the same fill on **Release** and red tracing over
+the teal border from the side midpoints toward the top and bottom centers.
+Releasing early, moving off the button, pressing Escape, or leaving the tab
+cancels the hold.
+
+After the full hold, the holder gets a focused dialog naming the requester.
+**Deny** keeps control; **Accept** transfers it immediately. With no response,
+the server transfers control after seven seconds. Releasing the button after
+the full hold does not cancel the request. The server cancels a pending request
+if either participant disconnects, authority changes, or the target lease is
+released or replaced. Progress never grants input before the server acknowledges
+the new controller.
+The dialog returns focus to the interrupted terminal or composer when it closes.
+
+![The holder's takeover dialog with Deny focused](media/terminal-takeover-dialog.webp)
+
+![An occupied click reports the original conflict without taking control](media/terminal-takeover-refusal.webp)
 
 The development shell dock does not compete for the primary harness lease.
 Each shell has its own controller, named in the dock, and starts as a watcher.
@@ -97,17 +117,21 @@ becomes a mirror. After the window, the return acquires control only if the run
 is still unoccupied.
 **Control changes are acknowledged on the existing attach WebSocket.** A
 dashboard terminal sends a text frame such as
-`{"type":"control","request_id":17,"write":true}`. It may include
-`"takeover":true` for an explicit Run Room takeover and the current
-`"control_generation"` fence. The server answers on that same stream with
+`{"type":"control","request_id":17,"write":true}`. Occupied takeovers use the
+five-second hold and seven-second review exchange described in the
+[attach protocol](local-gateway.md#get-wsattachrun_id). The server answers on that
+same stream with
 `{"type":"control","request_id":17,"ok":true,"has_control":true,
 "control_session_id":"...","control_generation":8}`. Every result includes
 `has_control`, even when false; refusals also carry `code` and `error`.
 A refused duplicate acquisition does not revoke a lease the session still owns.
 An unsolicited lease revocation is also a
 `type:"control"` frame, but has no `request_id`; it reports the exact revoked
-generation, and the displaced interactive session remains a read-only mirror.
-The same-socket notification is used when an interactive attach loses **Steer**:
+generation and `control_session_id`, and the displaced interactive session
+remains a read-only mirror. Its `revocation_reason` identifies an actual lease
+replacement (`takeover`), lost steering authority (`permission`), or other
+fencing (`revoked`). A successful voluntary-release acknowledgement has no
+revocation reason. The same-socket notification is used when an interactive attach loses **Steer**:
 the terminal stays open and input is disabled. Raw legacy attaches retain the
 named close (`1008`, `steer permission withdrawn`) instead. Input frames carry
 the current `control_generation`, and stale input is rejected. Taking or
@@ -140,19 +164,35 @@ The **Run Room** is the collaboration surface for this run. It starts as a
 collapsed vertical tab on the right of the terminal; its count includes
 unanswered questions and queued steer requests. The existing terminal toolbar
 names the controller and every viewer even while the room is collapsed. Viewer
-names scroll horizontally instead of adding a row; at limited widths, terminal
-tools move into **Terminal tools**. **(this tab)** means this live attach has
+names scroll horizontally instead of adding a row. Desktop terminal tools
+(search, text size, copy, paste, and upload) stay directly visible, including
+in environment and development terminals. At narrower desktop widths the tools
+wrap and presence/control use a separate row rather than a hidden menu.
+Phones keep secondary tools in **Terminal tools**, with **Take control** /
+**Release** directly accessible. **(this tab)** means this live attach has
 acknowledged control; the same member controlling elsewhere is **(another session)**.
 Narrow toolbars use key and eye icons for controller and viewers, retaining
 accessible role labels. Session markers stay in the controller's hover title
 and screen-reader text instead of wrapping onto another row.
 Live local ownership is shown by the toolbar's **(this tab)** controller marker
-and **Release** action. A thin, static teal outline surrounds the terminal
-only while this tab has live input. It disappears during replay, while reading
-history, after disconnecting or releasing control, and whenever input access is
-lost; a read-only mirror never shows it. The outline does not move or animate,
-including when reduced motion is enabled. The toolbar's controller markers and
-**Take control** / **Release** actions remain unchanged.
+and **Release** action. A 1px subdued teal border traces only the terminal
+viewport, never the toolbar, search bar, or UI above it. After this tab
+acknowledges live input, the border propagates from the left and right side
+midpoints, splitting up and down to meet at the top and bottom centers. An
+acknowledged voluntary release reverses that path. Both decelerate toward their
+endpoints.
+An explicit server takeover notification for this session's current lease
+turns the border red, then retracts along the reverse path over about two
+seconds. A completed hold has already made the border red; it stays red through
+the handoff. Presence names never trigger takeover feedback.
+Input is fenced immediately; the exit animation is decoration, not authority.
+Replay, recorded history, disconnects, permission loss, and other fencing hide
+the border without takeover feedback. A fresh read-only mirror has no border.
+Reduced motion makes ownership changes instant and replaces moving takeover
+fills with static red indicators and countdowns. Resizing preserves the
+viewport boundary, and a rapid control change reverses from the visible point.
+
+![A holder's red takeover progress traces over the active teal border](media/terminal-takeover-hold.webp)
 
 Presence refreshes on mount, every five seconds and after acknowledged control
 changes, independently of room history. A stalled refresh times out after 15
@@ -183,11 +223,11 @@ or answered the request. Retries use the
 same message identity, so they do not create a second request.
 
 Questions appear in the Run Room where they apply. **Answer** posts a
-correlated reply. The server includes each run's unanswered-question count in
-the normal run snapshot, so a fresh dashboard places that run in **Needs you**
-before anyone opens its room. The card names the run owner and points to the
-Run Room as the action. Questions and queued steers do not create a second
-action inbox.
+correlated reply. The run snapshot includes its unanswered-question count,
+so **Needs input** appears before anyone opens the room. The request does
+not change the execution group: a working run stays in **Working**. The
+card identifies the run owner and links to the Run Room. Questions and queued
+steers do not create a separate action inbox.
 
 Room image attachments use the terminal upload rules: each message may include
 up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than 8 MiB.

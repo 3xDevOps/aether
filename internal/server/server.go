@@ -107,6 +107,9 @@ type Config struct {
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
 	CoordinationDisabled bool
+	// HarnessUpdateDisabled stops pre-launch harness updates. The zero
+	// value keeps them on, which is the shipped default.
+	HarnessUpdateDisabled bool
 	// WhoIs overrides tailnet identity resolution; nil keeps the default
 	// (the local tailscaled socket when present). The E2E suite stubs it
 	// so join and fallback scenarios need no real tailnet.
@@ -136,8 +139,9 @@ type Config struct {
 	// file changes before it parks at needs-attention; PollInterval is how
 	// often that is checked. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
-	// RunContainerTTL is how long a closed or agent-finished TUI run's container
-	// is retained for reopening (negative disables retention).
+	// RunContainerTTL retains exact containers after TUI Close, an agent-finished
+	// TUI run, or mission-run completion (negative disables retention).
+	// Completed mission workers never reopen.
 	// MinFreeDiskBytes is the free-space floor below which new runs are
 	// refused (negative disables the floor).
 	StallThreshold   time.Duration
@@ -337,6 +341,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunContainerTTL:      cfg.RunContainerTTL,
 		MinFreeBytes:         cfg.MinFreeDiskBytes,
 		ServerBinary:         cfg.ServerBinary,
+
+		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
 		return nil, err
 	}

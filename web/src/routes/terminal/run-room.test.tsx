@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { Api } from '@/lib/api'
 import { RunRoom } from '@/routes/terminal/run-room'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { applyEvent } from '@/store/sync'
 import { useStore } from '@/store'
-import type { EvidencePatchResult, Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
+import type { DevArtifact, DevArtifactRetainResult, EvidencePatchResult, Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
 import { alice, bob, evidencePacket, fakeApi, roomMessage, run, workspace } from '@/test/fixtures'
+import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
+import { atViewport } from '@/test/viewport'
 
 
 const control: ControlMetadata = {
@@ -111,6 +114,35 @@ describe('Run Room', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Run Room' }))
   })
 
+  it('keeps phone keyboard focus inside the sheet and restores the opener without losing the draft', async () => {
+    atViewport(390, { pointer: 'coarse' })
+    render(
+      <>
+        <button>Outside Room</button>
+        <RunRoom run={run()} client={fakeApi()} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />
+      </>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    const room = await screen.findByRole('dialog', { name: 'Run Room' })
+    expect(screen.queryByRole('button', { name: 'Outside Room' })).toBeNull()
+    for (let index = 0; index < 12; index++) {
+      await userEvent.tab()
+      expect(room.contains(document.activeElement)).toBe(true)
+    }
+    await userEvent.tab({ shift: true })
+    expect(room.contains(document.activeElement)).toBe(true)
+    const composer = screen.getByRole('textbox', { name: 'Run Room message' })
+    fireEvent.change(composer, { target: { value: 'keep this phone draft' } })
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run Room' })).toBeNull())
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Run Room' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    const reopened = screen.getByRole('textbox', { name: 'Run Room message' })
+    expect(reopened).toHaveProperty('value', 'keep this phone draft')
+    fireEvent.keyDown(reopened, { key: 'M', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run Room' })).toBeNull())
+  })
+
   it.each(['dialog', 'alertdialog', 'menu', 'listbox'])('leaves the room shortcut to an open %s', (role) => {
     render(
       <>
@@ -134,6 +166,7 @@ describe('Run Room', () => {
   })
 
   it('refreshes collapsed presence independently of history and keeps stale status on failure', async () => {
+    atViewport(390, { pointer: 'coarse' })
     vi.useFakeTimers()
     try {
       const initial = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
@@ -161,6 +194,7 @@ describe('Run Room', () => {
   })
 
   it('applies slow presence responses and exposes slow failures without starving on the refresh interval', async () => {
+    atViewport(390, { pointer: 'coarse' })
     vi.useFakeTimers()
     try {
       useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
@@ -185,6 +219,7 @@ describe('Run Room', () => {
   })
 
   it.each(['success', 'failure'] as const)('recovers after a hung presence request and ignores its late %s', async (outcome) => {
+    atViewport(390, { pointer: 'coarse' })
     vi.useFakeTimers()
     try {
       const hung = Promise.withResolvers<RoomStatusResult>()
@@ -254,38 +289,29 @@ describe('Run Room', () => {
     expect(useStore.getState().roomStatus.run_2).toBeUndefined()
   })
 
-  it('confirms an occupied takeover and names the current controller', () => {
-    const take = vi.fn()
-    const occupied = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
+  it('keeps presence and protection in the phone sheet without duplicating desktop metadata', async () => {
+    const resize = atViewport(1440, { pointer: 'coarse' })
+    const occupied = status({ protected: true, controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
     const client = fakeApi({ runRoomStatus: vi.fn(async () => occupied) })
-    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: occupied }, roomMessages: {} })
-    render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    expect(screen.getByText(/Bob currently controls/)).toBeDefined()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Take control' }).at(-1)!)
-    expect(take).toHaveBeenCalledWith(true)
-  })
-  it('confirms takeover from another session of the same member', () => {
-    const take = vi.fn()
-    const occupied = status({
-      controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' },
-    })
-    const mirror = { ...control, has_control: false }
-    useStore.setState({
-      members: { [alice.id]: alice, [bob.id]: bob },
-      roomStatus: { run_1: occupied },
-      roomMessages: {},
-    })
-    render(<RunRoom run={run()} client={fakeApi()} selfID={alice.id} control={mirror} onTakeControl={take} onReleaseControl={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    expect(screen.getByText(/Alice currently controls/)).toBeDefined()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Take control' }).at(-1)!)
-    expect(take).toHaveBeenCalledWith(true)
+    mount({}, { client })
+    await waitFor(() => expect(useStore.getState().roomStatus.run_1).toEqual(occupied))
+    expect(screen.queryByText(/Controller:/)).toBeNull()
+    expect(screen.queryByText(/Viewing:/)).toBeNull()
+    expect(screen.queryByText('Protected', { exact: true })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Evidence/ })).toBeNull()
+    resize(390)
+    expect(screen.getByText(`Controller: ${bob.display_name}`)).toBeDefined()
+    expect(screen.getByText(`Viewing: ${alice.display_name}, ${bob.display_name}`)).toBeDefined()
+    expect(screen.getByText('Protected', { exact: true })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Take control' }).getAttribute('aria-disabled')).toBe('false')
+    resize(1440)
+    expect(screen.queryByText(/Controller:/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull()
   })
 
   it('keeps room control available for a needs-attention run', () => {
+    atViewport(390, { pointer: 'coarse' })
     const take = vi.fn()
     useStore.setState({
       members: { [alice.id]: alice, [bob.id]: bob },
@@ -295,30 +321,32 @@ describe('Run Room', () => {
     render(<RunRoom run={run({ status: 'needs-attention' })} client={fakeApi()} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     const button = screen.getByRole('button', { name: 'Take control' })
-    expect(button).toHaveProperty('disabled', false)
+    expect(button.getAttribute('aria-disabled')).toBe('false')
     fireEvent.click(button)
-    expect(take).toHaveBeenCalledWith(false)
+    expect(take).toHaveBeenCalledWith()
   })
   it('disables taking control for a completed run', () => {
+    atViewport(390, { pointer: 'coarse' })
     const take = vi.fn()
     const client = fakeApi()
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: status() }, roomMessages: {} })
     render(<RunRoom run={run({ status: 'completed' })} client={client} selfID={alice.id} onTakeControl={take} onReleaseControl={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     const button = screen.getByRole('button', { name: 'Take control' })
-    expect(button).toHaveProperty('disabled', true)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(button)
     expect(take).not.toHaveBeenCalled()
   })
   it('disables stale release control state for a completed run', () => {
+    atViewport(390, { pointer: 'coarse' })
     const release = vi.fn()
     const occupied = status({ controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
     const client = fakeApi({ runRoomStatus: vi.fn(async () => occupied) })
     useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: occupied }, roomMessages: {} })
     render(<RunRoom run={run({ status: 'completed' })} client={client} selfID={alice.id} control={control} onTakeControl={vi.fn()} onReleaseControl={release} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    const button = screen.getByRole('button', { name: 'Release control' })
-    expect(button).toHaveProperty('disabled', true)
+    const button = screen.getByRole('button', { name: 'Release' })
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     fireEvent.click(button)
     expect(release).not.toHaveBeenCalled()
   })
@@ -456,6 +484,7 @@ describe('Run Room', () => {
   })
 
   it('refreshes controller status without resetting the open room on control loss', async () => {
+    atViewport(390, { pointer: 'coarse' })
     vi.useFakeTimers()
     try {
       const initial = status({ controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
@@ -602,6 +631,7 @@ describe('Run Room', () => {
     { member_id: alice.id, connected: false },
     { member_id: bob.id, connected: true },
   ])('keeps acknowledged local authority despite stale presence from $member_id (connected=$connected)', async (snapshot) => {
+    atViewport(390, { pointer: 'coarse' })
     const queued = roomMessage({ id: 'steer_1', kind: 'steer_request', state: 'queued', body: 'Run the focused test' })
     const occupied = status({ controller: { ...snapshot, acquired_at: '2026-08-14T10:00:00Z' } })
     const client = fakeApi({
@@ -613,7 +643,7 @@ describe('Run Room', () => {
     render(<RunRoom run={run()} client={client} selfID={alice.id} control={control} onTakeControl={vi.fn()} onReleaseControl={release} />)
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     expect(screen.getByText(`Controller: ${alice.display_name}`)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Release control' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(release).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Approve now' }))
     await waitFor(() => expect(client.runRoomDecide).toHaveBeenCalledWith(expect.objectContaining({
@@ -644,7 +674,7 @@ describe('Run Room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     expect(screen.queryByRole('button', { name: 'Approve now' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
-    if (runStatus === 'running') expect(screen.queryByRole('button', { name: 'Release control' })).toBeNull()
+    if (runStatus === 'running') expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'Inspect the result' } })
     fireEvent.click(screen.getByRole('button', { name: 'Queue steer' }))
@@ -753,6 +783,61 @@ describe('Run Room', () => {
     expect(post.mock.calls[1][0].idempotency_key).not.toBe(post.mock.calls[0][0].idempotency_key)
   })
 
+  it('keeps capture drafts and an uncertain retention attempt across the evidence breakpoint', async () => {
+    const resize = atViewport(768)
+    const capture: DevArtifact = {
+      id: 'capture-resize', path: '/capture.png', source: 'terminal', run_id: 'run_1',
+      incarnation: 'shell-1', captured_at: '2026-08-14T10:00:00Z',
+      content_type: 'image/png', bytes: 100, width: 80, height: 24, truncated: false,
+    }
+    const first = Promise.withResolvers<DevArtifactRetainResult>()
+    const retry = Promise.withResolvers<DevArtifactRetainResult>()
+    const retain = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(retry.promise)
+    const packet = evidencePacket({ id: 'retained-after-resize', objective: 'Retained after resize' })
+    const client = fakeApi({
+      devArtifactList: vi.fn(async () => ({ artifacts: [capture], truncated: false })),
+      devArtifactRetain: retain,
+      runEvidenceGet: vi.fn(async () => ({ packet })),
+    })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByText('Select transient captures to retain'))
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Select terminal capture/ }))
+    fireEvent.change(screen.getByLabelText('Verification notes'), { target: { value: 'Observed the rendered result' } })
+
+    resize(767)
+    expect(screen.getByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', true)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', 'Observed the rendered result')
+    fireEvent.click(screen.getByRole('button', { name: 'Retain selected captures' }))
+    resize(768)
+    expect(screen.getByRole('button', { name: 'Retaining…' })).toHaveProperty('disabled', true)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('disabled', true)
+    await act(async () => { first.reject(new Error('Retention outcome uncertain')) })
+    expect(await screen.findByText('Retention outcome uncertain')).toBeDefined()
+    const key = retain.mock.calls[0][0].idempotency_key
+
+    resize(767)
+    expect(screen.getByText(`Idempotency key: ${key}`)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Retain selected captures' }))
+    expect(retain).toHaveBeenCalledTimes(2)
+    expect(retain.mock.calls[1][0]).toEqual(retain.mock.calls[0][0])
+    resize(768)
+    expect(screen.getByRole('button', { name: 'Retaining…' })).toHaveProperty('disabled', true)
+    await act(async () => { retry.resolve({ packet_id: packet.id }) })
+    expect(await screen.findByText('Retained after resize')).toBeDefined()
+    expect(screen.getByText(/Use this packet ID with the existing report/).textContent).toContain(packet.id)
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', '')
+    expect(screen.getByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', false)
+    expect(retain).toHaveBeenCalledTimes(2)
+
+    fireEvent.change(screen.getByLabelText('Verification notes'), { target: { value: 'discard on close' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByText('Select transient captures to retain'))
+    expect(screen.getByLabelText('Verification notes')).toHaveProperty('value', '')
+    expect(await screen.findByRole('checkbox', { name: /Select terminal capture/ })).toHaveProperty('checked', false)
+  })
+
   it('does not render a stale patch after selecting another packet', async () => {
     const packetA = evidencePacket({ id: 'packet_a', objective: 'A' })
     const packetB = evidencePacket({ id: 'packet_b', objective: 'B' })
@@ -765,7 +850,7 @@ describe('Run Room', () => {
         .mockImplementationOnce(() => first.promise)
         .mockImplementationOnce(() => second.promise),
     })
-    mount({}, { client })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} onAnswer={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     const packets = await screen.findAllByRole('button', { name: /report capture/ })
     fireEvent.click(packets[0])
@@ -798,7 +883,7 @@ describe('Run Room', () => {
       runEvidenceGet: vi.fn(async () => ({ packet })),
       runEvidencePatch: vi.fn(async () => ({ packet, patch: 'stable patch', truncated: false })),
     })
-    mount({}, { client })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} onAnswer={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
     fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))
@@ -828,7 +913,7 @@ describe('Run Room', () => {
       .mockRejectedValueOnce(new Error('evidence unavailable'))
       .mockResolvedValue({ packets: [packet] })
     const client = fakeApi({ runEvidenceList: list })
-    mount({}, { client })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} onAnswer={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     await screen.findByRole('alert')
     fireEvent.click(screen.getByRole('button', { name: 'Retry evidence' }))
@@ -847,20 +932,56 @@ describe('Run Room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'reply', correlation_id: 'question_1' })))
   })
-  it('prefills an evidence answer as a contextual comment and closes evidence', async () => {
-    const packet = evidencePacket({ unresolved_facts: ['Which branch should be released?'] })
-    const client = fakeApi({
-      runEvidenceList: vi.fn(async () => ({ packets: [packet] })),
-      runEvidenceGet: vi.fn(async () => ({ packet })),
-    })
-    mount({}, { client })
-    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
+  it('consumes each evidence request once, reopening and focusing a contextual comment without submitting', async () => {
+    const question = roomMessage({ id: 'question_1', kind: 'question', body: 'Which API?' })
+    const client = fakeApi({ runRoomList: vi.fn(async () => ({ messages: [question] })) })
+    const props = { run: run(), client, selfID: alice.id, onTakeControl: vi.fn(), onReleaseControl: vi.fn() }
+    const view = render(<RunRoom {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Answer' }))
-    expect(screen.queryByRole('heading', { name: 'Retained evidence' })).toBeNull()
-    expect((screen.getByRole('textbox', { name: 'Run Room message' }) as HTMLTextAreaElement).value).toBe('Which branch should be released?')
+    fireEvent.change(screen.getByLabelText('Attach image'), { target: { files: [new File(['image'], 'shot.png', { type: 'image/png' })] } })
+    await screen.findByText('Attachments: 1/8')
+    fireEvent.click(screen.getByRole('button', { name: 'Close Run Room' }))
+    const evidenceAnswer = { fact: 'Which branch should be released?' }
+    view.rerender(<RunRoom {...props} evidenceAnswer={evidenceAnswer} />)
+    const composer = screen.getByRole('textbox', { name: 'Run Room message' })
+    expect(composer).toHaveProperty('value', evidenceAnswer.fact)
+    expect(document.activeElement).toBe(composer)
+    expect(screen.queryByText('Replying to question')).toBeNull()
+    expect(screen.getByText('Attachments: 1/8')).toBeDefined()
+    expect(client.runRoomPost).not.toHaveBeenCalled()
+    fireEvent.change(composer, { target: { value: 'edited answer' } })
+    view.rerender(<RunRoom {...props} evidenceAnswer={evidenceAnswer} />)
+    expect(composer).toHaveProperty('value', 'edited answer')
+    view.rerender(<RunRoom {...props} evidenceAnswer={{ fact: evidenceAnswer.fact }} />)
+    expect(composer).toHaveProperty('value', evidenceAnswer.fact)
+    expect(document.activeElement).toBe(composer)
+    expect(client.runRoomPost).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'comment', body: 'Which branch should be released?' })))
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'comment', body: evidenceAnswer.fact, correlation_id: undefined,
+      attachments: ['/home/alice/.aether/uploads/image.png'],
+    })))
+  })
+
+  it('preserves an evidence answer and attachments when an older post completes', async () => {
+    const response = Promise.withResolvers<RoomPostResult>()
+    const client = fakeApi({ runRoomPost: vi.fn(() => response.promise) })
+    const props = { run: run(), client, selfID: alice.id, onTakeControl: vi.fn(), onReleaseControl: vi.fn() }
+    const view = render(<RunRoom {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    fireEvent.change(screen.getByLabelText('Attach image'), { target: { files: [new File(['image'], 'shot.png', { type: 'image/png' })] } })
+    await screen.findByText('Attachments: 1/8')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'original comment' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    view.rerender(<RunRoom {...props} evidenceAnswer={{ fact: 'new evidence question' }} />)
+    await act(async () => {
+      response.resolve({ message: roomMessage({ body: 'original comment' }) })
+      await response.promise
+    })
+    expect(screen.getByRole('textbox', { name: 'Run Room message' })).toHaveProperty('value', 'new evidence question')
+    expect(screen.getByText('Attachments: 1/8')).toBeDefined()
+    expect(client.runRoomPost).toHaveBeenCalledTimes(1)
   })
 
 
@@ -872,7 +993,7 @@ describe('Run Room', () => {
       runEvidencePatch: vi.fn(async () => ({ packet, patch: 'diff --git a/src/app.ts', truncated: false })),
       runEvidenceTranscript: vi.fn(async () => ({ packet, data_base64: btoa('agent output'), truncated: false })),
     })
-    mount({}, { client })
+    render(<EvidenceDrawer runID="run_1" workspaceID={workspace.id} client={client} onAnswer={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
     fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))

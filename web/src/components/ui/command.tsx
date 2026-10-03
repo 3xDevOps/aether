@@ -37,6 +37,7 @@ function CommandDialog({
   showCloseButton = true,
   onOpenAutoFocus,
   onCloseAutoFocus,
+  filter,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
@@ -45,12 +46,23 @@ function CommandDialog({
   showCloseButton?: boolean
   onOpenAutoFocus?: React.ComponentProps<typeof DialogContent>['onOpenAutoFocus']
   onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>['onCloseAutoFocus']
+  filter?: React.ComponentProps<typeof CommandPrimitive>['filter']
 }) {
   return (
     <Dialog {...props}>
       <DialogContent
         overlayClassName="!bg-transparent"
-        onOpenAutoFocus={onOpenAutoFocus}
+        onOpenAutoFocus={(event) => {
+          onOpenAutoFocus?.(event)
+          if (event.defaultPrevented) return
+          // The known input is the modal's initial focus target. Avoid Radix's
+          // generic walk through every option; its focus trap remains active.
+          const input = (event.target as HTMLElement).querySelector<HTMLInputElement>('[cmdk-input]')
+          if (input) {
+            input.focus({ preventScroll: true })
+            if (document.activeElement === input) event.preventDefault()
+          }
+        }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
           // The palette hangs from under the title bar, so its drop measures
@@ -66,7 +78,7 @@ function CommandDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
+        <Command filter={filter} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
           {children}
         </Command>
       </DialogContent>

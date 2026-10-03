@@ -62,6 +62,79 @@ func TestAcquireRejectsSecondTabAndForceTakeoverFencesOldGeneration(t *testing.T
 	}
 }
 
+func TestLeaseRevocationReasonSurvivesLaterGenerations(t *testing.T) {
+	service := New(Config{})
+	first, _, err := service.Acquire("run", "member", "tab-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, displaced, err := service.Acquire("run", "member", "tab-b", true)
+	if err != nil || displaced == nil {
+		t.Fatalf("takeover = %+v, %v", displaced, err)
+	}
+	if first.RevocationReason() != RevocationTakeover || displaced.RevocationReason() != RevocationTakeover {
+		t.Fatalf("takeover reasons = %q/%q", first.RevocationReason(), displaced.RevocationReason())
+	}
+	if _, err = service.AdmitRevoke("run", RevocationPermission, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	third, _, err := service.Acquire("run", "member", "tab-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RevokeMember("run", "member", first.SessionID, first.Generation); !errors.Is(err, ErrStale) {
+		t.Fatalf("delayed old permission revoke = %v, want stale", err)
+	}
+	if first.RevocationReason() != RevocationTakeover || second.RevocationReason() != RevocationPermission {
+		t.Fatalf("superseded reasons = %q/%q", first.RevocationReason(), second.RevocationReason())
+	}
+	if err := service.Validate("run", third.SessionID, third.Generation); err != nil {
+		t.Fatalf("delayed revocation invalidated replacement: %v", err)
+	}
+}
+
+func TestLeaseInvalidationDoesNotImplyTakeover(t *testing.T) {
+	for _, transition := range []string{"release", "fence", "permission", "expiry", "same-session reconnect", "failed takeover"} {
+		t.Run(transition, func(t *testing.T) {
+			clock := newTestClock()
+			service := New(Config{Now: clock.Now})
+			held, _, err := service.Acquire("run", "member", "session", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := RevocationRevoked
+			switch transition {
+			case "release":
+				err = service.Release("run", "member", held.SessionID, held.Generation)
+			case "fence":
+				service.Fence("run")
+			case "permission":
+				err = service.RevokeMember("run", "member", held.SessionID, held.Generation)
+				want = RevocationPermission
+			case "expiry":
+				service.Disconnect("run", held.SessionID, held.Generation)
+				clock.Advance(DefaultReconnectWindow)
+				_, _, err = service.Acquire("run", "member", "next-session", true)
+			case "same-session reconnect":
+				_, _, err = service.Acquire("run", "member", held.SessionID, true)
+			case "failed takeover":
+				denied := errors.New("denied")
+				_, _, err = service.AcquireAuthorized("run", "member", "next-session", true, 0, func() error { return denied })
+				if !errors.Is(err, denied) {
+					t.Fatalf("refused takeover = %v", err)
+				}
+				err = service.Validate("run", held.SessionID, held.Generation)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := held.RevocationReason(); got != want {
+				t.Fatalf("%s reason = %q, want %q", transition, got, want)
+			}
+		})
+	}
+}
+
 func TestAcquireForcedReconnectFencesSameSessionIncarnation(t *testing.T) {
 	service := New(Config{})
 	first, _, err := service.Acquire("run-1", "member-1", "tab-a", false)
@@ -336,7 +409,7 @@ func TestAdmitRevokeFencesTheLeaseAtTheMutationBoundary(t *testing.T) {
 	}
 	revoked := make(chan revokeResult, 1)
 	go func() {
-		displaced, revokeErr := service.AdmitRevoke("run-handoff", func() error {
+		displaced, revokeErr := service.AdmitRevoke("run-handoff", RevocationRevoked, func() error {
 			close(mutationEntered)
 			<-releaseMutation
 			return nil
@@ -392,7 +465,7 @@ func TestAdmitRevokeFailureKeepsTheCurrentLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutationErr := errors.New("transfer failed")
-	displaced, revokeErr := service.AdmitRevoke("run-failed-handoff", func() error {
+	displaced, revokeErr := service.AdmitRevoke("run-failed-handoff", RevocationRevoked, func() error {
 		return mutationErr
 	})
 	if !errors.Is(revokeErr, mutationErr) || displaced != nil {
@@ -490,5 +563,55 @@ func TestTryAdmitDefersWithoutWaitingOrChangingController(t *testing.T) {
 	<-called
 	if err := service.Validate("run", "session", controller.Generation); err != nil {
 		t.Fatalf("optional admission changed existing controller: %v", err)
+	}
+}
+
+func TestInteractiveForceOnlyReplacesExactAuthenticatedSession(t *testing.T) {
+	service := New(Config{})
+	first, _, err := service.Acquire("run", "member", "tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		member, session string
+		generation      uint64
+	}{
+		{"member", "other-tab", first.Generation},
+		{"other-member", "tab", first.Generation},
+		{"member", "tab", 0},
+	} {
+		called := false
+		_, _, err = service.AcquireInteractiveAuthorized("run", tc.member, tc.session, true, tc.generation, func() error {
+			called = true
+			return nil
+		})
+		if !errors.Is(err, ErrTakeoverRequired) || called {
+			t.Fatalf("interactive bypass %+v = %v, admitted=%v", tc, err, called)
+		}
+	}
+	replacement, _, err := service.AcquireInteractiveAuthorized("run", "member", "tab", true, first.Generation, nil)
+	if err != nil || replacement.Generation <= first.Generation {
+		t.Fatalf("same-session replacement = %+v, %v", replacement, err)
+	}
+	select {
+	case <-first.Revoked:
+	default:
+		t.Fatal("replaced lease did not notify its observers")
+	}
+	if _, _, err := service.AcquireInteractiveAuthorized("run", "member", "tab", true, first.Generation, nil); !errors.Is(err, ErrStale) {
+		t.Fatalf("stale reconnect = %v", err)
+	}
+	select {
+	case <-replacement.Revoked:
+		t.Fatal("stale reconnect revoked the replacement")
+	default:
+	}
+	if err := service.Release("run", "member", "tab", replacement.Generation); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-replacement.Revoked:
+	default:
+		t.Fatal("released lease did not notify its observers")
 	}
 }

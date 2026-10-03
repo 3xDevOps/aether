@@ -293,8 +293,13 @@ func (s *Scheduler) stopDevelopmentProcesses(ctx context.Context, id domain.RunI
 		if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
 			return err
 		}
+		s.setPaused(entry, false)
 		stopErr := s.StopDevelopmentTerminals(ctx, id)
-		return errors.Join(stopErr, s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid))
+		pauseErr := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid)
+		if pauseErr == nil {
+			s.setPaused(entry, true)
+		}
+		return errors.Join(stopErr, pauseErr)
 	}
 	return s.StopDevelopmentTerminals(ctx, id)
 }

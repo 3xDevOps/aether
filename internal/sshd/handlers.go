@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/collab"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
@@ -140,7 +141,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -182,11 +183,7 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		if p.ActiveOnly && r.Status.Terminal() {
 			continue
 		}
-		wr := protocol.RunFromDomain(r)
-		if s.cfg.Runs != nil {
-			wr.Paused = s.cfg.Runs.Paused(r.ID)
-		}
-		out = append(out, wr)
+		out = append(out, s.runSnapshot(r))
 	}
 	return protocol.RunListResult{Runs: out}, nil
 }
@@ -200,11 +197,18 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	wr := protocol.RunFromDomain(run)
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+}
+
+// runSnapshot decorates every run response, including mutation results. A
+// protection or launch response must not erase input learned from the stream.
+func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
+	out := protocol.RunFromDomain(run)
 	if s.cfg.Runs != nil {
-		wr.Paused = s.cfg.Runs.Paused(run.ID)
+		out.Paused = s.cfg.Runs.Paused(run.ID)
+		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
 	}
-	return protocol.RunResult{Run: wr}, nil
+	return out
 }
 
 func runIDParams(params json.RawMessage) (domain.RunID, *protocol.Error) {
@@ -241,7 +245,7 @@ func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 // runSeen clears a run's outcome_unseen flag. The guard only resolves the
@@ -330,7 +334,7 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 // runRelaunch re-enters the addressed retained TUI run. The retained
@@ -369,7 +373,7 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(reopened)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(reopened)}, nil
 }
 
 func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -431,7 +435,7 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 		})
 	}
 	if s.cfg.Control != nil {
-		displaced, transferErr := s.cfg.Control.AdmitRevoke(p.RunID, transfer)
+		displaced, transferErr := s.cfg.Control.AdmitRevoke(p.RunID, control.RevocationRevoked, transfer)
 		if transferErr != nil {
 			return nil, rpcError(transferErr)
 		}

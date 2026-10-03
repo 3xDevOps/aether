@@ -1,4 +1,4 @@
-import { awaitingReview, needsYou, runLabel, runState } from '@/lib/status'
+import { awaitingReview, runLabel, runState, waitsOnHuman } from '@/lib/status'
 import { isArchivable, isTerminal } from '@/store/runs'
 
 describe('runLabel', () => {
@@ -40,23 +40,17 @@ describe('run presentation', () => {
     expect(runState('completed')).toBe('done')
   })
 
-  it('keeps unanswered work in Needs you after a terminal lifecycle', () => {
-    for (const status of ['failed', 'completed', 'merged', 'abandoned'] as const) {
-      expect(runState(status, true)).toBe('needs-attention')
-    }
-  })
-
-  it('lists an unreviewed agent outcome as needing you without changing its finished state', () => {
+  it('lists an unreviewed agent outcome as waiting on a human without changing its finished state', () => {
     const success = { status: 'completed', outcome_unseen: true } as const
     const failure = { status: 'failed', outcome_unseen: true } as const
     expect(runState(success.status)).toBe('done')
     expect(runState(failure.status)).toBe('failed')
-    expect(needsYou(success, runState(success.status))).toBe(true)
-    expect(needsYou(failure, runState(failure.status))).toBe(true)
+    expect(waitsOnHuman(success, runState(success.status))).toBe(true)
+    expect(waitsOnHuman(failure, runState(failure.status))).toBe(true)
     expect(isTerminal(success.status) && isArchivable(failure.status)).toBe(true)
 
-    expect(needsYou({ status: 'completed' }, 'done')).toBe(false)
-    expect(needsYou({ status: 'completed', outcome_unseen: false }, 'done')).toBe(false)
+    expect(waitsOnHuman({ status: 'completed' }, 'done')).toBe(false)
+    expect(waitsOnHuman({ status: 'completed', outcome_unseen: false }, 'done')).toBe(false)
     // A later transition the flag outlived is not an agent outcome to review.
     expect(awaitingReview({ status: 'merged', outcome_unseen: true })).toBe(false)
     expect(awaitingReview({ status: 'running', outcome_unseen: true })).toBe(false)

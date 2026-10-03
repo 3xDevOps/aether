@@ -1,48 +1,72 @@
 name: Go build cache
 description: >
-  Restore Go's module and build caches on every run, and save them only
-  after a push to main. One Linux job may save a given key, and a
-  pull-request cache can evict the default-branch cache, so a pull request
-  restores and does not save. The key includes runner.environment so a
-  self-hosted archive is never restored onto a hosted VM. Used after
-  actions/setup-go with its own cache disabled, once per Go job.
+  Restore separate Go module and compiler caches after actions/setup-go
+  with its own cache disabled. Only main pushes save; one job per host
+  saves modules, and one job per variant saves its compiler cache.
+  Host, runner environment and resolved toolchain isolate all archives.
 inputs:
   mode:
     description: "restore or save"
     required: true
+  variant:
+    description: "Compiler cache lane (native or a distinct cross-build target)"
+    default: native
+  save-modules:
+    description: "Save modules from the single designated writer for this host"
+    default: 'false'
 runs:
   using: composite
   steps:
-    # actions/cache stores paths relative to the workspace, and different
-    # runner environments lay `go env`'s defaults out differently, hence
-    # runner.environment in the key (same convention as the Playwright cache).
-    - name: Resolve Go cache paths
+    - name: Resolve Go cache paths and toolchain
       id: paths
       shell: bash
       run: |
         echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-    # The save key carries the commit sha so every push refreshes the cache
-    # instead of reusing a stale one from the first commit that ever hashed
-    # to this go.sum (actions/cache/save never overwrites an existing key).
-    # Restore falls back through the sha-less prefixes to find the newest
-    # match for the same go.sum, then any go.sum, on a cache miss.
-    - name: Restore Go cache
+        echo "toolchain=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+    # Module downloads are immutable for the toolchain and dependency digest.
+    # A miss only fetches dependencies normally; no validation is skipped.
+    - name: Restore Go modules
       if: inputs.mode == 'restore'
       uses: actions/cache/restore@v4
       with:
-        path: |
-          ${{ steps.paths.outputs.mod }}
-          ${{ steps.paths.outputs.build }}
-        key: go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        path: ${{ steps.paths.outputs.mod }}
+        key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
+    # Refresh compiler archives per commit. Fallback stays within the same
+    # host, toolchain, dependency digest and lane, never another target.
+    - name: Restore Go compiler cache
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}
         restore-keys: |
-          go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-
-          go-${{ runner.os }}-${{ runner.environment }}-
-    - name: Save Go cache
-      if: inputs.mode == 'save' && github.event_name == 'push'
+          go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-
+    - name: Check for saved Go modules
+      id: saved-modules
+      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.mod }}
+        key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
+        lookup-only: true
+    - name: Save Go modules
+      if: inputs.mode == 'save' && inputs.save-modules == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-modules.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: |
-          ${{ steps.paths.outputs.mod }}
-          ${{ steps.paths.outputs.build }}
-        key: go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        path: ${{ steps.paths.outputs.mod }}
+        key: go-modules-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}
+    - name: Check for saved Go compiler cache
+      id: saved-build
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}
+        lookup-only: true
+    - name: Save Go compiler cache
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-build.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ steps.paths.outputs.toolchain }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ inputs.variant }}-${{ github.sha }}

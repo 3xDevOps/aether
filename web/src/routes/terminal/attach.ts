@@ -124,9 +124,11 @@ interface AttachFrame {
   control_session_id?: string
   control_generation?: number
   has_control?: boolean
+  revocation_reason?: 'takeover' | 'permission' | 'revoked'
   terminal_id?: string
   incarnation?: string
   server_owned_responder?: boolean
+  takeover?: TakeoverState
 }
 
 
@@ -135,6 +137,8 @@ export interface ControlMetadata {
   control_session_id: string
   control_generation: number
   has_control: boolean
+  /** Accepted ownership loss, not inferred from presence or transport state. */
+  loss?: 'release' | 'takeover'
   /** Server-issued terminal high-water carried atomically by this state. */
   position?: TerminalPosition
 }
@@ -143,6 +147,29 @@ export interface ControlResult extends ControlMetadata {
   request_id?: number
   code?: number
   error?: string
+}
+
+export type TakeoverAction = 'start' | 'confirm' | 'cancel' | 'accept' | 'deny'
+
+export interface TakeoverState {
+  id: string
+  requester_member_id: string
+  requester_session_id: string
+  holder_session_id: string
+  holder_generation: number
+  phase: 'holding' | 'review' | 'cancelled' | 'denied' | 'granted'
+  hold_started_at: string
+  hold_deadline: string
+  decision_deadline?: string
+  server_now: string
+}
+
+export interface TakeoverResult {
+  ok: boolean
+  request_id?: number
+  code?: number
+  error?: string
+  takeover?: TakeoverState
 }
 
 export interface AttachTerminalIdentity {
@@ -192,6 +219,8 @@ export interface AttachHandlers {
   onControl?: (metadata: ControlMetadata) => void
   /** A control request result, or an out-of-band lease revocation. */
   onControlResult?: (result: ControlResult) => void
+  /** Ephemeral takeover snapshots; null clears them on transport replacement. */
+  onTakeover?: (result: TakeoverResult | null) => void
   onState: (state: ConnectionState) => void
   /**
    * The attach was refused for good; no further reconnect is attempted. The
@@ -234,6 +263,7 @@ export interface Attachment {
   resize: (cols: number, rows: number) => void
   /** Request a control lease on the existing stream. */
   setControl: (write: boolean, takeover?: boolean) => void
+  requestTakeover: (action: TakeoverAction, id: string, generation?: number) => boolean
   /**
    * Reattach now, picking up the current write preference. `resume` asks
    * the server for no replay and keeps the screen already on-screen; it is
@@ -453,6 +483,43 @@ export function connectAttach(
     number,
     { generation: number; observedGeneration: number; revision: number; write: boolean; fresh: boolean }
   >()
+  let requestedTakeover: string | null = null
+  let observedTakeover: TakeoverState | null = null
+  const pendingTakeovers = new Map<number, string>()
+  const clearTakeover = () => {
+    requestedTakeover = null
+    observedTakeover = null
+    pendingTakeovers.clear()
+    handlers.onTakeover?.(null)
+  }
+  const receiveTakeover = (frame: AttachFrame) => {
+    if (!attached) return
+    if (frame.request_id !== undefined) {
+      const id = pendingTakeovers.get(frame.request_id)
+      if (!id) return
+      pendingTakeovers.delete(frame.request_id)
+      if (frame.takeover && frame.takeover.id !== id) return
+      if (id !== requestedTakeover && id !== observedTakeover?.id) return
+      if (!frame.ok && id === requestedTakeover) {
+        requestTakeover('cancel', id)
+        handlers.onTakeover?.({ ...frame, takeover: undefined })
+        return
+      }
+    }
+    const takeover = frame.takeover
+    if (takeover) {
+      const requester = takeover.requester_session_id === controlSessionID
+      const holder = hasControl && takeover.holder_session_id === controlSessionID &&
+        takeover.holder_generation === controlGeneration
+      if (requester ? takeover.id !== requestedTakeover : !holder) return
+      if (takeover.phase !== 'holding' && takeover.id !== observedTakeover?.id) return
+      if (takeover.phase === 'holding' && observedTakeover?.id === takeover.id &&
+        observedTakeover.phase !== 'holding') return
+      observedTakeover = takeover
+      if (requester && !['holding', 'review'].includes(takeover.phase)) requestedTakeover = null
+    }
+    handlers.onTakeover?.(frame)
+  }
   const applyPendingServerPosition = () => {
     if (pendingServerPosition === null || replayPending() || pendingLiveWrites.size > 0) return
     if (
@@ -473,6 +540,7 @@ export function connectAttach(
     generation: number,
     granted: boolean,
     position: TerminalPosition | null | undefined = undefined,
+    loss?: ControlMetadata['loss'],
   ) => {
     controlGeneration = generation
     hasControl = granted
@@ -483,6 +551,7 @@ export function connectAttach(
       control_generation: controlGeneration,
       has_control: hasControl,
     }
+    if (loss) metadata.loss = loss
     if (controlPosition !== null) metadata.position = controlPosition
     handlers.onControl?.(metadata)
   }
@@ -529,6 +598,14 @@ export function connectAttach(
       control_generation: generation,
       has_control: granted,
     }
+    if (hasControl && !granted) {
+      if (pending?.write === false && result.ok) result.loss = 'release'
+      else if (
+        requestID === undefined && frame.revocation_reason === 'takeover' &&
+        frame.control_session_id === controlSessionID &&
+        frame.control_generation === controlGeneration
+      ) result.loss = 'takeover'
+    }
     const framePosition = positionFromFrame(frame)
     if (framePosition !== null) adoptServerPosition(framePosition)
     const resultPosition = framePosition ?? controlPosition
@@ -537,9 +614,9 @@ export function connectAttach(
       // A released lease no longer needs its old fence. The next acquisition
       // starts from the server's unoccupied generation.
       result.control_generation = 0
-      publishControl(0, false, framePosition ?? undefined)
+      publishControl(0, false, framePosition ?? undefined, result.loss)
     } else if (frame.has_control !== undefined || frame.control_generation !== undefined) {
-      publishControl(result.control_generation, result.has_control, framePosition ?? undefined)
+      publishControl(result.control_generation, result.has_control, framePosition ?? undefined, result.loss)
     }
     handlers.onControlResult?.(result)
   }
@@ -975,6 +1052,10 @@ export function connectAttach(
         receiveControl(ack)
         return
       }
+      if (ack.type === 'takeover') {
+        receiveTakeover(ack)
+        return
+      }
       // Someone who does impose a size resized the session; a follower
       // redraws at it. Before the ack there is nothing to redraw.
       if (attached && ack.type === 'geometry') {
@@ -1136,6 +1217,7 @@ export function connectAttach(
     ws.onclose = (ev) => {
       if (disposed || socket !== ws) return
       socket = null
+      clearTakeover()
       // A close before the replay boundary abandons the hidden transaction.
       // Once every replay byte has arrived, let its parser completion finish
       // before cutting over; that completed replay is still safe to retain.
@@ -1233,6 +1315,7 @@ export function connectAttach(
   // Detach the handlers first: a close we asked for must not schedule its own
   // reconnect on top of the one we are about to make.
   const drop = () => {
+    clearTakeover()
     const ws = socket
     socket = null
     if (!ws) return
@@ -1391,6 +1474,29 @@ export function connectAttach(
     pendingControl = null
     dispatchControl(write, takeover)
   }
+  const requestTakeover = (action: TakeoverAction, id: string, generation?: number) => {
+    if (!attached || !socket || disposed || suspended || writeDenied) return false
+    if (action === 'cancel') {
+      for (const [requestID, pendingID] of pendingTakeovers) {
+        if (pendingID === id) pendingTakeovers.delete(requestID)
+      }
+    }
+    if (action === 'start') requestedTakeover = id
+    const requestID = ++controlRequestID
+    if (action !== 'cancel') pendingTakeovers.set(requestID, id)
+    socket.send(JSON.stringify({
+      type: 'takeover',
+      request_id: requestID,
+      action,
+      takeover_id: id,
+      ...(generation === undefined ? {} : { control_generation: generation }),
+    }))
+    if (action === 'cancel' && requestedTakeover === id) {
+      requestedTakeover = null
+      handlers.onTakeover?.(null)
+    }
+    return true
+  }
   const flushPendingControl = () => {
     if (!pendingControl) return
     const request = pendingControl
@@ -1465,6 +1571,7 @@ export function connectAttach(
     },
     // A paste arrives as one string that can dwarf the gateway's 64KB frame
     send: (data) => {
+      if (handlers.interactive?.() === true && !hasControl) return
       for (let at = 0; at < data.length; ) {
         let end = Math.min(at + inputChunk, data.length)
         // Never split a surrogate pair across frames.
@@ -1476,6 +1583,7 @@ export function connectAttach(
     },
     resize: (cols, rows) => sendControlFrame({ type: 'resize', cols, rows }),
     setControl,
+    requestTakeover,
     controlMetadata: () => {
       const metadata: ControlMetadata = {
         control_session_id: controlSessionID,

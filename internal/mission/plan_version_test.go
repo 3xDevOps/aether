@@ -49,6 +49,7 @@ func TestPlanShowDiscoversAcceptanceVersionAndWaitsForChange(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
 	f.evidence.packet = protocol.EvidencePacket{
 		ID: "version-evidence", WorkspaceID: string(f.workspace.ID), RunID: string(attempt.RunID),
+		Origin:       protocol.EvidenceOrigin{Kind: protocol.EvidenceOriginRun, ID: string(attempt.RunID)},
 		Availability: protocol.EvidenceAvailable, RetainedRevision: "revision-1", ExpiresAt: &expires,
 	}
 	submission, err := f.db.SubmitAttempt(t.Context(), attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration,

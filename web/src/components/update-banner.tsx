@@ -282,9 +282,9 @@ function serverFlow(
 
 /**
  * How many runs are working in the scope this member can see. It mirrors
- * the server's own idle check (internal/scheduler): a run parked at
- * needs-attention is waiting on a person and a paused run is a frozen
- * container, so neither has anything running inside it to interrupt.
+ * the server's own idle check (internal/scheduler): needs-attention is
+ * treated as idle and a paused run is a frozen container, so neither is
+ * counted as active work interrupted by a restart.
  */
 function activeRunCount(
   runs: Record<string, RunRecord>,

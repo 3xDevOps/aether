@@ -1,5 +1,7 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { Sidebar } from '@/components/shell/sidebar'
+import { TitleBar } from '@/components/shell/title-bar'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
@@ -9,8 +11,6 @@ import {
   fakeApi,
   otherWorkspace,
   run,
-  serverInfo,
-  vera,
   workspace,
 } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
@@ -28,12 +28,19 @@ const phoneWidth = 390
 beforeEach(async () => {
   useStore.setState({
     sidebarCollapsed: false,
+    sidebarDrawerOpen: false,
     activeWorkspace: '',
     groupBy: 'status',
     inbox: {},
+    roomMessages: {},
+    inboxError: null,
     route: { name: 'overview', params: {} },
   })
   await hydrate(useStore, fakeApi())
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('Sidebar', () => {
@@ -105,19 +112,26 @@ describe('Sidebar', () => {
     expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
   })
 
-  it('opens the run list as a modal drawer on a phone', () => {
+  it('opens the phone rail only in the drawer and returns focus to the titlebar', async () => {
     atViewport(phoneWidth, { pointer: 'coarse' })
-    render(<Sidebar />)
-
-    fireEvent.click(screen.getByLabelText('Expand sidebar'))
+    render(<><TitleBar /><Sidebar /></>)
+    const opener = screen.getByRole('button', { name: 'Expand sidebar' })
+    expect(screen.queryByRole('navigation', { name: 'Surfaces' })).toBeNull()
+    opener.focus()
+    fireEvent.click(opener)
     const drawer = screen.getByRole('dialog', { name: 'Runs' })
-    // The rail travels with the drawer, so every surface stays one tap away.
     expect(within(drawer).getByRole('navigation', { name: 'Surfaces' })).toBeDefined()
+    expect(drawer.contains(document.activeElement)).toBe(true)
+    const last = within(drawer).getAllByRole('button').at(-1)!
+    last.focus()
+    await userEvent.tab()
+    expect(drawer.contains(document.activeElement)).toBe(true)
 
     fireEvent.keyDown(document, { key: 'Escape' })
-
     expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
-    expect(screen.getByLabelText('Expand sidebar')).toBeDefined()
+    expect(screen.queryByRole('navigation', { name: 'Surfaces' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(opener))
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
   })
 
   // A dialog stands the shell's global keys down inside itself, so without
@@ -125,7 +139,7 @@ describe('Sidebar', () => {
   // it again.
   it('closes the phone drawer from the key that opened it', () => {
     atViewport(phoneWidth, { pointer: 'coarse' })
-    render(<Sidebar />)
+    render(<><TitleBar /><Sidebar /></>)
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
     const drawer = screen.getByRole('dialog', { name: 'Runs' })
@@ -138,7 +152,7 @@ describe('Sidebar', () => {
 
   it('closes the phone drawer after it navigates', () => {
     atViewport(phoneWidth, { pointer: 'coarse' })
-    render(<Sidebar />)
+    render(<><TitleBar /><Sidebar /></>)
     fireEvent.click(screen.getByLabelText('Expand sidebar'))
 
     const drawer = screen.getByRole('dialog', { name: 'Runs' })
@@ -151,6 +165,20 @@ describe('Sidebar', () => {
       params: { runId: 'run_1' },
     })
     expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+  })
+
+  it('does not carry an open phone drawer through widening or unmounting', () => {
+    const resize = atViewport(phoneWidth)
+    const { unmount } = render(<><TitleBar /><Sidebar /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    resize(wideWidth)
+    expect(useStore.getState().sidebarDrawerOpen).toBe(false)
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
+    resize(phoneWidth)
+    expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    unmount()
+    expect(useStore.getState().sidebarDrawerOpen).toBe(false)
   })
 
   it('routes to a run when its row is clicked', () => {
@@ -218,7 +246,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
     expect(screen.queryByText('refresh the install guide')).toBeNull()
 
-    await pickOption(screen.getByLabelText('Workspace'), otherWorkspace.name)
+    await pickOption(screen.getByRole('combobox', { name: 'Workspace' }), otherWorkspace.name)
 
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
     expect(screen.getByText('refresh the install guide')).toBeDefined()
@@ -231,7 +259,7 @@ describe('Sidebar', () => {
     )
     render(<Sidebar />)
 
-    expect(screen.queryByLabelText('Workspace')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Workspace' })).toBeNull()
     expect(screen.getByText(workspace.name)).toBeDefined()
     expect(screen.getByText(workspace.base_branch)).toBeDefined()
   })
@@ -251,15 +279,13 @@ describe('Sidebar', () => {
         ),
     )
 
-    expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle('Idle').length).toBeGreaterThan(0)
   })
 
-  it('badges how many runs are waiting on a human', () => {
+  it('does not infer input from a stalled or idle run', () => {
     render(<Sidebar />)
-    expect(screen.queryByLabelText(/needs? you/i)).toBeNull()
+    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
 
-    // A stall parks the run at needs-attention; the badge is how the
-    // dashboard says so without the member reading every row.
     act(() =>
       useStore
         .getState()
@@ -271,24 +297,33 @@ describe('Sidebar', () => {
         ),
     )
 
-    const badge = screen.getByLabelText('1 run needs you')
-    expect(badge.textContent).toBe('1')
+    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
+    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
   })
 
-  it('surfaces a run waiting on an approval as needs-attention', () => {
+  it('badges an approval without moving a busy run into Idle', () => {
     useStore.setState({ inbox: {} })
     render(<Sidebar />)
-    expect(screen.queryByTitle('Needs you')).toBeNull()
+    expect(screen.queryByTitle('Idle')).toBeNull()
 
     // The run still reads `running`; the pending inbox entry is the signal.
     act(() => useStore.getState().setInbox(workspace.id, [approval()]))
 
-    expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
-    // The run groups under Needs you, so the attention sort surfaces it.
-    expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
+    expect(screen.getByLabelText('1 run needs input')).toBeDefined()
+    expect(screen.getByRole('img', { name: /Needs input: 1 approval/ })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: /^Idle/ })).toBeNull()
+
+    act(() => useStore.getState().setInbox(workspace.id, [
+      approval({ decision: 'approved' }),
+    ]))
+    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
+    expect(screen.queryByLabelText('1 run needs input')).toBeNull()
+    expect(screen.getByRole('button', { name: /rewrite the checkout flow/ })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
   })
 
-  it('keeps a finished unanswered run under Needs you', () => {
+  it('keeps a finished unanswered run in its lifecycle group', () => {
     const finished = run({
       id: 'run_finished_question',
       task: 'answer after completion',
@@ -302,8 +337,8 @@ describe('Sidebar', () => {
     )
     render(<Sidebar />)
 
-    const needsYou = screen.getByRole('button', { name: /^Needs you/, expanded: true })
-    expect(needsYou.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Failed/, expanded: true })).toBeDefined()
+    expect(screen.getByRole('img', { name: /Needs input: 1 unanswered question/ })).toBeDefined()
     expect(screen.getByText('answer after completion')).toBeDefined()
   })
 
@@ -433,39 +468,16 @@ describe('Sidebar', () => {
   })
 
 
-  it('offers a new run to a member who may start one', () => {
-    useStore.setState({ info: { ...serverInfo, member: bob } })
-    render(<Sidebar />)
-
-    fireEvent.click(screen.getByText('New run'))
-
-    // The form is hosted app-wide; the sidebar only asks for it.
-    expect(useStore.getState().paletteDialog).toBe('launch')
-  })
-
-  it('offers no new run to a viewer', () => {
-    // A viewer cannot own a run, so the server refuses the launch; do not
-    // draw the button that would be refused.
-    useStore.setState({ info: { ...serverInfo, member: vera } })
-    render(<Sidebar />)
-
-    expect(screen.queryByText('New run')).toBeNull()
-  })
-
-  it('leads the nav with the two whole-workspace views, marking the active one', () => {
+  it('marks the active workspace destination without offering All runs in the rail', () => {
     useStore.setState({ route: { name: 'board', params: {} } })
     render(<Sidebar />)
     const surfaces = within(screen.getByLabelText('Surfaces'))
+    expect(surfaces.queryByRole('button', { name: 'All runs' })).toBeNull()
+    expect(surfaces.getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBe('page')
 
-    const names = surfaces.getAllByRole('button').map((b) => b.textContent)
-    expect(names.slice(0, 2)).toEqual(['Board', 'All runs'])
-
-    const current = () =>
-      surfaces.getAllByRole('button').find((b) => b.getAttribute('aria-current') === 'page')
-    expect(current()?.textContent).toBe('Board')
-
-    fireEvent.click(surfaces.getByText('All runs'))
-    expect(current()?.textContent).toBe('All runs')
+    fireEvent.click(surfaces.getByRole('button', { name: 'Activity' }))
+    expect(surfaces.getByRole('button', { name: 'Activity' }).getAttribute('aria-current')).toBe('page')
+    expect(surfaces.getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBeNull()
   })
 
   it('opens the approval inbox and the activity feed from the nav', () => {
@@ -529,32 +541,88 @@ describe('Sidebar', () => {
     expect(screen.getByRole('heading', { name: /^Alice/ })).toBeDefined()
   })
 
-  it('shows the admin and desktop surfaces the gateway can serve', () => {
+  it('keeps every permitted destination reachable as the available rail height changes', async () => {
+    atViewport(960, { height: 600 })
     useStore.setState({
-      capabilities: {
-        gateway: 'local',
-        methods: ['*'],
-        ws: ['events', 'attach', 'terminal'],
-        local: ['link.status', 'daemon.status', 'pull'],
-      },
+      capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['link.status'] },
     })
+    let railHeight = 543
+    const bounds = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === 'Surfaces'
+        ? { ...bounds.call(this), height: railHeight } as DOMRect
+        : bounds.call(this)
+    })
+    let resize = () => {}
+    vi.stubGlobal('ResizeObserver', class {
+      private callback: () => void
+      constructor(callback: () => void) { this.callback = callback }
+      observe(element: Element) {
+        if (element.getAttribute('aria-label') === 'Surfaces') resize = this.callback
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+    onTestFinished(() => { vi.unstubAllGlobals() })
     render(<Sidebar />)
-    const surfaces = within(screen.getByLabelText('Surfaces'))
 
-    fireEvent.click(surfaces.getByText('Members'))
+    const destinations = [
+      ['Board', 'board'], ['Missions', 'missions'], ['Approvals', 'approvals'],
+      ['Activity', 'timeline'], ['Files', 'files'], ['Templates', 'templates'],
+      ['Agents', 'agents'], ['Configuration', 'configuration'],
+      ['Members', 'members'], ['Devices', 'devices'], ['Manage workspaces', 'workspaces'],
+      ['Onboarding', 'onboarding'], ['Settings', 'settings'],
+    ]
+    for (const [label, name] of destinations) {
+      const direct = screen.queryByRole('button', { name: label })
+      if (direct) fireEvent.click(direct)
+      else {
+        const menu = ['members', 'devices', 'workspaces', 'onboarding'].includes(name) ? 'Admin' : 'More'
+        fireEvent.keyDown(screen.getByRole('button', { name: new RegExp(`^${menu}`) }), { key: 'ArrowDown' })
+        const item = await screen.findByRole('menuitem', { name: label })
+        fireEvent.click(item)
+      }
+      expect(useStore.getState().route.name).toBe(name)
+    }
+    act(() => {
+      railHeight = 900
+      resize()
+    })
+    expect(screen.queryByRole('button', { name: /^More/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Configuration' })).toBeDefined()
 
-    expect(useStore.getState().route).toEqual({ name: 'members', params: {} })
-    expect(surfaces.getByText('Files')).toBeDefined()
-    expect(surfaces.getByText('Onboarding')).toBeDefined()
-    expect(surfaces.getByText('Settings')).toBeDefined()
+    act(() => {
+      useStore.setState({ route: { name: 'configuration', params: {} } })
+      railHeight = 543
+      resize()
+    })
+    const more = screen.getByRole('button', { name: 'More, Configuration' })
+    fireEvent.keyDown(more, { key: 'ArrowDown' })
+    expect((await screen.findByRole('menuitem', { name: 'Configuration' })).getAttribute('aria-current')).toBe('page')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(document.activeElement).toBe(more))
   })
 
-  it('draws only what a narrow gateway can serve, and the two ungated views', () => {
-    // A gateway advertising a list with neither approval.list nor
-    // workspace.timeline on it: the methods behind those views would fail, so
-    // neither way in is drawn. member.list is on it and the roster is readable
-    // by everyone, so Members stays. Board and All runs are never gated -
-    // they are views of the runs the sidebar already has.
+  it('retains approval counts and server errors when the inbox is in More', async () => {
+    const bounds = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === 'Surfaces'
+        ? { ...bounds.call(this), height: 200 } as DOMRect
+        : bounds.call(this)
+    })
+    useStore.getState().setInbox(workspace.id, [approval()])
+    render(<Sidebar />)
+    const more = screen.getByRole('button', { name: 'More, Approvals, 1 waiting on a decision' })
+    fireEvent.keyDown(more, { key: 'ArrowDown' })
+    const approvalItem = await screen.findByRole('menuitem', { name: 'Approvals, 1 waiting on a decision' })
+    fireEvent.click(approvalItem)
+    expect(useStore.getState().route.name).toBe('approvals')
+    act(() => useStore.setState({ inboxError: 'approval.list: database is locked' }))
+    fireEvent.keyDown(screen.getByRole('button', { name: /More.*approval.list: database is locked/ }), { key: 'ArrowDown' })
+    expect((await screen.findByRole('menuitem', { name: 'Approvals, approval.list: database is locked' })).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('keeps Settings reachable without exposing unavailable gateway destinations', async () => {
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -563,31 +631,30 @@ describe('Sidebar', () => {
       },
     })
     render(<Sidebar />)
-
     const surfaces = within(screen.getByLabelText('Surfaces'))
-    expect(surfaces.getByText('Board')).toBeDefined()
-    expect(surfaces.getByText('All runs')).toBeDefined()
-    expect(surfaces.getByText('Members')).toBeDefined()
-    expect(surfaces.queryByText('Approvals')).toBeNull()
-    expect(surfaces.queryByText('Activity')).toBeNull()
-    expect(surfaces.queryByText('Manage workspaces')).toBeNull()
-    expect(surfaces.queryByText('Onboarding')).toBeNull()
-    expect(surfaces.queryByText('Settings')).toBeNull()
+    fireEvent.click(surfaces.getByRole('button', { name: 'Settings' }))
+    expect(useStore.getState().route.name).toBe('settings')
+    expect(surfaces.queryByRole('button', { name: 'Approvals' })).toBeNull()
+    expect(surfaces.queryByRole('button', { name: 'Activity' })).toBeNull()
+    fireEvent.keyDown(surfaces.getByRole('button', { name: 'Admin' }), { key: 'ArrowDown' })
+    const members = await screen.findByRole('menuitem', { name: 'Members' })
+    expect(screen.queryByRole('menuitem', { name: 'Manage workspaces' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Onboarding' })).toBeNull()
+    fireEvent.click(members)
+    expect(useStore.getState().route.name).toBe('members')
   })
 
-  it('shows the read surfaces on a legacy monitor without capabilities', () => {
-    // The capabilities endpoint 404ed: only the pre-capabilities allowlist
-    // may be assumed. approval.list, workspace.timeline and member.list are
-    // all on it, so the inbox, the feed and the roster stay reachable; no
-    // admin method is on it, so nothing behind one is drawn.
+  it('shows legacy read destinations without assuming administrative capabilities', async () => {
     useStore.setState({ capabilities: null })
     render(<Sidebar />)
-
     const surfaces = within(screen.getByLabelText('Surfaces'))
-    expect(surfaces.getByText('Approvals')).toBeDefined()
-    expect(surfaces.getByText('Activity')).toBeDefined()
-    expect(surfaces.getByText('Members')).toBeDefined()
-    expect(surfaces.queryByText('Templates')).toBeNull()
-    expect(surfaces.queryByText('Agents')).toBeNull()
+    expect(surfaces.getByRole('button', { name: 'Approvals' })).toBeDefined()
+    expect(surfaces.getByRole('button', { name: 'Activity' })).toBeDefined()
+    expect(surfaces.getByRole('button', { name: 'Settings' })).toBeDefined()
+    expect(surfaces.queryByRole('button', { name: 'Templates' })).toBeNull()
+    expect(surfaces.queryByRole('button', { name: 'Agents' })).toBeNull()
+    fireEvent.keyDown(surfaces.getByRole('button', { name: 'Admin' }), { key: 'ArrowDown' })
+    expect(await screen.findByRole('menuitem', { name: 'Members' })).toBeDefined()
+    expect(screen.queryByRole('menuitem', { name: 'Devices' })).toBeNull()
   })
 })

@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type { Candidate, CandidateSummary } from '@/lib/integration-types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
+import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { useStore } from '@/store'
-import { fakeApi, integrationCandidate, run, workspace } from '@/test/fixtures'
+import { evidencePacket, fakeApi, integrationCandidate, run, workspace } from '@/test/fixtures'
+import { atViewport } from '@/test/viewport'
 
 type CandidateOverrides = Partial<Candidate>
 
@@ -53,7 +55,10 @@ async function settle(): Promise<void> {
 }
 
 beforeEach(() => {
-  useStore.setState({ connection: 'live' })
+  useStore.setState({
+    connection: 'live', evidencePackets: {}, evidencePagination: {}, evidenceNextBefore: {},
+    evidenceLoading: {}, evidenceError: {}, selectedEvidence: {},
+  })
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true })
 })
 
@@ -62,6 +67,109 @@ afterEach(() => {
 })
 
 describe('candidate review authority and resolution drafts', () => {
+  it('preserves selected inputs and resolution drafts through resize and applies the in-flight retry once', async () => {
+    const resize = atViewport(768)
+    const first = candidate()
+    const partial = candidate({ version: 2, conflicts: ['right.txt'] })
+    const packet = evidencePacket({
+      id: 'resize-input', retained_revision: 'retained-input',
+      sources: [{ name: 'git', available: true }],
+    })
+    const failed = Promise.withResolvers<{ candidate: Candidate }>()
+    const retried = Promise.withResolvers<{ candidate: Candidate }>()
+    const resolve = vi.fn().mockReturnValueOnce(failed.promise).mockReturnValueOnce(retried.promise)
+    const client = fakeApi({
+      runEvidenceList: vi.fn(async () => ({ packets: [packet] })),
+      integrationList: vi.fn(async () => ({ candidates: [summary(first)] })),
+      integrationShow: vi.fn(async () => ({ candidate: first })),
+      integrationResolve: resolve,
+    })
+    render(<EvidenceDrawer workspaceID={workspace.id} runID="run_1" client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
+    fireEvent.click(await screen.findByLabelText(`Select packet ${packet.id}`))
+    fireEvent.change(screen.getByLabelText('Target ref'), { target: { value: 'refs/heads/reviewed' } })
+    resize(767)
+    expect(screen.getByLabelText(`Select packet ${packet.id}`)).toHaveProperty('checked', true)
+    expect(screen.getByLabelText('Target ref')).toHaveProperty('value', 'refs/heads/reviewed')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show full' }))
+    fireEvent.change(await screen.findByLabelText('Resolution for left.txt'), { target: { value: 'resolved left' } })
+    fireEvent.change(screen.getByLabelText('Resolution for right.txt'), { target: { value: 'keep right draft' } })
+    fireEvent.click(screen.getByLabelText('Apply resolution for right.txt'))
+    resize(768)
+    expect(screen.getByLabelText('Resolution for left.txt')).toHaveProperty('value', 'resolved left')
+    expect(screen.getByLabelText('Resolution for right.txt')).toHaveProperty('value', 'keep right draft')
+    expect(screen.getByLabelText('Apply resolution for right.txt')).toHaveProperty('checked', false)
+    fireEvent.click(screen.getByRole('button', { name: 'Apply resolutions' }))
+    resize(767)
+    expect(screen.getByRole('button', { name: 'Apply resolutions' })).toHaveProperty('disabled', true)
+    await act(async () => { failed.reject(new Error('Resolution outcome uncertain')) })
+    expect(await screen.findByText('Resolution outcome uncertain')).toBeDefined()
+    resize(768)
+    fireEvent.click(screen.getByRole('button', { name: 'Apply resolutions' }))
+    expect(resolve).toHaveBeenCalledTimes(2)
+    expect(resolve.mock.calls[1][0]).toEqual(resolve.mock.calls[0][0])
+    resize(767)
+    await act(async () => { retried.resolve({ candidate: partial }) })
+    expect(screen.queryByLabelText('Resolution for left.txt')).toBeNull()
+    expect(screen.getByLabelText('Resolution for right.txt')).toHaveProperty('value', 'keep right draft')
+    expect(screen.getByRole('button', { name: 'Apply resolutions' })).toHaveProperty('disabled', true)
+    expect(resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps verification drafts and selection across resize and displays the pending verification result', async () => {
+    const resize = atViewport(767)
+    const first = candidate({
+      state: 'frozen', conflicts: [],
+      verifications: [{
+        verification_id: 'passed-before-resize', candidate_revision: 'candidate-revision-1',
+        argv: ['go', 'test'], image: 'image:fixture', status: 'passed',
+        created_at: '2026-08-14T10:00:00Z', expires_at: '2026-08-15T10:00:00Z',
+      }],
+    })
+    const pending = Promise.withResolvers<{ candidate: Candidate }>()
+    const verify = vi.fn().mockReturnValue(pending.promise)
+    const client = fakeApi({
+      integrationList: vi.fn(async () => ({ candidates: [summary(first)] })),
+      integrationShow: vi.fn(async () => ({ candidate: first })),
+      integrationVerify: verify,
+    })
+    render(<EvidenceDrawer workspaceID={workspace.id} runID="run_1" client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show full' }))
+    fireEvent.change(await screen.findByLabelText('Verification argv'), { target: { value: '["go","test","./resize"]' } })
+    fireEvent.change(screen.getByLabelText('Timeout seconds'), { target: { value: '45' } })
+    fireEvent.click(screen.getByLabelText('Select verification passed-before-resize'))
+    resize(768)
+    expect(screen.getByLabelText('Verification argv')).toHaveProperty('value', '["go","test","./resize"]')
+    expect(screen.getByLabelText('Timeout seconds')).toHaveProperty('value', '45')
+    expect(screen.getByLabelText('Select verification passed-before-resize')).toHaveProperty('checked', true)
+    fireEvent.click(screen.getByRole('button', { name: 'Run verification' }))
+    resize(767)
+    expect(screen.getByRole('button', { name: 'Run verification' })).toHaveProperty('disabled', true)
+    await act(async () => {
+      pending.resolve({ candidate: {
+        ...first, version: 2,
+        verifications: [...first.verifications, {
+          ...first.verifications[0]!, verification_id: 'passed-after-resize',
+          output: 'Resize verification completed',
+        }],
+      } })
+    })
+    expect(await screen.findByText('Resize verification completed')).toBeDefined()
+    expect(screen.getByLabelText('Select verification passed-before-resize')).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: 'Run verification' })).toHaveProperty('disabled', false)
+    expect(verify).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    expect(screen.getByRole('button', { name: 'Candidate review' }).getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show full' }))
+    expect(await screen.findByLabelText('Verification argv')).not.toHaveProperty('value', '["go","test","./resize"]')
+  })
+
   it('leaves the target revision blank when only another run has a base', async () => {
     const client = fakeApi({
       runList: vi.fn(async () => [

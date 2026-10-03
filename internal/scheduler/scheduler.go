@@ -100,7 +100,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 168h; negative destroys on close
+	RunContainerTTL      time.Duration // default 168h; negative destroys on close/completion
 	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
 	// on startup to learn whether a container already exited before
 	// attach. Defaults to defaultExitProbeTimeout.
@@ -128,8 +128,18 @@ type Config struct {
 	// terminal container for the coordination CLI. Coordinated runs also use
 	// it for lifecycle callbacks; empty means DefaultServerBinary.
 	ServerBinary string
+	// HarnessUpdateDisabled stops the scheduler from updating a shipped
+	// harness installed in the member home before a launch
+	// (harness_update.go). The zero value keeps updates on.
+	HarnessUpdateDisabled bool
 	// turnTail overrides defaultTurnTail; only tests set it.
 	turnTail time.Duration
+	// harnessUpdateTimeout overrides defaultHarnessUpdateTimeout; only tests
+	// set it.
+	harnessUpdateTimeout time.Duration
+	// harnessUpdateWait overrides defaultHarnessUpdateWait; only tests set
+	// it.
+	harnessUpdateWait time.Duration
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -225,6 +235,9 @@ type Scheduler struct {
 	// drop each stream under the person typing into it, so they hold the idle
 	// check open the way an active run does.
 	shells int
+	// harnessUpdates is the pre-launch harness update state per member home
+	// and harness (harness_update.go).
+	harnessUpdates map[harnessUpdateKey]*harnessUpdateState
 }
 
 // credentialUserReservation protects the writable member home a container
@@ -286,15 +299,17 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	// agentReport is the last thing the agent said about itself, zero until
-	// it says anything and again whenever activity un-parks the run or a
-	// relaunch reopens it. It is only ever set to a report the run's status
-	// already matches, so a report the store refused leaves the silence
-	// fallback armed - except the turn-end wait that starts a reported
-	// finish, which is recorded without the park (see ReportAgentState).
-	// Mirrored into the run's sidecar on every change, so a run the agent
-	// parked for its member comes back from a restart still held for them.
+	// agentReport is the last execution report only; input deltas are never
+	// retained or replayed. It is cleared when observed activity un-parks the
+	// run, and mirrored into the sidecar independently of pendingInputs. The
+	// turn-end idle report that starts a reported finish is recorded without
+	// the park (see ReportAgentState).
 	agentReport agentstatus.Report
+	// pendingInputs is an immutable, sorted set for this execution lifetime.
+	pendingInputs []domain.RunInputRequest
+	// inputPublishPending keeps the current snapshot owed to the event log,
+	// including an empty set after the last request closes.
+	inputPublishPending bool
 	// lastWorking is when the agent last said it was working. A report is
 	// the only trace its hook leaves - it writes nothing to the terminal
 	// and touches no files - so the stall detector counts it as the
@@ -308,6 +323,7 @@ type supervised struct {
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
+	missionAssigned  bool
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
@@ -445,7 +461,7 @@ func (s *Scheduler) closeDone(entry *supervised) {
 	}
 }
 
-// RetainsContainer reports whether a durable terminal TUI row still owns a
+// RetainsContainer reports whether a durable terminal row still owns a
 // container. It intentionally does not consult in-memory state: coordination
 // recovery calls it during a fresh process boot. Every terminal sidecar with
 // a container ID remains an ownership reference until the scheduler confirms
@@ -453,18 +469,14 @@ func (s *Scheduler) closeDone(entry *supervised) {
 // not consulted here.
 func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool {
 	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil || r.Mode != domain.LaunchTUI || !r.Status.Terminal() {
+	if err != nil || !r.Status.Terminal() {
 		return false
 	}
 	sc, err := s.readSidecar(run)
 	if err != nil {
 		return false
 	}
-	mode := sc.Mode
-	if mode == "" {
-		mode = r.Mode
-	}
-	if sc.RunID != string(run) || mode != domain.LaunchTUI ||
+	if sc.RunID != string(run) ||
 		(sc.ContainerID == "" && !sc.DestroyPending) {
 		return false
 	}
@@ -779,6 +791,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.DiscoveryEnv = nil
 		profile.DiscoveryFiles = nil
 		profile.NativeCoordination = false
+		profile.UpdateScript = ""
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -64,7 +65,7 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 			if run.Status.Terminal() {
 				continue
 			}
-			if _, updateErr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+			if _, updateErr := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, func() error {
 				if updated {
 					return nil
 				}
@@ -185,7 +186,7 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 				return s.cfg.Store.SetRunProtected(ctx, id, true)
 			}
 			if s.cfg.Control != nil {
-				if _, protectErr := s.cfg.Control.AdmitRevoke(string(id), update); protectErr != nil {
+				if _, protectErr := s.cfg.Control.AdmitRevoke(string(id), control.RevocationPermission, update); protectErr != nil {
 					return nil, rpcError(protectErr)
 				}
 			} else if updateErr := update(); updateErr != nil {
@@ -201,7 +202,7 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 			return s.cfg.Store.SetRunProtected(ctx, id, false)
 		}
 		if s.cfg.Control != nil {
-			if _, updateErr := s.cfg.Control.AdmitRevoke(string(id), update); updateErr != nil {
+			if _, updateErr := s.cfg.Control.AdmitRevoke(string(id), control.RevocationRevoked, update); updateErr != nil {
 				return nil, rpcError(updateErr)
 			}
 		} else if updateErr := update(); updateErr != nil {
@@ -238,5 +239,5 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 	if len(publicationErrs) != 0 {
 		return nil, rpcError(errors.Join(publicationErrs...))
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }

@@ -1,11 +1,7 @@
 "use client"
 
-import { Monitor, Moon, Sun } from 'lucide-react'
 import { useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
 import { useStore } from '@/store'
-import type { Theme } from '@/store/ui'
 
 const darkQuery = '(prefers-color-scheme: dark)'
 
@@ -35,33 +31,3 @@ export function ThemeEffect() {
   return null
 }
 
-const order: Theme[] = ['system', 'light', 'dark']
-const icons = { system: Monitor, light: Sun, dark: Moon }
-
-export function ThemeToggle() {
-  const theme = useStore((s) => s.theme)
-  const setTheme = useStore((s) => s.setTheme)
-  const Icon = icons[theme]
-  return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <Button
-            {...triggerProps}
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={`Theme: ${theme}`}
-            onClick={(event) => {
-              triggerProps.onClick?.(event)
-              setTheme(order[(order.indexOf(theme) + 1) % order.length])
-            }}
-          >
-            <Icon className="size-3.5" />
-          </Button>
-        )}
-      />
-      <Tooltip.Content>Theme: {theme}</Tooltip.Content>
-    </Tooltip>
-  )
-}

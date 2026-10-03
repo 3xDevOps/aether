@@ -188,7 +188,7 @@ describe('the server update banner', () => {
 
   // The count is the live one from this member's own run list, and it is
   // the server's definition of busy: a paused run is a frozen container
-  // and a needs-attention run is waiting on a person.
+  // and a needs-attention run is treated as idle.
   test('the confirm dialog counts the runs a restart interrupts', async () => {
     const client = seedServer({
       runs: [

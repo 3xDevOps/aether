@@ -33,33 +33,36 @@ const (
 	exitedFailedReasonPrefix      = "agent exited "
 )
 
-// closeSpec is what ending a live run records: a human's merged or
-// abandoned close, or the completed or failed outcome its agent reported.
+// closeSpec is what ending a run through closeRun records: a human's
+// merged or abandoned close, a mission worker's completion, or the
+// completed or failed outcome an ordinary run's agent reported.
 type closeSpec struct {
 	outcome domain.RunStatus
 	actor   domain.MemberID
 	// reason is used when no container is retained, retained when one is.
 	reason   string
 	retained string
-	commit   string
+	// mission marks a mission worker's completion, which retains the
+	// container but never makes it relaunchable.
+	mission bool
 	// reported marks the close an agent's report causes, which leaves the
 	// outcome unseen by the run's owner.
 	reported bool
 }
 
 func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
-	commit := "wip: "
-	if outcome == domain.RunMerged {
-		commit = "aether: "
-	}
-	return closeSpec{outcome: outcome, actor: actor, reason: "closed", retained: retainedCloseReason, commit: commit}
+	return closeSpec{outcome: outcome, actor: actor, reason: "closed", retained: retainedCloseReason}
+}
+
+func missionClose(outcome domain.RunStatus) closeSpec {
+	return closeSpec{outcome: outcome, reason: "closed", retained: retainedCompletionReason, mission: true}
 }
 
 func reportedClose(outcome domain.RunStatus) closeSpec {
 	if outcome == domain.RunCompleted {
-		return closeSpec{outcome: outcome, reason: reportedSuccessReason, retained: reportedSuccessRetainedReason, commit: "aether: ", reported: true}
+		return closeSpec{outcome: outcome, reason: reportedSuccessReason, retained: reportedSuccessRetainedReason, reported: true}
 	}
-	return closeSpec{outcome: outcome, reason: reportedFailureReason, retained: reportedFailureRetainedReason, commit: "wip: ", reported: true}
+	return closeSpec{outcome: outcome, reason: reportedFailureReason, retained: reportedFailureRetainedReason, reported: true}
 }
 
 // retainedReason reports whether a terminal row promises a retained,
@@ -74,6 +77,14 @@ func retainedReason(status domain.RunStatus, reason string) bool {
 		return reason == reportedFailureRetainedReason
 	}
 	return false
+}
+
+// retentionValid reports whether a terminal row's reason matches the
+// retained container its sidecar records: a relaunchable TUI retention, or
+// a finished mission worker's, which never reopens.
+func retentionValid(mode domain.LaunchMode, missionAssigned bool, status domain.RunStatus, reason string) bool {
+	return (mode == domain.LaunchTUI && retainedReason(status, reason)) ||
+		(missionAssigned && reason == retainedCompletionReason)
 }
 
 // releasedReason is the reason a retained run keeps once its container is
@@ -153,9 +164,11 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 
 // FinishReported arms a live run to finish with the outcome its agent
 // reported through coord.report reportID: completed for success, failed for
-// failure. The run finishes on the agent's next turn-end wait, at once when
-// that wait already came, at reportFinishDeadline when the harness cannot
-// report one, or when the process exits, whichever is first. reportedAt is
+// failure. The run finishes on the agent's next turn-end idle report with
+// no input request open, at once when that report already came, at
+// reportFinishDeadline when the harness cannot report one, or when the
+// process exits, whichever is first. A mission worker is left to
+// CompleteMission. reportedAt is
 // when the report was finalized: a report finalized before the run's last
 // relaunch speaks for a launch that relaunch ended and is ignored. A run
 // whose process exited first takes the reported outcome over the exit's
@@ -171,7 +184,9 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	if entry == nil || entry.status.Terminal() {
 		return s.overrideExitLocked(ctx, run, reportID, outcome)
 	}
-	if reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
+	// CompleteMission finishes an assigned worker; its report is the
+	// mission's to reconcile.
+	if entry.missionAssigned || reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
 		return nil
 	}
 	prior, priorAt, blocked, shown := entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown
@@ -183,7 +198,7 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	}
 	// The hand-off can trail the turn end it belongs to - the agent
 	// reports, then stops - and no further turn-end wait will come.
-	if entry.turnEnded() {
+	if entry.turnEnded() && !entry.atPrompt() {
 		s.startReportedFinishLocked(entry)
 	}
 	return nil
@@ -249,10 +264,10 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 }
 
 // ReportBlocked records the summary of the agent's blocked report reportID.
-// The next turn-end park - a waiting-for-input report, or a stall on a
-// harness with no reporter - shows it as the needs-attention reason instead
-// of the generic one, and the first resume after that park clears it. A
-// permission or answer wait keeps its own reason and leaves it pending.
+// The next turn-end park - an idle report, or a stall on a harness with no
+// reporter - shows it as the needs-attention reason instead of the generic
+// one, and the first resume after that park clears it. An open input
+// request does not park the run, and leaves it pending.
 // Parking right away would not survive: the report is made from inside a
 // tool call, so a working report follows it. A replay of the report last
 // applied, a report finalized no later than it (an older report whose
@@ -325,25 +340,31 @@ func (s *Scheduler) finishOverdueReports() {
 	defer s.mu.Unlock()
 	for _, entry := range s.runs {
 		if entry.reported != "" && !entry.status.Terminal() &&
-			(entry.reporter == harness.ReporterNone || entry.turnEnded() ||
-				(entry.status == domain.RunNeedsAttention && !entry.atPrompt())) &&
+			(entry.reporter == harness.ReporterNone ||
+				((entry.turnEnded() || entry.status == domain.RunNeedsAttention) && !entry.atPrompt())) &&
 			now.Sub(entry.reportedAt) >= reportFinishDeadline {
 			s.startReportedFinishLocked(entry)
 		}
 	}
 }
 
-// atPrompt reports whether the agent's last word is a permission or answer
-// wait, which parks a run mid-turn. The caller must hold s.mu.
+// atPrompt reports whether the agent has an input request open, a
+// permission or a question that parks a run mid-turn. The caller must hold
+// s.mu.
 func (e *supervised) atPrompt() bool {
-	return e.agentReport.State == agentstatus.Waiting &&
-		(e.agentReport.Reason == agentstatus.ReasonPermission || e.agentReport.Reason == agentstatus.ReasonAnswer)
+	return len(e.pendingInputs) != 0
 }
 
-// turnEnded reports whether the agent's last word is the wait that ends a
-// turn. The caller must hold s.mu.
+// turnEnded reports whether the agent's last execution report is the idle
+// report that ends a turn. The caller must hold s.mu.
 func (e *supervised) turnEnded() bool {
-	return e.agentReport.State == agentstatus.Waiting && e.agentReport.Reason == agentstatus.ReasonInput
+	return turnEnd(e.agentReport)
+}
+
+// turnEnd reports whether report is the idle report that ends a turn. An
+// idle report for a failed turn parks the run with its own reason instead.
+func turnEnd(report agentstatus.Report) bool {
+	return report.State == agentstatus.Idle && report.Reason == agentstatus.ReasonIdle
 }
 
 // finishReported closes an armed run the way a human close would, recording
@@ -384,10 +405,10 @@ func (s *Scheduler) finishReportedLocked(ctx context.Context, entry *supervised)
 		return err
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
-	mode, paused := entry.launchMode, entry.paused
+	mode, paused, assigned := entry.launchMode, entry.paused, entry.missionAssigned
 	s.mu.Unlock()
 
-	if err := s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, paused, reportedClose(outcome)); err != nil {
+	if err := s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, paused, assigned, reportedClose(outcome)); err != nil {
 		s.mu.Lock()
 		entry.reportedAt = time.Now().UTC()
 		s.mu.Unlock()

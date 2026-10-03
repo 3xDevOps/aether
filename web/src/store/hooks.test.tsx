@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { useStore } from '@/store'
 import { useAttentionCount } from '@/store/hooks'
 import { toRecord } from '@/store/runs'
@@ -20,8 +20,12 @@ describe('attention hooks', () => {
     })
   })
 
-  it('counts a run with status and unanswered-question attention once', () => {
-    const attention = run({ id: 'attention', status: 'needs-attention' })
+  it('counts a run with both native input and an unanswered room question once', () => {
+    const attention = run({
+      id: 'attention',
+      status: 'running',
+      pending_inputs: [{ id: 'q1', session_id: 'session-1', kind: 'question' }],
+    })
     useStore.setState({
       runs: { [attention.id]: toRecord(attention) },
       members: { [alice.id]: alice },
@@ -66,20 +70,17 @@ describe('attention hooks', () => {
     expect(screen.getByLabelText('attention count').textContent).toBe('0')
   })
 
-  it('counts an agent outcome awaiting review, success or failure, until it is seen', () => {
+  it('leaves an agent outcome awaiting review out of the Needs input count', () => {
+    // Review lists the run in Idle; only a structured request raises Needs input.
     const success = run({ id: 'success', status: 'completed', outcome_unseen: true })
     const failure = run({ id: 'failure', status: 'failed', outcome_unseen: true })
-    const reviewed = run({ id: 'reviewed', status: 'completed', outcome_unseen: false })
     useStore.setState({
-      runs: Object.fromEntries([success, failure, reviewed].map((r) => [r.id, toRecord(r)])),
+      runs: Object.fromEntries([success, failure].map((r) => [r.id, toRecord(r)])),
       members: { [alice.id]: alice },
     })
 
     render(<Probe />)
-    expect(screen.getByLabelText('attention count').textContent).toBe('2')
-
-    act(() => useStore.getState().applyOutcomeSeen(success.id))
-    expect(screen.getByLabelText('attention count').textContent).toBe('1')
+    expect(screen.getByLabelText('attention count').textContent).toBe('0')
   })
 
   it('treats a modern zero count as authoritative over stale room history', () => {

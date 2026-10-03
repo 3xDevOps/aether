@@ -16,7 +16,15 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-var waitingForInput = agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+var waitingForInput = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
+
+// permissionInput opens (or closes) one permission request, the input-only
+// report a native hook sends while the agent waits mid-turn.
+func permissionInput(operation string) agentstatus.Report {
+	return agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{
+		Operation: operation, SessionID: "session-1", Kind: "permission", ID: "permission-1",
+	}}}
+}
 
 // expectOnlyStatusEvent reads sub until run reaches to and fails on any
 // other run.status event for run before it.
@@ -297,8 +305,8 @@ func TestBlockedReasonSurvivesTheHooksThatFollowIt(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	report(waitingForInput)
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got := reason(); got != agentstatus.ReasonInput {
-		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonInput)
+	if got := reason(); got != agentstatus.ReasonIdle {
+		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
 	}
 }
 
@@ -492,8 +500,9 @@ func (e *testEnv) finishByDeadline(t *testing.T, run domain.RunID) {
 }
 
 // TestOnlyATurnEndWaitFinishesAnArmedRun: a permission prompt after the
-// report is the agent still mid-turn. It parks the run for the member with
-// its own reason, and only the turn-end wait that follows finishes it.
+// report is the agent still mid-turn. Neither the input-only report that
+// opens it nor an idle report while it is open finishes the run; once it
+// closes, the armed, idle run finishes.
 func TestOnlyATurnEndWaitFinishesAnArmedRun(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, nil)
@@ -505,12 +514,15 @@ func TestOnlyATurnEndWaitFinishesAnArmedRun(t *testing.T) {
 		t.Fatalf("FinishReported: %v", err)
 	}
 
-	permission := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonPermission}
-	if err := e.sched.ReportAgentState(ctx, run.ID, permission); err != nil {
+	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Reason != agentstatus.ReasonPermission {
-		t.Fatalf("permission park reason = %q, want %q", p.Reason, agentstatus.ReasonPermission)
+	expectNoStatusEvent(t, sub, run.ID, "an input-only report on an armed run")
+	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+		t.Fatalf("idle with a permission open: %v", err)
+	}
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("park reason with a permission open = %q, want %q", p.Reason, agentstatus.ReasonIdle)
 	}
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
@@ -520,12 +532,8 @@ func TestOnlyATurnEndWaitFinishesAnArmedRun(t *testing.T) {
 		t.Fatalf("after a permission wait: armed %q, finishing %v; want still armed, not finishing", armed, finishing)
 	}
 
-	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
-		t.Fatalf("working: %v", err)
-	}
-	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
-	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
-		t.Fatalf("turn-end wait: %v", err)
+	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
+		t.Fatalf("permission answered: %v", err)
 	}
 	expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted)
 }
@@ -551,9 +559,10 @@ func TestTurnEndHarnessIsNotCutOffByTheDeadline(t *testing.T) {
 	expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted)
 }
 
-// TestBlockedReasonWaitsForTheTurnEnd: a permission wait, and a stall on a
-// harness that reports its turn end, keep their own reason and leave the
-// blocked reason pending; the turn-end wait shows it. On a harness with no
+// TestBlockedReasonWaitsForTheTurnEnd: a permission wait does not park the
+// run, and a stall on a harness that reports its turn end keeps its own
+// reason; both leave the blocked reason pending, and the turn-end idle
+// report shows it. On a harness with no
 // reporter the stall is the only park, so it shows the blocked reason.
 func TestBlockedReasonWaitsForTheTurnEnd(t *testing.T) {
 	t.Parallel()
@@ -584,17 +593,15 @@ func TestBlockedReasonWaitsForTheTurnEnd(t *testing.T) {
 		if err := e.sched.ReportBlocked(ctx, run.ID, "report-blocked-1", "need the staging key", time.Now()); err != nil {
 			t.Fatalf("ReportBlocked: %v", err)
 		}
-		permission := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonPermission}
-		if err := e.sched.ReportAgentState(ctx, run.ID, permission); err != nil {
+		if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 			t.Fatalf("permission wait: %v", err)
 		}
-		if got := reason(t, e, run.ID); got != agentstatus.ReasonPermission {
-			t.Fatalf("permission park reason = %q, want %q", got, agentstatus.ReasonPermission)
+		if r, err := e.db.GetRun(ctx, run.ID); err != nil || r.Status != domain.RunRunning {
+			t.Fatalf("run with a permission open = %+v, %v; want it still running", r, err)
 		}
-		if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
-			t.Fatalf("working: %v", err)
+		if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
+			t.Fatalf("permission answered: %v", err)
 		}
-		e.waitStoreStatus(t, run.ID, domain.RunRunning)
 		if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
 			t.Fatalf("turn-end wait: %v", err)
 		}
@@ -666,8 +673,8 @@ func TestReplayedBlockedReportStaysCleared(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	blocked()
 	report(waitingForInput)
-	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonInput {
-		t.Fatalf("reason after a replayed blocked report = %q, want %q", r.Reason, agentstatus.ReasonInput)
+	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("reason after a replayed blocked report = %q, want %q", r.Reason, agentstatus.ReasonIdle)
 	}
 	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.BlockedReportID != "report-blocked-1" || sc.BlockedReason != "" {
 		t.Fatalf("sidecar = %+v, %v; want the applied report ID and no reason", sc, err)
@@ -1144,8 +1151,8 @@ func TestFinishEvidenceFollowsAnOverriddenExit(t *testing.T) {
 
 // TestStalledArmedRunFinishesAtTheDeadline: a hook that never delivers the
 // turn end leaves a run on a reporter harness armed. Once it stalls into
-// needs-attention it is not working, so the deadline finishes it. A
-// permission prompt after the report is mid-turn: the deadline leaves it
+// needs-attention it is not working, so the deadline finishes it. While a
+// permission request is open the agent is mid-turn: the deadline leaves it
 // for the owner to answer.
 func TestStalledArmedRunFinishesAtTheDeadline(t *testing.T) {
 	t.Parallel()
@@ -1157,10 +1164,14 @@ func TestStalledArmedRunFinishesAtTheDeadline(t *testing.T) {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	sub := e.subscribe(t)
-	permission := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonPermission}
-	if err := e.sched.ReportAgentState(ctx, run.ID, permission); err != nil {
+	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
+	waitFor(t, "the run to stall", func() bool {
+		e.sched.checkStalls(ctx)
+		r, err := e.db.GetRun(ctx, run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention
+	})
 	expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
 	e.expireReportDeadline(t, run.ID)
 	expectNoStatusEvent(t, sub, run.ID, "an overdue arm parked at a permission prompt")
@@ -1170,15 +1181,10 @@ func TestStalledArmedRunFinishesAtTheDeadline(t *testing.T) {
 	if finishing {
 		t.Fatal("the deadline started finishing a run parked at a permission prompt")
 	}
-	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
-		t.Fatalf("working: %v", err)
+	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
+		t.Fatalf("permission answered: %v", err)
 	}
-	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
-	waitFor(t, "the run to stall", func() bool {
-		e.sched.checkStalls(ctx)
-		r, err := e.db.GetRun(ctx, run.ID)
-		return err == nil && r.Status == domain.RunNeedsAttention
-	})
+	expectNoStatusEvent(t, sub, run.ID, "closing the input on a stalled, armed run")
 	e.expireReportDeadline(t, run.ID)
 	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); row.Reason != reportedSuccessRetainedReason {
 		t.Fatalf("finish reason = %q, want %q", row.Reason, reportedSuccessRetainedReason)

@@ -37,6 +37,18 @@ async function openDock(page: Page, url: string): Promise<Locator> {
   return dock
 }
 
+async function terminalActions(page: Page, dock: Locator): Promise<Locator> {
+  await dock.getByRole('button', { name: 'More terminal actions' }).click()
+  return page.getByRole('menu')
+}
+
+async function expectCannotStop(page: Page, dock: Locator): Promise<void> {
+  const menu = await terminalActions(page, dock)
+  await expect(menu.getByRole('menuitem', { name: 'Stop terminal' })).toBeDisabled()
+  await menu.press('Escape')
+  await expect(menu).toBeHidden()
+}
+
 test.skip(!dockerReachable(), 'requires a real Docker daemon and run container')
 
 test('agent-created TUI shares authority, geometry, protocol responses and process lifetime', async ({ page, browser, aether }, testInfo) => {
@@ -66,9 +78,13 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   await page.setViewportSize({ width: 1568, height: 1000 })
   const dock = await openDock(page, alice.url)
   expect((await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)).toMatchObject({ cols: 73, rows: 19 })
-  await expect(dock.getByRole('button', { name: 'Stop terminal' })).toBeDisabled()
+  await expectCannotStop(page, dock)
+  const initialController = (await status()).controller
   await dock.getByRole('button', { name: 'Take shell control' }).click()
-  if (await page.getByRole('button', { name: 'Confirm takeover' }).isVisible()) await page.getByRole('button', { name: 'Confirm takeover' }).click()
+  if (initialController) {
+    await page.getByRole('dialog', { name: 'Take shell control?' })
+      .getByRole('button', { name: 'Confirm takeover' }).click()
+  }
   await expect(dock.getByRole('button', { name: 'Release shell control' })).toBeVisible()
   const firstController = (await status()).controller!
   expect(firstController.kind).toBe('member')
@@ -98,12 +114,13 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
     const watcher = await openDock(watcherPage, alice.url)
     await watcherPage.setViewportSize({ width: 360, height: 740 })
     expect((await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)).toMatchObject({ cols: beforeWatch.cols, rows: beforeWatch.rows })
-    await expect(watcher.getByRole('button', { name: 'Stop terminal' })).toBeDisabled()
+    await expectCannotStop(watcherPage, watcher)
     await expect(watcher.getByRole('status').filter({ hasText: `Controller: ${member}` })).toBeVisible()
     await watcher.getByRole('button', { name: 'Take shell control' }).click()
-    await watcherPage.getByRole('button', { name: 'Confirm takeover' }).click()
+    await watcherPage.getByRole('dialog', { name: 'Take shell control?' })
+      .getByRole('button', { name: 'Confirm takeover' }).click()
     await expect(watcher.getByRole('button', { name: 'Release shell control' })).toBeVisible()
-    await expect(dock.getByRole('button', { name: 'Stop terminal' })).toBeDisabled()
+    await expectCannotStop(page, dock)
     await expect(alice.api.rpc('dev.terminal.input', { ...target, control_session_id: firstController.control_session_id, control_generation: firstController.control_generation, kind: 'text', text: 'X' })).rejects.toThrow()
     expect(file('effects')).toBe('effect\n')
     await watcher.locator('.xterm-helper-textarea').focus()
@@ -111,7 +128,8 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
     await expect.poll(() => file('effects')).toBe('effect\neffect\n')
     await watcher.getByRole('button', { name: 'Release shell control' }).click()
     await expect(watcher.getByRole('button', { name: 'Take shell control' })).toBeVisible()
-    await watcher.getByRole('button', { name: 'Hide terminal' }).click()
+    await (await terminalActions(watcherPage, watcher))
+      .getByRole('menuitem', { name: 'Hide terminal' }).click()
     const heartbeat = file('heartbeat').length
     await expect.poll(() => file('heartbeat').length).toBeGreaterThan(heartbeat)
     await watcher.getByRole('button', { name: /Show agent-tui/ }).click()
@@ -128,12 +146,12 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
 
   await expect(dock.getByRole('status').filter({ hasText: 'Controller: Nobody' })).toBeVisible()
   await dock.getByRole('button', { name: 'Take shell control' }).click()
-  if (await page.getByRole('button', { name: 'Confirm takeover' }).isVisible()) await page.getByRole('button', { name: 'Confirm takeover' }).click()
   await expect(dock.getByRole('button', { name: 'Release shell control' })).toBeVisible()
   // A first capture includes companion launch and has a bounded 90s API
   // lifecycle; do not abort that request at the ordinary 30s locator limit.
   const captureResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/dev.terminal.screenshot'), { timeout: 95_000 })
-  await dock.getByRole('button', { name: 'Screenshot', exact: true }).click()
+  await (await terminalActions(page, dock))
+    .getByRole('menuitem', { name: 'Screenshot', exact: true }).click()
   const captured = await captureResponse
   expect(captured.ok(), await captured.text()).toBe(true)
   const { artifact } = await captured.json() as DevTerminalScreenshotResult
@@ -147,13 +165,15 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   await testInfo.attach('shared-terminal-capture', { body: Buffer.from(await image.arrayBuffer()), contentType: 'image/png' })
   await testInfo.attach('shared-terminal-capture-metadata', { body: JSON.stringify(artifact), contentType: 'application/json' })
   await expect(dock.getByRole('status').filter({ hasText: /Captured/ })).toBeVisible()
-  await dock.getByRole('button', { name: 'Stop terminal' }).click()
-  await page.getByRole('button', { name: 'Confirm stop' }).click()
+  await (await terminalActions(page, dock))
+    .getByRole('menuitem', { name: 'Stop terminal' }).click()
+  await page.getByRole('dialog', { name: 'Stop this terminal process?' })
+    .getByRole('button', { name: 'Confirm stop' }).click()
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   await page.reload()
   await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   await page.getByRole('region', { name: 'Terminal dock' }).getByRole('tab', { name: /agent-tui/ }).click()
-  await expect(page.getByRole('region', { name: 'Terminal dock' }).getByRole('button', { name: 'Stop terminal' })).toBeDisabled()
+  await expectCannotStop(page, page.getByRole('region', { name: 'Terminal dock' }))
   expect(file('starts')).toBe('start\n')
   expect((file('input').match(/\x1b\[[?\d;]*c/g) ?? []).length).toBe(1)
 })

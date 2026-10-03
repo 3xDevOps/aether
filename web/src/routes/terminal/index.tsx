@@ -22,6 +22,9 @@ import { TerminalHistory } from '@/routes/terminal/history'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useRunTerminalSession } from '@/routes/terminal/session'
+import { ControlButton } from '@/routes/terminal/control-button'
+import { useTakeover } from '@/routes/terminal/use-takeover'
+import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
@@ -84,6 +87,7 @@ function TerminalRoute({ params }: RouteProps) {
   const beforeDispose = useRef<((terminal: Terminal) => void) | null>(null)
   const historyTools = useRef<TerminalReadSurface | null>(null)
   const [readingHistory, setReadingHistory] = useState(true)
+  const [evidenceAnswer, setEvidenceAnswer] = useState<{ fact: string }>()
 
   const steerable = run?.status === 'running' || run?.status === 'needs-attention'
   const automaticWrite =
@@ -151,7 +155,7 @@ function TerminalRoute({ params }: RouteProps) {
   const { state, replaying, controlMetadata, sessionMissing } = session
   const replaySpinner = replaying
   const roomControl = state.connection === 'live' && steerable && !state.steerDenied ? controlMetadata : undefined
-  const stalePresence = roomStatusControl !== roomControl || Boolean(roomStatusError)
+  const stalePresence = state.connection !== 'live' || roomStatusControl !== roomControl || Boolean(roomStatusError)
   const localControl = state.connection === 'live' && state.write &&
     controlMetadata?.has_control === true && steerable && !state.steerDenied
   const liveWritable = localControl && !replaying && !readingHistory
@@ -160,12 +164,17 @@ function TerminalRoute({ params }: RouteProps) {
   const controllerName = controllerMember?.display_name || controllerID
   const controllerNote = localControl ? 'this tab' : stalePresence ? 'last known' :
     state.connection === 'live' && controlMetadata?.has_control === false && controllerID === self.id ? 'another session' : null
-  const takeControl = (takeover = false) => session.takeControl(takeover)
-  const releaseControl = () => session.releaseControl()
-  const toggleWrite = () => {
-    if (state.write) releaseControl()
-    else takeControl()
-  }
+  const takeover = useTakeover({
+    state: session.takeover,
+    error: session.takeoverError,
+    control: controlMetadata,
+    enabled: state.connection === 'live' && steerable && !state.steerDenied,
+    occupied: Boolean(roomStatus?.controller),
+    request: session.requestTakeover,
+  })
+  const controlUnavailable = state.connection !== 'live' || state.steerDenied || !steerable
+  const requesterID = takeover.review?.requester_member_id
+  const reviewingTakeover = Boolean(takeover.review)
 
   if (!run) {
     return <MissingRun />
@@ -219,22 +228,25 @@ function TerminalRoute({ params }: RouteProps) {
                 <MemberAvatar member={members[id]} fallback={id} className="size-4 text-[8px]" />
                 <span className="text-foreground">{members[id]?.display_name || id}</span>
               </span>
-            )) : <span className="text-muted-foreground">None</span> : (
+            )) : <span className="text-muted-foreground">{stalePresence ? 'Unknown' : 'None'}</span> : (
               <span className="text-muted-foreground">{roomStatusError ? 'Unavailable' : 'Loading…'}</span>
             )}
-            {roomStatusError && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
+            {stalePresence && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
           </div>
         </div>
-        <Button
-          size="sm"
-          variant={state.write ? 'default' : 'outline'}
-          disabled={state.steerDenied || !steerable}
-          className="shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
-          onClick={toggleWrite}
-        >
-          {state.write ? 'Release' : 'Take control'}
-        </Button>
+        <ControlButton
+          ownsControl={localControl}
+          unavailable={controlUnavailable}
+          onTakeControl={session.takeControl}
+          onReleaseControl={session.releaseControl}
+          takeover={takeover.interaction}
+        />
       </div>
+      {roomStatusError && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
+          {roomStatusError}
+        </span>
+      )}
       {state.steerDenied && (
         <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
           You cannot steer this run.
@@ -266,47 +278,70 @@ function TerminalRoute({ params }: RouteProps) {
   )
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8 coarse:pr-11">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden">
       <RunHeader run={run} subtitle={run.branch} active="terminal" />
-      <div {...panelProps}>
-        <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
-          <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
-            {liveWritable && <div aria-hidden="true" className="terminal-control-border" />}
-            <TerminalPane
-              key={runID}
-              controller={controller}
-              writable={state.write && !starting && !replaying}
-              readingSurface={readingHistory ? historyTools : undefined}
-              surface={
-                <TerminalHistory
-                  controller={controller}
-                  cache={historyCache}
-                  enabled={!starting && !replaying}
-                  beforeDispose={beforeDispose}
-                  tools={historyTools}
-                  onReadingChange={setReadingHistory}
-                />
-              }
-              imageTarget={runID}
-              toolbarEnd={attachmentControls}
-              imageUploadEnabled={
-                !starting && state.connection === 'live' && state.write && !state.steerDenied
-              }
-              replaying={replaySpinner}
-            >
-              {starting && <TerminalSpinner label="Starting the run's container" />}
-            </TerminalPane>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div {...panelProps}>
+          <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
+            <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
+              <TerminalPane
+                key={runID}
+                controller={controller}
+                writable={state.write && !starting && !replaying}
+                controlAppearance={liveWritable ? 'active' :
+                  state.connection !== 'live' || state.steerDenied || !steerable || replaying || readingHistory
+                    ? 'hidden' : controlMetadata?.loss ?? 'hidden'}
+                takeoverProgress={takeover.holderProgress}
+                readingSurface={readingHistory ? historyTools : undefined}
+                surface={
+                  <TerminalHistory
+                    controller={controller}
+                    cache={historyCache}
+                    enabled={!starting && !replaying}
+                    beforeDispose={beforeDispose}
+                    tools={historyTools}
+                    onReadingChange={setReadingHistory}
+                  />
+                }
+                imageTarget={runID}
+                toolbarEnd={attachmentControls}
+                imageUploadEnabled={
+                  !starting && state.connection === 'live' && state.write && !state.steerDenied
+                }
+                replaying={replaySpinner}
+              >
+                {starting && <TerminalSpinner label="Starting the run's container" />}
+              </TerminalPane>
+            </div>
+            <RunDock runID={runID} onEvidenceAnswer={(fact) => setEvidenceAnswer({ fact })} deferLayout={reviewingTakeover} />
           </div>
-          <RunDock runID={runID} />
         </div>
+        <RunRoom
+          key={runID}
+          run={run}
+          selfID={self.id}
+          control={roomControl}
+          onTakeControl={session.takeControl}
+          onReleaseControl={session.releaseControl}
+          controlUnavailable={controlUnavailable}
+          takeover={takeover.interaction}
+          evidenceAnswer={evidenceAnswer}
+        />
       </div>
-      <RunRoom
-        key={runID}
-        run={run}
-        selfID={self.id}
-        control={roomControl}
-        onTakeControl={takeControl}
-        onReleaseControl={releaseControl}
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {!localControl && takeover.interaction.phase === 'holding'
+          ? `Keep holding to request control. ${takeover.interaction.seconds} seconds remaining.`
+          : !localControl && takeover.interaction.phase === 'review'
+            ? `Control requested. Waiting for the controller's decision. ${takeover.interaction.seconds} seconds remaining.`
+            : ''}
+      </span>
+      <TakeoverDialog
+        open={reviewingTakeover}
+        requesterName={requesterID ? members[requesterID]?.display_name || requesterID : ''}
+        seconds={takeover.interaction.seconds}
+        pending={takeover.decisionPending}
+        error={session.takeoverError}
+        onDecide={takeover.decide}
       />
     </div>
   )

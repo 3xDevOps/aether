@@ -36,11 +36,12 @@ import type {
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, usePendingApprovalRuns, useSelf } from '@/store/hooks'
+import { useCapability, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
 import { StatusChip } from '@/components/run-list'
+import { RunInputIndicator } from '@/components/run-input-indicator'
 import { runState } from '@/lib/status'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
@@ -342,7 +343,6 @@ function MissionDetailView({
   const integratorRun = useStore((state) => (integratorRunID ? state.runs[integratorRunID] : undefined))
   const hydrated = useStore((state) => state.hydrated)
   const upsertRun = useStore((state) => state.upsertRun)
-  const pending = usePendingApprovalRuns()
   // A run absent from the hydrated store is not proof it does not exist: a
   // create's response can outrun the run's first event. Only the server's
   // not-found marks it missing. Any other failure is asked again only on the
@@ -486,7 +486,8 @@ function MissionDetailView({
                   {integratorRun && (
                     <>
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <StatusChip state={runState(integratorRun.status, pending.has(integratorRun.id) || (integratorRun.unanswered_questions ?? 0) > 0)} />
+                        <StatusChip state={runState(integratorRun.status)} />
+                        <RunInputIndicator run={integratorRun} />
                         {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
                       </span>
                       <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRun.id })}>
@@ -643,6 +644,7 @@ function TaskCard({
     (submission) =>
       submission.state === 'accepted' && submission.task_revision === task.current_revision,
   )
+  const evidenceExceptions = accepted?.evidence.filter((source) => !source.available || source.truncated) ?? []
   return (
     <article className="border bg-card p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -713,6 +715,19 @@ function TaskCard({
           <p className="font-medium">Accepted submission · revision {accepted.task_revision}</p>
           <p className="mt-0.5 font-mono break-all">{accepted.ref.run_id} · {accepted.ref.retained_revision}</p>
           {accepted.ref.evidence_ref && <p className="mt-0.5">Evidence: {accepted.ref.evidence_ref}</p>}
+          {evidenceExceptions.length > 0 && (
+            <>
+              <p className="mt-1 text-muted-foreground">Evidence observations at acceptance, not a live availability check. Retained sources may later expire.</p>
+              <ul aria-label="Evidence exceptions at acceptance" className="mt-0.5 space-y-0.5 text-state-needs-attention">
+                {evidenceExceptions.map((source, index) => (
+                  <li key={`${source.kind}-${source.ref}-${index}`} className="whitespace-pre-wrap break-words">
+                    {source.kind}: {source.available ? 'Partial retained evidence (truncated).' : 'Unavailable at acceptance.'}
+                    {source.detail && <span className="text-muted-foreground">{' '}{source.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {(accepted.scope_violations ?? []).length > 0 && <p className="mt-0.5 text-state-needs-attention">Scope violations: {accepted.scope_violations!.join(', ')}</p>}
           {accepted.acceptance?.scope_disposition && <p className="mt-0.5">Scope disposition: {accepted.acceptance.scope_disposition}</p>}
         </div>

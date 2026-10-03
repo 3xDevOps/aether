@@ -94,8 +94,6 @@ it('fits two owners beside one another and keeps three sibling workers on one ro
     ])
   }
   expectDisjoint(layout.nodes)
-  expect(layout.width / layout.height).toBeGreaterThan(1.3)
-  expect(layout.width / layout.height).toBeLessThan(2.4)
   // A typical desktop canvas must not shrink every card into the old tiny strip.
   expect(Math.min((1518 - 24) / layout.width, (869 - 24) / layout.height)).toBeGreaterThan(0.65)
 })

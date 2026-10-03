@@ -1,10 +1,9 @@
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { RunCard } from '@/routes/board/run-card'
-import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import '@/routes/missions'
 import { useStore } from '@/store'
@@ -21,7 +20,6 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
-import { hintOn } from '@/test/tooltip'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
@@ -38,11 +36,14 @@ function seed(runs: Run[], active = workspace.id) {
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     activeWorkspace: active,
     boardView: 'cards',
+    capabilities: everyMethod,
+    info: { ...serverInfo, member: alice },
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
     acked: {},
     pausedRuns: {},
     inbox: {},
+    roomMessages: {},
     hydrated: true,
     overlaps: {},
     missionDetails: {},
@@ -96,7 +97,7 @@ const archivedMerged = run({
 })
 
 // The columns are landmarks; a plain label lookup would also hit the state
-// dots, which carry the same words.
+// chips, which carry the same words.
 function column(label: string) {
   return within(screen.getByRole('region', { name: label }))
 }
@@ -155,7 +156,7 @@ describe('board', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
-    expect(column('Needs you').getByText('waiting on a question')).toBeDefined()
+    expect(column('Idle').getByText('waiting on a question')).toBeDefined()
     expect(column('Done').getByText('landed already')).toBeDefined()
 
     // queued (11:00) changed after running (10:02), so it sorts above it.
@@ -171,20 +172,27 @@ describe('board', () => {
     expect(tasks).toEqual(['not started', 'still going'])
   })
 
-  it('carries the whole branch name and copies it', async () => {
+  it.each(['cards', 'map'] as const)('copies the full disclosed branch without navigating or acknowledging in %s', async (variant) => {
     seed([working])
+    useStore.setState({ boardView: variant })
     render(<Board />)
     const card = screen.getByRole('article')
-    // The name is truncated on the card, so the title carries all of it.
-    expect(within(card).getByTitle(working.branch)).toBeDefined()
+    expect(within(card).queryByRole('button', { name: /^Copy branch/ })).toBeNull()
+    fireEvent.click(within(card).getByRole('button', { name: /^Show details/ }))
+    const details = variant === 'map' ? await screen.findByRole('dialog') : card
+    const branch = within(details).getByText(working.branch)
+    fireEvent.click(branch)
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
 
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { clipboard: { writeText } })
     fireEvent.click(
-      within(card).getByRole('button', { name: `Copy branch ${working.branch}` }),
+      within(details).getByRole('button', { name: `Copy branch ${working.branch}` }),
     )
 
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(working.branch))
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    expect(useStore.getState().acked[working.id]).toBeUndefined()
   })
 
   it('discloses the full task and reason without opening the run', () => {
@@ -341,6 +349,7 @@ describe('board', () => {
     // throw; it selects the branch name for a manual copy instead.
     seed([working])
     render(<Board />)
+    fireEvent.click(screen.getByRole('button', { name: /^Show details/ }))
 
     fireEvent.click(
       screen.getByRole('button', { name: `Copy branch ${working.branch}` }),
@@ -351,15 +360,17 @@ describe('board', () => {
       expect(selection?.rangeCount).toBe(1)
       expect(selection?.getRangeAt(0).toString()).toBe(working.branch)
     })
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
   })
 
-  it('offers no branch chip for a run whose checkout never got one', () => {
+  it('offers no branch copy in Details for a run whose checkout never got one', () => {
     // A run that failed in provisioning is marked failed before its branch is
     // assigned, so the card would carry an empty name and copy an empty string.
     seed([run({ id: 'run_nobranch', task: 'checkout failed', status: 'failed', branch: '' })])
     render(<Board />)
 
     const card = screen.getByRole('article')
+    fireEvent.click(within(card).getByRole('button', { name: /^Show details/ }))
     expect(within(card).queryByRole('button', { name: /^Copy branch/ })).toBeNull()
   })
 
@@ -418,11 +429,11 @@ describe('board', () => {
     render(<Board />)
 
     const card = screen.getByRole('article')
-    expect(within(card).getByLabelText('Unseen')).toBeDefined()
+    expect(within(card).getByRole('button', { name: stalled.task, description: 'Unseen' })).toBeDefined()
 
     fireEvent.click(within(card).getByRole('button', { name: 'waiting on a question' }))
 
-    expect(screen.queryByLabelText('Unseen')).toBeNull()
+    expect(within(card).queryByRole('button', { name: stalled.task, description: 'Unseen' })).toBeNull()
     // The ack is app-wide, and the click reveals the run.
     expect(useStore.getState().acked[stalled.id]).toEqual({
       status: stalled.status,
@@ -434,18 +445,17 @@ describe('board', () => {
     })
   })
 
-  it('marks every run seen at once', async () => {
+  it('marks every run seen at once', () => {
     seed([stalled, working])
     render(<Board />)
 
-    expect(screen.getAllByLabelText('Unseen')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { description: 'Unseen' })).toHaveLength(2)
     const markAll = screen.getByRole('button', { name: 'Mark all seen' })
-    // The button says "seen"; only the hint says how many runs that is.
-    expect(await hintOn(markAll)).toBe('Mark every run seen')
 
     fireEvent.click(markAll)
 
-    expect(screen.queryByLabelText('Unseen')).toBeNull()
+    expect(screen.queryAllByRole('button', { description: 'Unseen' })).toEqual([])
+    expect(Object.keys(useStore.getState().acked).sort()).toEqual([stalled.id, working.id].sort())
   })
 
   it('badges a paused run off the timeline stream, and clears it on resume', () => {
@@ -477,7 +487,7 @@ describe('board', () => {
     render(<Board />)
 
     act(() => useStore.getState().ackRun(working.id))
-    expect(screen.queryByLabelText('Unseen')).toBeNull()
+    expect(screen.queryByRole('button', { name: working.task, description: 'Unseen' })).toBeNull()
 
     act(() =>
       useStore
@@ -485,11 +495,11 @@ describe('board', () => {
         .applyRunStatus(working.id, 'needs-attention', 'plan approval', '2026-08-14T12:00:00Z'),
     )
 
-    expect(screen.getByLabelText('Unseen')).toBeDefined()
-    expect(column('Needs you').getByText('plan approval')).toBeDefined()
+    expect(column('Idle').getByRole('button', { name: working.task, description: 'Unseen' })).toBeDefined()
+    expect(column('Idle').getByText('plan approval')).toBeDefined()
   })
 
-  it('deals a running run with a pending approval into Needs you', () => {
+  it('keeps a busy run in Working while its approval opens and closes', () => {
     seed([working])
     render(<Board />)
     expect(column('Working').getByText('still going')).toBeDefined()
@@ -501,13 +511,17 @@ describe('board', () => {
         .setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
 
-    expect(column('Needs you').getByText('still going')).toBeDefined()
+    expect(column('Working').getByText('still going')).toBeDefined()
+    expect(column('Working').getByRole('button', { name: /Needs input: 1 approval/ })).toBeDefined()
     expect(useStore.getState().runs[working.id].status).toBe('running')
     // No run.status event fired, so the run has no reason; the card's
     // summary is the pending question itself.
-    expect(column('Needs you').getByText('write src/checkout.ts')).toBeDefined()
+    expect(column('Working').getByText('write src/checkout.ts')).toBeDefined()
+    fireEvent.click(column('Working').getByRole('button', { name: /Needs input: 1 approval/ }))
+    expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
+    expect(useStore.getState().acked[working.id]).toBeUndefined()
 
-    // Deciding the request sends the card back to Working.
+    // Deciding the request clears the indicator without moving the card.
     act(() =>
       useStore
         .getState()
@@ -516,8 +530,29 @@ describe('board', () => {
         ]),
     )
     expect(column('Working').getByText('still going')).toBeDefined()
+    expect(column('Working').queryByRole('button', { name: /Needs input:/ })).toBeNull()
   })
-  it('deals unanswered room questions into Needs you with an action summary', () => {
+
+  it('closes native requests individually without moving a busy card out of Working', async () => {
+    const first = { id: 'question', session_id: 'session-1', kind: 'question' as const }
+    const second = { id: 'permission', session_id: 'session-2', kind: 'permission' as const }
+    seed([working, stalled])
+    render(<Board />)
+    const input = (pending_inputs: (typeof first | typeof second)[], seq: number) =>
+      applyEvent(useStore, {
+        id: `input-${seq}`, seq, time: '2026-08-14T12:00:00Z', workspace_id: workspace.id,
+        run_id: working.id, actor_id: '', type: 'run.input', payload: { pending_inputs },
+      }, fakeApi())
+    expect(column('Idle').queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    await act(() => input([first, second], 1))
+    expect(column('Working').getByRole('button', { name: /Needs input: 1 question.*1 permission/ })).toBeDefined()
+    await act(() => input([second], 2))
+    expect(column('Working').getByRole('button', { name: /^Needs input: 1 permission request in Terminal$/ })).toBeDefined()
+    await act(() => input([], 3))
+    expect(column('Working').queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(column('Working').getByText(working.task)).toBeDefined()
+  })
+  it('keeps unanswered room questions actionable without hiding ongoing work', () => {
     const questionRun = run({
       id: 'run_room_attention',
       task: 'answer the room',
@@ -528,18 +563,19 @@ describe('board', () => {
     seed([questionRun])
     render(<Board />)
 
-    const needsYou = column('Needs you')
-    expect(needsYou.getByText('answer the room')).toBeDefined()
-    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    const active = column('Working')
+    expect(active.getByText('answer the room')).toBeDefined()
+    expect(active.getByRole('button', { name: /Needs input: 1 unanswered question/ })).toBeDefined()
+    expect(active.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
 
-    fireEvent.click(needsYou.getByRole('button', { name: 'answer the room' }))
+    fireEvent.click(active.getByRole('button', { name: /Needs input:/ }))
     expect(useStore.getState().route).toEqual({
       name: 'terminal',
       params: { runId: questionRun.id },
     })
   })
 
-  it('keeps a finished run with unanswered questions in Needs you with lifecycle context', () => {
+  it('keeps a finished run in Done with its unanswered question actionable', () => {
     const finished = run({
       id: 'run_finished_question',
       task: 'answer after completion',
@@ -551,11 +587,11 @@ describe('board', () => {
     seed([finished])
     render(<Board />)
 
-    const needsYou = column('Needs you')
-    expect(needsYou.getByText('answer after completion')).toBeDefined()
-    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
-    expect(needsYou.getByText('Lifecycle: Completed')).toBeDefined()
-    expect(column('Done').queryByText('answer after completion')).toBeNull()
+    const done = column('Done')
+    expect(done.getByText('answer after completion')).toBeDefined()
+    expect(done.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    expect(done.getByRole('button', { name: /Needs input:/ })).toBeDefined()
+    expect(column('Idle').queryByText('answer after completion')).toBeNull()
     expect(useStore.getState().runs[finished.id].status).toBe('completed')
   })
   it('keeps the unanswered-question action ahead of a failed lifecycle reason', () => {
@@ -570,14 +606,14 @@ describe('board', () => {
     seed([failed])
     render(<Board />)
 
-    const needsYou = column('Needs you')
-    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
-    expect(needsYou.getByText('Lifecycle: Failed')).toBeDefined()
-    fireEvent.click(needsYou.getByRole('button', { name: 'Show details for answer after failure' }))
-    expect(needsYou.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
+    const done = column('Done')
+    expect(done.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    expect(done.getByText('Failed')).toBeDefined()
+    fireEvent.click(done.getByRole('button', { name: 'Show details for answer after failure' }))
+    expect(done.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
   })
 
-  it('deals an unreviewed agent outcome into Needs you with its finished state, until it is seen', () => {
+  it('deals an unreviewed agent outcome into Idle with its finished state, until it is seen', () => {
     const success = run({
       id: 'run_reported_success',
       task: 'agent says done',
@@ -597,45 +633,41 @@ describe('board', () => {
     seed([success, failure])
     render(<Board />)
 
-    const needsYou = column('Needs you')
-    expect(needsYou.getByText('The agent reported success; open the run to review it.')).toBeDefined()
-    expect(needsYou.getByText('The agent reported failure; open the run to review it.')).toBeDefined()
+    const idle = column('Idle')
+    expect(idle.getByText('The agent reported success; open the run to review it.')).toBeDefined()
+    expect(idle.getByText('The agent reported failure; open the run to review it.')).toBeDefined()
     // The real state, not the amber needs-attention one.
-    expect(needsYou.getByLabelText('Done')).toBeDefined()
-    expect(needsYou.getByLabelText('Failed')).toBeDefined()
-    expect(needsYou.queryByLabelText('Needs you')).toBeNull()
+    expect(idle.getByLabelText('Done')).toBeDefined()
+    expect(idle.getByLabelText('Failed')).toBeDefined()
+    expect(idle.queryByLabelText('Idle')).toBeNull()
+    // A report to review is not a structured input request.
+    expect(idle.queryByRole('button', { name: /Needs input:/ })).toBeNull()
     expect(column('Done').queryByText('agent says done')).toBeNull()
 
     act(() => useStore.getState().applyOutcomeSeen(success.id))
     expect(column('Done').getByText('agent says done')).toBeDefined()
     expect(column('Done').queryByText(/open the run to review it/)).toBeNull()
-    expect(needsYou.getByText('agent says stuck')).toBeDefined()
+    expect(idle.getByText('agent says stuck')).toBeDefined()
   })
 
-  it('keeps the board identity across an inbox refresh that changed nothing', () => {
-    seed([working])
-    act(() =>
-      useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]),
-    )
-    const { result } = renderHook(() => useBoard())
-    const before = result.current
-
-    // A refetch builds fresh approval objects; unchanged content must not
-    // rebuild the derived board (and with it, the rendered tree).
-    act(() =>
-      useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]),
-    )
-    expect(result.current).toBe(before)
-  })
-
-  it('opens the launch form from the board header', () => {
-    seed([working])
+  it('keeps the launch action in the empty-board notice only', () => {
+    seedAs(alice, [working])
     render(<Board />)
 
+    expect(screen.queryByRole('button', { name: 'New run' })).toBeNull()
+    act(() => useStore.setState({ runs: {} }))
     fireEvent.click(screen.getByRole('button', { name: 'New run' }))
 
     // The form is hosted app-wide; the board only asks for it.
     expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  it('does not offer the empty-board launch action without launch capability', () => {
+    seedAs(alice, [])
+    useStore.setState({ capabilities: { gateway: 'remote', methods: [], ws: [] } })
+    render(<Board />)
+    expect(screen.getByText('No runs yet')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'New run' })).toBeNull()
   })
 
   it('says an empty workspace is empty once, not four times', () => {
@@ -648,7 +680,7 @@ describe('board', () => {
     const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
     expect(within(notice).getByRole('button', { name: 'New run' })).toBeDefined()
     expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
-    for (const bucket of ['Needs you', 'Working', 'Done']) {
+    for (const bucket of ['Idle', 'Working', 'Done']) {
       expect(screen.queryByRole('region', { name: bucket })).toBeNull()
     }
   })
@@ -674,7 +706,7 @@ describe('board', () => {
     render(<Board />)
 
     expect(column('Working').getByText('still going')).toBeDefined()
-    expect(column('Needs you').getByText('Nothing here.')).toBeDefined()
+    expect(column('Idle').getByText('Nothing here.')).toBeDefined()
     expect(column('Done').getByText('Nothing here.')).toBeDefined()
     expect(column('Working').queryByText('Nothing here.')).toBeNull()
   })
@@ -750,6 +782,25 @@ describe('board', () => {
     }
   })
 
+  it('switches archived runs from the Map Runs strip without hiding active runs', () => {
+    const finished = run({ ...merged, status: 'merged' })
+    seedAs(alice, [working, finished, archivedMerged])
+    useStore.setState({ boardView: 'map' })
+    render(<Board />)
+    const header = screen.getByRole('heading', { name: 'Runs' }).closest('header')!
+    expect(within(header).getByRole('button', { name: 'Clear done' })).toBeDefined()
+    const toggle = within(header).getByRole('button', { name: 'Archived 1' })
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: working.task })).toBeDefined()
+    expect(screen.getByRole('button', { name: archivedMerged.task })).toBeDefined()
+    expect(screen.queryByRole('button', { name: finished.task })).toBeNull()
+    expect(within(header).queryByRole('button', { name: 'Clear done' })).toBeNull()
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: finished.task })).toBeDefined()
+    expect(screen.queryByRole('button', { name: archivedMerged.task })).toBeNull()
+    expect(within(header).getByRole('button', { name: 'Clear done' })).toBeDefined()
+  })
+
   it('resets the toggle once the last archived run is restored', () => {
     seed([merged, archivedMerged])
     render(<Board />)
@@ -821,7 +872,7 @@ describe('board', () => {
 })
 
 describe('Clear done', () => {
-  it('archives what a collaborator may act on, skipping a completed run and a protected run owned by someone else', async () => {
+  it.each(['cards', 'map'] as const)('archives only eligible collaborator runs from %s, skipping completed and protected runs', async (view) => {
     const eligible = run({
       id: 'run_clear_eligible',
       status: 'merged',
@@ -842,9 +893,10 @@ describe('Clear done', () => {
       finished_at: '2026-08-14T10:15:00Z',
     })
     seedAs(bob, [eligible, stillOpen, someoneElsesProtected])
+    useStore.setState({ boardView: view })
     render(<Board />)
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear done' }))
     const dialog = within(await screen.findByRole('dialog'))
 
     expect(dialog.getByText('Archive 1 finished run?')).toBeDefined()

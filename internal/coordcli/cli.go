@@ -268,7 +268,7 @@ idempotency key, because the old key now fails with a conflict. Blocked is
 nonterminal, may repeat, and is not a way to wait for a peer or human.
 Ordinary run: success or failure finishes the run when your turn ends. Aether
 commits your work, publishes the run branch, and moves the run out of Working
-to completed (success) or failed (failure). Blocked moves it to Needs you with
+to completed (success) or failed (failure). Blocked moves it to Idle with
 the summary as the reason once your turn ends.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
@@ -458,7 +458,7 @@ work, publishes the run branch, and moves the run out of Working to completed
 only after finishing with required evidence, failure only if irrecoverable.
 Verify the changed behavior and collect required screenshots/evidence BEFORE
 reporting: finishing cleans up the run's development resources.
-Blocked moves the run to Needs you with your summary as the reason once your
+Blocked moves the run to Idle with your summary as the reason once your
 turn ends. It may repeat and does not use up the terminal report; it is not a
 way to wait. Do not report while idle or waiting on a peer or human. After a
 terminal report, end your turn and take no new work. If the run is relaunched,

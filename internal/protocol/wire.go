@@ -29,11 +29,14 @@ type Run struct {
 	Reason          string `json:"reason,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
-	Paused       bool    `json:"paused"`
-	Branch       string  `json:"branch"`
-	LastCommit   string  `json:"last_commit,omitempty"`
-	LastCommitAt *string `json:"last_commit_at,omitempty"`
-	Protected    bool    `json:"protected,omitempty"`
+	Paused bool `json:"paused"`
+	// PendingInputs is the scheduler's correlated native input snapshot, separate
+	// from execution status. Modern gateways always send a list, including [].
+	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
+	Branch        string                   `json:"branch"`
+	LastCommit    string                   `json:"last_commit,omitempty"`
+	LastCommitAt  *string                  `json:"last_commit_at,omitempty"`
+	Protected     bool                     `json:"protected,omitempty"`
 	// ArchivedAt is when the run was hidden from the board; absent means
 	// it is not archived. DeletesAt is ArchivedAt + domain.ArchiveRetention,
 	// computed here so no client hardcodes the retention window.
@@ -154,6 +157,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Mode:                string(r.Mode),
 		Status:              string(r.Status),
 		Reason:              r.Reason,
+		PendingInputs:       []domain.RunInputRequest{},
 		Branch:              r.Branch,
 		LastCommit:          r.LastCommit,
 		LastCommitAt:        rfc3339ValuePtr(r.LastCommitAt),

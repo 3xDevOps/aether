@@ -1,7 +1,5 @@
-// Local-machine settings: the link, the background sync daemon, and the live
-// overlay. All of it rides the /local/v1 verbs, so the whole route gates on
-// daemon.status or sync.status; a remote monitor gets an empty state pointing
-// at `aether gui`, not a broken form. Every server refusal is shown verbatim.
+// Appearance is client-local and available on every gateway. Machine settings
+// retain their /local/v1 capability gates and show server refusals verbatim.
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -27,36 +25,56 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import type { Theme } from '@/store/ui'
 
 export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
-
-  if (!caps.hasLocal('daemon.status') && !caps.hasLocal('sync.status')) {
-    return (
-      <div className="flex h-full min-w-0 flex-col">
-        <ViewHeader title="Settings" />
-        <div className="flex flex-1 items-center justify-center p-4">
-          <div className="w-full max-w-lg border border-border/70 bg-card px-4 py-4 text-left">
-            <p className="text-base font-medium">Machine settings are unavailable here</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              These settings manage a computer's link and sync daemon. This
-              dashboard is served by the Aether server, which cannot reach
-              that computer. Open the desktop app or `aether gui` on it.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
+  const machineSettings = caps.hasLocal('daemon.status') || caps.hasLocal('sync.status')
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <ViewHeader title="Settings" subtitle="this machine" />
+      <ViewHeader title="Settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <main className="mx-auto grid min-w-0 w-full max-w-5xl gap-0 px-4 sm:px-6">
-          {caps.hasLocal('link.status') && <LinkCard client={client} />}
-          {caps.hasLocal('daemon.status') && <DaemonCard client={client} />}
-          {caps.hasLocal('sync.status') && <OverlayCard client={client} />}
+          <section
+            aria-labelledby="appearance-heading"
+            className="min-w-0 space-y-3 border-b border-border/70 py-4"
+          >
+            <h2 id="appearance-heading" className="text-base font-semibold">
+              Appearance
+            </h2>
+            <div className="max-w-md space-y-1">
+              <Label htmlFor="settings-theme">Theme</Label>
+              <Select value={theme} onValueChange={(value) => setTheme(value as Theme)}>
+                <SelectTrigger id="settings-theme" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="system">System</SelectItem>
+                  <SelectItem value="light">Light</SelectItem>
+                  <SelectItem value="dark">Dark</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </section>
+          {machineSettings ? (
+            <>
+              {caps.hasLocal('link.status') && <LinkCard client={client} />}
+              {caps.hasLocal('daemon.status') && <DaemonCard client={client} />}
+              {caps.hasLocal('sync.status') && <OverlayCard client={client} />}
+            </>
+          ) : (
+            <div className="py-4">
+              <p className="text-base font-medium">Machine settings are unavailable here</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                These settings manage a computer's link and sync daemon. This
+                dashboard is served by the Aether server, which cannot reach
+                that computer. Open the desktop app or `aether gui` on it.
+              </p>
+            </div>
+          )}
         </main>
       </div>
     </div>

@@ -129,6 +129,7 @@ const (
 	DashAttachInput        = "input"
 	DashAttachResize       = "resize"
 	DashAttachControlFrame = "control"
+	DashAttachTakeover     = "takeover"
 	// DashAttachGeometry reports the shared PTY grid before the output drawn
 	// at that size. Every dashboard viewer, including writers, adopts it.
 	DashAttachGeometry = "geometry"
@@ -136,27 +137,64 @@ const (
 
 // DashAttachControl is one control frame on /ws/attach/{run}:
 // {"type":"input","data":"ls\r","control_generation":3} or
-// {"type":"control","request_id":4,"write":true,"takeover":true}
+// {"type":"control","request_id":4,"write":true}
 // from the client, {"type":"geometry","cols":132,"rows":43} from the
 // server. Terminal output travels as binary frames.
 type DashAttachControl struct {
-	Type              string `json:"type"`
-	Data              string `json:"data,omitempty"`
-	Cols              uint   `json:"cols,omitempty"`
-	Rows              uint   `json:"rows,omitempty"`
-	RequestID         uint64 `json:"request_id,omitempty"`
-	Write             bool   `json:"write,omitempty"`
-	Takeover          bool   `json:"takeover,omitempty"`
-	ControlGeneration uint64 `json:"control_generation,omitempty"`
-	OK                bool   `json:"ok,omitempty"`
-	Code              int    `json:"code,omitempty"`
-	Error             string `json:"error,omitempty"`
-	HasControl        bool   `json:"has_control,omitempty"`
-	ControlSessionID  string `json:"control_session_id,omitempty"`
+	Type              string         `json:"type"`
+	Data              string         `json:"data,omitempty"`
+	Cols              uint           `json:"cols,omitempty"`
+	Rows              uint           `json:"rows,omitempty"`
+	RequestID         uint64         `json:"request_id,omitempty"`
+	Write             bool           `json:"write,omitempty"`
+	Takeover          bool           `json:"takeover,omitempty"`
+	ControlGeneration uint64         `json:"control_generation,omitempty"`
+	Action            string         `json:"action,omitempty"`
+	TakeoverID        string         `json:"takeover_id,omitempty"`
+	TakeoverState     *TakeoverState `json:"-"`
+	OK                bool           `json:"ok,omitempty"`
+	Code              int            `json:"code,omitempty"`
+	Error             string         `json:"error,omitempty"`
+	HasControl        bool           `json:"has_control,omitempty"`
+	ControlSessionID  string         `json:"control_session_id,omitempty"`
+	// RevocationReason is takeover, permission, or revoked on unsolicited fences.
+	RevocationReason string `json:"revocation_reason,omitempty"`
 	// Cursor and ResumeID are the legacy flat encoding of Position.
 	Cursor   uint64           `json:"cursor,omitempty"`
 	ResumeID string           `json:"resume_id,omitempty"`
 	Position TerminalPosition `json:"-"`
+}
+
+// TakeoverState describes a server-timed handoff of the primary run lease.
+type TakeoverState struct {
+	ID                 string `json:"id"`
+	RequesterMemberID  string `json:"requester_member_id"`
+	RequesterSessionID string `json:"requester_session_id"`
+	HolderSessionID    string `json:"holder_session_id"`
+	HolderGeneration   uint64 `json:"holder_generation"`
+	Phase              string `json:"phase"`
+	HoldStartedAt      string `json:"hold_started_at"`
+	HoldDeadline       string `json:"hold_deadline"`
+	DecisionDeadline   string `json:"decision_deadline,omitempty"`
+	ServerNow          string `json:"server_now"`
+}
+
+func (c DashAttachControl) MarshalJSON() ([]byte, error) {
+	type wire DashAttachControl
+	if c.Type != DashAttachTakeover {
+		return json.Marshal(wire(c))
+	}
+	return json.Marshal(struct {
+		Type              string         `json:"type"`
+		RequestID         uint64         `json:"request_id,omitempty"`
+		Action            string         `json:"action,omitempty"`
+		TakeoverID        string         `json:"takeover_id,omitempty"`
+		ControlGeneration uint64         `json:"control_generation,omitempty"`
+		OK                bool           `json:"ok"`
+		Code              int            `json:"code,omitempty"`
+		Error             string         `json:"error,omitempty"`
+		Takeover          *TakeoverState `json:"takeover,omitempty"`
+	}{c.Type, c.RequestID, c.Action, c.TakeoverID, c.ControlGeneration, c.OK, c.Code, c.Error, c.TakeoverState})
 }
 
 // HighWater returns the atomic terminal position carried by this state frame.
@@ -174,10 +212,20 @@ func (c *DashAttachControl) UnmarshalJSON(data []byte) error {
 	type wire DashAttachControl
 	var decoded struct {
 		wire
-		Cursor json.RawMessage `json:"cursor"`
+		Cursor   json.RawMessage `json:"cursor"`
+		Takeover json.RawMessage `json:"takeover"`
 	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
+	}
+	if len(decoded.Takeover) > 0 && string(decoded.Takeover) != "null" {
+		if decoded.Type == DashAttachTakeover {
+			if err := json.Unmarshal(decoded.Takeover, &decoded.TakeoverState); err != nil {
+				return err
+			}
+		} else if err := json.Unmarshal(decoded.Takeover, &decoded.wire.Takeover); err != nil {
+			return err
+		}
 	}
 	cursor, err := unmarshalTerminalCursor(decoded.Cursor)
 	if err != nil {

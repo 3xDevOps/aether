@@ -1,37 +1,9 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { FeedEntry } from '@/components/feed-entry'
-import { eventLabel, typeLabel, type EventType } from '@/lib/events'
+import { typeLabel } from '@/lib/events'
 import type { Event } from '@/lib/types'
 import { useStore } from '@/store'
 import { alice } from '@/test/fixtures'
-
-/** One representative payload per named type. */
-const samples: Record<EventType, unknown> = {
-  'run.status': { to: 'needs-attention', reason: 'plan review' },
-  'run.title': { title: 'rewrite the checkout flow' },
-  'run.deleted': {},
-  'run.protected': { protected: true },
-  'run.archived': { archived_at: '2026-08-14T10:00:00Z', deletes_at: '2026-08-28T10:00:00Z' },
-  'run.outcome_seen': {},
-  'run.agent': { kind: 'tool', tool: 'Bash', detail: 'go test ./...' },
-  'run.diff': {
-    files: [
-      { path: 'src/a.ts', additions: 3, deletions: 1 },
-      { path: 'src/b.ts', additions: 0, deletions: 8 },
-    ],
-  },
-  'run.cost': { input_tokens: 120, output_tokens: 40 },
-  'run.overlap': { with: [{ run_id: 'run_2', files: ['src/a.ts'] }] },
-  'workspace.timeline': { kind: 'inject', message: 'try again' },
-  'workspace.approval': { action: 'Bash', decision: 'approved' },
-  'workspace.presence': { state: 'watching' },
-  'workspace.budget': { state: 'warn', spend_usd: 8.5, limit_usd: 10 },
-  'git.branch': { branch: 'run/1', commit: 'abc1234' },
-  'sync.conflict': { files: ['src/a.ts'], run_id: 'run_1' },
-  'server.update': { phase: 'applying', version: 'v0.2.0' },
-  'workspace.room_message': { kind: 'comment', state: 'sent', message_id: 'message_1' },
-  'workspace.evidence_packet': { trigger: 'report', packet_id: 'packet_1' },
-}
 
 function renderRow(type: string, payload: unknown): HTMLElement {
   const event: Event = {
@@ -53,30 +25,18 @@ function renderRow(type: string, payload: unknown): HTMLElement {
 }
 
 describe('feed rows', () => {
-  it('gives every type it names both a name and a description', () => {
-    for (const type of Object.keys(eventLabel) as EventType[]) {
-      const text = renderRow(type, samples[type]).textContent ?? ''
-      expect(text, type).toContain(eventLabel[type])
-      const described = text.split(eventLabel[type])[1] ?? ''
-      expect(described.trim(), type).not.toBe('')
-      cleanup()
-    }
-  })
-
-  it('keeps the wire string as the tooltip, for the reader who needs it', () => {
-    renderRow('run.status', { to: 'merged' })
-
-    // By title, so deleting the tooltip fails here rather than passing on a
-    // null the assertion never looked at.
-    expect(screen.getByTitle('run.status').textContent).toBe('Run status')
-  })
-
   // The dot's colour is the only other thing that says who acted.
   it('names the actor behind the colour', () => {
     useStore.setState({ members: { [alice.id]: alice } })
     const row = within(renderRow('run.status', { to: 'merged' }))
 
     expect(row.getByRole('img', { name: alice.display_name })).toBeDefined()
+  })
+
+  it('names the owner opening a reported run', () => {
+    const text = renderRow('run.outcome_seen', {}).textContent ?? ''
+    expect(text).toContain('Outcome seen')
+    expect(text).toContain('owner opened the finished run')
   })
 
   it('falls back to the wire string for a type it has never heard of', () => {

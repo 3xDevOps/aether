@@ -135,7 +135,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     }
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
-    await page.getByRole('tab', { name: 'Overview', exact: true }).click()
+    await page.getByRole('tab', { name: 'Events', exact: true }).click()
     await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
     await assertGrid(72, 22)
   } finally {
