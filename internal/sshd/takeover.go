@@ -19,7 +19,7 @@ const (
 
 // The coordinator lock precedes attach lease locks and control admission. No
 // control callback calls back into the coordinator; lease changes wake watchers
-// through Snapshot.Revoked instead. Notifications only enqueue bounded records.
+// through Snapshot.ConnectionDone instead. Notifications only enqueue bounded records.
 type takeoverCoordinator struct {
 	mu       sync.Mutex
 	attaches map[domain.RunID]map[*takeoverAttach]struct{}
@@ -34,7 +34,7 @@ type takeoverAttach struct {
 	session string
 	send    func(protocol.DashAttachControl) error
 	owns    func(uint64) bool
-	grant   func(uint64) error
+	grant   func(*pendingTakeover) error
 }
 
 type pendingTakeover struct {
@@ -147,6 +147,7 @@ func (s *Server) validateTakeover(p *pendingTakeover) error {
 		return control.ErrStale
 	}
 	if current, present := s.cfg.Control.Status(string(p.requester.run.ID)); !present ||
+		!current.Connected || current.ConnectionDone != p.lease.ConnectionDone ||
 		current.MemberID != p.lease.MemberID || current.SessionID != p.lease.SessionID || current.Generation != p.lease.Generation {
 		return control.ErrStale
 	}
@@ -200,15 +201,29 @@ func (s *Server) handleTakeover(a *takeoverAttach, ctl protocol.DashAttachContro
 			refuse("takeover requires another controller session")
 			return
 		}
-		now := c.clock()
-		p = &pendingTakeover{id: ctl.TakeoverID, requester: a, lease: lease, phase: "holding", started: now,
-			holdDeadline: now.Add(takeoverHold), done: make(chan struct{}), changed: make(chan struct{}, 1)}
+		if !lease.Connected {
+			refuse("controller session is disconnected")
+			return
+		}
+		var holder *takeoverAttach
+		interactiveHolder := false
 		for candidate := range c.attaches[a.run.ID] {
-			if candidate.member == lease.MemberID && candidate.session == lease.SessionID && candidate.owns(lease.Generation) {
-				p.holder = candidate
+			if candidate.member != lease.MemberID || candidate.session != lease.SessionID {
+				continue
+			}
+			interactiveHolder = true
+			if candidate.ctx.Err() == nil && candidate.owns(lease.Generation) {
+				holder = candidate
 				break
 			}
 		}
+		if interactiveHolder && holder == nil {
+			refuse("controller attachment is not ready")
+			return
+		}
+		now := c.clock()
+		p = &pendingTakeover{id: ctl.TakeoverID, requester: a, holder: holder, lease: lease, phase: "holding", started: now,
+			holdDeadline: now.Add(takeoverHold), done: make(chan struct{}), changed: make(chan struct{}, 1)}
 		c.pending[a.run.ID] = p
 		c.notify(p, a, ctl.RequestID, nil)
 		s.spawn(func() { s.watchTakeover(p) })
@@ -282,7 +297,7 @@ func (s *Server) grantTakeover(p *pendingTakeover, recipient *takeoverAttach, re
 		s.takeovers.finish(p, "cancelled", err, recipient, requestID)
 		return
 	}
-	if err := p.requester.grant(p.lease.Generation); err != nil {
+	if err := p.requester.grant(p); err != nil {
 		s.takeovers.finish(p, "cancelled", err, recipient, requestID)
 		return
 	}
@@ -330,7 +345,7 @@ func (s *Server) watchTakeover(p *pendingTakeover) {
 			s.advanceTakeover(p)
 		case <-holderDone:
 			s.advanceTakeover(p)
-		case <-p.lease.Revoked:
+		case <-p.lease.ConnectionDone:
 			s.advanceTakeover(p)
 		case <-ticker.C:
 			s.advanceTakeover(p)

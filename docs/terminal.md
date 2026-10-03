@@ -90,6 +90,7 @@ the full hold does not cancel the request. The server cancels a pending request
 if either participant disconnects, authority changes, or the target lease is
 released or replaced. Progress never grants input before the server acknowledges
 the new controller.
+The dialog returns focus to the interrupted terminal or composer when it closes.
 
 ![The holder's takeover dialog with Deny focused](media/terminal-takeover-dialog.webp)
 

@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -13,9 +14,21 @@ interface TakeoverDialogProps {
 }
 
 export function TakeoverDialog({ open, requesterName, seconds, pending, error, onDecide }: TakeoverDialogProps) {
+  const interrupted = useRef<HTMLElement | null>(null)
   return (
     <AlertDialog open={open}>
       <AlertDialogContent
+        onOpenAutoFocus={() => {
+          const target = document.activeElement
+          interrupted.current = target instanceof HTMLElement && target !== document.body ? target : null
+        }}
+        onCloseAutoFocus={(event) => {
+          const target = interrupted.current
+          interrupted.current = null
+          if (!target?.isConnected) return
+          event.preventDefault()
+          target.focus({ preventScroll: true })
+        }}
         onEscapeKeyDown={(event) => { event.preventDefault(); event.stopPropagation() }}
         onKeyDown={(event) => {
           if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault()

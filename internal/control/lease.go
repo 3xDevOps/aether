@@ -68,8 +68,11 @@ type Snapshot struct {
 	AcquiredAt time.Time
 	ExpiresAt  time.Time
 	// Revoked closes when this exact lease is replaced, released, or fenced.
-	Revoked    <-chan struct{} `json:"-"`
-	revocation *atomic.Uint32
+	Revoked <-chan struct{} `json:"-"`
+	// ConnectionDone also closes on disconnect; reconnecting the same generation
+	// gets a new signal so a pending takeover cannot follow a successor transport.
+	ConnectionDone <-chan struct{} `json:"-"`
+	revocation     *atomic.Uint32
 }
 
 // RevocationReason belongs to this exact lease, not the run's latest controller.
@@ -91,14 +94,15 @@ func (s Snapshot) RevocationReason() RevocationReason {
 }
 
 type lease struct {
-	memberID   domain.MemberID
-	sessionID  string
-	generation uint64
-	connected  bool
-	acquiredAt time.Time
-	expiresAt  time.Time
-	revocation atomic.Uint32
-	revoked    chan struct{}
+	memberID       domain.MemberID
+	sessionID      string
+	generation     uint64
+	connected      bool
+	acquiredAt     time.Time
+	expiresAt      time.Time
+	revocation     atomic.Uint32
+	revoked        chan struct{}
+	connectionDone chan struct{}
 }
 
 func (l *lease) revoke(reason RevocationReason) {
@@ -111,6 +115,9 @@ func (l *lease) revoke(reason RevocationReason) {
 	}
 	if l.revocation.CompareAndSwap(0, value) && l.revoked != nil {
 		close(l.revoked)
+		if l.connected && l.connectionDone != nil {
+			close(l.connectionDone)
+		}
 	}
 }
 
@@ -161,7 +168,7 @@ func New(cfg Config) *Service {
 // be explicitly taken over so two transports never share one generation.
 // A forced takeover returns the displaced controller for notification.
 func (s *Service) Acquire(run, member, session string, force bool) (Snapshot, *Snapshot, error) {
-	return s.acquireAuthorized(run, member, session, force, 0, nil, false)
+	return s.acquireAuthorized(run, member, session, force, 0, nil, false, nil)
 }
 
 // AcquireAuthorized performs authorization and lease installation as one
@@ -171,17 +178,26 @@ func (s *Service) Acquire(run, member, session string, force bool) (Snapshot, *S
 // but before a replacement lease is installed. It must be bounded and must
 // not call back into this Service.
 func (s *Service) AcquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error) (Snapshot, *Snapshot, error) {
-	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, false)
+	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, false, nil)
 }
 
 // AcquireInteractiveAuthorized permits force only to replace this authenticated
 // session's exact transport generation. Cross-session handoffs must first finish
-// the timed takeover protocol and use AcquireAuthorized with its captured fence.
+// the timed takeover protocol and use AcquireTakeoverAuthorized.
 func (s *Service) AcquireInteractiveAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error) (Snapshot, *Snapshot, error) {
-	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, true)
+	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, true, nil)
 }
 
-func (s *Service) acquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error, sameSessionOnly bool) (Snapshot, *Snapshot, error) {
+// AcquireTakeoverAuthorized replaces only the captured holder's live connection.
+// A disconnect invalidates the request even if the same generation reconnects.
+func (s *Service) AcquireTakeoverAuthorized(run, member, session string, holder *Snapshot, authorize func() error) (Snapshot, *Snapshot, error) {
+	if holder == nil || holder.RunID != domain.RunID(run) || holder.Generation == 0 || !holder.Connected || holder.ConnectionDone == nil {
+		return Snapshot{}, nil, ErrStale
+	}
+	return s.acquireAuthorized(run, member, session, true, holder.Generation, authorize, false, holder)
+}
+
+func (s *Service) acquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error, sameSessionOnly bool, holder *Snapshot) (Snapshot, *Snapshot, error) {
 	if err := s.validateRunMember(run, member); err != nil {
 		return Snapshot{}, nil, err
 	}
@@ -199,6 +215,11 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		(state.current == nil || state.generation != expectedGeneration) {
 		return Snapshot{}, nil, ErrStale
 	}
+	if holder != nil && (state.current == nil || !state.current.connected ||
+		state.current.memberID != holder.MemberID || state.current.sessionID != holder.SessionID ||
+		state.current.connectionDone != holder.ConnectionDone) {
+		return Snapshot{}, nil, ErrStale
+	}
 	if force && sameSessionOnly && (expectedGeneration == 0 || state.current == nil ||
 		state.current.memberID != domain.MemberID(member) || state.current.sessionID != session) {
 		return Snapshot{}, nil, ErrTakeoverRequired
@@ -214,6 +235,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 				}
 			}
 			current.connected = true
+			current.connectionDone = make(chan struct{})
 			current.expiresAt = time.Time{}
 			return s.snapshotLocked(runID, current), nil, nil
 		}
@@ -236,12 +258,13 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		}
 		current.revoke(reason)
 		current = &lease{
-			memberID:   domain.MemberID(member),
-			sessionID:  session,
-			generation: generation,
-			connected:  true,
-			acquiredAt: now,
-			revoked:    make(chan struct{}),
+			memberID:       domain.MemberID(member),
+			sessionID:      session,
+			generation:     generation,
+			connected:      true,
+			acquiredAt:     now,
+			revoked:        make(chan struct{}),
+			connectionDone: make(chan struct{}),
 		}
 		state.current = current
 		result := s.snapshotLocked(runID, current)
@@ -258,12 +281,13 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		return Snapshot{}, nil, genErr
 	}
 	current := &lease{
-		memberID:   domain.MemberID(member),
-		sessionID:  session,
-		generation: generation,
-		connected:  true,
-		acquiredAt: now,
-		revoked:    make(chan struct{}),
+		memberID:       domain.MemberID(member),
+		sessionID:      session,
+		generation:     generation,
+		connected:      true,
+		acquiredAt:     now,
+		revoked:        make(chan struct{}),
+		connectionDone: make(chan struct{}),
 	}
 	state.current = current
 	return s.snapshotLocked(runID, current), nil, nil
@@ -447,6 +471,7 @@ func (s *Service) Disconnect(run, session string, generation uint64) {
 	if current.connected {
 		current.connected = false
 		current.expiresAt = now.Add(s.reconnectWindow)
+		close(current.connectionDone)
 	}
 }
 
@@ -633,14 +658,15 @@ func (s *Service) nextGenerationLocked(state *runState) (uint64, error) {
 
 func (s *Service) snapshotLocked(run domain.RunID, current *lease) Snapshot {
 	return Snapshot{
-		RunID:      run,
-		MemberID:   current.memberID,
-		SessionID:  current.sessionID,
-		Generation: current.generation,
-		Connected:  current.connected,
-		AcquiredAt: current.acquiredAt,
-		ExpiresAt:  current.expiresAt,
-		revocation: &current.revocation,
-		Revoked:    current.revoked,
+		RunID:          run,
+		MemberID:       current.memberID,
+		SessionID:      current.sessionID,
+		Generation:     current.generation,
+		Connected:      current.connected,
+		AcquiredAt:     current.acquiredAt,
+		ExpiresAt:      current.expiresAt,
+		revocation:     &current.revocation,
+		Revoked:        current.revoked,
+		ConnectionDone: current.connectionDone,
 	}
 }

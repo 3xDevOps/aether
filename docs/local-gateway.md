@@ -1528,6 +1528,8 @@ resize, control, geometry, and acknowledgements.
    ordinary control requests. `start` supplies a fresh UUID `takeover_id` and
    snapshots the occupied holder. The server refuses unoccupied or already-owned
    targets, concurrent requests, and requesters without current Steer authority.
+   Disconnected holders and interactive holders still awaiting their control
+   acknowledgement are also refused.
    After a continuous five-second hold, the exact requesting attachment sends
    `confirm` with the same ID. Early or foreign confirms are refused. Nothing
    is granted without confirmation, even if the hold deadline has passed.
@@ -1538,12 +1540,12 @@ resize, control, geometry, and acknowledgements.
    sends `accept` or `deny` with the same takeover ID and its exact
    `control_generation`. Only that authenticated attachment can decide;
    knowing another session's ID is insufficient. Acceptance or expiry grants
-   only after the server atomically rechecks the captured holder generation,
-   current requester authority, terminal readiness, and mission admission.
-   A raw CLI holder cannot answer the dashboard dialog; the same deadline
-   still applies. Requester disconnect, holder replacement/release, or lost
-   run/member authority cancels the request rather than transferring it to a
-   successor holder.
+   only after the server atomically rechecks the captured holder generation
+   and live connection, current requester authority, terminal readiness, and
+   mission admission. A raw CLI holder cannot answer the dashboard dialog;
+   the same deadline still applies. Either participant disconnecting, holder
+   replacement/release, or lost run/member authority cancels the request.
+   Reconnecting the same generation does not revive an old request.
 
    Both interactive participants receive prompt `type:"takeover"` snapshots:
 
@@ -1570,6 +1572,10 @@ resize, control, geometry, and acknowledgements.
    and `error`; an invalidated request also carries its terminal snapshot.
    A successful takeover queues the ordinary unsolicited `type:"control"`
    acknowledgement with `ok:true` and `has_control:true` before `granted`.
+   The server reserves queue capacity for that acknowledgement before changing
+   ownership. A full requester control queue cancels the request and leaves
+   the holder in control. Once queued, a later transport failure does not
+   retroactively cancel the grant.
    Takeover progress itself never grants input authority.
 
 5. The server answers each requested control change on the same ordered
