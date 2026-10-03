@@ -284,9 +284,13 @@ jobs:
       # keeps its own store, so it would resolve BASE as a registry
       # reference and go looking for it on Docker Hub.
       - name: Build the agent smoke image
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          opencode=$(gh release view --repo anomalyco/opencode --json tagName --jq '.tagName | ltrimstr("v")')
           docker buildx build --builder default --load --no-cache \
             --build-arg BASE=aether-standard:ci \
+            --build-arg "OPENCODE_VERSION=$opencode" \
             --tag aether-smoke:ci \
             --file images/smoke/Dockerfile .
       - name: Real-harness smoke test (real Docker, real git)

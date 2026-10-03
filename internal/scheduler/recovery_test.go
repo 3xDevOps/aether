@@ -1312,9 +1312,11 @@ func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
 	if row.Reason != retainedExpiredReason {
 		t.Fatalf("boot retry reason = %q, want %q", row.Reason, retainedExpiredReason)
 	}
-	if _, err := os.Stat(s2.sidecarPath(run.ID)); !os.IsNotExist(err) {
-		t.Fatalf("boot retry sidecar still exists: %v", err)
-	}
+	// The sidecar goes after the row is abandoned, so it is waited for.
+	waitFor(t, "boot retry sidecar removed", func() bool {
+		_, err := os.Stat(s2.sidecarPath(run.ID))
+		return os.IsNotExist(err)
+	})
 	failures, destroys, waits := retry.counts()
 	if failures != 1 || destroys < 2 || waits > 2 {
 		t.Fatalf("destroy/wait calls = failures %d, destroys %d, waits %d; want one failed destroy, retry, and at most one Wait owner", failures, destroys, waits)

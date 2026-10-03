@@ -6,9 +6,13 @@
 # The install commands are the vendors' own, deliberately unpinned and
 # deliberately duplicated from harness.Profile.InstallScript: this image
 # exists to fail when today's release of an agent stops accepting a flag,
-# so pinning a version would defeat it.
+# so pinning a version would defeat it. OPENCODE_VERSION is today's release
+# resolved by the caller with an authenticated GitHub call: the installer's
+# own lookup is anonymous and is rate-limited on CI runners. Empty leaves
+# the installer to look it up itself.
 ARG BASE=ghcr.io/3xdevops/aether-standard:latest
 FROM ${BASE}
+ARG OPENCODE_VERSION=
 
 # Root, like a real run on the standard image.
 USER root
@@ -16,7 +20,7 @@ ENV HOME=/root
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN npm install -g --prefix "$HOME/.local" @openai/codex
-RUN curl -fsSL https://opencode.ai/install | bash
+RUN curl -fsSL https://opencode.ai/install | bash -s -- ${OPENCODE_VERSION:+--version "$OPENCODE_VERSION"}
 
 ENV PATH="/root/.local/bin:/root/.opencode/bin:${PATH}"
 
