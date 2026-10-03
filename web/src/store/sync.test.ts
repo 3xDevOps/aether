@@ -746,6 +746,31 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.pending_inputs).toEqual([question])
   })
 
+  it.each(['completed', 'failed'] as const)(
+    'invalidates native requests on %s even without an input-clearing event',
+    async (status) => {
+      const request = { id: 'q1', session_id: 'foreground', kind: 'question' as const }
+      const stale = run({ pending_inputs: [request], unanswered_questions: 1 })
+      const store = createRootStore()
+      const client = fakeApi({ runList: vi.fn(async () => [stale]) })
+      await hydrate(store, client)
+
+      await applyEvent(store, statusEvent({ seq: 1 }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([request])
+      await applyEvent(store, statusEvent({ seq: 2, payload: { to: status } }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+      expect(store.getState().runs.run_1.unanswered_questions).toBe(1)
+
+      store.getState().upsertRun({ ...stale, status })
+      await applyEvent(store, statusEvent({
+        seq: 3,
+        type: 'run.input',
+        payload: { pending_inputs: [request] },
+      }), client)
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+    },
+  )
+
   it('stamps finished_at on a terminal transition', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

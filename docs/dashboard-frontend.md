@@ -993,9 +993,14 @@ Use the existing Terminal for native prompts, Approvals for Aether approvals,
 or open Run Room from Terminal for room questions; no new answer transport is
 introduced. Unsupported native integrations show no inferred request.
 
+A terminal lifecycle transition also clears native requests if its empty
+`run.input` event is lost. Later native input events cannot revive a request
+on a finished run. This does not clear Aether approvals or Run Room questions.
+
 Hydration is authoritative and queues live events until its snapshot lands.
 Ordinary run upserts preserve a known input set, including an empty one, so
 an older route, room or launch response cannot resurrect a closed request.
+A terminal run upsert clears native requests instead.
 Mission relationship refreshes replace only relationship fields. Input events
 for unknown runs follow the existing fetch-first and ordered-cursor rules.
 
