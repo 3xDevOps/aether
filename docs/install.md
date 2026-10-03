@@ -142,13 +142,17 @@ against the release's `checksums.txt`, installs it at
 The CLI supplies Node.js when needed; neither Node nor Go needs installing
 first.
 
-Desktop setup requires `v0.4.0-alpha.6` or newer. Older releases are refused
-before installation because their desktop build can replace the CLI.
+Desktop setup requires `v0.5.1-alpha.4` or newer: the supported path needs the
+separate desktop directory, direct-Node build, native shortcut creation, and
+recorded CLI binding. In particular, `v0.4.0-alpha.6` predates the direct-Node
+and native-shortcut fixes; it is not a supported desktop-install example.
+Older releases are refused before downloading or replacing the CLI.
 `-Role none` permits a CLI-only installation, including an older release:
 
 ```powershell
 & "$env:TEMP\aether-install.ps1" -Role none
-& "$env:TEMP\aether-install.ps1" -Version v0.4.0-alpha.6 -BinDir "$env:LOCALAPPDATA\AetherTools"
+& "$env:TEMP\aether-install.ps1" -Version v0.4.0-alpha.6 -Role none
+& "$env:TEMP\aether-install.ps1" -Version v0.5.1-alpha.4 -BinDir "$env:LOCALAPPDATA\AetherTools"
 ```
 
 | Parameter | Variable | Effect |
@@ -169,11 +173,20 @@ shows which command runs. The installer never deletes a shadowing copy.
 The desktop built by the installer records the CLI it just installed, so an
 older Start Menu `PATH` does not change which CLI the app starts.
 
-Close Aether before rerunning the installer to upgrade. Downloads and
-checksum failures leave the installed binary alone; a locked binary reports
-the Windows error rather than deleting it first. A desktop-build failure
-keeps the installed CLI, returns failure, and prints the command to retry.
-Configuration and SSH files are untouched.
+The desktop executable is separate from the CLI:
+`%LOCALAPPDATA%\Programs\Aether Desktop\aether-desktop.exe`. Its `Aether.lnk`
+is registered in the current user's Windows **Programs known folder**
+(`FOLDERID_Programs`), including Windows/organization folder redirection.
+Do not infer this folder by appending a Start Menu path to `%APPDATA%`;
+the configured location can differ. See [shortcut diagnosis](#windows-start-menu-shortcut-diagnosis)
+to inspect the actual registration.
+
+For a fresh desktop installation, run the default command above. To reinstall
+or upgrade, close Aether and rerun it, retaining `-BinDir` if you selected a
+custom CLI location. Downloads and checksum failures leave the installed
+binary alone; a locked binary reports the Windows error rather than deleting
+it first. A desktop-build failure keeps the installed CLI, returns failure,
+and prints the explicit command to retry. Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,
 disable Defender, add exclusions, or unblock quarantined files. If policy
@@ -463,9 +476,11 @@ Copy-Item -Force .\aether-windows-amd64.exe "$dir\aether.exe"
   "Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$dir", "User")
 ```
 
-Use `aether-windows-arm64.exe` on an Arm device. Confirm it works with
-`aether version` in a fresh terminal. To build the desktop app, run
-`aether gui build` with a release containing the directory fix below.
+Use `aether-windows-arm64.exe` on an Arm device. Confirm the installed CLI with
+`& "$dir\aether.exe" version`. This manual copy is CLI-only: to install or
+repair the desktop, use `v0.5.1-alpha.4` or newer and run
+`& "$dir\aether.exe" gui build`. The explicit path ensures that the desktop
+records this CLI rather than a different `aether` on `PATH`.
 To upgrade, rerun the PowerShell installer or replace the CLI manually;
 there is no `aether update` on Windows.
 
@@ -481,9 +496,9 @@ This is an installation collision, not a Defender detection or damaged
 linked-server configuration.
 
 Quit Aether, including any stuck copies in Task Manager. Download a client
-release containing the separate **Aether Desktop** install location and
-verify it against that release's `checksums.txt`, as above. From that download
-directory, restore the CLI and rebuild the app:
+release `v0.5.1-alpha.4` or newer and verify it against that release's
+`checksums.txt`, as above. From that download directory, restore the CLI
+and rebuild the app:
 
 ```powershell
 $cli = "$env:LOCALAPPDATA\Programs\Aether\aether.exe"
@@ -505,25 +520,74 @@ The rebuilt app replaces the Start Menu shortcut and uses
 CLI and may hold unrelated files. Your `%APPDATA%\aether\config.json` and
 `%USERPROFILE%\.ssh` files do not need changing.
 
+### Windows Start Menu shortcut diagnosis
+
+A successful `aether version` proves only that a CLI is present. `-Role none`
+and a manual binary copy do not build the desktop or create its shortcut;
+they also do not remove an older desktop. The default installer runs
+`gui build`; a successful build installs the separate desktop executable and
+registers the current user's Start Menu entry.
+
+Inspect the real Programs folder and existing link without creating a link:
+
+```powershell
+$programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+if ([string]::IsNullOrWhiteSpace($programs)) { throw "Windows did not resolve the Programs folder" }
+$link = Join-Path $programs 'Aether.lnk'
+$desktop = "$env:LOCALAPPDATA\Programs\Aether Desktop\aether-desktop.exe"
+$programs
+Test-Path -LiteralPath $desktop -PathType Leaf
+Test-Path -LiteralPath $link -PathType Leaf
+if (Test-Path -LiteralPath $link -PathType Leaf) {
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($link)
+  $shortcut | Select-Object FullName, TargetPath, Arguments, WorkingDirectory, IconLocation
+}
+```
+
+The target should be the desktop executable above, not the CLI `aether.exe`.
+If it is missing or stale, close Aether, then rebuild using the exact installed
+CLI (adjust `$cli` for a custom installation):
+
+```powershell
+$cli = "$env:LOCALAPPDATA\Programs\Aether\aether.exe"
+& $cli version
+& $cli gui build
+```
+
+Use a current release containing the Programs-known-folder fix when repairing
+redirected folders; the minimum desktop-compatible release alone does not
+imply it contains every later shortcut fix. A build with this fix prints
+`launcher <resolved path>` so you can compare its destination with `$link`.
+Inspect the link again, then open **Aether** from Start.
+
+If it still fails, include the CLI version and explicit path, full installer
+or `gui build` output (including any native Windows error and launcher path),
+resolved `$programs`, link properties, whether the desktop executable exists,
+Windows version/architecture, and the exact launch/security warning in an
+issue. Redact personal path components as needed. A missing entry alone is
+not proof of Defender quarantine; check Protection History for a detection.
+
 ### Windows Defender and SmartScreen
 
-The client is not code-signed yet, so Windows can stop it in three different
-ways. They are separate systems with separate fixes, and the wording on screen
-does not always say which one you hit.
+The released CLI is unsigned, and building the desktop locally does not give
+it a trusted publisher signature. Either can trigger download reputation,
+SmartScreen, antivirus, Smart App Control, or organization policy. Inspect
+the exact warning, file path, publisher/signature, and applicable organization
+policy before deciding what happened; these are not interchangeable systems.
 
-| What you see | What it is | What to do |
+| What you see | Possible source | What to inspect |
 | --- | --- | --- |
-| The browser refuses the download | SmartScreen, in Edge or Chrome | Keep the file, then verify the hash above |
-| "Windows protected your PC" | SmartScreen, on first run | **More info**, then **Run anyway** |
-| The file disappears, or "virus detected" | Microsoft Defender antivirus | Verify the hash, then report it - below |
+| Browser download blocked or flagged | Edge uses Microsoft Defender SmartScreen; Chrome uses Google Safe Browsing, and other security tools may also intervene | Browser's exact warning and download details; follow organization policy |
+| "Windows protected your PC" on launch | Windows SmartScreen reputation check | Named application and publisher, signature details, and organization policy |
+| File disappears or "virus detected" | Microsoft Defender antivirus or another antivirus product | Protection History/security product report, detection name, and affected path |
 
-The third one is the antivirus, not SmartScreen, and it has no **Run anyway**.
-Do not disable Defender or add an exclusion to recover a quarantined binary.
-A matching checksum establishes download integrity, not safety; follow the
-report process below.
-
-Smart App Control and organizational policies can also reject unsigned
-binaries. The installer does not change those policies.
+Do not disable protection, add exclusions, or restore/run a quarantined file
+to work around a warning. A matching checksum establishes download integrity,
+not safety or publisher trust. Follow the report process below; managed
+devices may require an administrator-approved, signed distribution.
+The installer does not alter execution policy, Smart App Control, or
+organizational security policies.
 
 **Report a detection.** Verify the SHA-256 against `checksums.txt` first - if
 it does not match, do not run the file and open an issue. If it matches,
@@ -541,6 +605,15 @@ instead of a shell command. Neither operation launches `powershell.exe`,
 
 These measures do not confer publisher trust. Releases remain unsigned;
 Defender or SmartScreen may still flag a new binary.
+
+Release publication is gated on a Defender scan of the exact final x64 and
+ARM64 release binaries, downloaded from the build artifact without rebuilding.
+The gate records SHA-256 hashes and definition/protection evidence, checks
+effective real-time/cloud/sample-submission settings, and rejects missing or
+changed files, scan errors, or new detections (including remediated ones).
+That verdict covers those bytes and scan conditions, not signing, reputation,
+the locally built desktop, or a guarantee of warning-free execution on a
+different machine.
 
 ## The Windows client
 

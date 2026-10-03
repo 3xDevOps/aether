@@ -154,7 +154,7 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 			_, _ = fmt.Fprintln(notes, "open it from your Applications folder or Spotlight as Aether")
 		}
 	case "windows":
-		_, _ = fmt.Fprintln(notes, "open it from the Start Menu as Aether")
+		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from the Start Menu as Aether\n", app.Launcher)
 	default:
 		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from your application menu as Aether\n", app.Launcher)
 	}

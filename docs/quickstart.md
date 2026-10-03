@@ -48,10 +48,19 @@ Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevO
 ```
 
 It installs the CLI and desktop app by default, without administrator access.
-Use `-Role none` for the CLI alone. Desktop setup requires a release containing
-the Windows installer fixes (`v0.4.0-alpha.6` or newer); the installer refuses
-older desktop builds. See [install.md](install.md#windows-install-script)
-for script-policy requirements, version selection, upgrades, and manual installation.
+Use `-Role none` for the CLI alone; that does not create a desktop shortcut.
+Desktop setup requires `v0.5.1-alpha.4` or newer for the Windows build and
+recorded-CLI fixes; older desktop builds are refused. The desktop stays in
+`%LOCALAPPDATA%\Programs\Aether Desktop`, separate from the CLI. **Aether** is
+registered in the current user's Windows Programs known folder, including
+folder redirection, not a guessed path under `%APPDATA%`. See
+[install.md](install.md#windows-install-script) for fresh installs, reinstalls,
+script policy and version selection, and
+[shortcut diagnosis](install.md#windows-start-menu-shortcut-diagnosis) to
+inspect the real `Aether.lnk` and repair it with the explicit installed CLI.
+Unsigned downloads and locally built desktops can still trigger SmartScreen
+or Defender; inspect the actual warning/publisher and organization policy
+rather than bypassing protection.
 
 ## 2. Start the server
 

@@ -232,13 +232,13 @@ function Assert-AetherTag {
     if ($Role -ne 'client') {
         return
     }
-    $minimum = Get-AetherSemVer 'v0.4.0-alpha.6'
+    $minimum = Get-AetherSemVer 'v0.5.1-alpha.4'
     $actual = Get-AetherSemVer $Tag
     if ($null -eq $actual) {
         throw ("release tag '{0}' is not a semantic version; refusing desktop setup (pass -Role none to install the CLI without building)" -f $Tag)
     }
     if ((Compare-AetherSemVer $actual $minimum) -lt 0) {
-        throw ("release {0} is too old for the separate Windows desktop layout; client installs require v0.4.0-alpha.6 or newer (pass -Role none to install the CLI without building)" -f $Tag)
+        throw ("release {0} is too old for supported Windows desktop setup; client installs require v0.5.1-alpha.4 or newer for the separate desktop layout, direct Node build, native shortcut, and recorded CLI binding (pass -Role none to install the CLI without building)" -f $Tag)
     }
 }
 
