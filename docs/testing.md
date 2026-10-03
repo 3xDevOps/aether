@@ -133,6 +133,8 @@ PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
 before replacement, upgrade and locked-file boundaries, `PATH` preservation,
 CLI-only installation, unsupported releases, and desktop-build failures.
 They use temporary files and restore the user's environment after running.
+Changes to `.github/actions/go-cache/` or `.github/actions/bun-cache/`
+trigger both lanes on pull requests and pushes to `main`.
 
 The same workflow builds the real CLI with the release's Windows metadata
 and embedded dashboard, removes the hosted runner's inherited exclusions,
@@ -199,8 +201,9 @@ compiler archives; each Go release-build lane owns its
 `release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
 The installer uses a separate `windows-install` compiler lane; only its
 PowerShell/system-Node main lane saves that cache and its Bun dependency
-cache, leaving Windows module writes to CI's `windows` job. Cache reuse
-does not replace any build or validation gate.
+cache, leaving Windows module writes to CI's `windows` job. Before compressing
+an archive, each writer checks whether its exact key already exists and skips
+the save on a hit. Cache reuse does not replace any build or validation gate.
 
 ## Headless browser and remote-development acceptance
 
