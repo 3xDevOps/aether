@@ -671,6 +671,14 @@ func HomeRelative(p string) string {
 	return clean
 }
 
+// BorrowRoots lists the home-relative directories a launch that borrows an
+// account owner's installation mounts read-only: the owner's ~/.local/bin and
+// ~/.local/lib, plus InstallPaths. A launcher link that leaves them would
+// dangle in the run, so only an installation inside them counts as borrowable.
+func (p Profile) BorrowRoots() []string {
+	return append([]string{".local/bin", ".local/lib"}, p.InstallPaths...)
+}
+
 // LoginPaths returns CredentialPaths relative to the container home. A
 // definition carries absolute /root or /home/aether paths; whatever the
 // spelling, each result is a clean local path strictly below the home, so a

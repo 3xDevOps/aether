@@ -218,7 +218,7 @@ func (s *Scheduler) installMounts(launcher, account domain.MemberID, profile har
 	if len(profile.TUIArgs) == 0 {
 		return nil, nil
 	}
-	installation, err := s.cfg.Homes.Installation(launcher, account, profile.TUIArgs[0])
+	installation, err := s.cfg.Homes.Installation(launcher, account, profile.TUIArgs[0], profile.BorrowRoots())
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: find %s: %w", profile.TUIArgs[0], err)
 	}
@@ -230,9 +230,8 @@ func (s *Scheduler) installMounts(launcher, account domain.MemberID, profile har
 		return nil, fmt.Errorf("scheduler: resolve account home: %w", err)
 	}
 	targets := map[string]string{".local/bin": accountBin, ".local/lib": accountLib}
-	rels := append([]string{".local/bin", ".local/lib"}, profile.InstallPaths...)
 	var mounts []runtime.Mount
-	for _, rel := range rels {
+	for _, rel := range profile.BorrowRoots() {
 		dir, pathErr := s.cfg.Homes.LoginPathIsDir(account, rel)
 		if errors.Is(pathErr, fs.ErrNotExist) {
 			continue

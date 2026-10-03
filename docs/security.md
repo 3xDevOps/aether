@@ -77,9 +77,19 @@ it exists, `~/.local/lib` are mounted read-only at `~/.aether/account/bin` and
 (`harness.Profile.InstallPaths`; `~/.local/share/claude` for `claude`) is
 mounted read-only at its own path. Nothing else of the owner's home is
 mounted, and `~/.local/share` as a whole never is: opencode keeps its login
-there. A symlink at any component of these paths in the owner's home refuses
-the launch, as it does for a login. When neither home has the executable,
-nothing is borrowed and the run starts whatever the image provides.
+there. The owner's `~/.local/bin/<executable>` counts as an installation only
+when every link it follows stays inside those mounted directories; a link
+into anything else would dangle in the run, so the agent is reported as not
+installed instead. When neither home has the executable, nothing is borrowed
+and the run starts whatever the image provides.
+
+Two limits follow from mounting the owner's files unchanged. Claude Code's
+installer links by absolute path (`/root/...` or `/home/aether/...`), so an
+owner who installed as root and a recipient whose image runs as a non-root
+user, or the reverse, get a link that does not resolve and the container's
+own `not found` error. A recipient whose image runs as a different non-root
+uid can only execute what the owner's file modes allow others to; the
+read-only mounts are never re-owned.
 
 A borrowed installation means the owner's executables run in the recipient's
 container, with the recipient's home, GitHub login, and signing key. Every

@@ -312,6 +312,21 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	}
 	install(owner.ID, "claude", "mybot")
 	install(grantee.ID, "codex", "ownbot")
+	// The owner's pi links outside the directories a borrowed installation
+	// mounts, so the grantee cannot run it on the owner's account.
+	ownerHome, err := homes.Path(owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(ownerHome, "tools"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(ownerHome, "tools", "pi"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("/root/tools/pi", filepath.Join(ownerHome, ".local/bin", "pi")); err != nil {
+		t.Fatal(err)
+	}
 	if _, perr := callAgentRegister(t, s, owner.ID, validAgentDefinition()); perr != nil {
 		t.Fatal(perr)
 	}
@@ -363,6 +378,9 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	agents := list(raw)
 	if _, ok := agents["mybot"]; ok {
 		t.Fatalf("the owner's definition is listed for the grantee: %+v", agents)
+	}
+	if agents["pi"].Installed {
+		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
 	}
 	for name, want := range map[string]protocol.AgentInfo{
 		"claude": {Name: "claude", Source: "shipped", Installed: true, LoginMissing: true},

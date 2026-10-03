@@ -118,17 +118,29 @@ func TestSharedLaunchBorrowsTheOwnersInstallation(t *testing.T) {
 // comes from the owner and PATH is the launcher's.
 func TestSharedLaunchKeepsTheLaunchersInstallation(t *testing.T) {
 	t.Parallel()
-	for name, launcherHas := range map[string]bool{"launcher has it": true, "neither has it": false} {
+	cases := map[string]func(t *testing.T, e *shareEnv){
+		"launcher has it": func(t *testing.T, e *shareEnv) {
+			installClaude(t, e.ownerHome)
+			installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+		},
+		"neither has it": func(t *testing.T, e *shareEnv) {
+			installAgent(t, e.ownerHome, "gh", ".local/bin/gh", "")
+		},
+		// A link that leaves the directories a borrowed installation mounts
+		// would dangle in the run, so it does not count as one.
+		"owner's link leaves the borrowed directories": func(t *testing.T, e *shareEnv) {
+			installAgent(t, e.ownerHome, "claude", "tools/claude", "/root/tools/claude")
+		},
+		"owner's relative link leaves the borrowed directories": func(t *testing.T, e *shareEnv) {
+			installAgent(t, e.ownerHome, "claude", "tools/claude", "../../tools/claude")
+		},
+	}
+	for name, install := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			e := newShareEnv(t, nil)
 			writeHomeFiles(t, e.ownerHome, append([]string{".claude/.credentials.json"}, ownerState...)...)
-			if launcherHas {
-				installClaude(t, e.ownerHome)
-				installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
-			} else {
-				installAgent(t, e.ownerHome, "gh", ".local/bin/gh", "")
-			}
+			install(t, e)
 			spec := e.launchSpec(t, "claude")
 			e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
 			assertNoBorrowedPath(t, spec)
@@ -153,9 +165,10 @@ func TestSharedLaunchKeepsTheLaunchersInstallation(t *testing.T) {
 	assertNoBorrowedPath(t, spec)
 }
 
-// An owner's ~/.local/bin that is a symlink is refused like a symlinked
-// login, before any container exists.
-func TestSharedLaunchRefusesASymlinkedInstallation(t *testing.T) {
+// An owner's ~/.local/bin that is itself a symlink points outside the
+// directories a borrowed installation mounts, so it is no installation to
+// borrow: the launch gets nothing of the owner's beyond the login.
+func TestSharedLaunchIgnoresASymlinkedInstallation(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
 	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
@@ -163,11 +176,7 @@ func TestSharedLaunchRefusesASymlinkedInstallation(t *testing.T) {
 	if err := os.Symlink("bin2", filepath.Join(e.ownerHome, ".local", "bin")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.launch(t, "claude")
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("Launch = %v, want a symlink refusal", err)
-	}
-	if e.containerCount() != 0 {
-		t.Fatal("a container was created for the refused launch")
-	}
+	spec := e.launchSpec(t, "claude")
+	e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
+	assertNoBorrowedPath(t, spec)
 }

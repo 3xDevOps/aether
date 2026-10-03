@@ -78,8 +78,8 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
-	describe := func(name, source, executable, installScript string) (protocol.AgentInfo, error) {
-		installed, err := s.agentInstalled(member, account, executable)
+	describe := func(name, source, executable, installScript string, borrowRoots []string) (protocol.AgentInfo, error) {
+		installed, err := s.agentInstalled(member, account, executable, borrowRoots)
 		if err != nil {
 			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
 		}
@@ -104,7 +104,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript)
+		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.BorrowRoots())
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -119,7 +119,9 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
 		}
-		info, err := describe(row.Name, "member", def.Executable, "")
+		// A member's own definition runs only on their own account, so there
+		// is no installation to borrow for it.
+		info, err := describe(row.Name, "member", def.Executable, "", nil)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -133,11 +135,11 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 
 // agentInstalled reports whether a launch by member on account finds
 // executable: in member's home, or on another member's account in that
-// owner's home, whose installation the launch then borrows.
-func (s *Server) agentInstalled(member, account domain.MemberID, executable string) (bool, error) {
+// owner's home, whose installation the launch then borrows from borrowRoots.
+func (s *Server) agentInstalled(member, account domain.MemberID, executable string, borrowRoots []string) (bool, error) {
 	if s.cfg.Homes == nil {
 		return true, nil
 	}
-	installation, err := s.cfg.Homes.Installation(member, account, executable)
+	installation, err := s.cfg.Homes.Installation(member, account, executable, borrowRoots)
 	return installation != "", err
 }
