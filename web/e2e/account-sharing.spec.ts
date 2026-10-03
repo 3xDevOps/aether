@@ -78,7 +78,9 @@ test('a member shares their agent account and a teammate launches on it', async 
       timeout: 60_000,
     })
 
-    await page.getByRole('button', { name: 'Members', exact: true }).click()
+    await page.getByRole('navigation', { name: 'Surfaces' })
+      .getByRole('button', { name: /^Admin(?:,|$)/ }).click()
+    await page.getByRole('menuitem', { name: 'Members', exact: true }).click()
     const sharing = page.getByRole('region', { name: 'Account sharing' })
     await sharing
       .getByRole('listitem')

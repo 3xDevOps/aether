@@ -293,6 +293,9 @@ labels, tooltips and the 2px active indicator remain shared with navigation.
 The adjacent sidebar defaults to 320px and is constrained to 320-520px. Older
 saved widths below the minimum are clamped when rendered. Runs, the attention
 count and Status / Member stay on one row; launch belongs in the titlebar.
+Open **Admin → Members** for account sharing. On a local `aether gui` gateway,
+**Admin → Onboarding** returns to setup; an unlinked gateway opens setup
+automatically.
 
 The sidebar scopes runs to the selected workspace and groups them by state or
 owning member (`groupBy`, persisted). A swarm is a mission whose integrator

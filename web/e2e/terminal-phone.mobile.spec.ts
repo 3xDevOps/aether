@@ -148,7 +148,7 @@ done`)
 
   // Taking over through Run Room is explicit because the desktop viewer
   // still owns the controller lease.
-  const room = page.getByRole('complementary', { name: 'Run Room' })
+  const room = page.getByRole('dialog', { name: 'Run Room' })
   await page.getByRole('button', { name: 'Open Run Room' }).tap()
   await expect(room.getByText(/Controller: /)).toBeVisible()
   await room.getByRole('button', { name: 'Take control' }).tap()
@@ -156,6 +156,7 @@ done`)
     .getByRole('dialog', { name: 'Take control of this run?' })
     .getByRole('button', { name: 'Take control' })
     .tap()
+  await expect(room.getByRole('button', { name: 'Release control' })).toBeVisible()
   await room.getByRole('button', { name: 'Close Run Room' }).tap()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
@@ -359,11 +360,13 @@ done`)
     expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
 
     // Browsing while steering must not focus xterm's keyboard or emit input.
-    const room = page.getByRole('complementary', { name: 'Run Room' })
+    const room = page.getByRole('dialog', { name: 'Run Room' })
     await page.getByRole('button', { name: 'Open Run Room' }).tap()
+    await expect(room.getByText(/Controller: /)).toBeVisible()
     await room.getByRole('button', { name: 'Take control' }).tap()
     await page.getByRole('dialog', { name: 'Take control of this run?' })
       .getByRole('button', { name: 'Take control' }).tap()
+    await expect(room.getByRole('button', { name: 'Release control' })).toBeVisible()
     await room.getByRole('button', { name: 'Close Run Room' }).tap()
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {

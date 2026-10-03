@@ -236,12 +236,18 @@ test('two members share comments, moderated steering, and explicit control trans
     // Occupied control cannot transfer implicitly: Bob must see Alice named
     // in a confirmation dialog before the takeover attach is sent.
     await bobControls.getByRole('button', { name: 'Take control', exact: true }).click()
-    const takeover = bobPage.getByRole('dialog')
+    const takeover = bobPage.getByRole('dialog', { name: 'Take control of this run?', exact: true })
     await expect(takeover).toBeVisible()
-    await expect(takeover.getByRole('heading', { name: 'Take control of this run?', exact: true })).toBeVisible()
     await expect(takeover).toContainText(
       `${aliceDisplayName} currently controls the run`,
     )
+    await takeover.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(takeover).toBeHidden()
+    await expect(bobControls.getByRole('button', { name: 'Take control', exact: true })).toBeFocused()
+    await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
+    await expect(bobControls.getByTitle(`Controller: ${aliceDisplayName}`, { exact: true })).toBeVisible()
+    await bobControls.getByRole('button', { name: 'Take control', exact: true }).click()
+    await expect(takeover).toBeVisible()
     await takeover.getByRole('button', { name: 'Take control', exact: true }).click()
 
     // The main toolbar follows the new lease while the rooms remain open.
