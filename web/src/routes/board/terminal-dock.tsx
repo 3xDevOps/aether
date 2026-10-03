@@ -83,6 +83,7 @@ export function TerminalDock({
   const dock = useStore((s) => s.envTerminal ?? initialEnvTerminal)
   const terminalDockHeight = useStore((s) => s.terminalDockHeight)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const paletteDialog = useStore((s) => s.paletteDialog)
   const capability = useCapability()
   const openTab = useStore((s) => s.openEnvTerminalTab)
   const closeTab = useStore((s) => s.closeEnvTerminalTab)
@@ -101,6 +102,16 @@ export function TerminalDock({
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
   const [replaying, setReplaying] = useState(false)
+  const actionsTrigger = useRef<HTMLButtonElement>(null)
+  const openTrigger = useRef<HTMLButtonElement>(null)
+  const returnToActions = useRef(false)
+
+  useEffect(() => {
+    if (!returnToActions.current || confirmingStop || confirmingReset || paletteDialog === 'forward') return
+    returnToActions.current = false
+    if (paletteDialog === null) (actionsTrigger.current ?? openTrigger.current)?.focus()
+  }, [confirmingStop, confirmingReset, paletteDialog])
+
   const activeTab = dock.activeTab
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
@@ -470,24 +481,33 @@ export function TerminalDock({
               )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button type="button" size="sm" variant="ghost" aria-label="Environment actions">
+                  <Button ref={actionsTrigger} type="button" size="sm" variant="ghost" aria-label="Environment actions">
                     More
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
+                  if (returnToActions.current) event.preventDefault()
+                }}>
                   {dock.status?.running && capability.hasLocal('forward.start') && (
-                    <DropdownMenuItem onSelect={() => openForwardDialog('terminal')}>
+                    <DropdownMenuItem onSelect={() => {
+                      returnToActions.current = true
+                      openForwardDialog('terminal')
+                    }}>
                       Forward port
                     </DropdownMenuItem>
                   )}
                   {!empty && (
-                    <DropdownMenuItem onSelect={() => setConfirmingStop(true)}>
+                    <DropdownMenuItem onSelect={() => {
+                      returnToActions.current = true
+                      setConfirmingStop(true)
+                    }}>
                       Stop environment
                     </DropdownMenuItem>
                   )}
                   {dock.status?.saved_image && (
                     <DropdownMenuItem
                       onSelect={() => {
+                        returnToActions.current = true
                         setResetError(null)
                         setConfirmingReset(true)
                       }}
@@ -535,13 +555,13 @@ export function TerminalDock({
             ) : empty ? (
               <div className="space-y-2 bg-background p-3 text-[13px]">
                 <p>Your environment starts on first open</p>
-                <Button type="button" size="sm" onClick={open}>
+                <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
               <div className="bg-background p-3">
-                <Button type="button" size="sm" onClick={open}>
+                <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>

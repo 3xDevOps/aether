@@ -441,6 +441,7 @@ describe('environment terminal dock', () => {
     // Whether the dock is open is the member's choice, not part of the
     // environment's state, so stopping must not close it under them.
     expect(useStore.getState().envTerminal.collapsed).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
   })
   it('saves the running environment and hides the unsaved hint', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
@@ -517,6 +518,7 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
 
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
     const menu = await openEnvironmentActions()
     expect(menu.queryByRole('menuitem', { name: 'Stop environment' })).toBeNull()
     expect(menu.queryByRole('menuitem', { name: 'Forward port' })).toBeNull()
@@ -619,6 +621,7 @@ describe('environment terminal dock', () => {
       tabs: [],
       saved_image: '',
     })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
   })
 
   it.each(['Stop environment', 'Reset to standard'])('cancels %s without changing the environment', async (name) => {
@@ -630,6 +633,7 @@ describe('environment terminal dock', () => {
     const dialog = within(await screen.findByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
     expect(api.terminalStop).not.toHaveBeenCalled()
     expect(api.envReset).not.toHaveBeenCalled()
     expect(useStore.getState().envTerminal.status).toEqual(status)

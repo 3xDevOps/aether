@@ -1767,6 +1767,8 @@ names the container only while there is one to stop, because Reset outlives
 it. Stopping therefore carries the rest of the status forward rather than
 replacing it, so the image survives the container in what the dock knows as
 well as on the server, and Reset stays on offer with the environment stopped.
+Closing a dialog opened from **More** returns focus to that menu trigger, or
+to **Open** if stopping or resetting removed the menu.
 When the terminal is running and `saved_image` is empty, it shows the hint
 **Installs here reach agents after you save.** From the moment a tab opens until
 its attach is acked, a spinner covers the terminal. Once a dashboard run ack
