@@ -14,7 +14,7 @@ import (
 // no snapshot to observe.
 func TestObservedOverlapDiagnosticsSkipFinishedAttempts(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	tasks := f.activate(t, taskSpec{key: "propose-a", title: "task a", paths: []string{"internal/a"}})
 	if err := f.startWorker(t, tasks[0], "worker"); err != nil {
 		t.Fatalf("worker.start: %v", err)

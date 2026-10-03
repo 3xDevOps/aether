@@ -17,7 +17,7 @@ import (
 func init() {
 	register(command{
 		name:  "swarm",
-		short: "create, follow, and decide swarms (missions with an integrator run)",
+		short: "create, follow, and cancel swarms (missions with an integrator run)",
 		run:   runSwarm,
 	})
 }
@@ -26,9 +26,6 @@ const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harnes
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <mission-id>\n" +
 	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
-	"   or: aether swarm approve <mission-id>\n" +
-	"   or: aether swarm request-changes <mission-id> \"<feedback>\"\n" +
-	"   or: aether swarm reject <mission-id> [\"<feedback>\"]\n" +
 	"   or: aether swarm cancel <mission-id>\n" +
 	"   or: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
 
@@ -45,12 +42,6 @@ func runSwarm(args []string) error {
 		return swarmShow(args[1:])
 	case "answer":
 		return swarmAnswer(args[1:], os.Stdin)
-	case "approve":
-		return swarmDecide("approve", args[1:])
-	case "request-changes":
-		return swarmDecide("revise", args[1:])
-	case "reject":
-		return swarmDecide("reject", args[1:])
 	case "cancel":
 		return swarmCancel(args[1:])
 	case "replace-integrator":
@@ -310,7 +301,6 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	if m.IntegratorLaunchError != "" {
 		fmt.Fprintf(&b, "launch error: %s (since %s)\n", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
 	}
-	fmt.Fprintf(&b, "plan version: %d\n", m.PlanVersion)
 
 	if len(res.Questions) > 0 {
 		fmt.Fprintf(&b, "\nquestions (%d open):\n", m.OpenQuestions)
@@ -320,20 +310,6 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 				b.WriteString("    unanswered\n")
 			} else {
 				fmt.Fprintf(&b, "    answer: %s\n", q.Answer)
-			}
-		}
-	}
-	if len(res.PlanReviews) > 0 {
-		b.WriteString("\nplan reviews:\n")
-		for _, r := range res.PlanReviews {
-			decision := "undecided"
-			if r.Decision != "" {
-				decision = r.Decision
-			}
-			fmt.Fprintf(&b, "  v%d submitted from %s at %s: %s\n", r.PlanVersion, r.SubmittedPhase, r.SubmittedAt, decision)
-			fmt.Fprintf(&b, "    summary: %s\n", r.Summary)
-			if r.Feedback != "" {
-				fmt.Fprintf(&b, "    feedback: %s\n", r.Feedback)
 			}
 		}
 	}
@@ -349,7 +325,7 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 		title := ""
 		switch {
 		case t.Revision != nil && t.PendingRevision != nil:
-			// A proposed revision awaiting review may carry a new title; a
+			// A proposed revision not yet accepted may carry a new title; a
 			// reader of the swarm sees both, not only the one in force.
 			title = fmt.Sprintf("%s (pending rev %d: %s)", cell(t.Revision.Title), t.PendingRevision.Revision, cell(t.PendingRevision.Title))
 		case t.Revision != nil:

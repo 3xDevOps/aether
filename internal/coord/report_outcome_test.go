@@ -137,22 +137,27 @@ func TestCoordReportOutboxRetriesTheFinish(t *testing.T) {
 	}
 }
 
-// TestCoordReportSkipsMissionAndSupersededReports: mission runs keep their
-// own lifecycle, and a report a relaunch superseded before it was published
-// must not finish the reopened run.
-func TestCoordReportSkipsMissionAndSupersededReports(t *testing.T) {
+// TestCoordReportSkipsWorkerAndSupersededReports: a mission worker keeps its
+// own lifecycle while a mission integrator finishes like an ordinary run, and
+// a report a relaunch superseded before it was published must not finish the
+// reopened run.
+func TestCoordReportSkipsWorkerAndSupersededReports(t *testing.T) {
 	ctx := context.Background()
 	outcomes := &recordingOutcomes{}
-	h := newHarness(t, 2, func(c *Config) {
+	h := newHarness(t, 3, func(c *Config) {
 		c.Evidence = &coordReportEvidenceCapture{id: "ev_skip"}
 		c.Outcomes = outcomes
 	})
-	worker, ordinary := h.run(0), h.run(1)
-	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{worker}}
+	worker, ordinary, integrator := h.run(0), h.run(1), h.run(2)
+	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{worker, integrator}, integrator: integrator}
 
 	report(t, h, worker, protocol.CoordOutcomeSuccess, "submitted", "worker-success")
 	if got := outcomes.recorded(); len(got) != 0 {
 		t.Fatalf("scheduler calls for a mission worker = %+v, want none", got)
+	}
+	done := report(t, h, integrator, protocol.CoordOutcomeSuccess, "delivered", "integrator-success")
+	if got := outcomes.recorded(); len(got) != 1 || got[0] != (outcomeCall{run: integrator, status: domain.RunCompleted, reportID: done.ReportID}) {
+		t.Fatalf("scheduler calls for a mission integrator = %+v, want one completed finish", got)
 	}
 
 	outcomes.fail(errors.New("not yet"))
@@ -164,8 +169,8 @@ func TestCoordReportSkipsMissionAndSupersededReports(t *testing.T) {
 	if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if got := outcomes.recorded(); len(got) != 0 {
-		t.Fatalf("scheduler calls for a superseded report = %+v, want none", got)
+	if got := outcomes.recorded(); len(got) != 1 {
+		t.Fatalf("scheduler calls after a superseded report = %+v, want only the integrator's", got)
 	}
 	pub, err := h.db.GetCoordReportPublication(ctx, result.ReportID)
 	if err != nil || pub.State != store.CoordReportPublicationPublished {

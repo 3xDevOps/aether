@@ -62,10 +62,9 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if err != nil {
 		return nil, false, err
 	}
-	// Dispatch needs an approved plan; amendment_review keeps dispatching the
-	// already-approved set, and a pending revision cannot be reserved because
-	// it is not the task's current revision.
-	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview); phaseErr != nil {
+	// A pending revision cannot be reserved because it is not the task's
+	// current revision.
+	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive); phaseErr != nil {
 		return nil, false, phaseErr
 	}
 	if r.IntegratorGeneration != 0 && r.IntegratorGeneration != m.IntegratorGeneration {
@@ -101,18 +100,6 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	}
 	if taskRevisionStatus != string(domain.TaskRevisionAccepted) {
 		return nil, false, ErrMissionNotReady
-	}
-	// A task the amendment under review changes is held back whole: starting
-	// work on the approved revision now would be work the human is deciding
-	// whether to redirect.
-	if m.Phase == domain.MissionPhaseAmendmentReview {
-		var underReview int
-		if reviewErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_plan_items WHERE mission_id=? AND plan_version=? AND task_id=?`, r.MissionID, m.PlanVersion, r.TaskID).Scan(&underReview); reviewErr != nil {
-			return nil, false, fmt.Errorf("store: read plan items of task %s: %w", r.TaskID, reviewErr)
-		}
-		if underReview > 0 {
-			return nil, false, fmt.Errorf("%w: task %s has a revision awaiting human approval; wait for the decision", ErrMissionNotReady, r.TaskID)
-		}
 	}
 	var blocker domain.TaskID
 	blockedErr := tx.QueryRowContext(ctx, `SELECT d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=t.current_revision) ORDER BY d.depends_on_task_id LIMIT 1`, r.TaskID, r.TaskRevision).Scan(&blocker)

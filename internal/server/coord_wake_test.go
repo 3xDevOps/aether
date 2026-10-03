@@ -95,14 +95,7 @@ func newWakeServerFixture(t *testing.T, worker bool) *wakeServerFixture {
 		if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "worker scope", "wake-answer"); answerErr != nil {
 			t.Fatal(answerErr)
 		}
-		if _, clarificationErr := db.CompleteMissionClarification(ctx, m.ID, m.CurrentIntegratorRunID, "wake-clarify"); clarificationErr != nil {
-			t.Fatal(clarificationErr)
-		}
-		review, err := db.SubmitMissionPlan(ctx, m.ID, m.CurrentIntegratorRunID, "worker plan", "wake-plan")
-		if err != nil {
-			t.Fatal(err)
-		}
-		m, err = db.DecideMissionPlan(ctx, m.ID, review.PlanVersion, domain.MissionPlanApprove, "", member.ID, "wake-approve")
+		m, err = db.StartMission(ctx, m.ID, m.CurrentIntegratorRunID, "wake-start")
 		if err != nil {
 			t.Fatal(err)
 		}

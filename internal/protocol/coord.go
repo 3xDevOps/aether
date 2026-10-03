@@ -90,9 +90,7 @@ type CoordMissionAssignment struct {
 	ActiveAttempts        int                      `json:"active_attempts,omitempty"`
 	TotalAttempts         int                      `json:"total_attempts,omitempty"`
 	Phase                 string                   `json:"phase,omitempty"`
-	PlanVersion           uint64                   `json:"plan_version,omitempty"`
 	OpenQuestions         int                      `json:"open_questions,omitempty"`
-	LatestFeedback        string                   `json:"latest_feedback,omitempty"`
 	Capabilities          []string                 `json:"capabilities,omitempty"`
 }
 

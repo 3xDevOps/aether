@@ -15,8 +15,8 @@ func (s *Service) ValidateWake(ctx context.Context, run domain.RunID) error {
 	if err != nil {
 		return err
 	}
-	if m != nil && m.Phase == domain.MissionPhaseRejected {
-		return fmt.Errorf("%w: mission has been rejected", store.ErrMissionStale)
+	if m != nil && m.Phase.Terminal() {
+		return fmt.Errorf("%w: mission is %s", store.ErrMissionStale, m.Phase)
 	}
 	if attempt != nil && !attemptLive(attempt.State) {
 		return fmt.Errorf("%w: worker attempt has finished", store.ErrMissionStale)

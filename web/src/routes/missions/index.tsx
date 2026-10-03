@@ -45,15 +45,14 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { runState } from '@/lib/status'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
-  AmendmentReviewSection,
   ErrorNotice,
   PhaseBanner,
   PhaseChip,
-  PlanningHistory,
-  missionPhase,
-  PlanReviewSection,
+  QuestionHistory,
   QuestionsSection,
-} from '@/routes/missions/plan-gate'
+  missionFinal,
+  phaseLabel,
+} from '@/routes/missions/phase'
 
 function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -125,18 +124,7 @@ const statusColor: Record<MissionTask['status'], 'accent' | 'default' | 'success
 }
 
 function missionStatus(mission: Mission, tasks: MissionTask[], submissions: MissionSubmission[]): string {
-  switch (missionPhase(mission)) {
-    case 'planning':
-      return 'Planning'
-    case 'clarified':
-      return 'Preparing plan'
-    case 'plan_review':
-      return 'Plan ready for review'
-    case 'amendment_review':
-      return 'Amendment ready for review'
-    case 'rejected':
-      return 'Rejected'
-  }
+  if (mission.phase !== 'active') return phaseLabel(mission)
   if (!tasks.length) return 'Preparing'
   const acceptedDone = tasks.every(
     (task) =>
@@ -196,7 +184,6 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
               submissions: result.submissions ?? [],
               diagnostics: result.diagnostics ?? [],
               questions: result.questions ?? [],
-              plan_reviews: result.plan_reviews ?? [],
             })
           }
         }
@@ -289,7 +276,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
                   <span>{mission.max_total_attempts} attempts total</span>
                   <span>Generation {mission.integrator_generation}</span>
                 </div>
-                {mission.integrator_launch_error && missionPhase(mission) !== 'rejected' && (
+                {mission.integrator_launch_error && !missionFinal(mission) && (
                   <p className="mt-1 break-words text-xs text-state-failed">
                     Integrator did not launch: {mission.integrator_launch_error}
                   </p>
@@ -364,37 +351,25 @@ function MissionDetailView({
       setRunLookups((current) => ({ ...current, [integratorRunID]: lookup }))
     })
   }, [client, hydrated, integratorPresent, integratorRunID, runLookups, upsertRun])
-  const acceptedSubmissions = useMemo(
-    () => (detail?.submissions ?? []).filter((submission) => submission.state === 'accepted'),
-    [detail?.submissions],
-  )
   const canReplace =
-    Boolean(mission) &&
+    mission !== undefined &&
+    !missionFinal(mission) &&
     cap.hasMethod('mission.replace-integrator') &&
     allowed('launch', self)
   const canRelease =
     cap.hasMethod('mission.worker.release') &&
     allowed('launch', self)
-  // The gate is the accountable human's own decision; an admin stands in.
-  const gateAuthority =
+  // Answering and cancelling are the accountable human's own; an admin stands in.
+  const humanAuthority =
     Boolean(mission) &&
     allowed('launch', self) &&
     (self.id === mission?.accountable_human_id || self.role === 'admin')
-  const canAnswer = cap.hasMethod('mission.question.answer') && gateAuthority
-  const canDecide = cap.hasMethod('mission.plan.decide') && gateAuthority
-  const planReviews = detail?.plan_reviews ?? []
-  const pendingReview = planReviews.find(
-    (review) => review.plan_version === mission?.plan_version && !review.decision,
-  )
-  const latestFeedback = [...planReviews].reverse().find((review) => review.decision === 'revise')?.feedback
-  const phase = mission ? missionPhase(mission) : 'active'
-  // `amendment_review` keeps dispatching the approved set, so its attempts are
-  // real; only the pending revisions in the round are frozen.
-  const readOnly = phase !== 'active' && phase !== 'amendment_review'
+  const canAnswer = cap.hasMethod('mission.question.answer') && humanAuthority
+  const phase = mission?.phase
   const canCancel =
     cap.hasMethod('mission.cancel') &&
-    gateAuthority &&
-    (phase === 'planning' || phase === 'clarified' || phase === 'plan_review')
+    humanAuthority &&
+    (phase === 'planning' || phase === 'active')
   const releaseTakeover = async (attempt: MissionAttempt) => {
     if (!attempt.takeover_active || attempt.takeover_generation == null || !attempt.run_id || releasingAttemptID) return
     setReleaseError(null)
@@ -423,7 +398,6 @@ function MissionDetailView({
           attempts={(detail.attempts ?? []).filter((attempt) => attempt.task_id === task.id)}
           submissions={(detail.submissions ?? []).filter((submission) => submission.task_id === task.id)}
           diagnostics={(detail.diagnostics ?? []).filter((diagnostic) => diagnostic.task_id === task.id)}
-          readOnly={readOnly}
           showProposalBlocker={phase === 'active'}
           canRelease={canRelease}
           onRelease={releaseTakeover}
@@ -512,75 +486,40 @@ function MissionDetailView({
               </div>
             </section>
 
-            {(phase === 'planning' || phase === 'clarified') && (
+            {phase === 'planning' ? (
               <>
                 <QuestionsSection
                   questions={detail.questions ?? []}
-                  canAnswer={canAnswer && phase === 'planning'}
-                  complete={phase === 'clarified'}
+                  canAnswer={canAnswer}
                   client={client}
                   onAnswered={onRefresh}
                 />
-                {latestFeedback && (
-                  <div className="mt-3 border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">
-                    <p className="font-medium">Changes you requested</p>
-                    <p className="mt-0.5 whitespace-pre-wrap break-words">{latestFeedback}</p>
-                  </div>
-                )}
-                <section className="mt-3 space-y-2" aria-label="Draft plan">
-                  <h2 className="text-sm font-semibold">Draft plan</h2>
+                <section className="mt-3 space-y-2" aria-label="Proposed tasks">
+                  <h2 className="text-sm font-semibold">Proposed tasks</h2>
                   {taskList}
                 </section>
               </>
-            )}
-            {phase === 'plan_review' && (
-              <PlanReviewSection
-                mission={mission}
-                review={pendingReview}
-                canDecide={canDecide}
-                client={client}
-                onDecided={onRefresh}
-              >
-                {taskList}
-              </PlanReviewSection>
-            )}
-            {phase === 'amendment_review' && (
-              <AmendmentReviewSection
-                mission={mission}
-                review={pendingReview}
-                tasks={detail.tasks}
-                diagnostics={detail.diagnostics ?? []}
-                canDecide={canDecide}
-                client={client}
-                onDecided={onRefresh}
-              />
-            )}
-            {(phase === 'active' || phase === 'amendment_review' || phase === 'rejected') && (
-              <section className="mt-3 space-y-2" aria-label="Mission tasks">
-                <h2 className="text-sm font-semibold">Tasks</h2>
-                {taskList}
-              </section>
-            )}
-            {(phase === 'active' || phase === 'amendment_review') && (
-              <section className="mt-3 border bg-card p-3" aria-label="Mission candidate review">
-                <h2 className="text-sm font-semibold">Candidate progress</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Prepare and review the current accepted mission set through the existing verification and delivery workflow. Task status alone never implies delivery.</p>
-                {integratorRunID ? (
-                  <CandidateReview
-                    workspaceID={mission.workspace_id}
-                    currentRunID={integratorRunID}
-                    missionID={mission.id}
-                    missionSubmissions={acceptedSubmissions}
-                    initialExpanded
-                    client={client}
-                  />
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">Waiting for the integrator run before candidate preparation can begin.</p>
+            ) : (
+              <>
+                <section className="mt-3 space-y-2" aria-label="Mission tasks">
+                  <h2 className="text-sm font-semibold">Tasks</h2>
+                  {taskList}
+                </section>
+                {integratorRunID && (
+                  <section className="mt-3 border bg-card p-3" aria-label="Mission candidate progress">
+                    <h2 className="text-sm font-semibold">Candidate progress</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">The integrator prepares, verifies, and delivers candidates on its own. This view is read-only.</p>
+                    <CandidateReview
+                      workspaceID={mission.workspace_id}
+                      currentRunID={integratorRunID}
+                      readOnly
+                      initialExpanded
+                      client={client}
+                    />
+                  </section>
                 )}
-              </section>
-            )}
-            {phase !== 'planning' && phase !== 'clarified' && (
-              <PlanningHistory questions={detail.questions ?? []} reviews={planReviews} />
+                <QuestionHistory questions={detail.questions ?? []} />
+              </>
             )}
           </>
         )}
@@ -616,7 +555,6 @@ function TaskCard({
   attempts,
   submissions,
   diagnostics,
-  readOnly,
   showProposalBlocker,
   canRelease,
   onRelease,
@@ -627,10 +565,9 @@ function TaskCard({
   attempts: MissionAttempt[]
   submissions: MissionSubmission[]
   diagnostics: MissionScopeDiagnostic[]
-  /** Where the mission cannot dispatch, no attempt exists to chip. */
-  readOnly: boolean
-  /** Outside `active` a proposal is waiting on the human, which the phase
-   * banner already says; repeating it as a blocker reads as a fault. */
+  /** In planning every task waits for the integrator to start the swarm,
+   * which the phase banner already says; repeating it as a blocker reads as
+   * a fault. */
   showProposalBlocker: boolean
   canRelease: boolean
   onRelease: (attempt: MissionAttempt) => void
@@ -657,7 +594,7 @@ function TaskCard({
         <div className="flex flex-wrap gap-1">
           {pending && (
             <Chip color="warning" variant="soft" size="sm">
-              <Chip.Label>{pending.material ? 'Material revision pending' : 'Revision pending'}</Chip.Label>
+              <Chip.Label>Revision pending</Chip.Label>
             </Chip>
           )}
           <Chip color={statusColor[task.status]} variant="soft" size="sm">
@@ -732,7 +669,7 @@ function TaskCard({
           {accepted.acceptance?.scope_disposition && <p className="mt-0.5">Scope disposition: {accepted.acceptance.scope_disposition}</p>}
         </div>
       )}
-      {!readOnly && <div className="mt-3 flex flex-wrap gap-1">
+      {attempts.length > 0 && <div className="mt-3 flex flex-wrap gap-1">
         {attempts.map((attempt) => (
           <div key={attempt.id} className="flex flex-wrap items-center gap-1 border px-2 py-1 text-xs">
             <span>Attempt {attempt.number} · {attempt.cancel_requested_at && !['completed', 'failed', 'cancelled', 'superseded', 'abandoned'].includes(attempt.state) ? 'Cancellation pending' : attempt.state}</span>
@@ -870,7 +807,7 @@ function MissionCancel({
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel this swarm?</AlertDialogTitle>
           <AlertDialogDescription>
-            The mission moves to rejected, its integrator run is cancelled, and no worker starts. This cannot be undone.
+            The mission moves to cancelled, and its workers and integrator run are stopped. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && <ErrorNotice error={error} />}

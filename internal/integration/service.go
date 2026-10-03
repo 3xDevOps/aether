@@ -57,6 +57,7 @@ type Store interface {
 	GetMember(context.Context, domain.MemberID) (*domain.Member, error)
 	GetWorkspace(context.Context, domain.WorkspaceID) (*domain.Workspace, error)
 	GetRun(context.Context, domain.RunID) (*domain.Run, error)
+	GetMission(context.Context, domain.MissionID) (*domain.Mission, error)
 	CreateIntegrationCandidate(context.Context, *store.IntegrationCandidate) error
 	GetIntegrationCandidate(context.Context, string) (*store.IntegrationCandidate, error)
 	GetIntegrationCandidateByKey(context.Context, domain.WorkspaceID, string, string) (*store.IntegrationCandidate, error)

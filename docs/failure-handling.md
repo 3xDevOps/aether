@@ -233,8 +233,8 @@ Reconciliation only relaunches an integrator run whose row never existed.
 Once the row exists, `mission.show` reports `integrator_run_launched: true`,
 and deleting that run does not bring it back, not even through a same-key
 `mission.create`, which then returns the mission unchanged, as it does for
-a cancelled swarm. Use **Replace integrator** to start a new one, or, before
-the plan is approved, cancel the swarm.
+a cancelled swarm. Use **Replace integrator** to start a new one, or cancel
+the swarm.
 
 Upgrading to the server version that added `integrator_run_launched` marks
 every existing swarm's integrator as launched, so the upgrade relaunches

@@ -174,7 +174,7 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 	}
 	assertSnapshots(mission.ID, "worker")
 	other := mustCreatePlanningMission(t, db, workspace.ID, member.ID, 4, 4, "other-mission")
-	if _, err := db.db.ExecContext(ctx, `UPDATE missions SET phase='active', plan_version=1 WHERE id=?`, other.ID); err != nil {
+	if _, err := db.db.ExecContext(ctx, `UPDATE missions SET phase='active' WHERE id=?`, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	otherTask := mustCreateMissionTask(t, db, other.ID, "conflicting ownership")

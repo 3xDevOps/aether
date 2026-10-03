@@ -79,66 +79,6 @@ func answerSwarmQuestion(c *protocol.Client, w io.Writer, missionID, questionID,
 	return nil
 }
 
-// swarmDecisionUsage maps a mission.plan.decide decision to the command that
-// sends it.
-var swarmDecisionUsage = map[string]string{
-	"approve": "usage: aether swarm approve <mission-id>",
-	"revise":  "usage: aether swarm request-changes <mission-id> \"<feedback>\"",
-	"reject":  "usage: aether swarm reject <mission-id> [\"<feedback>\"]",
-}
-
-func swarmDecide(decision string, args []string) error {
-	missionID, feedback, err := parseSwarmDecision(decision, args)
-	if err != nil {
-		return err
-	}
-	return withControl(func(c *protocol.Client) error {
-		return decideSwarmPlan(c, os.Stdout, missionID, decision, feedback, cli.NewControlSessionID())
-	})
-}
-
-// parseSwarmDecision rejects what the server would refuse before any RPC:
-// feedback is required to request changes and not accepted on approve.
-func parseSwarmDecision(decision string, args []string) (missionID, feedback string, err error) {
-	usage := swarmDecisionUsage[decision]
-	missionID, rest, err := swarmTarget(args, usage)
-	if err != nil {
-		return "", "", err
-	}
-	switch {
-	case len(rest) == 0 && decision != "revise":
-	case len(rest) == 1 && decision != "approve" && strings.TrimSpace(rest[0]) != "":
-		feedback = rest[0]
-	default:
-		return "", "", errors.New(usage)
-	}
-	return missionID, feedback, nil
-}
-
-// decideSwarmPlan decides the plan version show reports, so a plan the
-// integrator resubmitted since the human read it is not decided unread.
-func decideSwarmPlan(c *protocol.Client, w io.Writer, missionID, decision, feedback, key string) error {
-	shown, err := showSwarm(c, missionID)
-	if err != nil {
-		return err
-	}
-	if shown.Mission.PlanVersion == 0 {
-		return fmt.Errorf("swarm %s has no submitted plan to decide (phase %s)", missionID, shown.Mission.Phase)
-	}
-	params := protocol.MissionPlanDecideParams{
-		MissionID:           missionID,
-		ExpectedPlanVersion: shown.Mission.PlanVersion,
-		Decision:            decision,
-		Feedback:            feedback,
-		IdempotencyKey:      key,
-	}
-	var res protocol.MissionPlanDecideResult
-	if err := c.Call(protocol.MethodMissionPlanDecide, params, &res); err != nil {
-		return err
-	}
-	return printSwarmPhase(w, res.Mission)
-}
-
 func swarmCancel(args []string) error {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
 		return errors.New("usage: aether swarm cancel <mission-id>")

@@ -2,10 +2,11 @@
 
 Candidate integration is a server-owned workflow for assembling ordered evidence
 submissions, checking a frozen revision, and either landing or proposing that
-revision. It is deliberately independent of mission state. The candidate
-engine can run today with ordinary evidence packets; it cannot mark a task
-`Done` or change mission state. A mission-policy adapter owns the final handoff
-to authoritative mission/accepted-submission state.
+revision. The candidate engine runs with ordinary evidence packets; it cannot
+mark a task `Done` or change mission state. Of a mission it reads only the
+accountable human, the approver of its integrator's delivery requests. A
+mission-policy adapter owns the final handoff to authoritative
+mission/accepted-submission state.
 
 ## Wire surface
 
@@ -200,6 +201,12 @@ next resolution batch.
 Remaining index conflicts keep the candidate `conflicted`, so files can be
 resolved in separate batches.
 
+`integration.resolve` is a human method. A mission integrator recovers from a
+conflict without it. `integration.prepare` takes an ordered subset of the
+accepted submissions, so the integrator delivers the ones that apply cleanly,
+revises the conflicting task so a new worker redoes it from the advanced
+target, accepts that submission, and prepares again.
+
 The service records a resolution intent before changing Git. After an
 uncertain error, retry the exact same actor, idempotency key, positive
 `expected_version`, and file payload. Authorization happens before retry
@@ -262,7 +269,7 @@ failed/running attempt overriding the selected pass. The UI must show argv,
 output/truncation, status, and observed configuration provenance; an absent or
 stale result is missing evidence, not approval.
 
-## Request, human decision, and delivery
+## Request, decision, and delivery
 
 `integration.request_delivery` binds a candidate revision to selected
 verification IDs, an action, and an idempotency key. The only actions are:
@@ -280,16 +287,24 @@ reviewed request: the human decision and subsequent delivery use the same
 exact value. Replacing or changing a request is not an adaptation; it creates
 a new request/version and invalidates the old one.
 
+A request starts `pending`, except one from a mission's current integrator: it
+is recorded `approved` with `decided_by` set to the mission's accountable human
+and `decided_at` set to the request time, so a verified mission candidate is
+delivered with no human step. The request is refused, and nothing is recorded,
+if the accountable human is pending or lacks Push on the workspace. A human's
+request on a mission candidate still waits for a decision.
+
 `integration.decide` is human-only: its actor must have no `RunID`. It takes
-`request_id`, the exact `request_version`, and `approve`; it is the human
-approval boundary and uses optimistic version fencing. Agent actors cannot
+`request_id`, the exact `request_version`, and `approve`; it decides a
+`pending` request and uses optimistic version fencing. Agent actors cannot
 approve or deny. This integration decision is separate from the existing
 `approval.decide` flow; that flow's contract is unchanged. `integration.deliver`
 takes the exact request/version and
 rechecks current membership, push permission, candidate ownership, all
-selected evidence, verification validity, approval, and target revision before
-claiming `delivering`. A request/version, target, candidate revision, action,
-or verification mismatch is rejected rather than rewritten.
+selected evidence, verification validity, the approver's current Push
+permission, and target revision before claiming `delivering`. A
+request/version, target, candidate revision, action, or verification mismatch
+is rejected rather than rewritten.
 
 Delivery writes a durable Git transaction receipt before the final aggregate
 save. If the response or database save is lost, retrying the same request
@@ -377,9 +392,13 @@ does not hold the authority fence while waiting for the command.
 The mission adapter resolves current assignments and every source run's
 mission association, even when `mission_id` is omitted. It rejects mixed
 mission/ordinary inputs, stale integrators, unaccepted revisions, and changed
-accepted-set bindings. Explicit sources may select an ordered subset.
-Human operations retain existing member permissions; historical review and
-authorized cleanup remain available. The engine does not own mission state.
+accepted-set bindings. Explicit sources may select an ordered subset. An
+integrator may change a candidate only while its mission is `active`: once the
+mission is cancelled or completed, prepare, verify, request-delivery, and
+deliver are refused with a conflict, so cancel is what stops an unattended
+delivery. Human operations retain existing member permissions; historical
+review and authorized cleanup remain available. The engine does not own
+mission state.
 
 `PrepareRuntime` and `ReleaseRuntime` must be supplied together or both omitted.
 The server wires them to verified CLI staging keyed by the persisted runtime
@@ -408,9 +427,12 @@ dispatching), `missions.plan_version`, the revision audit columns
 `.accepted_by_run_id`, `mission_questions`, `mission_plan_reviews` (including
 `submitted_phase`, which records whether a round was an initial plan or an
 amendment), and `mission_plan_items`, the per-round record of which task
-revisions a human decided. Shipped migrations remain unchanged. Operators
-should inspect `schema_migrations` and expect version 39, not infer schema
-from a client build or reuse a database from an incompatible branch.
+revisions a human decided. Migration **49** removes that plan gate again: it
+drops `mission_plan_reviews`, `mission_plan_items` and
+`mission_task_revisions.material`, and rebuilds `missions` so `phase` is one of
+`planning`, `active`, `completed` or `cancelled`. Shipped migrations remain
+unchanged. Operators should inspect `schema_migrations` rather than infer
+schema from a client build or reuse a database from an incompatible branch.
 
 Migration 39 was extended in place before release. A database created by an
 earlier build of this branch already recorded version 39 without the audit

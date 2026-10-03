@@ -282,3 +282,36 @@ func TestIntegrationAdmissionRechecksRevokedAgentHuman(t *testing.T) {
 		t.Fatal("revoked agent authorizer unexpectedly passed integration admission")
 	}
 }
+
+func TestIntegrationAdmissionStopsIntegratorOnceMissionEnds(t *testing.T) {
+	ctx := context.Background()
+	svc, mission, member, accepted := acceptedIntegrationPolicyFixture(t)
+	db := svc.cfg.Store.(*store.DB)
+	candidate := &protocol.Candidate{
+		CandidateID: "candidate-cancelled", WorkspaceID: string(mission.WorkspaceID), MissionID: string(mission.ID),
+		Submissions: []protocol.SubmissionRef{accepted}, MissionAcceptedSetVersion: mission.AcceptedSetVersion,
+	}
+	admit := func(op string) error {
+		release, err := svc.AdmitIntegration(ctx, feature.Admission{
+			Operation: op, Actor: feature.Actor{RunID: mission.CurrentIntegratorRunID},
+			WorkspaceID: mission.WorkspaceID, MissionID: string(mission.ID), Candidate: candidate,
+		})
+		if release != nil {
+			release()
+		}
+		return err
+	}
+	if err := admit(protocol.MethodIntegrationDeliver); err != nil {
+		t.Fatalf("active mission integrator delivery admission: %v", err)
+	}
+	if _, err := db.CancelMission(ctx, mission.ID, member.ID, "integration-policy-cancel"); err != nil {
+		t.Fatalf("cancel mission: %v", err)
+	}
+	// With no human delivery decision, cancel is what stops a delivery.
+	if err := admit(protocol.MethodIntegrationDeliver); !errors.Is(err, feature.ErrConflict) {
+		t.Fatalf("cancelled mission integrator delivery admission = %v, want integration conflict", err)
+	}
+	if err := admit(protocol.MethodIntegrationShow); err != nil {
+		t.Fatalf("cancelled mission integrator read admission: %v", err)
+	}
+}

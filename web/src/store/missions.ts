@@ -1,7 +1,6 @@
 import type {
   Mission,
   MissionAttempt,
-  MissionPlanReview,
   MissionQuestion,
   MissionScopeDiagnostic,
   MissionSubmission,
@@ -15,7 +14,6 @@ export interface MissionDetail {
   submissions: MissionSubmission[]
   diagnostics: MissionScopeDiagnostic[]
   questions: MissionQuestion[]
-  plan_reviews: MissionPlanReview[]
 }
 
 export interface MissionsSlice {

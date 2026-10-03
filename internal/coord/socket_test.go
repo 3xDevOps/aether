@@ -548,13 +548,20 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 type missionTransportStub struct {
 	err     error
 	mission []domain.RunID
+	// integrator, when set, is the one mission run whose role is integrator;
+	// every other mission run is a worker.
+	integrator domain.RunID
 }
 
 func (m missionTransportStub) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
 	if !slices.Contains(m.mission, run) {
 		return protocol.CoordMissionAssignment{}, nil
 	}
-	return protocol.CoordMissionAssignment{MissionID: "mission-1", Capabilities: coordinationCapabilities}, nil
+	role := "worker"
+	if run == m.integrator {
+		role = "integrator"
+	}
+	return protocol.CoordMissionAssignment{MissionID: "mission-1", Role: role, Capabilities: coordinationCapabilities}, nil
 }
 
 func (m missionTransportStub) Peers(_ context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
@@ -616,13 +623,6 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionPhase),
 			wantCode: protocol.CodeInvalidState,
 		},
-		// A revision the integrator may not accept alone is the same class of
-		// answer as a phase refusal: the call is well-formed, the state says
-		// no until a human decides.
-		"amendment-required": {
-			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionAmendmentRequired),
-			wantCode: protocol.CodeInvalidState,
-		},
 		"real-error": {
 			cause:    errors.New("database unavailable"),
 			wantCode: protocol.CodeInternal,
@@ -660,27 +660,27 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 	}
 }
 
-// TestMissionMethodWhitelistPlanGate: the allow-list, not the capability
-// advertisement, is what makes a method reachable from a run. The two human
-// decisions are control-channel-only and must stay unreachable from any agent.
-func TestMissionMethodWhitelistPlanGate(t *testing.T) {
+// TestMissionMethodWhitelistPlanning: the allow-list, not the capability
+// advertisement, is what makes a method reachable from a run. The human
+// answer and cancel are control-channel-only and must stay unreachable from
+// any agent.
+func TestMissionMethodWhitelistPlanning(t *testing.T) {
 	for _, method := range []string{
 		protocol.MethodMissionQuestionAsk,
-		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
-		protocol.MethodMissionPlanSubmit,
+		protocol.MethodMissionStart,
 	} {
 		if !isMissionMethod(method) {
-			t.Errorf("plan gate method %q is not admitted to mission dispatch", method)
+			t.Errorf("planning method %q is not admitted to mission dispatch", method)
 		}
 	}
 	h := newHarness(t, 1)
 	for _, method := range []string{
 		protocol.MethodMissionQuestionAnswer,
-		protocol.MethodMissionPlanDecide,
+		protocol.MethodMissionCancel,
 	} {
 		if isMissionMethod(method) {
-			t.Errorf("human decision method %q is admitted to mission dispatch", method)
+			t.Errorf("human method %q is admitted to mission dispatch", method)
 		}
 		line := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
 		resp := h.svc.handle(context.Background(), h.runs[0].ID, line)

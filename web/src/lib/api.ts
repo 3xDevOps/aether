@@ -40,8 +40,6 @@ import type {
   MissionCancelResult,
   MissionCreateResult,
   MissionListResult,
-  MissionPlanDecideResult,
-  MissionPlanDecision,
   MissionQuestionResult,
   MissionReplaceIntegratorResult,
   MissionShowResult,
@@ -563,13 +561,6 @@ export const api = {
     answer: string
     idempotency_key: string
   }) => call<MissionQuestionResult>('mission.question.answer', params),
-  missionPlanDecide: (params: {
-    mission_id: string
-    expected_plan_version: number
-    decision: MissionPlanDecision
-    feedback?: string
-    idempotency_key: string
-  }) => call<MissionPlanDecideResult>('mission.plan.decide', params),
   missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
     call<MissionCancelResult>('mission.cancel', params),
   missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>

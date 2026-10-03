@@ -15,13 +15,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// maxMissionTextBytes bounds every free-text body the plan gate carries.
+// maxMissionTextBytes bounds every free-text body a mission question carries.
 // internal/store does not import internal/protocol, so the wire cap is
 // applied here, once, for both the agent socket and the control channel.
 const maxMissionTextBytes = protocol.CoordMaxBodyBytes
 
 // planShowPoll is the re-read interval of mission.plan.show's bounded wait.
-// The gate changes through human action, so a poll is cheaper than a waiter
+// The plan changes through human answers, so a poll is cheaper than a waiter
 // registry and cannot leak a channel when an integrator is replaced mid-wait.
 const planShowPoll = 500 * time.Millisecond
 
@@ -29,14 +29,12 @@ const planShowPoll = 500 * time.Millisecond
 // whole change test: anything an integrator must react to moves one field.
 type planSnapshot struct {
 	phase                domain.MissionPhase
-	planVersion          uint64
 	integratorGeneration uint64
 	acceptedSetVersion   uint64
 	answered             int
-	latestDecision       domain.MissionPlanDecision
 }
 
-// missionPhaseRefusal repeats the store's gate at the service boundary so an
+// missionPhaseRefusal repeats the store's phase check at the service boundary so an
 // agent is refused before any work is done. It wraps the store's sentinel:
 // both RPC classifiers must see the same error from either layer.
 func missionPhaseRefusal(m *domain.Mission, operation string) error {
@@ -47,12 +45,10 @@ func (s *Service) handlePlanAgent(ctx context.Context, run domain.RunID, method 
 	switch method {
 	case protocol.MethodMissionQuestionAsk:
 		return s.questionAsk(ctx, run, raw)
-	case protocol.MethodMissionClarificationComplete:
-		return s.clarificationComplete(ctx, run, raw)
 	case protocol.MethodMissionPlanShow:
 		return s.planShow(ctx, run, raw)
-	case protocol.MethodMissionPlanSubmit:
-		return s.planSubmit(ctx, run, raw)
+	case protocol.MethodMissionStart:
+		return s.start(ctx, run, raw)
 	default:
 		return nil, errors.New("mission: method not found")
 	}
@@ -87,66 +83,39 @@ func (s *Service) questionAsk(ctx context.Context, run domain.RunID, raw json.Ra
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
 }
 
-// clarificationComplete is the integrator declaring that it has what it needs
-// to plan. Questions are optional; this call is what separates "still asking"
-// from "ready to submit", and the store refuses it while an answer is pending.
-func (s *Service) clarificationComplete(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
-	var p protocol.MissionClarificationCompleteParams
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
-		}
-	}
-	if !validTaskKey(p.IdempotencyKey) {
-		return nil, errors.New("mission: mission.clarification.complete requires idempotency_key")
-	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
-	m, err := s.integratorMission(ctx, run, "")
-	if err != nil {
-		return nil, err
-	}
-	if _, completeErr := s.cfg.Missions.CompleteMissionClarification(ctx, m.ID, run, p.IdempotencyKey); completeErr != nil {
-		return nil, completeErr
-	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
-		return nil, publishErr
-	}
-	state, _, _, err := s.planState(ctx, m.ID)
-	if err != nil {
-		return nil, err
-	}
-	return protocol.MissionClarificationCompleteResult{Plan: state}, nil
-}
-
-func (s *Service) planSubmit(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
-	var p protocol.MissionPlanSubmitParams
+// start is the integrator's mission.start: it accepts every proposed task
+// and moves the mission to active. The mission's launch admission is
+// re-resolved first, since starting is what lets workers dispatch: an
+// accountable human who lost Launch or the account share cannot carry the
+// mission forward.
+func (s *Service) start(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
+	var p protocol.MissionStartParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(p.Summary) == "" || !validTaskKey(p.IdempotencyKey) {
-		return nil, errors.New("mission: mission.plan.submit requires summary and idempotency_key")
-	}
-	if len(p.Summary) > maxMissionTextBytes {
-		return nil, fmt.Errorf("mission: mission.plan.submit summary is %d bytes, limit is %d", len(p.Summary), maxMissionTextBytes)
+	if p.MissionID == "" || !validTaskKey(p.IdempotencyKey) {
+		return nil, errors.New("mission: mission.start requires mission_id and idempotency_key")
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
-	m, err := s.integratorMission(ctx, run, "")
+	m, err := s.integratorMission(ctx, run, p.MissionID)
 	if err != nil {
 		return nil, err
 	}
-	if _, submitErr := s.cfg.Missions.SubmitMissionPlan(ctx, m.ID, run, p.Summary, p.IdempotencyKey); submitErr != nil {
-		return nil, submitErr
+	if _, admissionErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, m.AccountableHumanID, string(m.Integrator.AccountMemberID)); admissionErr != nil {
+		return nil, admissionErr
+	}
+	if _, startErr := s.cfg.Missions.StartMission(ctx, m.ID, run, p.IdempotencyKey); startErr != nil {
+		return nil, startErr
 	}
 	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
 		return nil, publishErr
 	}
-	state, _, _, err := s.planState(ctx, m.ID)
+	state, _, err := s.planState(ctx, m.ID)
 	if err != nil {
 		return nil, err
 	}
-	return protocol.MissionPlanSubmitResult{Plan: state}, nil
+	return protocol.MissionStartResult{Plan: state}, nil
 }
 
 func (s *Service) planShow(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
@@ -204,14 +173,13 @@ func (s *Service) planShow(ctx context.Context, run domain.RunID, raw json.RawMe
 }
 
 func (s *Service) planShowResult(ctx context.Context, missionID domain.MissionID) (protocol.MissionPlanShowResult, planSnapshot, error) {
-	state, questions, reviews, err := s.planState(ctx, missionID)
+	state, questions, err := s.planState(ctx, missionID)
 	if err != nil {
 		return protocol.MissionPlanShowResult{}, planSnapshot{}, err
 	}
 	out := protocol.MissionPlanShowResult{
-		Plan:        state,
-		Questions:   make([]protocol.MissionQuestion, 0, len(questions)),
-		PlanReviews: make([]protocol.MissionPlanReview, 0, len(reviews)),
+		Plan:      state,
+		Questions: make([]protocol.MissionQuestion, 0, len(questions)),
 	}
 	answered := 0
 	for _, question := range questions {
@@ -220,51 +188,29 @@ func (s *Service) planShowResult(ctx context.Context, missionID domain.MissionID
 		}
 		out.Questions = append(out.Questions, protocol.MissionQuestionFromDomain(question))
 	}
-	for _, review := range reviews {
-		out.PlanReviews = append(out.PlanReviews, protocol.MissionPlanReviewFromDomain(review))
-	}
 	snapshot := planSnapshot{
-		phase: domain.MissionPhase(state.Phase), planVersion: state.PlanVersion,
-		integratorGeneration: state.IntegratorGeneration, answered: answered,
-		acceptedSetVersion: state.AcceptedSetVersion,
-	}
-	if len(reviews) > 0 {
-		snapshot.latestDecision = reviews[len(reviews)-1].Decision
+		phase: domain.MissionPhase(state.Phase), integratorGeneration: state.IntegratorGeneration,
+		answered: answered, acceptedSetVersion: state.AcceptedSetVersion,
 	}
 	return out, snapshot, nil
 }
 
 // planState composes what the store deliberately does not: OpenQuestions comes
-// from GetMission, LatestFeedback from the most recent revise decision.
-func (s *Service) planState(ctx context.Context, missionID domain.MissionID) (protocol.MissionPlanState, []*domain.MissionQuestion, []*domain.MissionPlanReview, error) {
+// from GetMission.
+func (s *Service) planState(ctx context.Context, missionID domain.MissionID) (protocol.MissionPlanState, []*domain.MissionQuestion, error) {
 	m, err := s.cfg.Missions.GetMission(ctx, missionID)
 	if err != nil {
-		return protocol.MissionPlanState{}, nil, nil, err
+		return protocol.MissionPlanState{}, nil, err
 	}
 	questions, err := s.cfg.Missions.ListMissionQuestions(ctx, missionID)
 	if err != nil {
-		return protocol.MissionPlanState{}, nil, nil, err
-	}
-	reviews, err := s.cfg.Missions.ListMissionPlanReviews(ctx, missionID)
-	if err != nil {
-		return protocol.MissionPlanState{}, nil, nil, err
+		return protocol.MissionPlanState{}, nil, err
 	}
 	return protocol.MissionPlanState{
-		MissionID: string(m.ID), Phase: string(m.Phase), PlanVersion: m.PlanVersion,
+		MissionID: string(m.ID), Phase: string(m.Phase),
 		IntegratorGeneration: m.IntegratorGeneration, OpenQuestions: m.OpenQuestions,
 		AcceptedSetVersion: m.AcceptedSetVersion,
-		LatestFeedback:     latestReviseFeedback(reviews),
-	}, questions, reviews, nil
-}
-
-func latestReviseFeedback(reviews []*domain.MissionPlanReview) string {
-	feedback := ""
-	for _, review := range reviews {
-		if review.Decision == domain.MissionPlanRevise {
-			feedback = review.Feedback
-		}
-	}
-	return feedback
+	}, questions, nil
 }
 
 // AnswerQuestion records the accountable human's answer to one clarifying
@@ -295,60 +241,8 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
 }
 
-// DecidePlan is the human boundary before any worker runs: it approves,
-// requests changes to, or rejects one submitted plan version.
-func (s *Service) DecidePlan(ctx context.Context, actor domain.MemberID, p protocol.MissionPlanDecideParams) (protocol.MissionPlanDecideResult, error) {
-	if p.MissionID == "" || p.ExpectedPlanVersion == 0 || !validTaskKey(p.IdempotencyKey) {
-		return protocol.MissionPlanDecideResult{}, invalidMissionParams("mission_id, expected_plan_version, and idempotency_key are required")
-	}
-	decision := domain.MissionPlanDecision(p.Decision)
-	if !decision.Valid() {
-		return protocol.MissionPlanDecideResult{}, invalidMissionParams(fmt.Sprintf("decision %q must be approve, revise, or reject", p.Decision))
-	}
-	if decision == domain.MissionPlanRevise && strings.TrimSpace(p.Feedback) == "" {
-		return protocol.MissionPlanDecideResult{}, invalidMissionParams("requesting changes requires feedback")
-	}
-	if len(p.Feedback) > maxMissionTextBytes {
-		return protocol.MissionPlanDecideResult{}, invalidMissionParams(fmt.Sprintf("feedback is %d bytes, limit is %d", len(p.Feedback), maxMissionTextBytes))
-	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
-	m, err := s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
-	if err != nil {
-		return protocol.MissionPlanDecideResult{}, err
-	}
-	if authErr := s.authorizeMissionHuman(ctx, actor, m, "decide this plan"); authErr != nil {
-		return protocol.MissionPlanDecideResult{}, authErr
-	}
-	// Approval is what lets the mission dispatch, so the mission's own launch
-	// admission is re-resolved for it: an accountable human who lost Launch
-	// or the account share cannot carry the mission past this gate. Revise
-	// and reject dispatch nothing and stay available, or plan_review would
-	// have no exit once that admission is gone.
-	if decision == domain.MissionPlanApprove {
-		if _, admissionErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, m.AccountableHumanID, string(m.Integrator.AccountMemberID)); admissionErr != nil {
-			return protocol.MissionPlanDecideResult{}, admissionErr
-		}
-	}
-	decided, err := s.cfg.Missions.DecideMissionPlan(ctx, m.ID, p.ExpectedPlanVersion, decision, p.Feedback, actor, p.IdempotencyKey)
-	if err != nil {
-		return protocol.MissionPlanDecideResult{}, err
-	}
-	if publishErr := s.publishMissionChanged(ctx, decided.ID); publishErr != nil {
-		return protocol.MissionPlanDecideResult{Mission: protocol.MissionFromDomain(decided)}, publishErr
-	}
-	// DecideMissionPlan reads the mission inside its own transaction, which
-	// leaves OpenQuestions zero; re-read so the answer carries the count.
-	current, err := s.cfg.Missions.GetMission(ctx, decided.ID)
-	if err != nil {
-		return protocol.MissionPlanDecideResult{Mission: protocol.MissionFromDomain(decided)}, err
-	}
-	return protocol.MissionPlanDecideResult{Mission: protocol.MissionFromDomain(current)}, nil
-}
-
-// Cancel ends a mission before its plan is approved. It only records the
-// rejected phase; the reconcile loop stops the integrator run, exactly as it
-// does after a rejected plan.
+// Cancel ends a planning or active mission. It only records the cancelled
+// phase; the reconcile loop stops the mission's workers and integrator.
 func (s *Service) Cancel(ctx context.Context, actor domain.MemberID, p protocol.MissionCancelParams) (protocol.MissionCancelResult, error) {
 	if p.MissionID == "" || !validTaskKey(p.IdempotencyKey) {
 		return protocol.MissionCancelResult{}, invalidMissionParams("mission_id and idempotency_key are required")

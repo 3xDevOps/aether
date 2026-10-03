@@ -20,7 +20,6 @@ var (
 	ErrMissionNotReady            = errors.New("store: mission task not ready")
 	ErrMissionTakeover            = errors.New("store: mission worker under human control")
 	ErrMissionPhase               = errors.New("store: mission phase forbids this operation")
-	ErrMissionAmendmentRequired   = errors.New("store: revision requires human approval")
 )
 
 // SubmissionEvidenceValidation is a server-observed refresh, not client input.
@@ -63,18 +62,16 @@ type MissionStore interface {
 	PendingMissionControlChange(context.Context, domain.MissionID) (uint64, error)
 	AckMissionControlChange(context.Context, domain.MissionID, uint64) error
 	AbandonTask(context.Context, domain.TaskID, int, uint64, string) error
-	CompleteMissionClarification(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	InsertMissionQuestion(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionQuestion, error)
 	AnswerMissionQuestion(context.Context, domain.MissionQuestionID, domain.MemberID, string, string) (*domain.MissionQuestion, error)
 	GetMissionQuestion(context.Context, domain.MissionQuestionID) (*domain.MissionQuestion, error)
 	ListMissionQuestions(context.Context, domain.MissionID) ([]*domain.MissionQuestion, error)
-	SubmitMissionPlan(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionPlanReview, error)
-	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
+	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
+	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
 	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
 	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)
 	IntegratorReplacementRecorded(context.Context, domain.MissionID, string) (bool, error)
-	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
 	GetMissionWorkerAssignment(context.Context, domain.RunID) (*domain.MissionWorkerAssignment, error)
@@ -165,7 +162,7 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	integrator_account_member_id, integrator_harness, integrator_mode,
 	execution_choices, max_concurrent_attempts, max_total_attempts,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
-	integrator_generation, accepted_set_version, phase, plan_version,
+	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
 	integrator_launch_error, integrator_launch_error_at, integrator_run_launched`
 
@@ -179,7 +176,7 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&m.MaxConcurrentAttempts, &m.MaxTotalAttempts, &runID, &authorizingHumanID, &runOwnerID,
-		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase, &m.PlanVersion,
+		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
 		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
 		return nil, err
 	}
@@ -266,15 +263,13 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// A new mission starts behind the human plan gate; plan_version 0 means no
-	// plan has been submitted yet.
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID,
 		authorizingHumanID, runOwnerID, generation, m.AcceptedSetVersion,
-		domain.MissionPhasePlanning, 0, m.IdempotencyKey, n, n)
+		domain.MissionPhasePlanning, m.IdempotencyKey, n, n)
 	if err != nil {
 		return fmt.Errorf("store: create mission: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -286,7 +281,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	m.ID, m.CreatedAt, m.UpdatedAt = domain.MissionID(id), ts, ts
 	m.CurrentIntegratorRunID, m.IntegratorAuthorizingHumanID, m.IntegratorRunOwnerID, m.IntegratorGeneration = domain.RunID(runID), authorizingHumanID, runOwnerID, generation
-	m.Phase, m.PlanVersion, m.OpenQuestions = domain.MissionPhasePlanning, 0, 0
+	m.Phase, m.OpenQuestions = domain.MissionPhasePlanning, 0
 	return nil
 }
 func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.Mission, error) {
@@ -431,7 +426,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: replace integrator receipt: %w", err)
 	}
-	if phaseErr := requireMissionPhase(m, "mission.replace-integrator", domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview, domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission.replace-integrator", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
 		return nil, phaseErr
 	}
 	if expected != m.IntegratorGeneration {
@@ -536,7 +531,7 @@ func enqueueMissionControlChange(ctx context.Context, tx *sql.Tx, missionID doma
 }
 
 // lockMissionRowBy takes the mission row's write lock and returns the row, so
-// a caller that decides on phase, generation, or plan version cannot be
+// a caller that decides on phase or generation cannot be
 // overtaken between the read and its own write. idExpr locates the mission
 // from arg, which may be the mission id or a subquery over a child row.
 func lockMissionRowBy(ctx context.Context, tx *sql.Tx, idExpr string, arg any, subject string) (*domain.Mission, error) {
@@ -582,17 +577,13 @@ func requireMissionPhase(m *domain.Mission, operation string, allowed ...domain.
 func missionPhaseReason(phase domain.MissionPhase) string {
 	switch phase {
 	case domain.MissionPhasePlanning:
-		return "a human must approve the plan first"
-	case domain.MissionPhaseClarified:
-		return "the integrator is preparing the plan for review"
-	case domain.MissionPhasePlanReview:
-		return "the plan is frozen while a human reviews it"
-	case domain.MissionPhaseAmendmentReview:
-		return "the amendment is frozen while a human reviews it"
-	case domain.MissionPhaseRejected:
-		return "a human rejected the plan or cancelled the mission"
+		return "the integrator has not started the mission yet"
+	case domain.MissionPhaseActive:
+		return "the mission has already started"
+	case domain.MissionPhaseCompleted:
+		return "the mission is completed"
 	default:
-		return "the plan has already been approved"
+		return "the mission was cancelled"
 	}
 }
 

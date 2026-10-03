@@ -40,10 +40,11 @@ type OutcomeSink interface {
 	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
 }
 
-// applyRunOutcome hands an ordinary run's report to the scheduler before the
+// applyRunOutcome hands a run's report to the scheduler before the
 // publication is marked done, so the outbox retries a failed hand-off. A
-// mission worker or integrator keeps its mission lifecycle, and a report a
-// relaunch superseded no longer speaks for the run.
+// mission integrator's run finishes like an ordinary run; a mission worker
+// keeps its mission lifecycle, and a report a relaunch superseded no longer
+// speaks for the run.
 func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
 	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
 		return nil
@@ -56,7 +57,7 @@ func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport
 		if err != nil {
 			return fmt.Errorf("report outcome assignment: %w", err)
 		}
-		if assignment.MissionID != "" {
+		if assignment.Role == "worker" {
 			return nil
 		}
 	}

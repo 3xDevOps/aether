@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -39,25 +40,18 @@ func (p *planGateMissionService) AnswerQuestion(_ context.Context, actor domain.
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestion{ID: params.QuestionID, Answer: params.Answer}}, nil
 }
 
-func (p *planGateMissionService) DecidePlan(_ context.Context, actor domain.MemberID, params protocol.MissionPlanDecideParams) (protocol.MissionPlanDecideResult, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.actor = actor
-	return protocol.MissionPlanDecideResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseActive)}}, nil
-}
-
 func (p *planGateMissionService) Cancel(_ context.Context, actor domain.MemberID, params protocol.MissionCancelParams) (protocol.MissionCancelResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.actor = actor
-	return protocol.MissionCancelResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseRejected)}}, nil
+	return protocol.MissionCancelResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseCancelled)}}, nil
 }
 
-// TestMissionPlanGateControlMethods: the human plan gate methods are Launch-guarded
+// TestMissionHumanControlMethods: answer and cancel are Launch-guarded
 // control-channel methods whose handlers are thin - they carry the
 // authenticated member into the service and never take the authorization
-// mutex the service itself holds.
-func TestMissionPlanGateControlMethods(t *testing.T) {
+// mutex the service itself holds. mission.plan.decide no longer exists.
+func TestMissionHumanControlMethods(t *testing.T) {
 	t.Parallel()
 	shared := &sync.Mutex{}
 	svc := &planGateMissionService{mu: shared}
@@ -77,15 +71,10 @@ func TestMissionPlanGateControlMethods(t *testing.T) {
 		t.Fatalf("answer reached the service as %+v by %q, want question-1 by %q", answered.Question, svc.actor, e.member.ID)
 	}
 
-	var decided protocol.MissionPlanDecideResult
-	if err := adminC.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: "mission-1", ExpectedPlanVersion: 1, Decision: string(domain.MissionPlanApprove),
-		IdempotencyKey: "decide-1",
-	}, &decided); err != nil {
-		t.Fatalf("mission.plan.decide: %v", err)
-	}
-	if decided.Mission.ID != "mission-1" || svc.actor != e.member.ID {
-		t.Fatalf("decision reached the service as %+v by %q, want mission-1 by %q", decided.Mission, svc.actor, e.member.ID)
+	var removed protocol.MissionCancelResult
+	var rpcErr *protocol.Error
+	if err := adminC.Call("mission.plan.decide", map[string]string{"mission_id": "mission-1"}, &removed); !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeMethodNotFound {
+		t.Fatalf("mission.plan.decide = %v, want CodeMethodNotFound", err)
 	}
 
 	var cancelled protocol.MissionCancelResult
@@ -94,8 +83,8 @@ func TestMissionPlanGateControlMethods(t *testing.T) {
 	}, &cancelled); err != nil {
 		t.Fatalf("mission.cancel: %v", err)
 	}
-	if cancelled.Mission.Phase != string(domain.MissionPhaseRejected) || svc.actor != e.member.ID {
-		t.Fatalf("cancel reached the service as %+v by %q, want rejected mission-1 by %q", cancelled.Mission, svc.actor, e.member.ID)
+	if cancelled.Mission.Phase != string(domain.MissionPhaseCancelled) || svc.actor != e.member.ID {
+		t.Fatalf("cancel reached the service as %+v by %q, want cancelled mission-1 by %q", cancelled.Mission, svc.actor, e.member.ID)
 	}
 
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
@@ -103,10 +92,6 @@ func TestMissionPlanGateControlMethods(t *testing.T) {
 	wantDenied(t, viewerC.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
 		QuestionID: "question-1", Answer: "not mine", IdempotencyKey: "answer-viewer",
 	}, nil), "viewer mission.question.answer")
-	wantDenied(t, viewerC.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
-		MissionID: "mission-1", ExpectedPlanVersion: 1, Decision: string(domain.MissionPlanApprove),
-		IdempotencyKey: "decide-viewer",
-	}, nil), "viewer mission.plan.decide")
 	wantDenied(t, viewerC.Call(protocol.MethodMissionCancel, protocol.MissionCancelParams{
 		MissionID: "mission-1", IdempotencyKey: "cancel-viewer",
 	}, nil), "viewer mission.cancel")

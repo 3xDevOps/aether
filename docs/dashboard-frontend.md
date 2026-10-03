@@ -1503,7 +1503,8 @@ provenance for each verification. **Run verification** starts the server-side
 check;
 **Request delivery** binds the selected verification IDs, target, expected
 revision, and action; **Approve delivery** or **Deny delivery** records the
-human decision; and **Deliver approved** executes the already-approved exact
+human decision, except on a request a swarm's integrator made, which arrives
+already approved; and **Deliver approved** executes the already-approved exact
 request.
 
 Candidate mutations are disabled while the connection is **Offline**,
@@ -1513,9 +1514,16 @@ requests are not reused. A refreshed candidate with a new identity or version
 invalidates resolution drafts; an own partial **Apply resolutions** response
 keeps only untouched drafts that still conflict at the same assembly step.
 The panel preserves the gateway's real error rather than manufacturing a
-client-side result. Candidate review has no separate attention board,
-mission-progress surface, or agent decision path; it remains an evidence-linked
-human review flow.
+client-side result. Candidate review has no separate attention board or agent
+decision path; it remains an evidence-linked human review flow.
+
+The Missions page reuses the same panel with `readOnly`: a swarm's integrator
+prepares, verifies, and delivers on its own, so the page lists the
+workspace's candidates and **Show full** loads one, with its state, inputs,
+conflict paths, verification results, delivery request, and receipt. Packet
+selection, target fields, conflict editors, **Prepare candidate**, **Run
+verification**, **Request delivery**, **Approve delivery**, **Deny delivery**,
+and **Deliver candidate** are not rendered.
 
 The wire methods and bounded records are documented in
 [integration.md](integration.md); this guide records only the dashboard
@@ -3110,59 +3118,54 @@ to render Done: the server must accept a submission for the current task
 revision, with the required evidence available and any scope disposition
 explicitly recorded.
 
-### The plan gate
+### Mission phases
 
-A mission is in one of six phases - `planning`, `clarified`, `plan_review`,
-`active`, `amendment_review`, `rejected`. `active` dispatches workers;
-`amendment_review` keeps dispatching the set a human already approved while
-the human decides an amendment, and no other phase dispatches at all. The
-phase chip replaces the generic `Mission` chip on every mission card:
-`Planning`, `Planning · N questions for you`, `Preparing plan`, `Plan ready
-for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
-view's status line answers the phase first and falls back to the
+A mission is in one of four phases - `planning`, `active`, `completed`,
+`cancelled`. Only `active` dispatches workers. No phase waits on a human
+except for the answers to questions the integrator chose to ask. The phase
+chip replaces the generic `Mission` chip on every mission card: `Planning`,
+`Planning · N questions for you`, `Active`, `Completed`, `Cancelled`. The
+detail view's status line answers the phase first and falls back to the
 task-derived string only in `active`.
 
 The detail header shows the objective's first line, cut to 80 characters
 with an ellipsis, and carries the full objective in its `title` attribute.
 The full objective opens the scrollable detail, clamped to three lines with
-a **Show more** toggle when it overflows; a long objective never pushes the
-plan review below the viewport. Mission cards clamp the objective the same
-way.
+a **Show more** toggle when it overflows. Mission cards clamp the objective
+the same way.
 
-A phase banner sits under the objective in every phase and says what the
-human must do next. When `current_integrator_run_id` names a run whose
-status in the store is terminal, the banner adds `The integrator run <id>
-has exited; replace the integrator to continue` with the **Replace
-integrator** control inline, in every phase but `rejected` - an integrator
-that exited while waiting for a decision is recovered, not hidden behind a
-friendlier message. A `rejected` mission's integrator is cancelled on
-purpose and `mission.replace-integrator` is refused in that phase, so the
-sentence and the control are not shown there.
+A phase banner sits under the objective in every phase and says what is
+happening. When `current_integrator_run_id` names a run whose status in the
+store is terminal, the banner adds `The integrator run <id> has exited;
+replace the integrator to continue` with the **Replace integrator** control
+inline, in `planning` and `active` - an integrator that exited is recovered,
+not hidden behind a friendlier message. A `completed` or `cancelled`
+mission's integrator stops on purpose and `mission.replace-integrator` is
+refused there, so the sentence and the control are not shown, and
+**Replace integrator** leaves the authorization section too.
 
 When `current_integrator_run_id` names a run the hydrated store does not
 hold, the detail view asks `run.get` once for that run ID; a create's
 response can reach the dashboard before the run's first `run.status` event.
 A returned run is added to the store. While the request is open, and before
 hydration, the banner keeps its phase copy. Only a not-found answer means
-the server holds no run for it: outside `rejected`, the banner then replaces
-the phase sentence with `The integrator run has not started.`, says the
-server retries the launch periodically and logs `mission: recover
+the server holds no run for it: in `planning` and `active`, the banner then
+replaces the phase sentence with `The integrator run has not started.`,
+says the server retries the launch periodically and logs `mission: recover
 integrator`, and offers **Replace integrator**. When the mission's
 `integrator_run_launched` is true the run existed and is gone, so the
-banner says `The integrator run was deleted; replace the integrator.`
-instead, with ` or cancel the swarm` before the period in `planning`,
-`clarified` and `plan_review`, where **Cancel swarm** is offered. Any other `run.get` failure
-shows its error above the mission and keeps the phase copy; **Refresh** asks
-again, once. **Open integrator run** appears only once the store holds the
-run, beside the run's status chip - the same state vocabulary as the run
-list - and its last status reason.
+banner says `The integrator run was deleted; replace the integrator or
+cancel the swarm.` instead. Any other `run.get` failure shows its error
+above the mission and keeps the phase copy; **Refresh** asks again, once.
+**Open integrator run** appears only once the store holds the run, beside
+the run's status chip - the same state vocabulary as the run list - and its
+last status reason.
 
 While the mission carries `integrator_launch_error`, the server's reason the
 integrator run last failed to launch, both the not-started and the exited
 banner add `Last launch failure <time ago>: <error>`, and the mission card
-in the list adds `Integrator did not launch: <error>` outside `rejected`,
-where the integrator is cancelled on purpose. The server clears the field
-once an integrator run launches.
+in the list adds `Integrator did not launch: <error>` in `planning` and
+`active`. The server clears the field once an integrator run launches.
 
 **Replace integrator** offers each distinct account and harness in the
 mission's `execution_choices`, of any mode, and always sends mode `tui`:
@@ -3170,80 +3173,43 @@ the server accepts a replacement only from those choices and runs it
 interactive.
 
 In `planning`, **Questions from the integrator** lists every question the
-integrator asked. Questions are optional - the integrator declares
-clarification complete when it has what it needs - so the section can stay
-at `The integrator has not asked anything yet.` for a whole mission. Each
-unanswered question takes a textarea and an **Answer** button sending
-`mission.question.answer` with the deterministic key
-`question-answer-<question_id>`, so a retry replays rather than answering
-twice. Answered questions show the answer and who answered. If a question
-this member is typing into arrives answered - the `mission.changed` refetch
-replaces the whole projection - the textarea stays mounted with the draft
-intact under `Answered by <display name>`, rather than dropping what was
-typed. The feedback from the most recent **Request changes** decision is
-shown above the tasks, which render as a read-only **Draft plan**.
+integrator asked. Questions are optional - the integrator asks only when the
+objective is ambiguous - so the section can stay at `The integrator has not
+asked anything yet.` for a whole mission. Each unanswered question takes a
+textarea and an **Answer** button sending `mission.question.answer` with the
+deterministic key `question-answer-<question_id>`, so a retry replays rather
+than answering twice. Answered questions show the answer and who answered.
+If a question this member is typing into arrives answered - the
+`mission.changed` refetch replaces the whole projection - the textarea stays
+mounted with the draft intact under `Answered by <display name>`, rather
+than dropping what was typed. The tasks the integrator has proposed render
+read-only under **Proposed tasks**. The answer form needs the capability,
+launch permission, and the mission's accountable human or an admin:
+`cap.hasMethod('mission.question.answer') && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
 
-In `clarified` the integrator has declared it has what it needs and the
-server refuses another answer, so **Questions from the integrator** is a
-record rather than a form: it opens with `Clarification complete.` and shows
-every question with its answer, above the same read-only **Draft plan**.
-Asking a follow-up question returns the mission to `planning`, where the
-answer form is offered again.
+In `planning` and `active` the header also offers **Cancel swarm** to the
+same identity, gated on `mission.cancel`. It opens a confirmation;
+confirming sends `mission.cancel` with a key minted when the confirmation
+opened, so a retry after a failure replays rather than cancelling twice. The
+mission moves to `cancelled` and its workers and integrator run are stopped.
+A refusal - the mission completed while the dialog was open, for example -
+shows the server's error inside the dialog.
 
-In `plan_review`, **Plan review** shows the integrator's summary, the plan
-version, the same read-only task list, and **Approve**, **Request changes**
-(feedback required) and **Reject**. Each sends `mission.plan.decide` with the
-observed `expected_plan_version` and the key
-`plan-decide-<mission_id>-<plan_version>-<decision>`: retrying the same
-button replays, while a different button or a refreshed plan version is a
-fresh mutation. A member who is neither the mission's accountable human nor
-an admin still sees the whole plan, above the line `Only the accountable
-human or an admin may decide this plan.` Both gate controls need the
-capability, launch permission, and that identity:
-`cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
-
-Until a plan is approved - in `planning`, `clarified` and `plan_review` -
-the header also offers **Cancel swarm** to the same identity, gated on
-`mission.cancel`. It opens a confirmation; confirming sends `mission.cancel`
-with a key minted when the confirmation opened, so a retry after a failure
-replays rather than cancelling twice. The mission moves to `rejected`. A
-refusal - the phase moved on while the dialog was open, for example - shows
-the server's error inside the dialog.
-
-In `amendment_review` the integrator has submitted a change to a plan that
-is already approved. **Amendment review** shows the summary, the plan
-version, and one card per item of the round - read from the undecided review
-at the mission's current plan version, never from the last review in the
-list. A `new_task` item is a **New work** card built from the task's current
-revision; any other item is a **Changed task** card showing the approved
-revision beside the proposed one, with the objective, expected paths and
-exclusions of each. A `material` item carries a `Material` chip. The paths
-and dropped exclusions highlighted as widening the approved scope are the
-item's server-computed `widening` list; the dashboard has no path rule of
-its own. Intended-overlap diagnostics for the item's task are listed under
-its card. An item whose task or pending revision is gone from the projection
-renders its title and revision number with `This revision is no longer
-pending.` The controls are **Approve** and **Request changes** only: the
-server refuses to reject an amendment, because the approved work it amends
-keeps running either way. Below the section, the Tasks and candidate
-sections stay visible, attempt chips included - those workers are still
-running.
-
-In `active` and `amendment_review`, a task carrying a `pending_revision`
-shows a `Revision pending` chip, `Material revision pending` when the
-revision is declared material, and names the pending revision number and
+Outside `planning` the tasks render under **Tasks**, followed by **Candidate
+progress** - the read-only candidate panel described in [Candidate review in
+Run evidence](#candidate-review-in-run-evidence) - and the questions, if any,
+collapsed into **Planning questions**. A task carrying a `pending_revision`
+shows a `Revision pending` chip and names the pending revision number and
 title under the task. A pending revision is never the task's current
-revision, so it cannot be dispatched.
+revision, so it cannot be dispatched until the integrator accepts it.
 
-Attempt chips render only where the mission can dispatch, so they are hidden
-outside `active` and `amendment_review`. The `proposal` blocker chip is
-hidden in every phase except `active`: everywhere else the proposal is
-waiting on the human, which the phase banner already says, and repeating it
-as a blocker reads as a fault. The candidate section renders in `active` and
-`amendment_review`. In every phase after `clarified`, the questions and the
-decided review rounds collapse into **Planning history**.
+Attempt chips render wherever a task has attempts, so a completed or
+cancelled mission still shows how each attempt ended. The `proposal`
+blocker chip is hidden in `planning`: every task there waits for the
+integrator to start the swarm, which the phase banner already says, and
+repeating it as a blocker reads as a fault.
 
-Answer and decision failures live in component state and render through the
+Answer and cancel failures live in component state and render through the
 same `ErrorNotice` as a failed release, verbatim. They never go through
 `setMissionError`, which the next `setMissionDetail` or `mission.changed`
 refetch would wipe, and a failed answer leaves the draft intact.

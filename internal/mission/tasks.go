@@ -257,26 +257,19 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 	}
 }
 
-// taskMutationPhase repeats the store's gate before any work: the draft plan
-// may be shaped while it is being written, but accepting a revision is a
-// post-approval act, and a review phase freezes the plan the human is reading.
+// taskMutationPhase repeats the store's phase check before any work: tasks
+// may be shaped while planning, but accepting a revision or a submission
+// needs a started mission, and an ended mission takes no change at all.
 func taskMutationPhase(mission *domain.Mission, method string) error {
 	switch method {
-	case protocol.MethodTaskAccept:
+	case protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission:
+		// AcceptSubmission has no store phase check; this is the only thing
+		// enforcing it.
 		if mission.Phase != domain.MissionPhaseActive {
 			return missionPhaseRefusal(mission, method)
 		}
-	case protocol.MethodTaskAcceptSubmission:
-		// Finishing work the human already approved is not a plan change, so
-		// it continues through an amendment round. AcceptSubmission has no
-		// store phase gate; this check is the only thing enforcing it.
-		if mission.Phase != domain.MissionPhaseActive && mission.Phase != domain.MissionPhaseAmendmentReview {
-			return missionPhaseRefusal(mission, method)
-		}
 	default:
-		switch mission.Phase {
-		case domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhaseActive:
-		default:
+		if mission.Phase.Terminal() {
 			return missionPhaseRefusal(mission, method)
 		}
 	}
@@ -452,7 +445,6 @@ func revisionFromWire(in protocol.TaskRevision, run domain.RunID) *domain.TaskRe
 	r := &domain.TaskRevision{
 		TaskID: domain.TaskID(in.TaskID), Revision: in.Revision, Title: in.Title,
 		Objective: in.Objective, Scope: scopeFromWire(in.Scope),
-		Material:           in.Material,
 		SupersedesRevision: in.SupersedesRevision, ProposedByRunID: run,
 		Status: domain.TaskRevisionProposed,
 	}
@@ -513,7 +505,7 @@ func taskWire(t *domain.Task) protocol.Task {
 }
 
 func revisionWire(r *domain.TaskRevision) protocol.TaskRevision {
-	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Material: r.Material, Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, AcceptedByMemberID: string(r.AcceptedByMemberID), AcceptedByRunID: string(r.AcceptedByRunID), CreatedAt: rfc3339Task(r.CreatedAt)}
+	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, AcceptedByMemberID: string(r.AcceptedByMemberID), AcceptedByRunID: string(r.AcceptedByRunID), CreatedAt: rfc3339Task(r.CreatedAt)}
 	if len(r.EvidenceRequirements) > 0 {
 		out.EvidenceRequirements = make([]protocol.EvidenceRequirement, len(r.EvidenceRequirements))
 		for i, e := range r.EvidenceRequirements {

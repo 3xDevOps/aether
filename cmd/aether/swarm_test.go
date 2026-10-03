@@ -147,21 +147,16 @@ func TestRenderSwarms(t *testing.T) {
 
 func TestRenderSwarm(t *testing.T) {
 	answered := "2026-09-25T07:05:00Z"
-	decided := "2026-09-25T07:20:00Z"
 	res := protocol.MissionShowResult{
 		Mission: protocol.Mission{
 			ID: "m1", Phase: "active", Objective: "ship the swarm CLI", AccountableHumanID: "mem1",
 			Integrator:             protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
-			CurrentIntegratorRunID: "r1", IntegratorGeneration: 2, PlanVersion: 1, OpenQuestions: 1,
+			CurrentIntegratorRunID: "r1", IntegratorGeneration: 2, OpenQuestions: 1,
 			IntegratorLaunchError: "image missing", IntegratorLaunchErrorAt: "2026-09-25T07:01:00Z",
 		},
 		Questions: []protocol.MissionQuestion{
 			{ID: "q1", Body: "Which harness?", Answer: "claude", AnsweredAt: &answered},
 			{ID: "q2", Body: "Which branch?"},
-		},
-		PlanReviews: []protocol.MissionPlanReview{
-			{PlanVersion: 1, Summary: "two tasks", SubmittedPhase: "clarified", SubmittedAt: "2026-09-25T07:10:00Z", Decision: "revise", Feedback: "split the docs", DecidedAt: &decided},
-			{PlanVersion: 2, Summary: "three tasks", SubmittedPhase: "clarified", SubmittedAt: "2026-09-25T07:30:00Z"},
 		},
 		Tasks: []protocol.Task{
 			{ID: "t1", Status: "working", Revision: &protocol.TaskRevision{Title: "Add the command"}, PendingRevision: &protocol.TaskRevision{Revision: 2, Title: "Add the\tswarm command"}},
@@ -179,20 +174,12 @@ objective: ship the swarm CLI
 accountable human: mem1
 integrator: run r1 generation 2 (claude tui, account mem1)
 launch error: image missing (since 2026-09-25T07:01:00Z)
-plan version: 1
 
 questions (1 open):
   q1 Which harness?
     answer: claude
   q2 Which branch?
     unanswered
-
-plan reviews:
-  v1 submitted from clarified at 2026-09-25T07:10:00Z: revise
-    summary: two tasks
-    feedback: split the docs
-  v2 submitted from clarified at 2026-09-25T07:30:00Z: undecided
-    summary: three tasks
 
 tasks:
 ID  TITLE                                                   STATUS    BLOCKERS

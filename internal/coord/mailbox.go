@@ -268,7 +268,7 @@ func missionRPCError(method string, err error) *protocol.Error {
 	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
 		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict), errors.Is(err, store.ErrConflict):
 		code = protocol.CodeConflict
-	case errors.Is(err, store.ErrMissionPhase), errors.Is(err, store.ErrMissionAmendmentRequired):
+	case errors.Is(err, store.ErrMissionPhase):
 		code = protocol.CodeInvalidState
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound

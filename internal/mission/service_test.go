@@ -258,7 +258,7 @@ func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 func TestHeadlessIntegratorIsRefused(t *testing.T) {
 	ctx := context.Background()
 	const want = "integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told"
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	headless := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)}
 	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-headless",
@@ -443,7 +443,7 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newPlanGateFixture(t)
+			f := newMissionFixture(t)
 			cause := errors.New("harness image missing")
 			launcher := failingMissionLauncher{err: cause}
 			if tc.writesRow {
@@ -537,7 +537,7 @@ func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, ac
 func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	ctx := context.Background()
 	const want = `integrator harness legacy cannot launch in tui mode: scheduler: harness "legacy" has no command for mode "tui"`
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	launcher := &validatingLauncher{recordingLauncher: f.launcher}
 	f.svc.cfg.Runs = launcher
 	legacy := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "legacy", Mode: string(domain.LaunchTUI)}
@@ -590,7 +590,7 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 // launch resolves the harness in the run owner's context.
 func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	launcher := &validatingLauncher{recordingLauncher: f.launcher}
 	f.svc.cfg.Runs = launcher
 	owner := regressionMember(t, f.db, "owner")
@@ -625,7 +625,7 @@ func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 // still refused.
 func TestLaunchValidationDoesNotRefuseAReplay(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	launcher := &validatingLauncher{recordingLauncher: f.launcher}
 	f.svc.cfg.Runs = launcher
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}

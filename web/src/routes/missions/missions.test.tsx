@@ -3,7 +3,6 @@ import { ApiError, type Api } from '@/lib/api'
 import type {
   Mission,
   MissionAttempt,
-  MissionPlanReview,
   MissionQuestion,
   MissionSubmission,
   MissionTask,
@@ -17,9 +16,6 @@ import {
   bob,
   fakeApi,
   mission,
-  missionAttempt,
-  missionPlanItem,
-  missionPlanReview,
   missionQuestion,
   missionTask,
   missionTaskRevision,
@@ -38,8 +34,8 @@ function seed(extra: Partial<RootState> = {}) {
     missionDetails: {},
     missionError: null,
     missionLoading: false,
-    // Alice is both the accountable human and an admin; the gate needs a
-    // gateway that advertises the methods and a member who may decide.
+    // Alice is both the accountable human and an admin; answering and
+    // cancelling need a gateway that advertises the methods and such a member.
     info: serverInfo,
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
@@ -51,7 +47,6 @@ function seed(extra: Partial<RootState> = {}) {
 function showing(
   over: Partial<Mission>,
   questions: MissionQuestion[] = [],
-  planReviews: MissionPlanReview[] = [],
   tasks: MissionTask[] = [],
   attempts: MissionAttempt[] = [],
   submissions: MissionSubmission[] = [],
@@ -64,7 +59,6 @@ function showing(
       submissions,
       diagnostics: [],
       questions,
-      plan_reviews: planReviews,
     })),
   })
 }
@@ -100,7 +94,7 @@ describe('accepted mission evidence', () => {
   }
 
   function clientWith(submissions: MissionSubmission[]): Api {
-    return showing({}, [], [], [missionTask({ status: 'done' })], [], submissions)
+    return showing({}, [], [missionTask({ status: 'done' })], [], submissions)
   }
 
   function taskCard() {
@@ -198,7 +192,6 @@ describe('accepted mission evidence', () => {
       submissions: [old, current],
       diagnostics: [],
       questions: [],
-      plan_reviews: [],
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
@@ -220,7 +213,6 @@ describe('accepted mission evidence', () => {
       ],
       diagnostics: [],
       questions: [],
-      plan_reviews: [],
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
@@ -231,10 +223,10 @@ describe('accepted mission evidence', () => {
   })
 })
 
-describe('mission plan gate', () => {
+describe('mission questions', () => {
   it('offers the answer form in planning to the accountable human', async () => {
     seed()
-    const client = showing({ phase: 'planning', plan_version: 0, open_questions: 1 }, [missionQuestion()])
+    const client = showing({ phase: 'planning', open_questions: 1 }, [missionQuestion()])
     await mount(client)
     expect(screen.getByLabelText('Answer question 1')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Answer' })).toBeDefined()
@@ -242,7 +234,7 @@ describe('mission plan gate', () => {
 
   it('sends the answer with a key derived from the question', async () => {
     seed()
-    const client = showing({ phase: 'planning', plan_version: 0, open_questions: 1 }, [missionQuestion()])
+    const client = showing({ phase: 'planning', open_questions: 1 }, [missionQuestion()])
     await mount(client)
     fireEvent.change(screen.getByLabelText('Answer question 1'), {
       target: { value: 'the guest checkout flow' },
@@ -259,14 +251,14 @@ describe('mission plan gate', () => {
 
   it('keeps an unsent draft visible when the answer arrives from elsewhere', async () => {
     seed()
-    const client = showing({ phase: 'planning', plan_version: 0, open_questions: 1 }, [missionQuestion()])
+    const client = showing({ phase: 'planning', open_questions: 1 }, [missionQuestion()])
     await mount(client)
     fireEvent.change(screen.getByLabelText('Answer question 1'), {
       target: { value: 'half a thought' },
     })
     act(() => {
       useStore.getState().setMissionDetail({
-        mission: mission({ phase: 'planning', plan_version: 0, open_questions: 0 }),
+        mission: mission({ phase: 'planning', open_questions: 0 }),
         tasks: [],
         attempts: [],
         submissions: [],
@@ -278,241 +270,114 @@ describe('mission plan gate', () => {
             answered_at: '2026-08-14T10:03:00Z',
           }),
         ],
-        plan_reviews: [],
-      })
+        })
     })
     expect((screen.getByLabelText('Answer question 1') as HTMLTextAreaElement).value).toBe('half a thought')
     expect(screen.getByText('Answered by Bob')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull()
   })
 
-  it('offers the three decisions in plan_review', async () => {
+  it('shows proposed tasks and offers no plan decision while planning', async () => {
     seed()
     const client = showing(
-      { phase: 'plan_review', plan_version: 2 },
-      [missionQuestion({ answer: 'the guest checkout flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' })],
-      [missionPlanReview({ plan_version: 2 })],
+      { phase: 'planning' },
+      [],
+      [missionTask({ status: 'proposed', revision: missionTaskRevision({ status: 'proposed', title: 'rewrite the guest checkout flow' }) })],
     )
     await mount(client)
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Request changes' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Reject' })).toBeDefined()
+    const proposed = within(screen.getByRole('region', { name: 'Proposed tasks' }))
+    expect(proposed.getByText('rewrite the guest checkout flow')).toBeDefined()
+    for (const name of ['Approve', 'Request changes', 'Reject']) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
   })
 
-  it('sends the observed plan version and a per-decision key', async () => {
-    seed()
-    const client = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
-    await mount(client)
-    fireEvent.change(screen.getByLabelText('Feedback (required to request changes)'), {
-      target: { value: 'split the migration out' },
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Request changes' }))
-    })
-    expect(vi.mocked(client.missionPlanDecide).mock.calls[0][0]).toEqual({
-      mission_id: 'mission_1',
-      expected_plan_version: 2,
-      decision: 'revise',
-      feedback: 'split the migration out',
-      idempotency_key: 'plan-decide-mission_1-2-revise',
-    })
-  })
-
-  it('renders the decision read-only for a member who is neither accountable nor admin', async () => {
-    seed({ info: { ...serverInfo, member: bob } })
-    const client = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
-    await mount(client)
-    expect(screen.getByText('split the checkout rewrite into two bounded tasks')).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
-    expect(screen.getByText('Only the accountable human or an admin may decide this plan.')).toBeDefined()
-  })
-
-  it('shows the questions without an answer form in clarified', async () => {
-    seed()
-    const client = showing({ phase: 'clarified', plan_version: 0 }, [
-      missionQuestion({ answer: 'the guest checkout flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }),
-    ])
-    await mount(client)
-    expect(screen.getByText('Clarification complete.')).toBeDefined()
-    expect(screen.getByText('1. which checkout flow?')).toBeDefined()
-    expect(screen.queryByLabelText('Answer question 1')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull()
-  })
-
-  it('renders the amendment round and keeps the approved work visible', async () => {
+  it('names a pending revision on its task in active', async () => {
     seed()
     const client = showing(
-      { phase: 'amendment_review', plan_version: 3 },
-      [],
-      [
-        missionPlanReview({
-          plan_version: 3,
-          submitted_phase: 'active',
-          summary: 'the payment provider needs a second task',
-          items: [
-            missionPlanItem({
-              task_id: 'task_1',
-              revision: 2,
-              material: true,
-              title: 'rewrite the guest checkout flow',
-              supersedes_revision: 1,
-              widening: ['web/payments/'],
-            }),
-            missionPlanItem({ task_id: 'task_2', revision: 1, new_task: true, title: 'swap the payment provider' }),
-          ],
-        }),
-      ],
-      [
-        missionTask({
-          status: 'working',
-          pending_revision: missionTaskRevision({
-            revision: 2,
-            status: 'proposed',
-            material: true,
-            scope: { expected_paths: ['web/checkout/', 'web/payments/'] },
-          }),
-        }),
-        missionTask({
-          id: 'task_2',
-          current_revision: 1,
-          status: 'proposed',
-          revision: missionTaskRevision({
-            task_id: 'task_2',
-            title: 'swap the payment provider',
-            status: 'proposed',
-            scope: { expected_paths: ['web/payments/'] },
-          }),
-        }),
-      ],
-      [missionAttempt()],
-    )
-    await mount(client)
-    expect(screen.getByText('Changed task · rewrite the guest checkout flow')).toBeDefined()
-    expect(screen.getByText('New work · swap the payment provider')).toBeDefined()
-    expect(screen.getByText('Material')).toBeDefined()
-    expect(screen.getByText('Expected web/payments/ · widens the approved scope')).toBeDefined()
-    // Approved work keeps running while the human decides.
-    expect(screen.getByRole('region', { name: 'Mission tasks' })).toBeDefined()
-    expect(screen.getByText('Attempt 1 · running')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Request changes' })).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull()
-  })
-
-  it('sends the amendment decision with the observed plan version', async () => {
-    seed()
-    const client = showing(
-      { phase: 'amendment_review', plan_version: 3 },
-      [],
-      [missionPlanReview({ plan_version: 3, submitted_phase: 'active', items: [missionPlanItem()] })],
-      [missionTask({ pending_revision: missionTaskRevision({ revision: 2, status: 'proposed' }) })],
-    )
-    await mount(client)
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
-    })
-    expect(vi.mocked(client.missionPlanDecide).mock.calls[0][0]).toEqual({
-      mission_id: 'mission_1',
-      expected_plan_version: 3,
-      decision: 'approve',
-      idempotency_key: 'plan-decide-mission_1-3-approve',
-    })
-  })
-
-  it('shows the revision the amendment names for a new task revised again in active', async () => {
-    seed()
-    const client = showing(
-      { phase: 'amendment_review', plan_version: 3 },
-      [],
-      [
-        missionPlanReview({
-          plan_version: 3,
-          submitted_phase: 'active',
-          items: [missionPlanItem({ task_id: 'task_2', revision: 2, new_task: true, title: 'swap the payment provider' })],
-        }),
-      ],
-      [
-        missionTask({
-          id: 'task_2',
-          current_revision: 1,
-          status: 'proposed',
-          revision: missionTaskRevision({ task_id: 'task_2', revision: 1, status: 'proposed', objective: 'the first draft' }),
-          pending_revision: missionTaskRevision({ task_id: 'task_2', revision: 2, status: 'proposed', objective: 'the revised draft' }),
-        }),
-      ],
-    )
-    await mount(client)
-    // The Tasks section still shows the current draft; the amendment card
-    // must show the revision the round names.
-    const amendment = within(screen.getByRole('region', { name: 'Amendment review' }))
-    expect(amendment.getByText('the revised draft')).toBeDefined()
-    expect(amendment.queryByText('the first draft')).toBeNull()
-  })
-
-  it('names a pending revision on the task it amends in active', async () => {
-    seed()
-    const client = showing(
-      { phase: 'active', plan_version: 2 },
-      [],
+      { phase: 'active' },
       [],
       [
         missionTask({
           pending_revision: missionTaskRevision({
             revision: 2,
             status: 'proposed',
-            material: true,
             title: 'also replace the payment provider',
           }),
         }),
       ],
     )
     await mount(client)
-    expect(screen.getByText('Material revision pending')).toBeDefined()
+    expect(screen.getByText('Revision pending')).toBeDefined()
     expect(screen.getByText('Revision 2: also replace the payment provider')).toBeDefined()
   })
 
-  it('hides both gate controls when the gateway omits the methods', async () => {
+  it('keeps the asked questions collapsed once the swarm is active', async () => {
+    seed()
+    await mount(showing({ phase: 'active' }, [
+      missionQuestion({ answer: 'the guest checkout flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }),
+    ]))
+    expect(screen.getByRole('region', { name: 'Planning questions' })).toBeDefined()
+    expect(screen.queryByLabelText('Answer question 1')).toBeNull()
+  })
+
+  it('hides the answer form when the gateway omits the method', async () => {
     seed({ capabilities: { gateway: 'remote', methods: ['mission.show'], ws: ['events', 'attach'] } })
-    const planning = showing({ phase: 'planning', plan_version: 0, open_questions: 1 }, [missionQuestion()])
-    await mount(planning)
+    await mount(showing({ phase: 'planning', open_questions: 1 }, [missionQuestion()]))
     expect(screen.queryByLabelText('Answer question 1')).toBeNull()
     expect(screen.getByText('1. which checkout flow?')).toBeDefined()
+  })
+})
 
-    seed({ capabilities: { gateway: 'remote', methods: ['mission.show'], ws: ['events', 'attach'] } })
-    const review = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
-    await mount(review)
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+describe('finished missions', () => {
+  it.each([
+    ['completed', 'The integrator reported success. Leftover workers were stopped.'],
+    ['cancelled', 'The swarm was cancelled. Its workers and integrator run are stopped.'],
+  ] as const)('shows %s without recovery or cancel controls', async (phase, sentence) => {
+    seed({ runs: { run_integrator: toRecord(run({ id: 'run_integrator', status: 'completed' })) } })
+    await mount(showing({ phase }, [], [missionTask({ status: 'done' })]))
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(sentence)).toBeDefined()
+    expect(banner.queryByText(/has exited/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace integrator' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Mission tasks' })).toBeDefined()
+  })
+
+  it('shows candidate progress without any candidate control', async () => {
+    seed()
+    await mount(showing({ phase: 'completed' }))
+    const progress = within(screen.getByRole('region', { name: 'Mission candidate progress' }))
+    expect(progress.getByText(/This view is read-only/)).toBeDefined()
+    for (const name of ['Prepare candidate', 'Run verification', 'Request delivery', 'Approve delivery', 'Deliver candidate']) {
+      expect(progress.queryByRole('button', { name })).toBeNull()
+    }
+    expect(progress.queryByLabelText('Target ref')).toBeNull()
   })
 })
 
 describe('mission cancel', () => {
-  it.each(['planning', 'clarified', 'plan_review'] as const)('offers Cancel swarm in %s', async (phase) => {
+  it.each(['planning', 'active'] as const)('offers Cancel swarm in %s', async (phase) => {
     seed()
-    await mount(showing({ phase, plan_version: phase === 'plan_review' ? 2 : 0 }))
+    await mount(showing({ phase }))
     expect(screen.getByRole('button', { name: 'Cancel swarm' })).toBeDefined()
-  })
-
-  it('hides Cancel swarm once the plan is approved', async () => {
-    seed()
-    await mount(showing({ phase: 'active' }))
-    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
   })
 
   it('hides Cancel swarm from a member who is neither accountable nor admin', async () => {
     seed({ info: { ...serverInfo, member: bob } })
-    await mount(showing({ phase: 'planning', plan_version: 0 }))
+    await mount(showing({ phase: 'planning' }))
     expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
   })
 
   it('offers Cancel swarm to an admin who is not the accountable human', async () => {
     seed()
-    await mount(showing({ phase: 'planning', plan_version: 0, accountable_human_id: bob.id }))
+    await mount(showing({ phase: 'planning', accountable_human_id: bob.id }))
     expect(screen.getByRole('button', { name: 'Cancel swarm' })).toBeDefined()
   })
 
   it('cancels the mission after confirmation and refreshes the detail', async () => {
     seed()
-    const client = showing({ phase: 'planning', plan_version: 0 })
+    const client = showing({ phase: 'planning' })
     await mount(client)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
     const dialog = within(screen.getByRole('alertdialog', { name: 'Cancel this swarm?' }))
@@ -530,9 +395,9 @@ describe('mission cancel', () => {
 
   it('shows the refusal and retries under the same key', async () => {
     seed()
-    const client = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
+    const client = showing({ phase: 'active' })
     vi.mocked(client.missionCancel).mockRejectedValueOnce(
-      new Error('mission.cancel: mission is in phase active; the plan has already been approved'),
+      new Error('mission.cancel: mission is in phase completed; the mission is completed'),
     )
     await mount(client)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
@@ -541,7 +406,7 @@ describe('mission cancel', () => {
       fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
     })
     expect(dialog.getByRole('alert').textContent).toBe(
-      'mission.cancel: mission is in phase active; the plan has already been approved',
+      'mission.cancel: mission is in phase completed; the mission is completed',
     )
     await act(async () => {
       fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
@@ -553,7 +418,7 @@ describe('mission cancel', () => {
 
 describe('mission integrator run', () => {
   function withRunGet(runGet: Api['runGet']): Api {
-    return { ...showing({ phase: 'planning', plan_version: 0 }), runGet: vi.fn(runGet) }
+    return { ...showing({ phase: 'planning' }), runGet: vi.fn(runGet) }
   }
 
   it('says the integrator run has not started once the server has no run for it', async () => {
@@ -568,7 +433,7 @@ describe('mission integrator run', () => {
     expect(client.runGet).toHaveBeenCalledWith('run_integrator')
     const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
     expect(banner.getByText(/^The integrator run has not started\./)).toBeDefined()
-    expect(banner.queryByText(/may ask you clarifying questions/)).toBeNull()
+    expect(banner.queryByText(/asks you clarifying questions only if/)).toBeNull()
     expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
   })
@@ -581,7 +446,7 @@ describe('mission integrator run', () => {
   it('says why the integrator has not started', async () => {
     seed()
     const client = {
-      ...showing({ phase: 'planning', plan_version: 0, ...launchFailure }),
+      ...showing({ phase: 'planning', ...launchFailure }),
       runGet: vi.fn(async () => {
         throw new ApiError(404, 'run.get: run not found')
       }),
@@ -599,21 +464,21 @@ describe('mission integrator run', () => {
 
   it('says why the replacement did not launch once the integrator has exited', async () => {
     seed({ runs: { run_integrator: toRecord(run({ id: 'run_integrator', status: 'failed' })) } })
-    await mount(showing({ phase: 'plan_review', plan_version: 2, ...launchFailure }, [], [missionPlanReview({ plan_version: 2 })]))
+    await mount(showing({ phase: 'active', ...launchFailure }))
     const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
     expect(banner.getByText(/has exited; replace the integrator to continue/)).toBeDefined()
     expect(banner.getByText(/^Last launch failure/).textContent).toContain('is not installed for account alice')
   })
 
-  it('names no launch failure on a rejected swarm card', async () => {
+  it('names no launch failure on a cancelled swarm card', async () => {
     seed({ route: { name: 'missions', params: {} } })
     render(
       <MissionRoute
         params={{}}
-        client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission({ ...launchFailure, phase: 'rejected' })] })) })}
+        client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission({ ...launchFailure, phase: 'cancelled' })] })) })}
       />,
     )
-    expect(await screen.findByText('Rejected')).toBeDefined()
+    expect(await screen.findByText('Cancelled')).toBeDefined()
     expect(screen.queryByText(/Integrator did not launch/)).toBeNull()
   })
 
@@ -670,13 +535,10 @@ describe('mission integrator run', () => {
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['claude', 'codex'])
   })
 
-  it.each([
-    ['active', 'The integrator run was deleted; replace the integrator.'],
-    ['planning', 'The integrator run was deleted; replace the integrator or cancel the swarm.'],
-  ] as const)('says the integrator run was deleted once it had launched, in %s', async (phase, sentence) => {
+  it.each(['active', 'planning'] as const)('says the integrator run was deleted once it had launched, in %s', async (phase) => {
     seed()
     const client = {
-      ...showing({ phase, plan_version: 1, integrator_run_launched: true }),
+      ...showing({ phase, integrator_run_launched: true }),
       runGet: vi.fn(async () => {
         throw new ApiError(404, 'run.get: run not found')
       }),
@@ -686,7 +548,7 @@ describe('mission integrator run', () => {
       await Promise.resolve()
     })
     const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
-    expect(banner.getByText(sentence)).toBeDefined()
+    expect(banner.getByText('The integrator run was deleted; replace the integrator or cancel the swarm.')).toBeDefined()
     expect(banner.queryByText(/has not started/)).toBeNull()
     expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
   })
@@ -694,7 +556,7 @@ describe('mission integrator run', () => {
   it('keeps the planning copy and no run button while the server is asked', async () => {
     seed()
     await mount(withRunGet(() => new Promise(() => {})))
-    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.getByText(/asks you clarifying questions only if/)).toBeDefined()
     expect(screen.queryByText(/has not started/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
   })
@@ -726,7 +588,7 @@ describe('mission integrator run', () => {
       await Promise.resolve()
     })
     expect(screen.getByText('run.get: server unavailable')).toBeDefined()
-    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.getByText(/asks you clarifying questions only if/)).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
     expect(client.runGet).toHaveBeenCalledTimes(1)
 
@@ -748,7 +610,7 @@ describe('mission integrator run', () => {
     const client = withRunGet(async () => run({ id: 'run_integrator' }))
     await mount(client)
     expect(client.runGet).not.toHaveBeenCalled()
-    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.getByText(/asks you clarifying questions only if/)).toBeDefined()
   })
 })
 
@@ -770,15 +632,13 @@ describe('mission objective', () => {
   it('keeps the header to one short line and the full objective in the scroll area', async () => {
     seed()
     clip()
-    await mount(showing({ phase: 'plan_review', plan_version: 2, objective }, [], [missionPlanReview({ plan_version: 2 })]))
+    await mount(showing({ phase: 'planning', objective }))
     const heading = screen.getByRole('heading', { level: 1 })
     expect(heading.textContent).toBe(`${firstLine.slice(0, 80).trimEnd()}…`)
     expect(heading.getAttribute('title')).toBe(objective)
     const section = within(screen.getByRole('region', { name: 'Mission objective' }))
     const full = section.getByText((_, node) => node?.tagName === 'P' && node.textContent === objective)
     expect(full.className).toContain('line-clamp-3')
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Request changes' })).toBeDefined()
     fireEvent.click(section.getByRole('button', { name: 'Show more' }))
     expect(full.className).not.toContain('line-clamp-3')
     fireEvent.click(section.getByRole('button', { name: 'Show less' }))

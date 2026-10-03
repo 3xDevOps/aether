@@ -24,7 +24,7 @@ func (s integratorLookupFailure) GetMissionByRun(context.Context, domain.RunID) 
 
 func TestIntegratorOperationsDenyWorkersAndOrdinaryRuns(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	tasks := f.activate(t, taskSpec{key: "task", title: "bounded task"})
 	if err := f.startWorker(t, tasks[0], "worker"); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestIntegratorOperationsDenyWorkersAndOrdinaryRuns(t *testing.T) {
 }
 
 func TestIntegratorLookupPreservesStorageFailureAndAuthority(t *testing.T) {
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	cause := errors.New("mission index unavailable")
 	original := f.svc.cfg.Missions
 	f.svc.cfg.Missions = integratorLookupFailure{MissionStore: original, err: fmt.Errorf("read integrator: %w", cause)}
@@ -111,7 +111,7 @@ func TestIntegratorLookupPreservesStorageFailureAndAuthority(t *testing.T) {
 }
 
 func TestTaskAcceptanceReplayPreservesReceiptAfterConflict(t *testing.T) {
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	tasks := f.activate(t, taskSpec{key: "task", title: "bounded task"})
 	f.mustCall(t, protocol.MethodTaskRevise, protocol.TaskReviseParams{
 		TaskID: string(tasks[0].ID), Revision: protocol.TaskRevision{Title: "clarified task", Objective: "same bounded work"}, IdempotencyKey: "revise",
@@ -137,7 +137,7 @@ func TestTaskAcceptanceReplayPreservesReceiptAfterConflict(t *testing.T) {
 
 func TestWorkerRetryWaitsForCancellationSettlement(t *testing.T) {
 	ctx := context.Background()
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	tasks := f.activate(t, taskSpec{key: "task", title: "bounded task"})
 	if err := f.startWorker(t, tasks[0], "worker"); err != nil {
 		t.Fatal(err)

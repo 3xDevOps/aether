@@ -21,9 +21,9 @@ type EvidenceReader interface {
 }
 
 // ValidateReport performs the authority check before coord.report reserves a
-// fresh report. Ordinary runs and the current integrator intentionally remain
-// on the normal no-submission path; current workers are accepted, while a
-// stale worker/coordinator fails closed through resolveAssignment.
+// fresh report. Ordinary runs, the current integrator, and current workers are
+// accepted, while a stale worker/coordinator fails closed through
+// resolveAssignment.
 func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 	_, _, err := s.resolveAssignment(ctx, run)
 	return err
@@ -32,7 +32,8 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 // ReconcileReport is called for every finalized report outbox row, including
 // ordinary runs and historical mission identities. Only the current worker
 // assignment can create a mission submission. A failure report retains that
-// worker before releasing its attempt capacity; other identities remain no-ops.
+// worker before releasing its attempt capacity. The current integrator's
+// success report completes its mission; other identities remain no-ops.
 // Callers must release coordination run references before waiting for admission.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
 	if report == nil {
@@ -48,8 +49,11 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		}
 		return err
 	}
-	if m == nil || attempt == nil {
+	if m == nil {
 		return nil
+	}
+	if attempt == nil {
+		return s.reconcileIntegratorReport(ctx, m, run, report)
 	}
 	if report.RunID != run || report.WorkspaceID != m.WorkspaceID || report.WorkspaceID == "" {
 		return fmt.Errorf("mission: report identity does not match worker assignment")
@@ -136,6 +140,26 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		return publishErr
 	}
 	return nil
+}
+
+// reconcileIntegratorReport moves the mission of run, its current integrator,
+// to completed on a success report; the reconcile loop then stops leftover
+// workers. The integrator's run itself finishes through the ordinary
+// reported-outcome path, whatever the outcome, so a failure report ends the
+// run and leaves the mission where it is for Replace integrator to recover.
+// An ended mission takes no report: a replay finds it completed, and a
+// cancelled mission stays cancelled.
+func (s *Service) reconcileIntegratorReport(ctx context.Context, m *domain.Mission, run domain.RunID, report *store.CoordReport) error {
+	if report.Outcome != store.CoordOutcomeSuccess || m.Phase.Terminal() {
+		return nil
+	}
+	s.cfg.AuthorizationMu.Lock()
+	_, err := s.cfg.Missions.CompleteMission(ctx, m.ID, run)
+	s.cfg.AuthorizationMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.publishMissionChanged(ctx, m.ID)
 }
 
 func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {

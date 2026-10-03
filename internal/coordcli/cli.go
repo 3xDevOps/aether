@@ -155,7 +155,7 @@ Commands:
   inbox     read the at-least-once inbox
   ask       ask an authorized peer a durable question
   reply     answer a durable question
-  mission   ask the accountable human and submit the plan for review
+  mission   ask the accountable human and start the mission
   task      inspect and mutate mission task revisions
   worker    inspect and manage mission worker attempts
   integration run the five integrator candidate operations
@@ -199,22 +199,12 @@ Ask one durable, correlated question. A body file of "-" reads standard input.
 
 Reply to the sender of one durable question. A body file of "-" reads standard input.
 `,
-	"mission": `usage: aether-internal mission <clarification|question|plan> <subcommand> [options]
+	"mission": `usage: aether-internal mission <question|plan|start> [subcommand] [options]
 
 mission question ask asks the accountable human, who answers in the dashboard.
 ask --to <run-id> asks a peer agent run, which answers with reply. They are
-separate mailboxes. The mission is the run's own; no command takes a mission ID.
-`,
-	"mission clarification": `usage: aether-internal mission clarification complete --idempotency-key <key>
-
-Declare that clarification is done and the plan can be written. Only the
-integrator may complete it, and only while the mission is in the planning
-phase.
-`,
-	"mission clarification complete": `usage: aether-internal mission clarification complete --idempotency-key <key>
-
-Move the mission from planning to clarified. Questions are optional, but the
-call is refused while a question you asked is unanswered.
+separate mailboxes. mission start accepts the proposed tasks and starts the
+mission.
 `,
 	"mission question": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
 
@@ -225,27 +215,21 @@ separate mailboxes.
 	"mission question ask": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
 
 Ask the accountable human one clarifying question. A body file of "-" reads
-standard input. Only the integrator may ask, in the planning and clarified
-phases; asking in clarified returns the mission to planning until the question
-is answered.
+standard input. Only the integrator may ask, and only in the planning phase.
 `,
-	"mission plan": `usage: aether-internal mission plan <show|submit> [options]
+	"mission plan": `usage: aether-internal mission plan show [--wait <seconds>]
 
-show reads the gate state, questions, and review rounds. submit sends the
-proposed tasks to the accountable human for a decision.
+show reads the mission phase and questions.
 `,
 	"mission plan show": `usage: aether-internal mission plan show [--wait <seconds>]
 
-Read the mission phase, plan version, open questions, and review rounds.
---wait asks the server to wait up to 30 seconds for a change; it is not a
-client polling loop.
+Read the mission phase and questions. --wait asks the server to wait up to 30
+seconds for a change; it is not a client polling loop.
 `,
-	"mission plan submit": `usage: aether-internal mission plan submit (--summary <text> | --summary-file <path>) --idempotency-key <key>
+	"mission start": `usage: aether-internal mission start --mission-id <id> --idempotency-key <key>
 
-Submit the pending tasks and revisions as a plan for human review. For an
-initial plan, clarification must be complete first; from the active phase this
-submits an amendment to the approved plan. A summary file of "-" reads standard
-input.
+Accept every proposed task and move the mission from planning to active.
+Refused while a question you asked is unanswered or no task is proposed.
 `,
 	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
 
@@ -272,6 +256,8 @@ to completed (success) or failed (failure). Blocked moves it to Idle with
 the summary as the reason once your turn ends.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
+Mission integrator: success completes the mission and stops leftover workers;
+failure ends this run and leaves the mission active for Replace integrator.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
@@ -305,13 +291,14 @@ argv is a JSON string array. Poll show for the durable verification result.
 
 Required JSON: workspace_id, candidate_id, candidate_revision, verification_ids,
 action ("update_ref" or "proposal"), idempotency_key.
-This requests a human decision; it does not approve or deliver the candidate.
+For a verified mission candidate the returned request is already approved on
+behalf of the accountable human; deliver it next.
 `,
 	"integration deliver": `usage: aether-internal integration deliver --params-file FILE|- [--json]
 
 Required JSON: workspace_id, candidate_id, request_id, request_version.
-Use the human-approved request returned by show. Replay the same request after
-an uncertain outcome; do not invent another delivery request.
+Use the approved request returned by request-delivery or show. Replay the same
+request after an uncertain outcome; do not invent another delivery request.
 `,
 	"task show":              "usage: aether-internal task show --task-id <id>\n",
 	"task list":              "usage: aether-internal task list --mission-id <id>\n",
@@ -331,7 +318,7 @@ an uncertain outcome; do not invent another delivery request.
 const taskRevisionHelp = `
 Revision JSON (maximum 32 KiB); title and objective are required non-empty strings:
   {"title":"Fix checkout","objective":"Reject expired sessions"}
-Declare the intended scope before human approval, for example:
+Declare the intended scope, for example:
   {"title":"Fix checkout","objective":"Reject expired sessions","scope":{"expected_paths":["internal/checkout/"],"exclusions":["internal/checkout/generated/"]},"evidence_requirements":[{"kind":"transcript","detail":"Retain test output showing expired sessions are rejected"}]}
 scope.expected_paths and scope.exclusions are arrays of repository-relative paths.
 evidence_requirements is an array of {kind, detail} objects; detail is optional.
@@ -339,9 +326,7 @@ Kinds name retained evidence sources, such as transcript or git, not test types.
 depends_on is an array of task IDs in this mission; the task stays blocked, and
 worker start is refused, until each one's current revision has an accepted
 submission. A cycle or an unknown, abandoned, or self ID is refused.
-Set "material":true for changed scope, constraints, or success criteria requiring
-a human-approved amendment. IDs, revision numbers, status, and timestamps are
-server-managed; do not copy them from task show. Revise supplies the whole spec,
+IDs, revision numbers, status, and timestamps are server-managed; do not copy them from task show. Revise supplies the whole spec,
 not a patch, so a revision without depends_on drops earlier dependencies.
 --revision-file - reads stdin. Store files outside /run/aether.
 `
@@ -442,7 +427,7 @@ Read the inbox once more before a terminal report:
   aether-internal report --help
 `
 
-const missionOutcomes = `Success and failure are terminal worker outcomes: success submits the attempt
+const workerOutcomes = `Success and failure are terminal worker outcomes: success submits the attempt
 and stops the worker; failure ends it without a task result. Report success
 only after finishing with required evidence, failure only if irrecoverable.
 Verify the changed behavior and collect required screenshots/evidence BEFORE
@@ -450,6 +435,14 @@ reporting: a terminal worker report can clean up its development resources.
 Blocked is a nonterminal durable observation, not a submission or a way to wait.
 Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
+`
+
+const integratorOutcomes = `Success and failure are terminal integrator outcomes. Report success only after
+the verified candidate is delivered: it completes the mission, stops leftover
+workers, and finishes this run. Report failure only if the mission cannot be
+finished: it ends this run and leaves the mission active for Replace integrator.
+Blocked is a nonterminal durable observation, not a way to wait. Do not report
+while idle or waiting on workers. After a terminal report, take no new work.
 `
 
 const ordinaryOutcomes = `Success or failure finishes this run once your turn ends: Aether commits your
@@ -473,10 +466,12 @@ Use a new key only for a new operation; receipt means durable storage, not read.
 const integratorWorkflow = `When accepted submissions are ready for combined verification:
   aether-internal integration --help
   aether-internal integration prepare --help
-Prepare, show, verify, request-delivery, then deliver only after human approval.
+Prepare, show, verify, request-delivery, then deliver. A verified mission
+candidate needs no human decision: request-delivery returns an approved request.
+A conflicted candidate: revise the conflicting task so a worker rebases it,
+accept the new submission, then prepare again.
 Each subcommand's --help lists its JSON fields; use --params-file with a file
-outside /run/aether or "-" for stdin. The agent cannot approve delivery or
-take over an integrator. A human uses Replace integrator if this run stops.
+outside /run/aether or "-" for stdin. A human uses Replace integrator if this run stops.
 `
 
 func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
@@ -536,7 +531,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts, assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
 					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
 				}
-				if assignment.Phase == "active" || assignment.Phase == "amendment_review" {
+				if assignment.Phase == "active" {
 					if _, err := io.WriteString(out, integratorWorkflow); err != nil {
 						return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
 					}
@@ -557,7 +552,10 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	if hasSkillCapability(status, protocol.MethodCoordInbox) || status.Assignment != nil {
 		outcomes := ordinaryOutcomes
 		if status.Assignment != nil {
-			outcomes = missionOutcomes
+			outcomes = workerOutcomes
+			if status.Assignment.Role == "integrator" {
+				outcomes = integratorOutcomes
+			}
 		}
 		if _, err := io.WriteString(out, skillBootstrap+skillWorkflow+outcomes+skillRetry); err != nil {
 			return ExitFailure, fmt.Errorf("write skill workflow: %w", err)

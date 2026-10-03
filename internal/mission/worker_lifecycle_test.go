@@ -32,7 +32,7 @@ func (l *confirmedWorkerLauncher) LaunchMission(ctx context.Context, req Mission
 func TestWorkerStartReturnsConfirmedLifecycle(t *testing.T) {
 	for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchHeadless} {
 		t.Run(string(mode), func(t *testing.T) {
-			f := newPlanGateFixture(t)
+			f := newMissionFixture(t)
 			task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
 			launcher := &confirmedWorkerLauncher{recordingLauncher: f.launcher, status: domain.RunRunning}
 			f.svc.cfg.Runs = launcher
@@ -72,7 +72,7 @@ func TestReconcilePromotesOnlyConfirmedLiveWorkers(t *testing.T) {
 		{"observer-error", domain.RunRunning, MissionRunActive, errors.New("observer unavailable"), domain.AttemptLaunching},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newPlanGateFixture(t)
+			f := newMissionFixture(t)
 			task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
 			if err := f.startWorker(t, task, "recover-worker"); err != nil {
 				t.Fatal(err)
@@ -100,7 +100,7 @@ func TestReconcilePromotesOnlyConfirmedLiveWorkers(t *testing.T) {
 }
 
 func TestFailedWorkerLaunchRemainsUnknownUntilConfirmedRecovery(t *testing.T) {
-	f := newPlanGateFixture(t)
+	f := newMissionFixture(t)
 	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
 	launchErr := errors.New("launch response lost")
 	launcher := &confirmedWorkerLauncher{recordingLauncher: f.launcher, status: domain.RunRunning, err: launchErr}

@@ -5,14 +5,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
-import type { EvidencePacket, MissionSubmission, Run } from '@/lib/types'
+import type { EvidencePacket, Run } from '@/lib/types'
 import type {
   Candidate,
   CandidateResolution,
   CandidateSummary,
   DeliveryAction,
   IntegrationPrepareParams,
-  SubmissionRef,
   Verification,
 } from '@/lib/integration-types'
 import { useStore } from '@/store'
@@ -72,29 +71,6 @@ function packetSelectable(packet: EvidencePacket): boolean {
   return Boolean(git?.available && !git.truncated)
 }
 
-function acceptedMissionSubmissions(submissions: MissionSubmission[]): MissionSubmission[] {
-  return submissions
-    .filter((submission) => submission.state === 'accepted')
-    .sort((left, right) => {
-      const leftVersion = left.acceptance?.accepted_set_version ?? Number.MAX_SAFE_INTEGER
-      const rightVersion = right.acceptance?.accepted_set_version ?? Number.MAX_SAFE_INTEGER
-      return leftVersion - rightVersion || left.id.localeCompare(right.id)
-    })
-}
-
-function submissionRef(submission: MissionSubmission): SubmissionRef {
-  return {
-    workspace_id: submission.ref.workspace_id,
-    run_id: submission.ref.run_id,
-    evidence_ref: submission.ref.evidence_ref,
-    retained_revision: submission.ref.retained_revision,
-  }
-}
-
-function missionAcceptedSetLabel(submissions: MissionSubmission[]): string {
-  const latest = submissions.reduce((value, submission) => Math.max(value, submission.acceptance?.accepted_set_version ?? 0), 0)
-  return latest > 0 ? `Accepted set ${latest}` : 'Accepted set unavailable'
-}
 function targetRevision(runs: Run[], currentRunID: string): string {
   return runs.find((run) => run.id === currentRunID && run.base_commit)?.base_commit
     || ''
@@ -103,9 +79,9 @@ export interface CandidateReviewProps {
   workspaceID: string
   currentRunID: string
   client?: Api
-  /** Mission context reuses this review surface with the current accepted set. */
-  missionID?: string
-  missionSubmissions?: MissionSubmission[]
+  /** A mission's integrator prepares, verifies, and delivers on its own, so
+   * the mission page shows its candidates without any control. */
+  readOnly?: boolean
   initialExpanded?: boolean
 }
 
@@ -119,11 +95,9 @@ export function useCandidateReview({
   workspaceID,
   currentRunID,
   client = api,
-  missionID,
-  missionSubmissions = [],
+  readOnly = false,
   initialExpanded = false,
 }: CandidateReviewProps, active = true) {
-  const missionMode = Boolean(missionID)
   const [expandedState, setExpanded] = useState(initialExpanded)
   const expanded = active && expandedState
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine)
@@ -163,20 +137,14 @@ export function useCandidateReview({
     () => selectedIDs.map((id) => packets.find((packet) => packet.id === id)).filter((packet): packet is EvidencePacket => Boolean(packet)),
     [packets, selectedIDs],
   )
-  const orderedMissionSubmissions = useMemo(
-    () => acceptedMissionSubmissions(missionSubmissions),
-    [missionSubmissions],
-  )
   const selectedSubmissionRefs = useMemo(
-    () => missionMode
-      ? orderedMissionSubmissions.map(submissionRef)
-      : selectedPackets.map((packet) => ({
-        workspace_id: workspaceID,
-        run_id: packet.run_id,
-        evidence_ref: packet.id,
-        retained_revision: packet.retained_revision || '',
-      })),
-    [missionMode, orderedMissionSubmissions, selectedPackets, workspaceID],
+    () => selectedPackets.map((packet) => ({
+      workspace_id: workspaceID,
+      run_id: packet.run_id,
+      evidence_ref: packet.id,
+      retained_revision: packet.retained_revision || '',
+    })),
+    [selectedPackets, workspaceID],
   )
   const request = candidate?.delivery_request
   const frozen = candidate?.state === 'frozen'
@@ -187,7 +155,7 @@ export function useCandidateReview({
       && verification.candidate_revision === candidate.candidate_revision,
   ) ?? []
   const gatewayAvailable = browserOnline && gatewayConnection === 'live'
-  const canMutate = gatewayAvailable && authorityReady && !busy
+  const canMutate = !readOnly && gatewayAvailable && authorityReady && !busy
 
   const invalidateAuthority = useCallback(() => {
     loadGeneration.current += 1
@@ -358,11 +326,9 @@ export function useCandidateReview({
   }
 
   const prepare = async () => {
-    const minimumInputs = missionMode ? 1 : 2
-    if (!canMutate || selectedSubmissionRefs.length < minimumInputs || !targetRef || !expectedRevision) return
+    if (!canMutate || selectedSubmissionRefs.length < 2 || !targetRef || !expectedRevision) return
     const params: IntegrationPrepareParams = {
       workspace_id: workspaceID,
-      ...(missionID ? { mission_id: missionID } : {}),
       submissions: selectedSubmissionRefs,
       target_ref: targetRef,
       expected_target_revision: expectedRevision,
@@ -598,31 +564,9 @@ export function useCandidateReview({
       </Button>
       {expanded && (
         <div id="candidate-review-region" className="mt-2 space-y-3" role="region" aria-label="Candidate review">
-          {(!gatewayAvailable || !authorityReady) && <p role="status" className="border border-state-attention/40 bg-state-attention/10 p-2 text-[11px] text-state-attention">{!gatewayAvailable ? 'Offline or reconnecting.' : 'Loading fresh workspace authority.'} Mutation controls remain disabled until the gateway reconnects and fresh authority is loaded.</p>}
+          {(!gatewayAvailable || !authorityReady) && <p role="status" className="border border-state-attention/40 bg-state-attention/10 p-2 text-[11px] text-state-attention">{!gatewayAvailable ? 'Offline or reconnecting.' : 'Loading fresh workspace authority.'} {readOnly ? '' : ' Mutation controls remain disabled until the gateway reconnects and fresh authority is loaded.'}</p>}
           {error && <div role="alert" className="flex items-start justify-between gap-2 border border-state-failed/30 bg-state-failed/10 p-2 text-[11px] text-state-failed"><span>{error}</span>{candidate && <Button type="button" size="sm" variant="ghost" disabled={loading || !gatewayAvailable} onClick={() => void showCandidate(candidate.candidate_id)}>Reload candidate</Button>}</div>}
-          {missionMode ? (
-            <div className="space-y-2" data-testid="mission-candidate-inputs">
-              <h3 className="text-[12px] font-semibold">Mission accepted inputs</h3>
-              <p className="text-[11px] text-muted-foreground">The current accepted set is sent exactly as recorded by the mission. Order follows acceptance version; refresh and retry if the set changed.</p>
-              <p className="text-[11px] text-muted-foreground">{missionAcceptedSetLabel(orderedMissionSubmissions)} · {orderedMissionSubmissions.length} input{orderedMissionSubmissions.length === 1 ? '' : 's'}</p>
-              {orderedMissionSubmissions.length === 0 ? (
-                <p className="border border-state-attention/40 bg-state-attention/10 p-2 text-[11px] text-state-attention">No current accepted submissions are available for preparation.</p>
-              ) : (
-                <ol className="space-y-1 border border-border p-2 text-[11px]" aria-label="Ordered mission candidate inputs">
-                  {orderedMissionSubmissions.map((submission, index) => (
-                    <li key={submission.id} className="flex items-center gap-1">
-                      <span className="w-4 text-muted-foreground">{index + 1}.</span>
-                      <span className="min-w-0 flex-1">
-                        <code className="block truncate">{submission.ref.evidence_ref}</code>
-                        <span className="block truncate text-muted-foreground">run {submission.ref.run_id} · retained <code>{submission.ref.retained_revision}</code></span>
-                      </span>
-                      {submission.acceptance?.accepted_set_version != null && <span className="shrink-0 text-muted-foreground">#{submission.acceptance.accepted_set_version}</span>}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          ) : (
+          {!readOnly && (
             <div className="space-y-2">
               <h3 className="text-[12px] font-semibold">Select retained packets</h3>
               <p className="text-[11px] text-muted-foreground">Select at least two precise packets. Retained revisions are immutable; unavailable sources cannot be prepared.</p>
@@ -653,12 +597,13 @@ export function useCandidateReview({
             </div>
           )}
 
-          <div className="grid gap-2 sm:grid-cols-2">
+          {!readOnly && <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1"><Label htmlFor="candidate-target-ref">Target ref</Label><Input id="candidate-target-ref" value={targetRef} onChange={(event) => setTargetRef(event.target.value)} placeholder="refs/heads/main" disabled={Boolean(candidate)} /></div>
             <div className="space-y-1"><Label htmlFor="candidate-target-revision">Expected target revision</Label><Input id="candidate-target-revision" value={expectedRevision} onChange={(event) => setExpectedRevision(event.target.value)} placeholder="Authoritative workspace commit" disabled={Boolean(candidate)} /><p className="text-[10px] text-muted-foreground">Read from the workspace run's captured base commit; never guessed.</p></div>
-          </div>
+          </div>}
           {summaries.length > 0 && <div className="space-y-1"><h3 className="text-[12px] font-semibold">Existing candidates</h3><div className="divide-y divide-border border border-border">{summaries.map((item) => <div key={item.candidate_id} className="flex items-center gap-2 p-2 text-[11px]"><span className="min-w-0 flex-1"><code className="block truncate">{item.candidate_id}</code><span className="text-muted-foreground">{item.state} · {item.candidate_revision || 'No combined revision'}</span></span><Button type="button" size="sm" variant="outline" disabled={loading || Boolean(busy) || !gatewayAvailable} onClick={() => void showCandidate(item.candidate_id)}>Show full</Button></div>)}</div></div>}
-          <Button type="button" size="sm" disabled={!canMutate || selectedSubmissionRefs.length < (missionMode ? 1 : 2) || !targetRef || !expectedRevision || Boolean(candidate)} onClick={() => void prepare()}>Prepare candidate</Button>
+          {readOnly && !summaries.length && authorityReady && <p className="text-[11px] text-muted-foreground">No candidate has been prepared yet.</p>}
+          {!readOnly && <Button type="button" size="sm" disabled={!canMutate || selectedSubmissionRefs.length < 2 || !targetRef || !expectedRevision || Boolean(candidate)} onClick={() => void prepare()}>Prepare candidate</Button>}
           {candidate && <CandidateDetails
             candidate={candidate}
             patch={patch}
@@ -680,6 +625,7 @@ export function useCandidateReview({
             onRequestDelivery={() => void requestDelivery()}
             onDecide={(approve) => void decide(approve)}
             onDeliver={() => void deliver()}
+            readOnly={readOnly}
             canMutate={canMutate}
             busy={busy}
           />}
@@ -710,12 +656,13 @@ interface CandidateDetailsProps {
   onRequestDelivery: () => void
   onDecide: (approve: boolean) => void
   onDeliver: () => void
+  readOnly: boolean
   canMutate: boolean
   busy: MutationOperation | 'decide' | 'deliver' | null
 }
 
 function CandidateDetails(props: CandidateDetailsProps) {
-  const { candidate, patch, resolutions, setResolutions, onLoadPatch, onResolve, onRunVerification, argvText, setArgvText, timeoutSeconds, setTimeoutSeconds, argvError, selectedVerificationIDs, setSelectedVerificationIDs, selectedPassing, deliveryAction, setDeliveryAction, onRequestDelivery, onDecide, onDeliver, canMutate, busy } = props
+  const { candidate, patch, resolutions, setResolutions, onLoadPatch, onResolve, onRunVerification, argvText, setArgvText, timeoutSeconds, setTimeoutSeconds, argvError, selectedVerificationIDs, setSelectedVerificationIDs, selectedPassing, deliveryAction, setDeliveryAction, onRequestDelivery, onDecide, onDeliver, readOnly, canMutate, busy } = props
   const request = candidate.delivery_request
   const selectedResolutionCount = Object.values(resolutions).filter((draft) => draft.selected).length
   return (
@@ -725,16 +672,17 @@ function CandidateDetails(props: CandidateDetailsProps) {
       {candidate.error && <p role="alert" className="text-[11px] text-state-failed">Blocked: {candidate.error}</p>}
       <dl className="grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2"><div><dt className="inline font-medium">Target ref: </dt><dd className="inline break-all">{candidate.target_ref}</dd></div><div><dt className="inline font-medium">Expected target revision: </dt><dd className="inline break-all">{candidate.expected_target_revision}</dd></div></dl>
       <div><h4 className="text-[11px] font-semibold">Ordered inputs</h4><ol className="mt-1 space-y-1 text-[11px] text-muted-foreground">{candidate.inputs.map((input, index) => <li key={`${input.submission.evidence_ref}-${index}`}>{index + 1}. <code>{input.submission.evidence_ref}</code> · retained <code>{input.submission.retained_revision}</code> · base <code>{input.base_revision}</code></li>)}</ol></div>
-      {candidate.state === 'conflicted' && <div className="space-y-2 border border-state-attention/40 bg-state-attention/5 p-2"><h4 className="text-[11px] font-semibold">Conflicts</h4><p className="text-[10px] text-muted-foreground">Enter complete resolved file contents. Select only files to apply; untouched drafts remain conflicted and are preserved.</p><p className="text-[10px] text-muted-foreground">Selected resolutions: {selectedResolutionCount}/{maxConflictResolutionBatch}{selectedResolutionCount > maxConflictResolutionBatch ? ' (apply in partial batches)' : ''}</p>{(candidate.conflicts ?? []).map((path) => { const draft = resolutions[path] ?? { content: '', delete: false, selected: false }; return <div key={path} className="space-y-1"><Label htmlFor={`candidate-resolution-${path}`}>{path} · complete file content</Label><Textarea id={`candidate-resolution-${path}`} aria-label={`Resolution for ${path}`} value={draft.content} disabled={draft.delete || !canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, content: event.target.value, selected: true } }))} placeholder="Complete resolved file contents" /><label className="flex items-center gap-2 text-[11px]"><input type="checkbox" aria-label={`Apply resolution for ${path}`} checked={draft.selected} disabled={!canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, selected: event.target.checked } }))} />Apply this resolution</label><label className="flex items-center gap-2 text-[11px]"><input type="checkbox" checked={draft.delete} disabled={!canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, delete: event.target.checked, selected: event.target.checked || draft.selected } }))} />Delete file</label></div> })}<Button type="button" size="sm" disabled={!canMutate || busy === 'resolve' || selectedResolutionCount === 0 || selectedResolutionCount > maxConflictResolutionBatch} onClick={onResolve}>Apply resolutions</Button></div>}
+      {candidate.state === 'conflicted' && readOnly && <div className="space-y-1 border border-state-attention/40 bg-state-attention/5 p-2"><h4 className="text-[11px] font-semibold">Conflicts</h4><ul className="text-[11px]">{(candidate.conflicts ?? []).map((path) => <li key={path} className="break-all">{path}</li>)}</ul></div>}
+      {candidate.state === 'conflicted' && !readOnly && <div className="space-y-2 border border-state-attention/40 bg-state-attention/5 p-2"><h4 className="text-[11px] font-semibold">Conflicts</h4><p className="text-[10px] text-muted-foreground">Enter complete resolved file contents. Select only files to apply; untouched drafts remain conflicted and are preserved.</p><p className="text-[10px] text-muted-foreground">Selected resolutions: {selectedResolutionCount}/{maxConflictResolutionBatch}{selectedResolutionCount > maxConflictResolutionBatch ? ' (apply in partial batches)' : ''}</p>{(candidate.conflicts ?? []).map((path) => { const draft = resolutions[path] ?? { content: '', delete: false, selected: false }; return <div key={path} className="space-y-1"><Label htmlFor={`candidate-resolution-${path}`}>{path} · complete file content</Label><Textarea id={`candidate-resolution-${path}`} aria-label={`Resolution for ${path}`} value={draft.content} disabled={draft.delete || !canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, content: event.target.value, selected: true } }))} placeholder="Complete resolved file contents" /><label className="flex items-center gap-2 text-[11px]"><input type="checkbox" aria-label={`Apply resolution for ${path}`} checked={draft.selected} disabled={!canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, selected: event.target.checked } }))} />Apply this resolution</label><label className="flex items-center gap-2 text-[11px]"><input type="checkbox" checked={draft.delete} disabled={!canMutate} onChange={(event) => setResolutions((current) => ({ ...current, [path]: { ...draft, delete: event.target.checked, selected: event.target.checked || draft.selected } }))} />Delete file</label></div> })}<Button type="button" size="sm" disabled={!canMutate || busy === 'resolve' || selectedResolutionCount === 0 || selectedResolutionCount > maxConflictResolutionBatch} onClick={onResolve}>Apply resolutions</Button></div>}
       {candidate.state === 'frozen' && <div className="space-y-2"><p className="text-[11px] text-state-success">Frozen at exact combined revision <code>{candidate.candidate_revision}</code>.</p><Button type="button" variant="outline" size="sm" disabled={busy !== null || Boolean(patch)} onClick={onLoadPatch}>Load combined patch</Button>{patch && <div><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/20 p-2 font-mono text-[10px]">{patch.text || 'Combined patch is empty.'}</pre>{patch.truncated && <p className="mt-1 text-[10px] text-muted-foreground">Patch truncated at the 1 MiB server bound.</p>}</div>}</div>}
-      <div className="space-y-2 border-t border-border pt-2"><h4 className="text-[11px] font-semibold">Verification</h4><div className="grid gap-2 sm:grid-cols-[1fr_7rem]"><div className="space-y-1"><Label htmlFor="candidate-verification-argv">Verification argv</Label><Textarea id="candidate-verification-argv" value={argvText} onChange={(event) => setArgvText(event.target.value)} disabled={!canMutate || !candidate.candidate_revision || candidate.state !== 'frozen'} aria-invalid={Boolean(argvError)} /></div><div className="space-y-1"><Label htmlFor="candidate-verification-timeout">Timeout seconds</Label><Input id="candidate-verification-timeout" type="number" min={1} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} disabled={!canMutate || !candidate.candidate_revision || candidate.state !== 'frozen'} /></div></div>{argvError && <p role="alert" className="text-[11px] text-state-failed">{argvError}</p>}<Button type="button" size="sm" disabled={!canMutate || candidate.state !== 'frozen' || !candidate.candidate_revision || busy === 'verify'} onClick={onRunVerification}>Run verification</Button>{candidate.verifications.map((verification) => <VerificationRow key={verification.verification_id} verification={verification} selected={selectedVerificationIDs.includes(verification.verification_id)} onSelect={() => setSelectedVerificationIDs((current) => current.includes(verification.verification_id) ? current.filter((id) => id !== verification.verification_id) : [...current, verification.verification_id])} />)}</div>
-      <div className="space-y-2 border-t border-border pt-2"><h4 className="text-[11px] font-semibold">Delivery</h4>{request ? <div className="space-y-2 text-[11px]"><p>Request <code>{request.request_id}</code> · immutable request version <strong>{request.request_version}</strong> · {request.state}</p><p>Checks: {request.verification_ids.join(', ') || 'none'} · action: {request.action}</p>{request.state === 'pending' && <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={!canMutate || busy === 'decide'} onClick={() => onDecide(true)}>Approve delivery</Button><Button type="button" size="sm" variant="outline" disabled={!canMutate || busy === 'decide'} onClick={() => onDecide(false)}>Deny delivery</Button></div>}{request.state === 'approved' && <Button type="button" size="sm" disabled={!canMutate || busy === 'deliver'} onClick={onDeliver}>Deliver candidate</Button>}</div> : <><div className="space-y-1"><Label htmlFor="candidate-delivery-action">Delivery action</Label><select id="candidate-delivery-action" className="h-[26px] w-full rounded-[2px] border border-input bg-background px-2 text-[12px]" value={deliveryAction} onChange={(event) => setDeliveryAction(event.target.value as DeliveryAction)} disabled={!canMutate}><option value="update_ref">Update target ref</option><option value="proposal">Create proposal</option></select></div><p className="text-[11px] text-muted-foreground">Only currently selected passing verification IDs are requested; failed checks never imply pass.</p><Button type="button" size="sm" disabled={!canMutate || candidate.state !== 'frozen' || !candidate.candidate_revision || !selectedPassing.length} onClick={onRequestDelivery}>Request delivery</Button></>}</div>
+      <div className="space-y-2 border-t border-border pt-2"><h4 className="text-[11px] font-semibold">Verification</h4>{!readOnly && <><div className="grid gap-2 sm:grid-cols-[1fr_7rem]"><div className="space-y-1"><Label htmlFor="candidate-verification-argv">Verification argv</Label><Textarea id="candidate-verification-argv" value={argvText} onChange={(event) => setArgvText(event.target.value)} disabled={!canMutate || !candidate.candidate_revision || candidate.state !== 'frozen'} aria-invalid={Boolean(argvError)} /></div><div className="space-y-1"><Label htmlFor="candidate-verification-timeout">Timeout seconds</Label><Input id="candidate-verification-timeout" type="number" min={1} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} disabled={!canMutate || !candidate.candidate_revision || candidate.state !== 'frozen'} /></div></div>{argvError && <p role="alert" className="text-[11px] text-state-failed">{argvError}</p>}<Button type="button" size="sm" disabled={!canMutate || candidate.state !== 'frozen' || !candidate.candidate_revision || busy === 'verify'} onClick={onRunVerification}>Run verification</Button></>}{readOnly && !candidate.verifications.length && <p className="text-[11px] text-muted-foreground">No verification has run yet.</p>}{candidate.verifications.map((verification) => <VerificationRow key={verification.verification_id} verification={verification} readOnly={readOnly} selected={selectedVerificationIDs.includes(verification.verification_id)} onSelect={() => setSelectedVerificationIDs((current) => current.includes(verification.verification_id) ? current.filter((id) => id !== verification.verification_id) : [...current, verification.verification_id])} />)}</div>
+      <div className="space-y-2 border-t border-border pt-2"><h4 className="text-[11px] font-semibold">Delivery</h4>{request ? <div className="space-y-2 text-[11px]"><p>Request <code>{request.request_id}</code> · immutable request version <strong>{request.request_version}</strong> · {request.state}</p><p>Checks: {request.verification_ids.join(', ') || 'none'} · action: {request.action}</p>{request.state === 'pending' && !readOnly && <div className="flex flex-wrap gap-1"><Button type="button" size="sm" disabled={!canMutate || busy === 'decide'} onClick={() => onDecide(true)}>Approve delivery</Button><Button type="button" size="sm" variant="outline" disabled={!canMutate || busy === 'decide'} onClick={() => onDecide(false)}>Deny delivery</Button></div>}{request.state === 'approved' && !readOnly && <Button type="button" size="sm" disabled={!canMutate || busy === 'deliver'} onClick={onDeliver}>Deliver candidate</Button>}</div> : readOnly ? <p className="text-[11px] text-muted-foreground">No delivery requested yet.</p> : <><div className="space-y-1"><Label htmlFor="candidate-delivery-action">Delivery action</Label><select id="candidate-delivery-action" className="h-[26px] w-full rounded-[2px] border border-input bg-background px-2 text-[12px]" value={deliveryAction} onChange={(event) => setDeliveryAction(event.target.value as DeliveryAction)} disabled={!canMutate}><option value="update_ref">Update target ref</option><option value="proposal">Create proposal</option></select></div><p className="text-[11px] text-muted-foreground">Only currently selected passing verification IDs are requested; failed checks never imply pass.</p><Button type="button" size="sm" disabled={!canMutate || candidate.state !== 'frozen' || !candidate.candidate_revision || !selectedPassing.length} onClick={onRequestDelivery}>Request delivery</Button></>}</div>
       {candidate.delivery_receipt && <div className="border border-state-success/30 bg-state-success/5 p-2 text-[11px]"><strong>Receipt: {candidate.delivery_receipt.result === 'landed' ? 'Landed' : 'Proposed'}</strong><p>Target {candidate.delivery_receipt.target_ref} · revision <code>{candidate.delivery_receipt.candidate_revision}</code>{candidate.delivery_receipt.proposal_ref ? ` · ${candidate.delivery_receipt.proposal_ref}` : ''}</p></div>}
     </div>
   )
 }
 
-function VerificationRow({ verification, selected, onSelect }: { verification: Verification; selected: boolean; onSelect: () => void }) {
+function VerificationRow({ verification, readOnly, selected, onSelect }: { verification: Verification; readOnly: boolean; selected: boolean; onSelect: () => void }) {
   const observed = [
     verification.observed_image && `image ${verification.observed_image}`,
     verification.user && `user ${verification.user}`,
@@ -744,5 +692,5 @@ function VerificationRow({ verification, selected, onSelect }: { verification: V
     verification.environment_sha256 && `environment ${verification.environment_sha256}`,
     verification.setup_script_sha256 && `setup ${verification.setup_script_sha256}`,
   ].filter(Boolean).join(' · ')
-  return <div className="border border-border p-2 text-[10px]"><div className="flex items-start gap-2"><input type="checkbox" aria-label={`Select verification ${verification.verification_id}`} checked={selected} disabled={verification.status !== 'passed'} onChange={onSelect} /><span className="min-w-0 flex-1"><strong>{verification.status}</strong> · <code>{verification.verification_id}</code> · exit {verification.exit_code ?? '—'}<span className="block text-muted-foreground">Observed: {observed || 'Not reported'} · argv: {JSON.stringify(verification.argv)}</span>{verification.error && <span className="block text-state-failed">Failure: {verification.error}</span>}<pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words bg-muted/20 p-1">{verification.output || 'No verification output'}{verification.output_truncated ? '\n[output truncated by server]' : ''}</pre></span></div></div>
+  return <div className="border border-border p-2 text-[10px]"><div className="flex items-start gap-2">{!readOnly && <input type="checkbox" aria-label={`Select verification ${verification.verification_id}`} checked={selected} disabled={verification.status !== 'passed'} onChange={onSelect} />}<span className="min-w-0 flex-1"><strong>{verification.status}</strong> · <code>{verification.verification_id}</code> · exit {verification.exit_code ?? '-'}<span className="block text-muted-foreground">Observed: {observed || 'Not reported'} · argv: {JSON.stringify(verification.argv)}</span>{verification.error && <span className="block text-state-failed">Failure: {verification.error}</span>}<pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words bg-muted/20 p-1">{verification.output || 'No verification output'}{verification.output_truncated ? '\n[output truncated by server]' : ''}</pre></span></div></div>
 }

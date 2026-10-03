@@ -254,7 +254,7 @@ export function LaunchDialog() {
           <DialogTitle>{kind === 'swarm' ? 'Launch a swarm' : 'Launch a run'}</DialogTitle>
           <DialogDescription>
             {kind === 'swarm'
-              ? 'Authorize one integrator and the execution choices it and its workers may use. The integrator asks you clarifying questions and submits a plan; no worker starts until you approve it.'
+              ? 'Authorize one integrator and the execution choices it and its workers may use. The integrator asks you clarifying questions only if it needs answers, then runs the swarm to completion.'
               : 'Start an agent in a container on the workspace\'s base branch. Interactive runs open a terminal; headless runs need a task.'}
           </DialogDescription>
         </DialogHeader>
@@ -272,7 +272,7 @@ export function LaunchDialog() {
           <Label className="space-y-1">
             <span>{kind === 'swarm' ? 'Objective (required)' : mode === 'headless' ? 'Task (required)' : 'Task (optional)'}</span>
             <Textarea autoFocus required={kind === 'swarm' || mode === 'headless'} rows={3} placeholder={kind === 'swarm' ? 'What outcome should the integrator coordinate?' : 'What should the agent do?'} value={task} onChange={(event) => setTask(event.target.value)} />
-            <span className="block text-xs leading-4 font-normal text-muted-foreground">{kind === 'swarm' ? 'The integrator turns this objective into a plan you approve before any worker runs.' : mode === 'headless' ? 'Headless runs start with this task and have no terminal.' : 'Leave blank to open an interactive terminal without a seeded task.'}</span>
+            <span className="block text-xs leading-4 font-normal text-muted-foreground">{kind === 'swarm' ? 'The integrator splits this objective into tasks and runs workers on them.' : mode === 'headless' ? 'Headless runs start with this task and have no terminal.' : 'Leave blank to open an interactive terminal without a seeded task.'}</span>
           </Label>
           <div className={`grid gap-2 ${kind === 'swarm' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
             <div className="min-w-0 space-y-1 text-sm"><Label htmlFor="launch-account">{kind === 'swarm' ? 'Integrator account' : 'Account'}</Label><Select value={account} onValueChange={setAccount}><SelectTrigger id="launch-account"><SelectValue placeholder="Choose an account" /></SelectTrigger><SelectContent>{accounts.map((member) => <SelectItem key={member.id} value={member.id}>{member.display_name}{member.id === ownAccountID ? ' (you)' : ' (shared)'}</SelectItem>)}</SelectContent></Select></div>
