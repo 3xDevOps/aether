@@ -1443,8 +1443,11 @@ func migrate(db *sql.DB) error {
 		if err == nil || !isBusy(err) {
 			return err
 		}
-		if current, ok := committedVersion(db); ok && current != last {
-			last, progress = current, time.Now()
+		if current, ok := committedVersion(db); ok {
+			if last >= 0 && current != last {
+				progress = time.Now()
+			}
+			last = current
 		}
 		if time.Since(progress) > stall {
 			return err
