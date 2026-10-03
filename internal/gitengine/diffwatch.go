@@ -23,6 +23,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
+// newWatcher is replaced by tests that need the kernel to refuse a watcher.
+var newWatcher = fsnotify.NewWatcher
+
 // snapshotTimeout bounds the git work of a single diff snapshot.
 const snapshotTimeout = 30 * time.Second
 const diffWarnInterval = time.Minute
@@ -38,6 +41,10 @@ type diffWatch struct {
 	checkout string
 	base     string
 	watcher  *fsnotify.Watcher
+	// polling is set when the kernel refused the watcher or a directory
+	// watch, and makes loop attempt a snapshot every MaxInterval. watcher is
+	// nil when the checkout root could not be watched at all.
+	polling bool
 
 	// gitIgnoredDirs is the repository-relative set of ignored directories
 	// reported by git. visibleFiles and visibleDirs are the tracked or
@@ -120,16 +127,15 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	}
 	e.mu.Unlock()
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("gitengine: start watcher: %w", err)
+	refDir := filepath.Dir(filepath.Join(checkout, ".git", "refs", "heads", meta.Branch))
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		return fmt.Errorf("gitengine: create ref watch directory %s: %w", refDir, err)
 	}
 	w := &diffWatch{
 		e:            e,
 		run:          run,
 		checkout:     checkout,
 		base:         meta.Base,
-		watcher:      watcher,
 		watchedDirs:  make(map[string]struct{}),
 		metadataDirs: make(map[string]struct{}),
 		done:         make(chan struct{}),
@@ -140,37 +146,20 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		lastHead: head,
 		lastTree: lastTree,
 	}
-	if err := w.loadIgnoreState(ctx); err != nil {
-		// A failure to ask git about excludes must never turn a working
-		// checkout blind. Falling back to the full walk costs watches, but
-		// preserves change detection and makes the failure visible.
-		slog.Warn("gitengine: cannot load git ignore state; watching all directories",
-			"run", string(run), "error", err)
-	}
-	if err := w.addRecursive(checkout); err != nil {
-		_ = watcher.Close()
-		return err
-	}
-	refDir := filepath.Dir(filepath.Join(checkout, ".git", "refs", "heads", meta.Branch))
-	if err := os.MkdirAll(refDir, 0o755); err != nil {
-		_ = watcher.Close()
-		return fmt.Errorf("gitengine: create ref watch directory %s: %w", refDir, err)
-	}
-	for _, dir := range []string{
-		filepath.Join(checkout, ".git"),
-		filepath.Join(checkout, ".git", "info"),
-		refDir,
-	} {
-		if err := w.addWatch(dir, true); err != nil {
-			_ = watcher.Close()
-			return fmt.Errorf("gitengine: watch %s: %w", dir, err)
-		}
+	if err := w.watchCheckout(ctx, refDir); err != nil {
+		// The kernel caps inotify instances and watches per user, and run
+		// containers draw on the same budget. A run must still launch when
+		// that budget is spent, so the watch polls instead.
+		slog.Warn("gitengine: cannot watch checkout for file changes; polling for diff snapshots instead",
+			"run", string(run), "interval", e.cfg.MaxInterval, "error", err)
 	}
 
 	e.mu.Lock()
 	if e.closed || e.watches[run] != nil {
 		e.mu.Unlock()
-		_ = watcher.Close()
+		if w.watcher != nil {
+			_ = w.watcher.Close()
+		}
 		return nil
 	}
 	e.watches[run] = w
@@ -178,6 +167,45 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 
 	go w.loop()
 	return nil
+}
+
+// watchCheckout registers the checkout and its Git metadata with a new
+// fsnotify watcher, or switches the watch to polling when it cannot.
+func (w *diffWatch) watchCheckout(ctx context.Context, refDir string) error {
+	watcher, err := newWatcher()
+	if err != nil {
+		w.polling = true
+		return fmt.Errorf("gitengine: start watcher: %w", err)
+	}
+	w.watcher = watcher
+	if ignoreErr := w.loadIgnoreState(ctx); ignoreErr != nil {
+		// A failure to ask git about excludes must never turn a working
+		// checkout blind. Falling back to the full walk costs watches, but
+		// preserves change detection and makes the failure visible.
+		slog.Warn("gitengine: cannot load git ignore state; watching all directories",
+			"run", string(w.run), "error", ignoreErr)
+	}
+	err = w.addRecursive(w.checkout)
+	for _, dir := range []string{
+		filepath.Join(w.checkout, ".git"),
+		filepath.Join(w.checkout, ".git", "info"),
+		refDir,
+	} {
+		if err != nil {
+			break
+		}
+		if err = w.addWatch(dir, true); err != nil {
+			err = fmt.Errorf("gitengine: watch %s: %w", dir, err)
+		}
+	}
+	if err != nil {
+		_ = watcher.Close()
+		w.watcher = nil
+		w.polling = true
+		clear(w.watchedDirs)
+		clear(w.metadataDirs)
+	}
+	return err
 }
 
 // StopDiffWatch stops the run's diff watcher. The registry entry survives
@@ -465,7 +493,8 @@ func (w *diffWatch) reconcileWatches() error {
 				return fmt.Errorf("gitengine: watch %s: %w", path, err)
 			}
 			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
+				w.polling = true
+				slog.Warn("gitengine: diff watch cannot observe subtree; polling for its changes",
 					"run", string(w.run), "dir", path, "error", err)
 			}
 		}
@@ -505,7 +534,8 @@ func (w *diffWatch) addRecursive(root string) error {
 				return fmt.Errorf("gitengine: watch %s: %w", path, err)
 			}
 			if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-				slog.Warn("gitengine: diff watch cannot observe subtree; its changes will not produce snapshots",
+				w.polling = true
+				slog.Warn("gitengine: diff watch cannot observe subtree; polling for its changes",
 					"run", string(w.run), "dir", path, "error", err)
 			}
 		}
@@ -515,15 +545,24 @@ func (w *diffWatch) addRecursive(root string) error {
 
 func (w *diffWatch) loop() {
 	defer close(w.finished)
-	defer func() { _ = w.watcher.Close() }()
 
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	defer timer.Stop()
 
+	// Without a watcher both channels stay nil and never deliver, leaving
+	// the timer as the only source of snapshots.
+	var fsEvents chan fsnotify.Event
+	var fsErrors chan error
+	if w.watcher != nil {
+		defer func() { _ = w.watcher.Close() }()
+		fsEvents, fsErrors = w.watcher.Events, w.watcher.Errors
+	}
+	w.arm(timer, time.Now())
+
 	for {
 		select {
-		case ev, ok := <-w.watcher.Events:
+		case ev, ok := <-fsEvents:
 			if !ok {
 				return
 			}
@@ -566,7 +605,8 @@ func (w *diffWatch) loop() {
 				w.requestIgnoreRefresh(now)
 				if err := w.addWatch(ev.Name, false); err != nil &&
 					!errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-					slog.Warn("gitengine: diff watch cannot observe new directory",
+					w.polling = true
+					slog.Warn("gitengine: diff watch cannot observe new directory; polling for its changes",
 						"run", string(w.run), "dir", ev.Name, "error", err)
 				}
 				w.arm(timer, now)
@@ -590,7 +630,7 @@ func (w *diffWatch) loop() {
 			w.lastEvent = now
 			w.dirty = true
 			w.arm(timer, now)
-		case err, ok := <-w.watcher.Errors:
+		case err, ok := <-fsErrors:
 			if !ok {
 				return
 			}
@@ -606,6 +646,9 @@ func (w *diffWatch) loop() {
 			w.arm(timer, now)
 		case <-timer.C:
 			now := time.Now()
+			if w.polling && !now.Before(w.lastSnap.Add(w.e.cfg.MaxInterval)) {
+				w.dirty = true
+			}
 			if w.ignoreRefreshPending && !w.ignoreRefreshAt.After(now) {
 				w.ignoreRefreshPending = false
 				w.ignoreRefreshAt = time.Time{}
@@ -677,6 +720,9 @@ func (w *diffWatch) arm(timer *time.Timer, now time.Time) {
 	if w.ignoreRefreshPending && (deadline.IsZero() || w.ignoreRefreshAt.Before(deadline)) {
 		deadline = w.ignoreRefreshAt
 	}
+	if poll := w.lastSnap.Add(w.e.cfg.MaxInterval); w.polling && (deadline.IsZero() || poll.Before(deadline)) {
+		deadline = poll
+	}
 	if !timer.Stop() {
 		select {
 		case <-timer.C:
@@ -715,6 +761,9 @@ func (w *diffWatch) snapshot() {
 		changed = !slices.Equal(files, w.lastFiles)
 	}
 	if changed {
+		if w.polling {
+			w.lastChange.Store(time.Now().UnixNano())
+		}
 		w.lastFiles = files
 		payload := events.RunDiffPayload{Files: files}
 		if treeErr == nil {
