@@ -279,8 +279,9 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 }
 
 // Discovery on a shared account describes what a launch there would run: the
-// caller's own installations and definitions, never the owner's, and whether
-// the owner has the login each agent needs.
+// caller's own definitions, never the owner's, an agent installed in either
+// home, since a launch borrows the owner's installation when the caller has
+// none, and whether the owner has the login each agent needs.
 func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	t.Parallel()
 	s, owner := newAgentTestServer(t)
@@ -311,6 +312,21 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	}
 	install(owner.ID, "claude", "mybot")
 	install(grantee.ID, "codex", "ownbot")
+	// The owner's pi links outside the directories a borrowed installation
+	// mounts, so the grantee cannot run it on the owner's account.
+	ownerHome, err := homes.Path(owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(ownerHome, "tools"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(ownerHome, "tools", "pi"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("/root/tools/pi", filepath.Join(ownerHome, ".local/bin", "pi")); err != nil {
+		t.Fatal(err)
+	}
 	if _, perr := callAgentRegister(t, s, owner.ID, validAgentDefinition()); perr != nil {
 		t.Fatal(perr)
 	}
@@ -363,8 +379,11 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	if _, ok := agents["mybot"]; ok {
 		t.Fatalf("the owner's definition is listed for the grantee: %+v", agents)
 	}
+	if agents["pi"].Installed {
+		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
+	}
 	for name, want := range map[string]protocol.AgentInfo{
-		"claude": {Name: "claude", Source: "shipped", Installed: false, LoginMissing: true},
+		"claude": {Name: "claude", Source: "shipped", Installed: true, LoginMissing: true},
 		"codex":  {Name: "codex", Source: "shipped", Installed: true},
 		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
 		"omp":    {Name: "omp", Source: "shipped", Installed: false, Unavailable: refusal},

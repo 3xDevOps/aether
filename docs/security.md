@@ -57,17 +57,47 @@ are attributed to the selected account.
 A run always starts from its launcher's saved image, or the standard image,
 with the launcher's home as `$HOME`. Git identity, `.gitconfig`, the gh login,
 the signing key, SSH files, shell history, harness configuration (settings,
-hooks, MCP servers, history), installed executables, imported configuration,
-terminal image uploads, and the profile snapshot pin are all the launcher's.
+hooks, MCP servers, history), installed executables (except a borrowed agent
+installation, below), imported configuration, terminal image uploads, and the
+profile snapshot pin are all the launcher's.
 Candidate verification started by a run's agent runs in the home that run's
 container mounts, which Aether records on the run when it is launched; a
 handoff (`aether handoff`) changes the run's owner but not that home, and
 verification does not need the run's container to still be alive. On a shared
-account, Aether additionally mounts only that harness's login path from the
-owner's home over the same path in the launcher's home, read-write. The **Login state** column of
-[harnesses.md](harnesses.md#shipped-harnesses) lists each path; for `claude`
-it is `~/.claude/.credentials.json`. Except for `omp`, no executable of the
-owner's runs in the recipient's container.
+account, Aether additionally mounts that harness's login path from the
+owner's home over the same path in the launcher's home, read-write. The
+**Login state** column of [harnesses.md](harnesses.md#shipped-harnesses) lists
+each path; for `claude` it is `~/.claude/.credentials.json`.
+
+When the launcher's home has no `~/.local/bin/<executable>` for the harness,
+the run borrows the owner's installation. The owner's `~/.local/bin` and, when
+it exists, `~/.local/lib` are mounted read-only at `~/.aether/account/bin` and
+`~/.aether/account/lib`, and `~/.aether/account/bin` is appended to the end of
+`PATH`. Each install directory the harness declares
+(`harness.Profile.InstallPaths`; `~/.local/share/claude` for `claude`) is
+mounted read-only at its own path. Nothing else of the owner's home is
+mounted, and `~/.local/share` as a whole never is: opencode keeps its login
+there. The owner's `~/.local/bin/<executable>` counts as an installation only
+when every link it follows stays inside those mounted directories; a link
+into anything else would dangle in the run, so the agent is reported as not
+installed instead. When neither home has the executable, nothing is borrowed
+and the run starts whatever the image provides.
+
+Two limits follow from mounting the owner's files unchanged. Claude Code's
+installer links by absolute path (`/root/...` or `/home/aether/...`), so an
+owner who installed as root and a recipient whose image runs as a non-root
+user, or the reverse, get a link that does not resolve and the container's
+own `not found` error. A recipient whose image runs as a different non-root
+uid can only execute what the owner's file modes allow others to; the
+read-only mounts are never re-owned.
+
+A borrowed installation means the owner's executables run in the recipient's
+container, with the recipient's home, GitHub login, and signing key. Every
+executable in the owner's `~/.local/bin` is on `PATH`, after the recipient's
+own and the image's, so a recipient who launches without their own
+installation trusts the owner's. The mounts are read-only, so the recipient's
+run cannot alter the owner's installation. A recipient who installs the agent
+in their own `~/.local/bin` runs their own copy and borrows nothing.
 
 `omp` is the exception. It keeps its login in a SQLite WAL database,
 `agent.db`, beside `config.yml`, `mcp.json`, its extensions, usage tables, and

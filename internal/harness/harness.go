@@ -263,6 +263,11 @@ type Profile struct {
 	// holding the harness's native login state. Everything else in a shared
 	// run is the launcher's. Resolve them with LoginPaths.
 	CredentialPaths []string
+	// InstallPaths are home-relative directories the CLI's ~/.local/bin
+	// launcher links into. A launch on another member's account that
+	// borrows the owner's installation mounts each read-only from the
+	// owner's home at the same path. Definitions never set them.
+	InstallPaths []string
 	// PinLogin means the CLI replaces its login file by rename instead of
 	// rewriting it, so once the member has shared their account the file is
 	// mounted in place in their own containers too; the rename then fails
@@ -390,6 +395,9 @@ var profiles = map[string]Profile{
 		// sandbox.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
 		CredentialPaths: []string{".claude/.credentials.json"},
+		// The native installer links ~/.local/bin/claude, by absolute
+		// path, to ~/.local/share/claude/versions/<version>.
+		InstallPaths: []string{".local/share/claude"},
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.
@@ -661,6 +669,14 @@ func HomeRelative(p string) string {
 		return "."
 	}
 	return clean
+}
+
+// BorrowRoots is what a launch that borrows an account owner's installation
+// mounts read-only from the owner's home. bin and lib travel together because
+// npm links a launcher into ../lib; InstallPaths cover installers that link by
+// absolute path instead.
+func (p Profile) BorrowRoots() []string {
+	return append([]string{".local/bin", ".local/lib"}, p.InstallPaths...)
 }
 
 // LoginPaths returns CredentialPaths relative to the container home. A

@@ -29,8 +29,9 @@ import { useStore } from '@/store'
 type LaunchMode = 'tui' | 'headless'
 type LaunchKind = 'single' | 'swarm'
 
-// An agent installed in the caller's environment launches on an account
-// unless the server says why it would be refused there.
+// An agent installed for the launch, in the caller's environment or on a
+// shared account in the owner's, launches on an account unless the server
+// says why it would be refused there.
 function launchable(agent: AgentInfo): boolean {
   return agent.installed === true && agent.login_missing !== true && agent.own_account_only !== true && !agent.unavailable
 }
@@ -282,7 +283,7 @@ export function LaunchDialog() {
           {kind === 'swarm' && <SwarmFields integrator={integratorChoice} accounts={accounts} agentsByAccount={agentsByAccount} choices={workerChoices} onToggle={toggleChoice} onMode={setChoiceMode} maxConcurrent={maxConcurrent} maxAttempts={maxAttempts} onConcurrent={setMaxConcurrent} onAttempts={setMaxAttempts} />}
           {agentError && <p role="alert" className="break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{agentError}</p>}
           {swarmError && <p role="alert" className="break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{swarmError}</p>}
-          {noAgents && !agentError && <div className="border-y border-border/70 px-2 py-2"><p className="text-[13px] font-medium">No agent is installed in your environment.</p><p className="mt-0.5 text-xs leading-4 text-muted-foreground">{sharedAccount ? `A run on ${accountName}'s account starts the agent installed in your environment with ${accountName}'s login, so install it in your environment; you need not log in to it. Set up an agent opens Agents, where Add agent installs it.` : 'Set one up before launching work. Set up an agent opens Agents, where Add agent installs it.'}</p><Button type="button" size="sm" className="mt-2" onClick={setUpAgent}>Set up an agent</Button></div>}
+          {noAgents && !agentError && <div className="border-y border-border/70 px-2 py-2"><p className="text-[13px] font-medium">{sharedAccount ? `Neither you nor ${accountName} has an agent installed.` : 'No agent is installed in your environment.'}</p><p className="mt-0.5 text-xs leading-4 text-muted-foreground">{sharedAccount ? `A run on ${accountName}'s account uses ${accountName}'s login and your installation of the agent, or ${accountName}'s when you have none. Set up an agent opens Agents, where Add agent installs it in your environment.` : 'Set one up before launching work. Set up an agent opens Agents, where Add agent installs it.'}</p><Button type="button" size="sm" className="mt-2" onClick={setUpAgent}>Set up an agent</Button></div>}
           {loggedOutAgents.length > 0 && !agentError && <p role="status" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">{accountName} is not logged in to {loggedOutAgents.map((agent) => agent.name).join(', ')}, so {loggedOutAgents.length === 1 ? 'it' : 'they'} cannot launch on this account. {accountName} logs in from the terminal dock on their own Board; then press Refresh agents.</p>}
           {ownOnlyAgents.length > 0 && !agentError && <p role="status" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">Your own agent definitions run only on your own account: {ownOnlyAgents.map((agent) => agent.name).join(', ')}. To launch one, choose your own account, marked (you), under {kind === 'swarm' ? 'Integrator account' : 'Account'}.</p>}
           {unavailableAgents.map((agent) => !agentError && <p key={agent.name} role="status" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs break-words">{agent.name} cannot launch on this account: {agent.unavailable}</p>)}

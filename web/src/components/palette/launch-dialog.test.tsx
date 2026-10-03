@@ -65,6 +65,7 @@ describe('launch dialog', () => {
   })
 
   it('discovers a completed installation without restarting the app', async () => {
+    useStore.setState({ info: serverInfo })
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
     render(<LaunchDialog />)
     await screen.findByText(/No agent is installed/)
@@ -184,7 +185,7 @@ describe('launch dialog', () => {
     )
   })
 
-  it('sends a recipient with nothing installed to set up their own environment', async () => {
+  it('tells a recipient that neither side has an agent installed', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
       ? [agentInfo({ installed: false })]
@@ -192,8 +193,8 @@ describe('launch dialog', () => {
     await open()
 
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
-    await screen.findByText('No agent is installed in your environment.')
-    expect(screen.getByText("A run on Bob's account starts the agent installed in your environment with Bob's login, so install it in your environment; you need not log in to it. Set up an agent opens Agents, where Add agent installs it.")).toBeDefined()
+    await screen.findByText('Neither you nor Bob has an agent installed.')
+    expect(screen.getByText("A run on Bob's account uses Bob's login and your installation of the agent, or Bob's when you have none. Set up an agent opens Agents, where Add agent installs it in your environment.")).toBeDefined()
     expect(screen.getByText("Uses Bob's agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.")).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))

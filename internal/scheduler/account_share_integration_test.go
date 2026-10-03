@@ -162,10 +162,14 @@ func (r shareRun) close(t *testing.T, e *testEnv) {
 	})
 }
 
+// printLogin is a "claude" argv that prints the login it finds. The leading
+// sleep keeps the output behind the attach.
+var printLogin = []string{"sh", "-c", `sleep 1; printf 'harness-login:%s\n' "$(cat "$HOME/.claude/.credentials.json")"; sleep 1`}
+
 // newShareDockerEnv is a scheduler on the real engine whose "claude" harness
-// prints the login it finds and exits into the supervisor's login shell,
-// with a second member, Grace, beside the test member Ada.
-func newShareDockerEnv(t *testing.T) (*testEnv, *runtime.Docker, *client.Client, *domain.Member) {
+// runs claude and exits into the supervisor's login shell, with a second
+// member, Grace, beside the test member Ada.
+func newShareDockerEnv(t *testing.T, claude []string) (*testEnv, *runtime.Docker, *client.Client, *domain.Member) {
 	t.Helper()
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
@@ -184,13 +188,9 @@ func newShareDockerEnv(t *testing.T) (*testEnv, *runtime.Docker, *client.Client,
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Runtime = docker
 		cfg.RunContainerTTL = -time.Second
-		cfg.Harnesses = map[string]HarnessSpec{
-			// An argv override keeps the shipped claude profile, whose login
-			// path is .claude/.credentials.json. The leading sleep keeps the
-			// output behind the attach.
-			"claude": {TUIArgs: []string{"sh", "-c",
-				`sleep 1; printf 'harness-login:%s\n' "$(cat "$HOME/.claude/.credentials.json")"; sleep 1`}},
-		}
+		// An argv override keeps the shipped claude profile, whose login
+		// path is .claude/.credentials.json.
+		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: claude}}
 	})
 	owner := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
 	if err = e.db.CreateMember(t.Context(), owner); err != nil {
@@ -204,7 +204,7 @@ func newShareDockerEnv(t *testing.T) (*testEnv, *runtime.Docker, *client.Client,
 // Grace's Claude login mounted in, and Ada's identity authors its commit.
 // Ada's later run on her own account mounts nothing of Grace's.
 func TestIntegrationSharedAccountRunDocker(t *testing.T) {
-	e, docker, cli, owner := newShareDockerEnv(t)
+	e, docker, cli, owner := newShareDockerEnv(t, printLogin)
 	ctx := t.Context()
 	// A run on Grace's account that used her image would fail here: it
 	// does not exist in the engine.
@@ -283,7 +283,7 @@ func TestIntegrationSharedAccountRunDocker(t *testing.T) {
 // run on Grace's account reads that same file, including writes Grace's run
 // makes while both are live.
 func TestIntegrationSharerPinDocker(t *testing.T) {
-	e, docker, cli, owner := newShareDockerEnv(t)
+	e, docker, cli, owner := newShareDockerEnv(t, printLogin)
 	ctx := t.Context()
 	if err := e.db.ShareAccount(ctx, owner.ID, e.member.ID); err != nil {
 		t.Fatal(err)

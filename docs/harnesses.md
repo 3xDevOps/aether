@@ -15,9 +15,10 @@ Two rules shape everything below:
    [Updates before launch](#updates-before-launch).
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
-   Credentials remain in the member home; an explicit account share mounts only
+   Credentials remain in the member home; an explicit account share mounts
    the harness's login path (the **Login state** column below) from that home
-   into a recipient's run, a whole directory for `omp`. For the read-only subscription quota
+   into a recipient's run, a whole directory for `omp`, and no other
+   credential. For the read-only subscription quota
    indicator, the server may read supported native Claude Code and Codex
    subscription credentials in that home and call the vendor's fixed HTTPS
    usage endpoint. Credential bytes and provider responses are never sent to
@@ -62,7 +63,14 @@ window has passed without a new measurement.
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user). **Login state** is the path an
 account share mounts from the owner's home into a recipient's run
-(`harness.Profile.CredentialPaths`); everything else there is the launcher's.
+(`harness.Profile.CredentialPaths`). Everything else there is the
+launcher's, except the owner's installation of the agent when the launcher
+has no `~/.local/bin/<executable>` of their own: the owner's `~/.local/bin`
+and `~/.local/lib` mounted read-only at `~/.aether/account/bin` and
+`~/.aether/account/lib`, last on `PATH`, and each directory in
+`harness.Profile.InstallPaths` read-only at its own path (`claude`:
+`~/.local/share/claude`, where the native installer keeps the versions
+`~/.local/bin/claude` links to).
 `omp` shares a directory because its login is a SQLite WAL database beside its
 settings, MCP configuration, extensions, and sessions. omp loads extensions and
 MCP server commands from that directory, so a recipient's run can plant code
@@ -930,13 +938,13 @@ The local dashboard's **I've installed and logged in** button checks `agent.list
 before confirming installation. The Agents page shows **Installed** or
 **Not installed** for your account. These checks verify the executable;
 the agent verifies its vendor login when it starts. Shipped agents need no
-separate registration record. Your installation is used only by runs you
-launch. Sharing your account lends other members your login, not your
-installation: each recipient installs the agent in their own environment
-([teams.md](teams.md#agent-accounts)).
+separate registration record. Sharing your account lends other members your
+login, and your installation to a recipient who has none of their own; a
+recipient need not install the agent ([teams.md](teams.md#agent-accounts)).
 
-`agent.list` with `account_member_id` set to a shared account still reports
-the caller's own agents and installations, and says why a launch of one on
+`agent.list` with `account_member_id` set to a shared account reports the
+caller's own agents, `installed` when the executable is in the caller's
+`~/.local/bin` or the account owner's, and says why a launch of one on
 that account would be refused, resolving the name as a launch does:
 `login_missing: true` when the account owner has no login at its **Login
 state** path (a missing or empty file), `own_account_only: true` when it
@@ -1088,7 +1096,8 @@ A member's own definition runs only on that member's own account. On a
 shared account, only a shipped harness or a server-wide definition is
 launched, and its `CredentialPaths` are the login paths the share mounts from
 the owner's home. A launch is refused when a credential path is the home
-itself.
+itself. A definition declares no install directories, so a recipient without
+its executable borrows only the owner's `~/.local/bin` and `~/.local/lib`.
 
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by harness name. Each definition must
@@ -1169,7 +1178,9 @@ release channel. These are never updated:
 - `opencode`, because an upgrade can cross a major version that the managed
   OpenCode wrapper refuses (see [Managed native loading](#managed-native-loading));
 - an agent installed in the image rather than in `~/.local/bin` of the member
-  home.
+  home;
+- an account owner's installation a recipient's run borrows: it is mounted
+  read-only, and the owner's own launches update it.
 
 A launch waits at most 25 seconds for the update. If it is still running, the
 agent starts on whatever is installed at that moment, the update finishes in

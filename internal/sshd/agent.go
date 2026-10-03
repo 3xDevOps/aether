@@ -4,13 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -71,9 +66,9 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 }
 
 // agentList describes what a launch by member on the requested account would
-// run: member's own executables and definitions, since a run uses its
-// launcher's environment, and on another member's account whether that
-// account has the login the launch needs.
+// run: member's own definitions, since a run uses its launcher's environment,
+// the executables installed for it, and on another member's account whether
+// that account has the login the launch needs.
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.AgentListParams](raw)
 	if perr != nil {
@@ -83,8 +78,8 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
-	describe := func(name, source, executable, installScript string) (protocol.AgentInfo, error) {
-		installed, err := s.agentInstalled(member, executable)
+	describe := func(name, source, executable, installScript string, installPaths []string) (protocol.AgentInfo, error) {
+		installed, err := s.agentInstalled(member, account, executable, installPaths)
 		if err != nil {
 			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
 		}
@@ -109,7 +104,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript)
+		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.InstallPaths)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -124,7 +119,9 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
 		}
-		info, err := describe(row.Name, "member", def.Executable, "")
+		// A member's own definition runs only on their own account, so there
+		// is no installation to borrow for it.
+		info, err := describe(row.Name, "member", def.Executable, "", nil)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -136,79 +133,14 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	return protocol.AgentListResult{Agents: agents}, nil
 }
 
-func (s *Server) agentInstalled(member domain.MemberID, executable string) (bool, error) {
+// agentInstalled reports whether a launch by member on account finds
+// executable: in member's home, or on another member's account in that
+// owner's home, whose installation the launch then borrows (see
+// memberhome.Manager.Installation for which links installPaths let resolve).
+func (s *Server) agentInstalled(member, account domain.MemberID, executable string, installPaths []string) (bool, error) {
 	if s.cfg.Homes == nil {
 		return true, nil
 	}
-	home, err := s.cfg.Homes.Path(member)
-	if err != nil {
-		return false, err
-	}
-	root, err := os.OpenRoot(home)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = root.Close() }()
-
-	// Vendor installers use absolute container-home symlinks. Resolve each
-	// component explicitly; os.Root confines even concurrent symlink swaps
-	// to the member's home instead of following a link on the server host.
-	pending := []string{".local", "bin", executable}
-	resolved := []string{}
-	links := 0
-	for len(pending) > 0 {
-		part := pending[0]
-		pending = pending[1:]
-		switch part {
-		case "", ".":
-			continue
-		case "..":
-			if len(resolved) == 0 {
-				return false, nil
-			}
-			resolved = resolved[:len(resolved)-1]
-			continue
-		}
-		candidate := filepath.Join(append(resolved, part)...)
-		info, err := root.Lstat(candidate)
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			links++
-			if links > 40 {
-				return false, nil
-			}
-			target, err := root.Readlink(candidate)
-			if err != nil {
-				return false, err
-			}
-			if path.IsAbs(target) {
-				// Strip only the home prefix: cleaning before resolving a
-				// symlink followed by ".." would change its meaning.
-				switch {
-				case strings.HasPrefix(target, harness.HomeDir("")+"/"):
-					target = strings.TrimPrefix(target, harness.HomeDir("")+"/")
-				case strings.HasPrefix(target, harness.HomeDir("1000")+"/"):
-					target = strings.TrimPrefix(target, harness.HomeDir("1000")+"/")
-				default:
-					return false, nil
-				}
-				resolved = nil
-			}
-			pending = append(strings.Split(target, "/"), pending...)
-			continue
-		}
-		if len(pending) == 0 {
-			return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0, nil
-		}
-		if !info.IsDir() {
-			return false, nil
-		}
-		resolved = append(resolved, part)
-	}
-	return false, nil
+	installation, err := s.cfg.Homes.Installation(member, account, executable, installPaths)
+	return installation != "", err
 }

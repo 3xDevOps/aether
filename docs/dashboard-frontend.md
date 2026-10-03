@@ -1164,16 +1164,17 @@ no way back to that state once one is. Under it are the installed entries from
 `agent.list`, then `custom`, the escape hatch that `agent.list` never returns
 and that only launches where the deployment pinned a harness with
 `--harness-definitions`. `agent.list` reports installation from the
-caller's persistent `~/.local/bin`; uninstalled shipped entries
+caller's persistent `~/.local/bin` or, on a shared account, the owner's;
+uninstalled shipped entries
 remain visible on the Agents page so setup can install them. The launch form
 also remembers the most recently used installed agent for each account and
 falls back to the first installed entry. With nothing installed nothing is
 preselected, so Launch stays disabled until the member picks one: "No agent is
 installed in your environment." and a **Set up an agent** button sit beside the
 field rather than replacing it, and the button opens the Agents view. On a
-shared account the note adds that the run starts the agent installed in the
-caller's environment with the owner's login, so the caller installs it
-without logging in. A failed
+shared account the heading reads "Neither you nor <owner> has an agent
+installed." and the note says the run uses the owner's login and the
+caller's installation, or the owner's when the caller has none. A failed
 list request shows its error and no setup button - nothing here can fix a
 gateway that did not answer - and Launch stays disabled there too. **Refresh
 agents** retries discovery after a connection failure or an installation

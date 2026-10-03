@@ -840,7 +840,7 @@ aether account revoke <member-id>
 The run is owned by the authenticated launcher and runs in the launcher's
 environment: their saved image, home, git identity, GitHub login, installed
 agents, and configuration.
-The selected account supplies only the agent's login file, read-write, plus
+The selected account supplies the agent's login file, read-write, plus
 vendor quota and cost attribution. `omp` is the exception: it shares the
 owner's whole `~/.omp/agent` directory, from which omp loads extensions and
 MCP server commands, so a recipient's run can plant code that runs in the
@@ -849,19 +849,20 @@ Share an `omp` account only with someone you would give your home to.
 [security.md](security.md#account-sharing) lists exactly what is shared and
 what a recipient's run can still do with the login.
 
-Before launching on a shared account, the recipient:
+The recipient needs neither the agent installed nor its vendor login. A run
+uses the recipient's own installation in `~/.local/bin` when there is one,
+and otherwise the owner's, mounted read-only. The launch dialog lists every
+agent installed in either home (`agent.list` reports `installed` for either).
+With nothing installed on either side, it says **Neither you nor `<owner>`
+has an agent installed.** and offers **Set up an agent**, which installs one
+in the recipient's environment.
 
-- Installs the agent in their own environment. In the dashboard, **Set up an
-  agent** in the launch dialog opens **Agents**, where **Add agent** types the
-  vendor installer into the terminal dock. From the CLI: `aether agent add
-  <name>`, then install it in `aether terminal`. The vendor login is not
-  needed for an agent they only borrow. The owner's executables never run in
-  the recipient's container, except an `omp` owner's extensions and MCP
-  servers.
-- Connects their own GitHub; the run pushes and opens pull requests as the
-  recipient. **Connect GitHub** is available from the Agents page and the
-  onboarding Agents step on local and hosted gateways. `aether github connect`
-  ([environment-home.md](environment-home.md#connect-github)) is the CLI equivalent.
+Before launching on a shared account, the recipient connects their own
+GitHub; the run pushes and opens pull requests as the recipient. **Connect
+GitHub** is available from the Agents page and the onboarding Agents step on
+local and hosted gateways. `aether github connect`
+([environment-home.md](environment-home.md#connect-github)) is the CLI
+equivalent.
 
 A member-defined agent (`aether agent add`) runs only on its member's own
 account. On a shared account the launch dialog lists it as `<name> (your

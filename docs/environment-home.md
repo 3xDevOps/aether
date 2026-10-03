@@ -5,8 +5,10 @@ Aether mounts it read-write as `$HOME` in the member's environment terminal and
 every run the member launches, including the run's shell tabs and runs on
 another member's shared agent account. Those containers also start from that
 member's saved image, or the standard image when none is saved. A share of
-your own account exposes only the launched agent's login to the recipient's
-runs, not the rest of this home; see [teams.md](teams.md#agent-accounts).
+your own account exposes the launched agent's login to the recipient's runs
+and, when the recipient has no installation of that agent, your
+`~/.local/bin`, `~/.local/lib`, and the agent's install directory, read-only;
+nothing else of this home. See [teams.md](teams.md#agent-accounts).
 
 ## What persists
 
@@ -29,9 +31,11 @@ terminal turns that layer into your member image so later runs get it; see
 The local dashboard (`aether gui`) and CLI list both the agents Aether ships
 and the ones members define. Its launch form and onboarding wizard's First run
 step only offer agents whose executable is installed in your own
-`~/.local/bin`, also when launching on a shared account, and with none
-installed they say so and offer **Set up an agent** rather than a launch the
-server would refuse; the Agents page still lists uninstalled shipped agents so
+`~/.local/bin` or, when launching on a shared account, in the owner's, since a
+run there uses the owner's installation when you have none. You need not
+install an agent to launch it on a shared account. With none installed they
+say so and offer **Set up an agent** rather than a launch the server would
+refuse; the Agents page still lists uninstalled shipped agents so
 you can set them up. On a shared account, an agent whose owner has no login
 for it is not offered either, nor is your own member-defined agent, which
 runs only on your own account. The server-hosted dashboard has no onboarding
