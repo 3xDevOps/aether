@@ -280,6 +280,24 @@ cleanup before it can replace the terminal. A retry only removes a durable
 row that still names that same container, so a newer terminal cannot be
 deleted by an older cleanup.
 
+### Database startup contention
+
+`aether-server serve` applies pending SQLite schema migrations when it opens
+the state database. Each schema change and its version record commit together.
+If another opener has already committed the required version, startup resumes
+from the latest committed version even when a competing writer holds the lock.
+Uncommitted or rolled-back version records do not count as completed work.
+
+If a required migration still cannot obtain the write lock within the bounded
+wait, startup returns the original SQLite error, for example:
+
+```text
+store: begin migration 1: database is locked (5) (SQLITE_BUSY)
+```
+
+Investigate the competing writer before retrying startup. Do not delete the
+database or edit `schema_migrations` to bypass the failure.
+
 ### Server reboot, or a hard kill
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs

@@ -1463,40 +1463,41 @@ func migrateOnce(db *sql.DB) error {
 	).Scan(&current); err != nil {
 		return fmt.Errorf("store: read schema version: %w", err)
 	}
+	for current < len(migrations) {
+		var err error
+		current, err = applyMigration(db, current+1)
+		if err != nil {
+			return err
+		}
+	}
 	if current > len(migrations) {
 		return fmt.Errorf("store: database schema version %d is newer than this binary supports (%d)",
 			current, len(migrations))
-	}
-
-	for v := current + 1; v <= len(migrations); v++ {
-		if err := applyMigration(db, v); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
 // applyMigration runs one migration in a transaction whose first statement
 // claims the version row (acquiring the write lock before any DDL). When a
-// concurrent opener already applied this version, the claim inserts zero
-// rows and the DDL is skipped, so racing Opens on one file all succeed.
+// concurrent opener already applied this version, it returns the latest
+// committed version so the caller skips the completed work.
 //
 // A version in foreignKeysOffMigrations runs on one pinned connection with
 // foreign keys off, because SQLite ignores that pragma inside a
 // transaction and DROP TABLE would otherwise fire ON DELETE CASCADE into
 // every referencing table. PRAGMA foreign_key_check must come back empty
 // before it commits.
-func applyMigration(db *sql.DB, version int) error {
+func applyMigration(db *sql.DB, version int) (int, error) {
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("store: begin migration %d: %w", version, err)
+		return 0, fmt.Errorf("store: begin migration %d: %w", version, err)
 	}
 	defer conn.Close() //nolint:errcheck // returns the connection to the pool
 	fkOff := foreignKeysOffMigrations[version]
 	if fkOff {
 		if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
-			return fmt.Errorf("store: migration %d: disable foreign keys: %w", version, err)
+			return 0, fmt.Errorf("store: migration %d: disable foreign keys: %w", version, err)
 		}
 		defer func() {
 			if _, restoreErr := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); restoreErr != nil {
@@ -1507,7 +1508,20 @@ func applyMigration(db *sql.DB, version int) error {
 	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: begin migration %d: %w", version, err)
+		if isBusy(err) {
+			// The writer may have finished this version before taking another lock.
+			var current int
+			readErr := conn.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`,
+			).Scan(&current)
+			if readErr != nil {
+				return 0, fmt.Errorf("store: begin migration %d: %w", version, errors.Join(err, readErr))
+			}
+			if current >= version {
+				return current, nil
+			}
+		}
+		return 0, fmt.Errorf("store: begin migration %d: %w", version, err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
@@ -1517,27 +1531,33 @@ func applyMigration(db *sql.DB, version int) error {
 		version,
 	)
 	if err != nil {
-		return fmt.Errorf("store: record migration %d: %w", version, err)
+		return 0, fmt.Errorf("store: record migration %d: %w", version, err)
 	}
 	claimed, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("store: record migration %d: %w", version, err)
+		return 0, fmt.Errorf("store: record migration %d: %w", version, err)
 	}
 	if claimed == 0 {
-		return nil
+		var current int
+		if err := tx.QueryRow(
+			`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`,
+		).Scan(&current); err != nil {
+			return 0, fmt.Errorf("store: read schema version: %w", err)
+		}
+		return current, nil
 	}
 	if _, err := tx.Exec(migrations[version-1]); err != nil {
-		return fmt.Errorf("store: apply migration %d: %w", version, err)
+		return 0, fmt.Errorf("store: apply migration %d: %w", version, err)
 	}
 	if fkOff {
 		if err := checkForeignKeys(tx); err != nil {
-			return fmt.Errorf("store: migration %d: %w", version, err)
+			return 0, fmt.Errorf("store: migration %d: %w", version, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: commit migration %d: %w", version, err)
+		return 0, fmt.Errorf("store: commit migration %d: %w", version, err)
 	}
-	return nil
+	return version, nil
 }
 
 func checkForeignKeys(tx *sql.Tx) error {

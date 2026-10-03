@@ -16,6 +16,11 @@ Layers, per the design spec's testing strategy:
   guard and what each role may do, and the SPA's half of it is in its rendered
   route tests. The multi-member E2E row below joins members and administers
   them; it does not re-prove the matrix.
+  `make test TEST_PKGS=./internal/store` covers concurrent database opens
+  against real SQLite files. The migration contention regressions keep a
+  competing writer active while checking already-committed progress,
+  foreign-key restoration, and refusal to trust an uncommitted version.
+  `TestConcurrentOpen` still races eight opens on a fresh database.
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
