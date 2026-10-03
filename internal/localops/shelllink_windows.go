@@ -11,6 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func windowsProgramsFolder() (string, error) {
+	return windows.KnownFolderPath(windows.FOLDERID_Programs, windows.KF_FLAG_CREATE)
+}
+
 var (
 	shellLinkOLE32            = windows.NewLazySystemDLL("ole32.dll")
 	shellLinkCoInitializeEx   = shellLinkOLE32.NewProc("CoInitializeEx")

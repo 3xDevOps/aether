@@ -119,41 +119,94 @@ Layers, per the design spec's testing strategy:
 CI's native `windows` job builds, vets, and tests the full Windows client
 package closure (`./cmd/aether` and its repository dependencies). It owns
 the selected `internal/localops` regressions rather than repeating them in
-the `Windows install` workflow. `TestInstallDesktopWindowsPreservesCLI`
-requires install and reinstall to preserve the CLI and unrelated files in
-the documented CLI directory and detect only the desktop directory as an
-installed app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real
+the installer lanes. `TestInstallDesktopWindowsPreservesCLI` requires install
+and reinstall to preserve the CLI and unrelated files in the documented CLI
+directory and detect only the desktop directory as an installed app.
+`TestDesktopLayoutWindowsUsesProgramsKnownFolder` covers standard and redirected
+Programs locations independently of missing, relative, or ordinary `APPDATA`.
+`TestInstallDesktopWindowsProgramsLookupFailurePreservesInstall` checks that a
+failed lookup leaves an existing installation intact. Unit installation tests
+inject a temporary Programs destination and never overwrite the developer's
+real Start entry.
+`TestShellLinkLaunchesNativeConsumer` separately exercises Windows' real
 shortcut launcher with a target path containing spaces, an ampersand, and
 non-ASCII characters, and checks the launched process's working directory.
-Moving their invocation does not remove either regression or either
-installer lane.
+These tests do not establish shell catalogue discovery or keyboard Search behavior.
 
-The `Windows install` workflow runs `scripts/install-test.ps1` under Windows
-PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
-before replacement, upgrade and locked-file boundaries, `PATH` preservation,
-CLI-only installation, unsupported releases, and desktop-build failures.
-They use temporary files and restore the user's environment after running.
-Changes to `.github/actions/go-cache/` or `.github/actions/bun-cache/`
-trigger both lanes on pull requests and pushes to `main`.
+CI calls the reusable, `workflow_call`-only `Windows install` workflow under
+the same code-change condition as the native `windows` job. Installer results
+are therefore part of the main CI run required by the release gate, not a
+separate workflow whose result can be omitted from that gate. Docs-only changes
+skip both jobs; code changes, including Go/Bun cache action changes, include both.
+The installer workflow runs `scripts/install-test.ps1` under Windows PowerShell
+5.1 and PowerShell 7. Those scenarios cover checksum rejection before
+replacement, upgrade and locked-file boundaries, `PATH` preservation, CLI-only
+installation, unsupported releases, and desktop-build failures. They use
+temporary files and restore the user's environment after running.
 
-The same workflow builds the real CLI with the release's Windows metadata
-and embedded dashboard, removes the hosted runner's inherited exclusions,
-and enables Defender realtime, script, archive, and first-seen cloud scanning
-before running `scripts/install-smoke.ps1`. A local release mirror serves those
-exact bytes and their checksum so the scenario tests the checkout, not the
-latest published release. It installs and rebuilds the desktop, verifies
-the unchanged CLI, and launches the installed Start Menu shortcut with the
-pre-install `PATH`. Playwright checks that window's onboarding screen
-and saves a screenshot. Windows PowerShell 5.1 uses system Node; PowerShell 7
-(`pwsh`) hides system Node to exercise the verified private download.
+The same workflow builds the real CLI with Windows release metadata and the
+embedded dashboard, removes the hosted runner's inherited exclusions, and
+enables Defender realtime, script, archive, and first-seen cloud scanning
+before running `scripts/install-smoke.ps1`. A local release mirror labels the
+checkout build `v0.5.1-alpha.4` and serves its exact bytes and checksum; it does
+not download or claim to test the historical published release with that tag.
+The smoke refuses to run unless both `GITHUB_ACTIONS=true` and
+`RUNNER_ENVIRONMENT=github-hosted`, before changing files or registry state.
+It installs and reinstalls into an isolated app/config tree and verifies the
+unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
+`APPDATA` so child-process Known Folder expansion matches the shell.
+`LOCALAPPDATA` is redirected only through installation and the private-Node
+check, then restored before creating `Shell.Application`, querying AppsFolder,
+or activating either launch. The captured installed paths, Aether configuration,
+npm/Electron build caches, and explicit Electron user-data directory remain
+isolated; restoring the environment does not move the installed executables.
+Unlike the unit test's injected destination, it resolves the real current-user
+Programs Known Folder through `Environment.SpecialFolder.Programs`, backs up any
+existing `Aether.lnk`, and restores it in `finally` before deleting the temporary
+app. It never redirects permanent shell-folder registry settings.
+
+For each install, the smoke inspects the real shortcut's executable target and
+working directory. It then waits up to 90 seconds for `Shell.Application`'s
+`shell:AppsFolder` catalogue to enumerate Aether with the installed executable
+as its link target, rather than accepting a filename or display-name match.
+Discovery and activation timeout diagnostics include the catalogue item count,
+the total number of Aether candidates, and at most ten candidate names, paths,
+AppUserModelIDs, and targets. They also report the real `LOCALAPPDATA`, Programs
+and fixture paths, the caller's session and interactive status, and at most eight
+Explorer process IDs/session IDs with same-session and total Explorer counts.
+There are then two launches, with the caller's pre-install `PATH` and no
+`AETHER_BIN` override:
+
+1. The smoke invokes `InvokeVerb('open')` on the exact discovered AppsFolder item.
+   Because this verb has no argument parameter, the fixture shortcut temporarily
+   carries only an added `--user-data-dir` isolation argument; its installed target
+   and working directory are rechecked. The smoke waits for that exact installed
+   executable's main window and CLI child, closes the window normally, and requires
+   both processes to exit within bounded waits before restoring the shortcut arguments.
+2. It launches the matching Programs shortcut with explicit remote-debugging and
+   isolated user-data arguments. Playwright checks that window's onboarding screen,
+   saves a screenshot, and closes it; both desktop and CLI child must exit.
+
+The protocol registration is backed up before either launch and restored in
+`finally`, which also stops any surviving fixture desktop/CLI processes.
+Explorer-mediated catalogue activation may inherit Explorer's environment rather
+than the caller's config overrides: the real profile is deliberately a disposable
+hosted profile, never a developer's profile. The explicit Electron data directory
+applies to both launches. This proves native shell catalogue discovery, catalogue
+activation, and shortcut onboarding, not keyboard-driven Start Search indexing or
+ranking. Shell COM works in both supported PowerShell lanes without relying on a
+PowerShell-5-only module.
+Windows PowerShell 5.1 uses system Node; PowerShell 7 (`pwsh`) hides system Node
+to exercise the verified private download.
 The seven-day screenshot artifacts are `windows-desktop-powershell-system`
 and `windows-desktop-pwsh-downloaded`, uploaded even after failure when a
-screenshot exists. Defender scans the
-download and install tree without exclusions or disabled remediation. The
-gate rejects new detections even when Defender has already remediated them,
-and checks that installation changed neither protection settings nor exclusions.
-This is a detection gate, not a guarantee that an unsigned release will
-never receive a false positive on another machine.
+screenshot exists. Defender scans the download and install tree without
+exclusions or disabled remediation. The gate rejects new detections even when
+Defender has already remediated them, requires automatic safe sample submission
+(`SubmitSamplesConsent=1`) before and after installation, and checks that
+installation changed neither protection settings nor exclusions.
+This is a detection gate, not a guarantee that an unsigned release will never
+receive a false positive on another machine.
 
 ## Workflow and release-build gates
 
@@ -184,13 +237,24 @@ assets by default without Android or Docker; `make release` still adds
 Android. Go builds still need the dashboard's Bun and Node toolchain.
 
 `windows-defender` depends on the Go matrix, not Android. It downloads only
-`binaries-go-windows-*`, merges their contents, and requires both
-`aether-windows-amd64.exe` and `aether-windows-arm64.exe` for scanning.
-It enables realtime and cloud protection and updates signatures before
-scanning; missing, quarantined, or detected executables fail the gate.
-This static scan supplements, rather than replaces, the runtime installer
-Defender scenarios above. Android and every Go lane remain required CI
-coverage.
+the current run's `binaries-go-windows-*` artifacts, merges their contents,
+and requires both `aether-windows-amd64.exe` and `aether-windows-arm64.exe`.
+CI and release publication share `scripts/windows-defender.ps1`: prepare the
+hosted runner before downloading artifacts, remove inherited antivirus
+exclusions, enable and verify effective realtime/cloud protection, automatic
+safe sample submission, and all required scanning flags, and update definitions.
+The helper retains each binary's resolved absolute path for hashing and the
+native scan, scans with remediation enabled, records each binary's SHA-256 and
+Defender status/definitions in the logs and job summary, and rejects missing or
+quarantined files, changed hashes, scan failures, and new detections even when
+already remediated. Scan or pre-scan hash failures include the Defender log path
+and up to its last 200 lines for diagnosis. The release workflow scans the final
+Windows artifacts from its own `release-binaries` build without rebuilding them;
+publication depends
+on that exact-byte scan succeeding. A scan of CI's earlier build cannot stand
+in for this release scan. Windows executables remain unsigned.
+These static scans supplement, rather than replace, the runtime installer
+Defender scenarios above. Android and every Go lane remain required CI coverage.
 
 Go caches separate module downloads from compiled objects. Both are scoped
 to host OS/architecture, runner environment, resolved toolchain, and module

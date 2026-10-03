@@ -41,6 +41,11 @@ type DesktopApp struct {
 // tests can point it at a temporary directory.
 var macSystemApplications = "/Applications"
 
+// resolveWindowsPrograms uses the shell's current-user Programs Known Folder,
+// which can be redirected independently of APPDATA. Tests replace the resolver
+// so installing a fixture never changes the developer's real Start Menu.
+var resolveWindowsPrograms = windowsProgramsFolder
+
 // desktopIcon is the icon copied beside the unpacked linux app; the
 // .desktop entry points at it by absolute path so no icon theme cache
 // needs refreshing.
@@ -517,13 +522,17 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 		}
 		return DesktopApp{App: app, Launcher: app, Superseded: other}, nil
 	case "windows":
-		local, roaming := os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")
-		if !filepath.IsAbs(local) || !filepath.IsAbs(roaming) {
-			return DesktopApp{}, errors.New("localops: LOCALAPPDATA and APPDATA must be absolute paths")
+		local := os.Getenv("LOCALAPPDATA")
+		if !filepath.IsAbs(local) {
+			return DesktopApp{}, errors.New("localops: LOCALAPPDATA must be an absolute path")
+		}
+		programs, err := resolveWindowsPrograms()
+		if err != nil {
+			return DesktopApp{}, fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err)
 		}
 		return DesktopApp{
 			App:      filepath.Join(local, "Programs", "Aether Desktop"),
-			Launcher: filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Aether.lnk"),
+			Launcher: filepath.Join(programs, "Aether.lnk"),
 		}, nil
 	default:
 		return DesktopApp{}, fmt.Errorf("localops: no desktop app target for %s", goos)
