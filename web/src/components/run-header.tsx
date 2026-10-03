@@ -1,10 +1,12 @@
-import { Archive, Shield } from 'lucide-react'
+import { Archive, GitCommitHorizontal, Shield } from 'lucide-react'
 import { RunActions } from '@/components/run-actions'
 import { StateIndicator } from '@/components/state-dot'
-import { deletesInLabel } from '@/lib/format'
+import { deletesInLabel, timeAgo } from '@/lib/format'
 import { runLabel, runState, stateLabel, type PresentationState } from '@/lib/status'
 import { focusRing } from '@/lib/utils'
+import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunTabs } from '@/routes/terminal/tabs'
+import { useStore } from '@/store'
 import { usePendingApprovalRuns } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
@@ -36,11 +38,7 @@ function reasonTone(state: PresentationState) {
   }
 }
 
-/**
- * The title row every run-detail tab opens with. The state travels with the
- * header, so the Terminal, Diff and Events tabs say how the run is doing
- * without sending anyone back to the Overview for it.
- */
+/** Shared title, state, task and metadata for every run-detail tab. */
 export function RunHeader({
   run,
   subtitle,
@@ -51,6 +49,10 @@ export function RunHeader({
   active: string
 }) {
   const pending = usePendingApprovalRuns()
+  const owner = useStore((s) => s.members[run.member_id])
+  const account = useStore((s) =>
+    run.account_member_id ? s.members[run.account_member_id] : undefined,
+  )
   const state = runState(run.status, pending.has(run.id))
   const label = runLabel(run)
   const task = run.task.trim()
@@ -63,7 +65,7 @@ export function RunHeader({
     <div className="@container/run-header min-w-0 shrink-0">
       <header className="min-w-0 border-b border-border/80">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-3 py-1 sm:px-4">
-          <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2">
+          <div className="col-span-2 row-start-1 flex min-w-0 items-start gap-2">
             <h1
               className="line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground"
               title={label}
@@ -90,7 +92,7 @@ export function RunHeader({
               </span>
             )}
           </div>
-          <div className="col-span-2 row-start-2 flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-4 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-4 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <span
               className={`inline-flex min-h-5 shrink-0 items-center gap-1.5 rounded-sm border px-2 py-px text-xs leading-4 ${stateTone(state)}`}
             >
@@ -117,23 +119,69 @@ export function RunHeader({
               </span>
             )}
           </div>
-          {task && (
-            <details className="contents">
-              <summary
-                className={`${focusRing} col-start-2 row-start-1 cursor-pointer whitespace-nowrap text-[11px] leading-5 text-muted-foreground underline underline-offset-2`}
-              >
-                View full task
-              </summary>
-              <div
-                tabIndex={0}
-                className={`${focusRing} col-span-2 row-start-3 max-h-40 min-w-0 max-w-full overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5`}
-              >
+          <details className="contents">
+            <summary
+              className={`${focusRing} col-start-2 row-start-2 cursor-pointer whitespace-nowrap text-[11px] leading-5 text-muted-foreground underline underline-offset-2`}
+            >
+              Task and details
+            </summary>
+            <div
+              tabIndex={0}
+              className={`${focusRing} col-span-2 row-start-3 max-h-60 min-w-0 max-w-full space-y-2 overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5`}
+            >
+              {task && (
                 <p className="whitespace-pre-wrap break-words select-text text-[13px] leading-5 text-foreground/90">
                   {run.task}
                 </p>
-              </div>
-            </details>
-          )}
+              )}
+              <dl className="divide-y divide-border/70 select-text">
+                <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                  <dt className="text-xs font-medium text-muted-foreground">Owner</dt>
+                  <dd className="flex min-w-0 items-center gap-2 break-words text-[13px] text-foreground">
+                    <MemberAvatar member={owner} fallback={run.member_id} className="size-5 text-[9px]" />
+                    <span className="min-w-0 break-words">{owner?.display_name ?? run.member_id}</span>
+                  </dd>
+                </div>
+                {run.account_member_id && run.account_member_id !== run.member_id && (
+                  <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                    <dt className="text-xs font-medium text-muted-foreground">Agent account</dt>
+                    <dd className="flex min-w-0 items-center gap-2 break-words text-[13px] text-foreground">
+                      <MemberAvatar
+                        member={account}
+                        fallback={run.account_member_id}
+                        className="size-5 text-[9px]"
+                      />
+                      <span className="min-w-0 break-words">
+                        {account?.display_name ?? run.account_member_id}
+                      </span>
+                    </dd>
+                  </div>
+                )}
+                <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                  <dt className="text-xs font-medium text-muted-foreground">Created</dt>
+                  <dd className="min-w-0 break-words text-[13px]">{timeAgo(run.created_at)}</dd>
+                </div>
+                <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                  <dt className="text-xs font-medium text-muted-foreground">Changed</dt>
+                  <dd className="min-w-0 break-words text-[13px]">{timeAgo(run.stateChangedAt)}</dd>
+                </div>
+                {run.last_commit_at && (
+                  <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                    <dt className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <GitCommitHorizontal className="size-3.5" aria-hidden />
+                      Last commit
+                    </dt>
+                    <dd className="min-w-0 break-words text-[13px]">
+                      <code className="font-mono text-[12px]" title={run.last_commit}>
+                        {run.last_commit?.slice(0, 8)}
+                      </code>{' '}
+                      <span className="text-muted-foreground">{timeAgo(run.last_commit_at)}</span>
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          </details>
           {run.reason && (
             <div
               tabIndex={0}

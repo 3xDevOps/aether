@@ -49,8 +49,37 @@ async function attach(write = false, replay = '') {
   return socket
 }
 
+async function terminalActions() {
+  fireEvent.keyDown(screen.getByRole('button', { name: 'More terminal actions' }), { key: 'ArrowDown' })
+  return within(await screen.findByRole('menu'))
+}
+
+it('keeps evidence reachable with an empty collapsed dock without creating a terminal', async () => {
+  vi.mocked(api.devTerminalList).mockResolvedValue({ terminals: [] })
+  vi.spyOn(api, 'runEvidenceList').mockResolvedValue({ packets: [] })
+  vi.spyOn(api, 'devArtifactList').mockResolvedValue({ artifacts: [], truncated: false })
+  useStore.getState().setDockCollapsed('run_1', true)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
+  const evidence = screen.getByRole('button', { name: 'Evidence' })
+  evidence.focus()
+  fireEvent.click(evidence)
+  const panel = await screen.findByRole('dialog', { name: 'Retained evidence' })
+  expect(screen.queryByRole('tabpanel')).toBeNull()
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  expect(StubSocket.opened).toHaveLength(0)
+  fireEvent.click(within(panel).getByRole('button', { name: 'Close evidence' }))
+  await waitFor(() => expect(document.activeElement).toBe(evidence))
+  fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+  expect(screen.getAllByRole('button', { name: 'Evidence' })).toHaveLength(1)
+  fireEvent.click(evidence)
+  await screen.findByRole('dialog', { name: 'Retained evidence' })
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  expect(StubSocket.opened).toHaveLength(0)
+  view.unmount()
+})
+
 it('discovers an agent command without creating a process or resizing a watcher', async () => {
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   const socket = await attach(false, '\x1b[?1049h\x1b[H共有 λ界')
   expect(socket.frames()[0]).toMatchObject({ incarnation: 'process-1', follow: true })
   expect(socket.frames()[0]).not.toHaveProperty('write')
@@ -61,9 +90,9 @@ it('discovers an agent command without creating a process or resizing a watcher'
 })
 
 it('hides and rejoins the same incarnation without stopping or restarting it', async () => {
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   const first = await attach()
-  fireEvent.click(screen.getByRole('button', { name: 'Hide terminal' }))
+  fireEvent.click((await terminalActions()).getByRole('menuitem', { name: 'Hide terminal' }))
   expect(first.closed).toBe(true)
   expect(api.devTerminalStop).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: /Show Agent command/ }))
@@ -75,15 +104,22 @@ it('hides and rejoins the same incarnation without stopping or restarting it', a
 })
 
 it('requires confirmed authority before resizing or stopping a process', async () => {
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   await attach()
-  expect((screen.getByRole('button', { name: 'Stop terminal' }) as HTMLButtonElement).disabled).toBe(true)
+  const stop = (await terminalActions()).getByRole('menuitem', { name: 'Stop terminal' })
+  expect(stop.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.keyDown(stop, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
   fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
   await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
   expect(api.devTerminalResize).not.toHaveBeenCalled()
   await attach(true)
-  fireEvent.click(screen.getByRole('button', { name: 'Stop terminal' }))
+  fireEvent.click((await terminalActions()).getByRole('menuitem', { name: 'Stop terminal' }))
   expect(api.devTerminalStop).not.toHaveBeenCalled()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More terminal actions' })))
+  expect(api.devTerminalStop).not.toHaveBeenCalled()
+  fireEvent.click((await terminalActions()).getByRole('menuitem', { name: 'Stop terminal' }))
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm stop' }))
   await waitFor(() => expect(api.devTerminalStop).toHaveBeenCalledWith(expect.objectContaining({
     terminal_id: process.terminal_id, incarnation: process.incarnation, control_generation: 7,
@@ -93,16 +129,16 @@ it('requires confirmed authority before resizing or stopping a process', async (
 
 it('keeps ended command terminals discoverable without attaching or rerunning them', async () => {
   vi.mocked(api.devTerminalList).mockResolvedValue({ terminals: [{ ...process, process: { state: 'exited', exit_code: 23 } }] })
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   await screen.findByRole('tab', { name: /Agent command.*exited/ })
-  expect((screen.getByRole('button', { name: 'Stop terminal' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((await terminalActions()).getByRole('menuitem', { name: 'Stop terminal' }).getAttribute('aria-disabled')).toBe('true')
   expect(StubSocket.opened).toHaveLength(0)
   expect(api.devTerminalStart).not.toHaveBeenCalled()
   view.unmount()
 })
 
 it('refuses an ACK for a replacement incarnation rather than parsing its output', async () => {
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   await waitFor(() => expect(StubSocket.opened).toHaveLength(1))
   const socket = StubSocket.last()
   act(() => {
@@ -122,7 +158,7 @@ it.each(['detach', 'rejection'])('drops the unsent remainder of a paste after %s
   let reject!: (reason: Error) => void
   const pending = new Promise<{ accepted: boolean }>((resolve, fail) => { finish = resolve; reject = fail })
   vi.mocked(api.devTerminalInput).mockReturnValueOnce(pending)
-  const view = render(<RunDock runID="run_1" />)
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
   await attach()
   fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
   await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
@@ -132,7 +168,7 @@ it.each(['detach', 'rejection'])('drops the unsent remainder of a paste after %s
   fireEvent.paste(input, { clipboardData: { getData: () => 'x'.repeat(5000) } })
   await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(1))
   if (boundary === 'detach') {
-    fireEvent.click(screen.getByRole('button', { name: 'Hide terminal' }))
+    fireEvent.click((await terminalActions()).getByRole('menuitem', { name: 'Hide terminal' }))
     await act(async () => { finish({ accepted: true }); await pending })
   } else {
     await act(async () => { reject(new Error('Control was fenced')); await pending.catch(() => {}) })

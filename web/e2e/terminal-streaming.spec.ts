@@ -671,7 +671,7 @@ test('switching live runs restores the same recorded rows and pixel offsets with
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png',
     })
-    await page.getByRole('tab', { name: 'Overview', exact: true }).click()
+    await page.getByRole('tab', { name: 'Events', exact: true }).click()
     await expect.poll(() => activeSockets.size).toBe(0)
   } finally {
     await releaseWriter(runA.writer, 1)

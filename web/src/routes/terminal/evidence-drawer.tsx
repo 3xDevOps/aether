@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { belowMd, useMediaQuery } from '@/lib/hooks'
 import { api, type Api } from '@/lib/api'
 import type { DevArtifact, EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
@@ -39,6 +43,9 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
   const select = useStore((state) => state.selectEvidence)
   const selectedID = useStore((state) => state.selectedEvidence[runID])
   const [open, setOpen] = useState(false)
+  const narrow = useMediaQuery(belowMd)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const answering = useRef(false)
   const [packet, setPacket] = useState<EvidencePacket | null>(null)
   const [patch, setPatch] = useState<EvidencePatchResult | null>(null)
   const [transcript, setTranscript] = useState<EvidenceTranscriptResult | null>(null)
@@ -114,6 +121,7 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
   }
 
   const answerFact = (fact: string) => {
+    answering.current = true
     setOpen(false)
     onAnswer?.(fact)
   }
@@ -164,25 +172,28 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
     }
   }
 
-  return (
-    <section className="min-w-0" aria-label="Run evidence">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        Evidence{packets.length ? ` (${packets.length})` : ''}
-      </Button>
-      {open && (
-        <div className="fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-[80] flex min-h-0 w-full flex-col overflow-hidden border border-border bg-background shadow-lg md:top-[calc(var(--title-bar-height)+var(--safe-top)+0.75rem)] md:right-3 md:bottom-auto md:left-auto md:z-40 md:max-h-[min(38rem,calc(100dvh-var(--title-bar-height)-var(--safe-top)-var(--status-bar-height)-1.5rem))] md:w-[min(38rem,calc(100vw-2rem))]">
+  const onCloseAutoFocus = (event: Event) => {
+    if (!answering.current) return
+    answering.current = false
+    event.preventDefault()
+  }
+  const evidenceTrigger = (
+    <Button ref={trigger} type="button" variant="outline" size="sm">
+      Evidence{packets.length ? ` (${packets.length})` : ''}
+    </Button>
+  )
+  const content = (
+    <>
           <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
             <div className="min-w-0">
-              <h2 className="truncate text-[13px] font-semibold">Retained evidence</h2>
-              <p className="text-[11px] text-muted-foreground">Recorded observations, not verification</p>
+              {narrow
+                ? <DialogTitle className="truncate text-[13px] font-semibold">Retained evidence</DialogTitle>
+                : <h2 className="truncate text-[13px] font-semibold">Retained evidence</h2>}
+              {narrow
+                ? <DialogDescription className="text-[11px] text-muted-foreground">Recorded observations, not verification</DialogDescription>
+                : <p className="text-[11px] text-muted-foreground">Recorded observations, not verification</p>}
             </div>
-            <Button type="button" size="icon" variant="ghost" aria-label="Close evidence" onClick={() => setOpen(false)}>×</Button>
+            <Button type="button" size="icon" variant="ghost" aria-label="Close evidence" onClick={() => setOpen(false)}><X className="size-4" aria-hidden /></Button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-3">
@@ -261,7 +272,36 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
               </div>
             )}
           </div>
-        </div>
+    </>
+  )
+
+  return (
+    <section className="min-w-0" aria-label="Run evidence">
+      {narrow ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>{evidenceTrigger}</DialogTrigger>
+          <DialogContent
+            showCloseButton={false}
+            onCloseAutoFocus={onCloseAutoFocus}
+            className="top-[calc(var(--title-bar-height)+var(--safe-top))] right-0 bottom-0 left-0 z-[80] flex min-h-0 max-h-none w-full max-w-none translate-x-0 flex-col gap-0 overflow-hidden rounded-none bg-background p-0 sm:top-[calc(var(--title-bar-height)+var(--safe-top))] sm:max-w-none sm:translate-y-0"
+          >
+            {content}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>{evidenceTrigger}</PopoverTrigger>
+          <PopoverContent
+            aria-label="Retained evidence"
+            side="top"
+            align="end"
+            collisionBoundary={trigger.current?.closest('[role="tabpanel"]')}
+            onCloseAutoFocus={onCloseAutoFocus}
+            className="flex min-h-0 max-h-[min(38rem,var(--radix-popover-content-available-height))] w-[min(38rem,var(--radix-popover-content-available-width))] flex-col overflow-hidden bg-background p-0"
+          >
+            {content}
+          </PopoverContent>
+        </Popover>
       )}
     </section>
   )

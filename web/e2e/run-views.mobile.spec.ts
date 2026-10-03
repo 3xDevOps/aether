@@ -54,7 +54,16 @@ test('a phone protects a run from More and reads its diff', async ({
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
-  await page.getByRole('tab', { name: 'Diff' }).tap()
+  for (const name of ['Browser', 'Events', 'Diff']) {
+    const tab = page.getByRole('tab', { name, exact: true })
+    await tab.tap()
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+    await expect.poll(() => tab.evaluate((element) => {
+      const strip = element.closest('[role="tablist"]')!.getBoundingClientRect()
+      const selected = element.getBoundingClientRect()
+      return selected.left >= strip.left && selected.right <= strip.right
+    })).toBe(true)
+  }
   const refresh = page.getByRole('button', { name: 'Refresh', exact: true })
   await expect(async () => {
     await refresh.tap()

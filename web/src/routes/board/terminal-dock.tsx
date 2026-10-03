@@ -14,6 +14,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
@@ -452,17 +458,6 @@ export function TerminalDock({
           (!empty || !!dock.status?.saved_image) && (
             <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
               {dock.status?.running && (
-                <>
-                {capability.hasLocal('forward.start') && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => openForwardDialog('terminal')}
-                  >
-                    Forward port
-                  </Button>
-                )}
                 <Button
                   type="button"
                   size="sm"
@@ -472,32 +467,37 @@ export function TerminalDock({
                 >
                   {saving ? 'Saving...' : 'Save environment'}
                 </Button>
-                </>
               )}
-              {!empty && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setConfirmingStop(true)}
-                >
-                  Stop environment
-                </Button>
-              )}
-              {dock.status?.saved_image && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setResetError(null)
-                    setConfirmingReset(true)
-                  }}
-                  disabled={resetting}
-                >
-                  Reset to standard
-                </Button>
-              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" size="sm" variant="ghost" aria-label="Environment actions">
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {dock.status?.running && capability.hasLocal('forward.start') && (
+                    <DropdownMenuItem onSelect={() => openForwardDialog('terminal')}>
+                      Forward port
+                    </DropdownMenuItem>
+                  )}
+                  {!empty && (
+                    <DropdownMenuItem onSelect={() => setConfirmingStop(true)}>
+                      Stop environment
+                    </DropdownMenuItem>
+                  )}
+                  {dock.status?.saved_image && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setResetError(null)
+                        setConfirmingReset(true)
+                      }}
+                      disabled={resetting}
+                    >
+                      Reset to standard
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {savedConfirmation && (
                 <span className="text-xs text-muted-foreground">
                   Saved - new runs use this environment

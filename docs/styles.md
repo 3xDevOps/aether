@@ -65,8 +65,8 @@ Use compact workbench geometry rather than landing-page ornament:
 
 - 35px title and command bar, 48px activity rail with 24px icons, and a
   preferred 260px workspace/run sidebar constrained to 200-520px.
-- 35px view and section headers; the run detail's combined metadata, tab and
-  action strip stays 36px, while dock headers use a `min-h-9` strip whose
+- 35px view and section headers; the run detail's combined tab and action
+  strip stays 36px, while dock headers use a `min-h-9` strip whose
   actions can wrap to another row; 22px status rows and 22-28px list rows
   according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
@@ -82,9 +82,15 @@ Use compact workbench geometry rather than landing-page ornament:
   Restrained shadows are limited to actual floating menus, quick input and
   dialogs. Headers stay 13-16px, with no promotional 20-24px titles or
   oversized cards.
-- Board cards share a uniform collapsed preview height, with a full-width
-  title row and visible status and branch-copy controls. The Cards / Map
-  layouts and their disclosure, packing and motion contracts are described in
+- Board Cards use compact, natural-height rows with a full-width title, state
+  badge and brief owner/harness/time metadata. Unseen titles stay bold with an
+  accessible **Unseen** description, not a second dot or a **New** pill.
+  **Details** reveals the branch and copy control along with the full details;
+  protection, questions, conflicts and archival state remain visible when relevant.
+  Desktop column headers share a subgrid row so card lists start together.
+  Map packs fixed-size nodes from `map-layout.ts`, not measured card heights;
+  its camera controls live with the **Runs** header rather than in a second
+  toolbar. Preserve the gesture, camera and motion contracts in
   [Dashboard SPA: Board](dashboard-frontend.md#board).
 
 At 390px every operation remains available through compact navigation or
@@ -95,11 +101,23 @@ under `coarse:` while retaining desktop density. Floating menus stay inside
 the available viewport and scroll to their last action.
 
 The run Browser uses shared 13px controls at 26px for mouse input and 44px
-for coarse pointers, including native selects. Navigation, address, selectors,
-capture and destructive actions wrap as groups rather than stretching the page.
+for coarse pointers, including native selects. Before a page is selected,
+the URL field and **Open browser** are primary; a selected page adds
+Back/Forward/Reload and **Go**. **Browser tools** holds page and viewport
+selection, New page, Screenshot, Reconnect and the gated Close page/Reset
+session actions. These destructive actions use shared AlertDialog confirmations
+bound to the captured page/session and control authority, retain raw failures,
+and return focus to Browser tools when dismissed. Groups wrap without
+stretching the page.
+
 Run-terminal controller and viewer names stay in the existing toolbar, never
-in an extra presence row. Keep all viewers in a horizontally scrollable list;
-use the existing **Terminal tools** popover when inline tools crowd the names.
+in an extra presence row. Keep all viewers in a horizontally scrollable list.
+**Terminal tools** is a compact popover on narrow or touch panes; fine-pointer
+panes show inline tools from 42rem, or 70rem when attachment controls share
+the toolbar. The run shell strip keeps its own lease control plus **More**
+for Screenshot, Hide and confirmed Stop; it does not own the browser or
+primary run's lease. The environment dock promotes **Save environment**,
+with gated Forward port, Stop environment and Reset to standard in **More**.
 
 Route roots own the shell's bounded height; their content regions use
 `min-h-0` and vertical overflow. On phones Diff scrolls its local controls
@@ -109,30 +127,71 @@ panel scrolls independently without consuming the entire editor.
 
 ## Shell, palette and focus
 
-The shell keeps a persistent 48px activity rail for existing navigation, with
-capability gates, accessible labels and tooltips, an active 2px indicator and
-overflow when destinations do not fit. The adjacent workspace/run sidebar
-keeps its persisted splitter behavior and uses compact group rows. At 1000px
-and narrower that pane collapses into the persistent rail, which exposes
-**Expand sidebar** without changing the stored preference. At 640px and
-narrower its expanded pane overlays the center from the rail's right edge.
+Above 640px the shell keeps a persistent 48px activity rail, with **Work**
+and **Workspace** groups, capability gates, accessible labels and tooltips,
+and an active 2px indicator. A visibly labeled **More** menu holds destinations
+that do not fit the rail's measured available height; there is no fixed
+destination-count limit. **Admin** sits at the bottom beside the universally
+reachable **Settings** destination. All runs remains available through the
+global overview and palette, not as a second Board link in the rail.
+
+The adjacent workspace/run sidebar keeps its persisted splitter behavior and
+compact group rows. At 1000px and narrower it collapses into the rail without
+changing the stored preference. At 640px and narrower there is no permanent
+rail strip: the titlebar's **Expand sidebar** opens a transient modal drawer
+containing navigation and runs. **Mod+B** toggles it; closing restores focus,
+and navigation or crossing the phone breakpoint resets the drawer.
 
 The browser and Electron titlebar is a real 35px command center. It names the
 active workspace and opens the existing palette through `togglePalette(true)`.
-The command palette is mounted exactly once as an independent AppShell host,
-never as a hidden status-slot contributor. Quick input is top-centered directly
-under the titlebar, max 600px, with compact rows and no giant scrim-heavy card.
+Its right side owns the filled **New run** action when connected and launchable,
+using the selected workspace; native window controls remain at the far right.
+Do not repeat that action in the sidebar or populated Board header; the empty
+Board's launch CTA remains. The command palette is mounted exactly once as an
+independent AppShell host, never as a hidden status-slot contributor. Quick
+input is top-centered directly under the titlebar, max 600px, with compact rows
+and no giant scrim-heavy card.
+
 The status Slot remains mounted once for team refresh and other live
-contributors, including shortcuts. At narrow widths secondary status details
-use a bounded, keyboard-reachable popup while connection and theme controls stay
-available. Wrapped readouts in that popup use a 1.5 line height so Saira's
-glyphs fit inside each row; the wide status bar keeps its 22px rows.
+contributors, including shortcuts. At every width, secondary facts,
+version/storage, presence, budget and errors live in the bounded,
+keyboard-reachable status details popup. Connection and shortcuts remain
+outside it, with an Approvals signal on phones; do not duplicate Timeline
+navigation there. Wrapped readouts use a 1.5 line height so Saira's glyphs fit
+inside each row; the status bar keeps its compact row geometry.
+Theme discovery belongs in **Settings → Appearance**, with explicit
+**System**, **Light** and **Dark** choices and matching palette commands,
+not a cycling status icon. Appearance works on remote gateways too, while
+machine-local settings retain their capability gates.
 
 `focusRing` and `field` remain signature-compatible shared utilities. Preserve
 their keyboard outline, inset behavior for full-bleed rows, readable
 placeholders, disabled and read-only states, menu roving focus, typeahead,
 portalling and viewport flipping. Shared primitives retain their props,
 events, refs and accessibility contracts.
+
+Run headers expose at most two contextual labeled actions plus **More** at
+every width; destructive overflow actions remain last, with their existing gates and
+confirmations. **Task and details** holds the full task and metadata rather
+than a separate per-run Overview tab. Terminal, Browser, Diff and Events remain;
+the global overview is unaffected.
+
+On desktop, **Run Room** is a real flex sibling beside the terminal and its
+dock, below the run header, capped at 420px or 40% of the available width.
+It never overlays that work area. The terminal toolbar is the single source
+for same-run controller/presence controls, and protection stays in the header.
+On phones Room is a full-width modal sheet below the titlebar, contains
+keyboard focus and retains those metadata/control affordances. Closing restores
+focus without discarding the draft. Occupied run control has one host-owned
+confirmation, not a second Room-specific takeover path.
+
+Within Terminal, **Evidence** has one persistent trigger in the existing dock
+header, including when the shell is collapsed or empty, and none in Room.
+Desktop Evidence is an anchored popover bounded by the terminal tabpanel;
+phones use a modal sheet. Answering with a fact closes Evidence and opens and
+focuses a Room comment draft without sending it, preserving attachments and
+clearing steer correlation. Retention, expiry, partial-source disclosure and
+authority boundaries are unchanged.
 
 ## Run state and startup motion
 

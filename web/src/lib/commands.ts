@@ -16,6 +16,8 @@ import {
   House,
   List,
   MessageSquarePlus,
+  Monitor,
+  Moon,
   Network,
   Pause,
   Play,
@@ -24,6 +26,7 @@ import {
   Shield,
   ShieldOff,
   Square,
+  Sun,
   Trash2,
   UserPlus,
 } from 'lucide-react'
@@ -38,6 +41,7 @@ import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
 import { isArchivable, type RunRecord } from '@/store/runs'
+import type { Theme } from '@/store/ui'
 
 /** What a command needs to do its work, supplied by the surface running it. */
 export interface CommandDeps {
@@ -47,6 +51,7 @@ export interface CommandDeps {
   openForwardDialog: (target: string) => void
   openClearDoneDialog: (plan: ClearDonePlan) => void
   ackAll: () => void
+  setTheme: (theme: Theme) => void
   /** Keeps a pull's git output for the diff tab to show. */
   recordPull: (runID: string, result: PullResult) => void
   /** Removes a run after the server has deleted its durable record. */
@@ -498,6 +503,26 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.openClearDoneDialog(plan),
     })
   }
+  list.push(
+    {
+      id: 'theme-system',
+      label: 'Use system theme',
+      Icon: Monitor,
+      perform: (d) => d.setTheme('system'),
+    },
+    {
+      id: 'theme-light',
+      label: 'Use light theme',
+      Icon: Sun,
+      perform: (d) => d.setTheme('light'),
+    },
+    {
+      id: 'theme-dark',
+      label: 'Use dark theme',
+      Icon: Moon,
+      perform: (d) => d.setTheme('dark'),
+    },
+  )
   return list
 }
 
@@ -518,6 +543,7 @@ export function useCommandRunner(
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
+  const setTheme = useStore((s) => s.setTheme)
   const { onDone, onTemplates } = opts
 
   return useCallback(
@@ -532,6 +558,7 @@ export function useCommandRunner(
         ackAll,
         recordPull,
         removeRun,
+        setTheme,
         onTemplates: onTemplates ?? (() => {}),
       })
       const done = command.done
@@ -553,6 +580,7 @@ export function useCommandRunner(
       openClearDoneDialog,
       recordPull,
       removeRun,
+      setTheme,
     ],
   )
 }

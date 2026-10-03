@@ -80,11 +80,11 @@ describe('workspace scope and route stay in sync', () => {
   })
 
   it('leaves other routes alone when the scope switches', () => {
-    useStore.getState().navigate('run', { runId: 'run_1' })
+    useStore.getState().navigate('events', { runId: 'run_1' })
     useStore.getState().setActiveWorkspace('wsp_2')
 
     expect(useStore.getState().route).toEqual({
-      name: 'run',
+      name: 'events',
       params: { runId: 'run_1' },
     })
   })

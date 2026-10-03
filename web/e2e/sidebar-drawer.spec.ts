@@ -21,14 +21,16 @@ test('the drawer answers the key that opened it and gives the rest back', async 
 
   const drawer = page.getByRole('dialog', { name: 'Runs' })
   const palette = page.locator('[data-slot="command-input"]')
-  // The shortcut is a window listener the shell installs on mount, so the
-  // rail has to be on screen before a key press means anything.
-  await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+  const opener = page.getByRole('banner', { name: 'Aether' }).getByRole('button', { name: 'Expand sidebar' })
+  await expect(opener).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Views' })).toBeHidden()
+  await opener.focus()
 
   await page.keyboard.press('Control+b')
   await expect(drawer).toBeVisible()
   await page.keyboard.press('Control+b')
   await expect(drawer).toBeHidden()
+  await expect(opener).toBeFocused()
 
   await page.keyboard.press('Control+b')
   await expect(drawer).toBeVisible()
@@ -38,6 +40,7 @@ test('the drawer answers the key that opened it and gives the rest back', async 
 
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
+  await expect(opener).toBeFocused()
   await page.keyboard.press('Control+k')
   await expect(palette).toHaveCount(1)
 })

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { toast } from 'sonner'
 import { Eye, KeyRound } from 'lucide-react'
@@ -7,6 +7,7 @@ import { RunHeader } from '@/components/run-header'
 import { TerminalPane, TerminalSpinner, type TerminalReadSurface } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
@@ -84,6 +85,7 @@ function TerminalRoute({ params }: RouteProps) {
   const beforeDispose = useRef<((terminal: Terminal) => void) | null>(null)
   const historyTools = useRef<TerminalReadSurface | null>(null)
   const [readingHistory, setReadingHistory] = useState(true)
+  const [evidenceAnswer, setEvidenceAnswer] = useState<{ fact: string }>()
 
   const steerable = run?.status === 'running' || run?.status === 'needs-attention'
   const automaticWrite =
@@ -151,7 +153,7 @@ function TerminalRoute({ params }: RouteProps) {
   const { state, replaying, controlMetadata, sessionMissing } = session
   const replaySpinner = replaying
   const roomControl = state.connection === 'live' && steerable && !state.steerDenied ? controlMetadata : undefined
-  const stalePresence = roomStatusControl !== roomControl || Boolean(roomStatusError)
+  const stalePresence = state.connection !== 'live' || roomStatusControl !== roomControl || Boolean(roomStatusError)
   const localControl = state.connection === 'live' && state.write &&
     controlMetadata?.has_control === true && steerable && !state.steerDenied
   const liveWritable = localControl && !replaying && !readingHistory
@@ -160,7 +162,35 @@ function TerminalRoute({ params }: RouteProps) {
   const controllerName = controllerMember?.display_name || controllerID
   const controllerNote = localControl ? 'this tab' : stalePresence ? 'last known' :
     state.connection === 'live' && controlMetadata?.has_control === false && controllerID === self.id ? 'another session' : null
-  const takeControl = (takeover = false) => session.takeControl(takeover)
+  const occupiedLease = roomStatus?.controller
+    ? JSON.stringify([roomStatus.controller.member_id, roomStatus.controller.acquired_at])
+    : null
+  const [takeover, setTakeover] = useState<{
+    control: typeof roomControl
+    authorityKey: string
+    lease: string
+  } | null>(null)
+  const canConfirmTakeover = takeover !== null &&
+    roomControl !== undefined && takeover.control === roomControl &&
+    takeover.authorityKey === authorityKey && takeover.lease === occupiedLease &&
+    !stalePresence && !state.write
+  useEffect(() => {
+    if (!canConfirmTakeover) setTakeover(null)
+  }, [canConfirmTakeover])
+  const takeControl = () => {
+    if (!steerable || state.steerDenied) return
+    if (occupiedLease && roomControl && !stalePresence && !state.write) {
+      setTakeover({ control: roomControl, authorityKey, lease: occupiedLease })
+    } else {
+      setTakeover(null)
+      session.takeControl(false)
+    }
+  }
+  const confirmTakeover = () => {
+    setTakeover(null)
+    // Approval belongs to this observed lease and attach, never a replacement.
+    if (canConfirmTakeover) session.takeControl(true)
+  }
   const releaseControl = () => session.releaseControl()
   const toggleWrite = () => {
     if (state.write) releaseControl()
@@ -219,10 +249,10 @@ function TerminalRoute({ params }: RouteProps) {
                 <MemberAvatar member={members[id]} fallback={id} className="size-4 text-[8px]" />
                 <span className="text-foreground">{members[id]?.display_name || id}</span>
               </span>
-            )) : <span className="text-muted-foreground">None</span> : (
+            )) : <span className="text-muted-foreground">{stalePresence ? 'Unknown' : 'None'}</span> : (
               <span className="text-muted-foreground">{roomStatusError ? 'Unavailable' : 'Loading…'}</span>
             )}
-            {roomStatusError && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
+            {stalePresence && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
           </div>
         </div>
         <Button
@@ -235,6 +265,11 @@ function TerminalRoute({ params }: RouteProps) {
           {state.write ? 'Release' : 'Take control'}
         </Button>
       </div>
+      {roomStatusError && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
+          {roomStatusError}
+        </span>
+      )}
       {state.steerDenied && (
         <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
           You cannot steer this run.
@@ -266,48 +301,65 @@ function TerminalRoute({ params }: RouteProps) {
   )
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8 coarse:pr-11">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden">
       <RunHeader run={run} subtitle={run.branch} active="terminal" />
-      <div {...panelProps}>
-        <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
-          <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
-            {liveWritable && <div aria-hidden="true" className="terminal-control-border" />}
-            <TerminalPane
-              key={runID}
-              controller={controller}
-              writable={state.write && !starting && !replaying}
-              readingSurface={readingHistory ? historyTools : undefined}
-              surface={
-                <TerminalHistory
-                  controller={controller}
-                  cache={historyCache}
-                  enabled={!starting && !replaying}
-                  beforeDispose={beforeDispose}
-                  tools={historyTools}
-                  onReadingChange={setReadingHistory}
-                />
-              }
-              imageTarget={runID}
-              toolbarEnd={attachmentControls}
-              imageUploadEnabled={
-                !starting && state.connection === 'live' && state.write && !state.steerDenied
-              }
-              replaying={replaySpinner}
-            >
-              {starting && <TerminalSpinner label="Starting the run's container" />}
-            </TerminalPane>
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div {...panelProps}>
+          <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
+            <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
+              {liveWritable && <div aria-hidden="true" className="terminal-control-border" />}
+              <TerminalPane
+                key={runID}
+                controller={controller}
+                writable={state.write && !starting && !replaying}
+                readingSurface={readingHistory ? historyTools : undefined}
+                surface={
+                  <TerminalHistory
+                    controller={controller}
+                    cache={historyCache}
+                    enabled={!starting && !replaying}
+                    beforeDispose={beforeDispose}
+                    tools={historyTools}
+                    onReadingChange={setReadingHistory}
+                  />
+                }
+                imageTarget={runID}
+                toolbarEnd={attachmentControls}
+                imageUploadEnabled={
+                  !starting && state.connection === 'live' && state.write && !state.steerDenied
+                }
+                replaying={replaySpinner}
+              >
+                {starting && <TerminalSpinner label="Starting the run's container" />}
+              </TerminalPane>
+            </div>
+            <RunDock runID={runID} onEvidenceAnswer={(fact) => setEvidenceAnswer({ fact })} />
           </div>
-          <RunDock runID={runID} />
         </div>
+        <RunRoom
+          key={runID}
+          run={run}
+          selfID={self.id}
+          control={roomControl}
+          onTakeControl={takeControl}
+          onReleaseControl={releaseControl}
+          evidenceAnswer={evidenceAnswer}
+        />
       </div>
-      <RunRoom
-        key={runID}
-        run={run}
-        selfID={self.id}
-        control={roomControl}
-        onTakeControl={takeControl}
-        onReleaseControl={releaseControl}
-      />
+      <Dialog open={canConfirmTakeover} onOpenChange={(open) => { if (!open) setTakeover(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Take control of this run?</DialogTitle>
+            <DialogDescription>
+              {controllerName} currently controls the run. Taking control will end their writable session and notify them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTakeover(null)}>Cancel</Button>
+            <Button type="button" disabled={!canConfirmTakeover} onClick={confirmTakeover}>Take control</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

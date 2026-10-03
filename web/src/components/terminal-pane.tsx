@@ -398,7 +398,7 @@ export function TerminalPane({
         <div className="flex h-[35px] shrink-0 items-center coarse:h-[47px]">
           {!controller.findOpen ? (
             <>
-              <div className={toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
+              <div className={coarse ? undefined : toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="ghost" size="icon" aria-label="Terminal tools">
@@ -410,9 +410,11 @@ export function TerminalPane({
                   </PopoverContent>
                 </Popover>
               </div>
-              <div className={toolbarEnd ? 'hidden @[70rem]/terminal-pane:block' : 'hidden @[42rem]/terminal-pane:block'}>
-                <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
-              </div>
+              {!coarse && (
+                <div className={toolbarEnd ? 'hidden @[70rem]/terminal-pane:block' : 'hidden @[42rem]/terminal-pane:block'}>
+                  <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
+                </div>
+              )}
             </>
           ) : (
             <Button variant="ghost" size="icon" aria-label="Close terminal search" onClick={closeFind}>

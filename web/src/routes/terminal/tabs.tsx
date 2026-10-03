@@ -7,18 +7,13 @@ import type { Route } from '@/store/ui'
 /** The run-detail tabs, in strip order. Exported so a caller that has to
  * reason about "any tab of this run" reads the same list the strip draws. */
 export const runTabs = [
-  { route: 'run', label: 'Overview' },
   { route: 'terminal', label: 'Terminal' },
   { route: 'browser', label: 'Browser' },
   { route: 'diff', label: 'Diff' },
   { route: 'events', label: 'Events' },
 ]
 
-/**
- * True while any run-detail tab for this run is open. Every entry point
- * lands on the terminal, so a selected row cannot key on the Overview route
- * alone and still stay lit while the reader moves between tabs.
- */
+/** True while any run-detail tab for this run is open. */
 export function isRunRoute(route: Route, runID: string): boolean {
   return route.params.runId === runID && runTabs.some((t) => t.route === route.name)
 }
@@ -36,9 +31,7 @@ export function runTabPanel(active: string, className: string, scrolls = false) 
     role: 'tabpanel',
     id: panelID,
     'aria-labelledby': tabID(active),
-    // A tab stop only where the panel is the scroller and holds nothing
-    // focusable of its own; the other two would be a stop that scrolls
-    // nothing.
+    // Only panels that own their scrolling need a separate tab stop.
     tabIndex: scrolls ? 0 : undefined,
     className: cn(scrolls && focusRing, className),
   } as const
@@ -66,6 +59,7 @@ export function RunTabs({ runID, active }: { runID: string; active: string }) {
     const want = pendingFocus
     pendingFocus = null
     if (want === `${runID}:${active}`) selected.current?.focus()
+    else selected.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [runID, active])
 
   return (

@@ -52,7 +52,7 @@ test('a member shares their agent account and a teammate launches on it', async 
   const bobPage = await bobContext.newPage()
   try {
     const openLaunch = async () => {
-      await bobPage.getByRole('complementary').getByRole('button', { name: 'New run' }).click()
+      await bobPage.getByRole('banner', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
       const dialog = bobPage.getByRole('dialog', { name: 'Launch a run' })
       await expect(dialog).toBeVisible()
       return dialog

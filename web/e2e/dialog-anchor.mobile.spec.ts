@@ -64,9 +64,8 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
   await page.goto(alice.url)
   await shrinkToKeyboardHeight(page)
 
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('banner', { name: 'Aether' })
     .getByRole('button', { name: 'New run' })
     .tap()
 

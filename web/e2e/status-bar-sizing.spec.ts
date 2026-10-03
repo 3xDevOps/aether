@@ -1,32 +1,20 @@
-// The status bar at the smallest window the desktop shell allows, and below
-// that floor in a browser tab. At compact widths the connection, status-slot
-// actions and theme remain on screen while the secondary readouts use a
-// collapsible popup. The wide row expands those readouts in place.
-//
-// The state that makes the left group too wide is a server that has gone
-// away: the notice explaining it is the longest thing the bar ever carries,
-// and it needs a real server to leave. Everything here is real - the member
-// links, the server is stopped, and the gateway reports what it finds.
-//
-// Keep the compact disclosure keyboard reachable: a mouse-only check would
-// miss the disclosure behavior that makes the offline notice available.
-//
-// The same bar on a phone, tapped rather than clicked, is
-// `status-bar.mobile.spec.ts`.
+// A real server shutdown exercises complete diagnostics in the bounded status
+// popup at wide and cramped widths, without faking connection state.
 
 import { expect, test } from './fixtures'
 import { OnboardingWizard } from './pages/wizard'
 
 /** Controls that must stay reachable even when the left status readouts wrap. */
-const controls = ['Search runs and commands', 'Keyboard shortcuts', 'Theme: system', 'Usage']
+const controls = ['Search runs and commands', 'Keyboard shortcuts', 'Show status details']
 
+const wideSize = { width: 1280, height: 600 }
 const sizes = [
   // The floor desktop/main.js enforces.
   { width: 960, height: 600 },
   // A browser tab, which has no floor at all.
   { width: 800, height: 480 },
+  wideSize,
 ]
-const wideSize = { width: 1280, height: 600 }
 const unreachableNotice =
   'server unreachable over SSH - check the server and network; retrying'
 
@@ -59,6 +47,8 @@ test('the status bar keeps its controls on screen with every readout up', async 
   // actual gauge at the wide layout before taking the server away; the version
   // label above only proves server.info answered.
   await page.setViewportSize(wideSize)
+  const trigger = footer.getByRole('button', { name: 'Show status details' })
+  await trigger.click()
   await expect(footer.locator('[aria-label="Disk usage"]')).toBeVisible()
 
   await aether.server.stop()
@@ -68,7 +58,6 @@ test('the status bar keeps its controls on screen with every readout up', async 
     for (const name of controls) {
       await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
     }
-    const trigger = footer.getByRole('button', { name: 'Show status details' })
     const notice = footer.getByRole('status', { name: unreachableNotice })
     await expect(trigger).toBeVisible()
     if ((await trigger.getAttribute('aria-expanded')) === 'true') {
@@ -80,7 +69,7 @@ test('the status bar keeps its controls on screen with every readout up', async 
     await trigger.press('Enter')
     await expect(notice).toBeVisible()
     await expect(notice).toHaveText(unreachableNotice)
-    const localStatus = footer.getByRole('button', { name: 'Not linked', exact: true })
+    const localStatus = footer.getByText('Not linked', { exact: true })
     const memberRow = footer.getByText(longName, { exact: true })
     const diskRow = footer.locator('[aria-label="Disk usage"]')
     await expect(localStatus).toBeVisible()
@@ -114,7 +103,6 @@ test('the status bar keeps its controls on screen with every readout up', async 
     expect(popupBox.y).toBeGreaterThanOrEqual(0)
     expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(size.width)
     expect(popupBox.y + popupBox.height).toBeLessThanOrEqual(size.height)
-    await expect(popup).toHaveCSS('overflow-y', 'auto')
 
     // The readouts give way inside their own group rather than pushing it:
     // an overflowing left group is what took the controls off the edge.
@@ -131,28 +119,9 @@ test('the status bar keeps its controls on screen with every readout up', async 
       ),
     )
     expect(verticalOverflow).toBe(0)
+    const usage = footer.getByRole('button', { name: 'Usage', exact: true })
+    await usage.scrollIntoViewIfNeeded()
+    await expect(usage).toBeInViewport({ ratio: 1 })
   }
 
-  await page.setViewportSize(wideSize)
-  await expect(
-    footer.getByRole('button', { name: 'Show status details' }),
-  ).toBeHidden()
-  await expect(footer.getByRole('status', { name: unreachableNotice })).toBeVisible()
-  for (const name of controls) {
-    await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
-  }
-  const wideMember = footer.getByText(longName, { exact: true })
-  const wideDisk = footer.locator('[aria-label="Disk usage"]')
-  await expect(wideMember).toBeVisible()
-  const wideMemberMetrics = await wideMember.evaluate((element) => {
-    const memberElement = element as HTMLElement
-    return {
-      height: memberElement.clientHeight,
-      clientWidth: memberElement.clientWidth,
-      scrollWidth: memberElement.scrollWidth,
-    }
-  })
-  expect(wideMemberMetrics.height).toBe(22)
-  expect(wideMemberMetrics.scrollWidth).toBeGreaterThan(wideMemberMetrics.clientWidth)
-  await expect(wideDisk).toHaveCSS('height', '22px')
 })

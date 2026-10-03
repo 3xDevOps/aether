@@ -1,9 +1,14 @@
 import type { LucideIcon } from 'lucide-react'
-import { Copy, Minus, Square, X } from 'lucide-react'
+import { Copy, Minus, PanelLeftOpen, Rocket, Square, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
 import { CommandPaletteTrigger } from '@/components/palette'
 import { cn, focusRing } from '@/lib/utils'
+import { canLaunch } from '@/lib/commands'
+import { useMediaQuery } from '@/lib/hooks'
+import { useStore } from '@/store'
+import { useCapability, useSelfRole } from '@/store/hooks'
 /** The window buttons, present only when the shell draws none of its own. */
 export type DesktopControls = {
   minimize: () => void
@@ -102,6 +107,11 @@ export function TitleBar({
   const desktop = desktopBridge()
   const controls = desktop?.controls
   const [maximized, setMaximized] = useState(false)
+  const mobile = useMediaQuery('(max-width: 640px)')
+  const drawerOpen = useStore((s) => s.sidebarDrawerOpen)
+  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
+  const openDialog = useStore((s) => s.openPaletteDialog)
+  const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
 
   useEffect(() => {
     if (!controls) return
@@ -133,16 +143,33 @@ export function TitleBar({
         // grows by the top inset and pads its controls back below it. The
         // insets are 0 everywhere else, and the Electron inline padding above
         // wins where it applies.
-        'relative z-50 grid h-[calc(var(--title-bar-height)_+_var(--safe-top))] shrink-0 select-none grid-cols-[minmax(36px,1fr)_minmax(0,600px)_minmax(36px,1fr)] items-center border-b border-border bg-sidebar pt-[var(--safe-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground max-[767px]:grid-cols-[36px_minmax(0,1fr)_36px]',
+        'relative z-50 grid h-[calc(var(--title-bar-height)_+_var(--safe-top))] shrink-0 select-none grid-cols-[minmax(36px,1fr)_minmax(0,600px)_minmax(max-content,1fr)] items-center border-b border-border bg-sidebar pt-[var(--safe-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground max-[767px]:grid-cols-[44px_minmax(0,1fr)_auto]',
         desktop && 'backdrop-blur',
       )}
     >
-      <div className="flex min-w-0 shrink items-center gap-2 px-3 max-[767px]:justify-center max-[767px]:px-0">
-        <img src="/aether-mark.png" alt="" aria-hidden className="h-4 w-auto shrink-0" />
-        <span className="font-pixel text-[18px] leading-none tracking-wide text-foreground max-[767px]:hidden">
-          aether
-        </span>
-      </div>
+      {mobile ? (
+        <Button
+          id="sidebar-drawer-trigger"
+          variant="ghost"
+          size="icon"
+          style={NO_DRAG}
+          aria-label="Expand sidebar"
+          aria-controls="sidebar-drawer"
+          aria-expanded={drawerOpen}
+          disabled={commandPaletteDisabled}
+          onClick={() => setDrawerOpen(true)}
+          className="justify-self-center"
+        >
+          <PanelLeftOpen aria-hidden />
+        </Button>
+      ) : (
+        <div className="flex min-w-0 shrink items-center gap-2 px-3 max-[767px]:justify-center max-[767px]:px-0">
+          <img src="/aether-mark.png" alt="" aria-hidden className="h-4 w-auto shrink-0" />
+          <span className="font-pixel text-[18px] leading-none tracking-wide text-foreground max-[767px]:hidden">
+            aether
+          </span>
+        </div>
+      )}
 
       <div className="flex min-w-0 w-full items-center justify-center">
         <div style={NO_DRAG} className="flex min-w-0 w-full max-w-[600px]">
@@ -150,8 +177,20 @@ export function TitleBar({
         </div>
       </div>
 
-      {controls && (
-        <div className="flex h-full shrink-0 items-center justify-self-end">
+      <div className="flex h-full shrink-0 items-center justify-self-end">
+        {launchable && !commandPaletteDisabled && (
+          <Button
+            size="sm"
+            style={NO_DRAG}
+            onClick={() => openDialog('launch')}
+            className="mx-2"
+          >
+            <Rocket aria-hidden className="max-[767px]:hidden" />
+            New run
+          </Button>
+        )}
+        {controls && (
+          <div className="flex h-full shrink-0 items-center">
           <ControlButton label="Minimize" icon={Minus} onClick={controls.minimize} />
           <ControlButton
             label={maximized ? 'Restore' : 'Maximize'}
@@ -164,8 +203,9 @@ export function TitleBar({
             onClick={controls.close}
             className="hover:bg-destructive hover:text-destructive-foreground"
           />
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </header>
   )
 }

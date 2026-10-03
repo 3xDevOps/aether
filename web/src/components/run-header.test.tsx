@@ -1,16 +1,16 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { lookupRoute } from '@/routes/registry'
 import { runTabs } from '@/routes/terminal/tabs'
 import '@/routes/browser'
 import '@/routes/diff'
-import '@/routes/run'
 import '@/routes/terminal'
 import '@/routes/terminal/events'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import type { Run } from '@/lib/types'
 import type * as apiModule from '@/lib/api'
-import { alice, approval, run, serverInfo, workspace } from '@/test/fixtures'
+import { alice, approval, bob, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -20,7 +20,6 @@ vi.mock('@/lib/api', async (importOriginal) => {
 })
 
 const tabs = runTabs.map((tab) => tab.route)
-
 
 function seed(over: Partial<Run> = {}) {
   useStore.setState({
@@ -97,23 +96,83 @@ describe('run header', () => {
     }
   })
 
-  // A swarm worker's prompt is a whole brief; without a terminal title the
-  // heading must stay short and the brief stays behind the disclosure.
-  it('keeps an untitled run with a long prompt to a short heading', () => {
+  it.each(tabs)('discloses the complete task and metadata on the %s tab', async (name) => {
     const task = `Goal: fix conflict communication for mission runs.\n${'x'.repeat(2000)}`
-    seed({ title: '', task })
-    const bar = runHeader('terminal')
-    const heading = within(bar).getByRole('heading', { level: 1 })
+    const now = Date.now()
+    const commit = 'abcdef0123456789abcdef0123456789abcdef01'
+    seed({
+      title: '',
+      task,
+      account_member_id: bob.id,
+      created_at: new Date(now - 7_200_000).toISOString(),
+      started_at: new Date(now - 3_600_000).toISOString(),
+      last_commit: commit,
+      last_commit_at: new Date(now - 1_800_000).toISOString(),
+    })
+    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
+    const bar = runHeader(name)
+    const trigger = within(bar).getByText('Task and details')
+    const disclosure = trigger.closest('details')!
 
-    expect(heading.textContent).toBe('Goal: fix conflict communication for mission runs.')
-    expect(heading.className).toContain('line-clamp-2')
-    expect(heading.getAttribute('title')).toBe(heading.textContent)
-    expect(within(bar).getByText('View full task')).toBeDefined()
-    expect(bar.textContent).toContain('x'.repeat(2000))
+    expect(disclosure.open).toBe(false)
+    expect(within(bar).getByRole('heading', { level: 1 }).textContent).toBe(
+      'Goal: fix conflict communication for mission runs.',
+    )
+    await userEvent.click(trigger)
+
+    expect(disclosure.open).toBe(true)
+    expect(disclosure.querySelector('p')?.textContent).toBe(task)
+    const details = within(disclosure)
+    expect(details.getByText('Owner').nextElementSibling?.textContent).toContain('Alice')
+    expect(details.getByText('Agent account').nextElementSibling?.textContent).toContain('Bob')
+    expect(details.getByText('Created').nextElementSibling?.textContent).toBe('2 hours ago')
+    expect(details.getByText('Changed').nextElementSibling?.textContent).toBe('1 hour ago')
+    expect(details.getByText('Last commit').nextElementSibling?.textContent).toBe(
+      'abcdef01 30 minutes ago',
+    )
+    expect(details.getByTitle(commit).textContent).toBe('abcdef01')
+
+    await userEvent.click(trigger)
+    expect(disclosure.open).toBe(false)
   })
 
-  // The shield used to sit on the Overview alone, which is not the tab
-  // anyone reaches for the steer button it is warning about.
+  it('keeps details and the branch available for a titled run without a task', async () => {
+    seed({ task: '', title: 'Terminal title', member_id: 'missing-owner', account_member_id: 'missing-account' })
+    const bar = runHeader('events')
+    expect(within(bar).getByText('aether/run-1-checkout')).toBeDefined()
+    const trigger = within(bar).getByText('Task and details')
+
+    await userEvent.click(trigger)
+
+    const disclosure = trigger.closest('details')!
+    expect(disclosure.open).toBe(true)
+    const details = within(disclosure)
+    expect(details.getByText('Owner').nextElementSibling?.textContent).toContain('missing-owner')
+    expect(details.getByText('Agent account').nextElementSibling?.textContent).toContain('missing-account')
+  })
+
+  it.each([undefined, alice.id])('omits a redundant agent account (%s)', async (account_member_id) => {
+    seed({ account_member_id })
+    const bar = runHeader('events')
+    const trigger = within(bar).getByText('Task and details')
+
+    await userEvent.click(trigger)
+
+    const details = within(trigger.closest('details')!)
+    expect(details.getByText('Owner').nextElementSibling?.textContent).toContain('Alice')
+    expect(details.queryByText('Agent account')).toBeNull()
+  })
+
+  it('omits a last commit without its timestamp', async () => {
+    seed({ last_commit: 'a'.repeat(40), last_commit_at: null })
+    const bar = runHeader('events')
+    const trigger = within(bar).getByText('Task and details')
+
+    await userEvent.click(trigger)
+
+    expect(within(trigger.closest('details')!).queryByText('Last commit')).toBeNull()
+  })
+
   it('warns that a run is protected on the tab that steers it', () => {
     seed({ protected: true })
     const bar = runHeader('terminal')

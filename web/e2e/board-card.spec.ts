@@ -31,6 +31,7 @@ test('a card gives up its branch name without opening the run', async ({ page, a
   await page.goto(alice.url)
   const card = page.getByRole('article').filter({ hasText: 'long enough' })
   await expect(card).toBeVisible()
+  await card.getByRole('button', { name: /^Show details for / }).click()
   const name = card.getByTitle(run.branch)
 
   // The tooltip chain, resolved the way the browser resolves it: from the
@@ -48,11 +49,6 @@ test('a card gives up its branch name without opening the run', async ({ page, a
   })
   expect(tooltip).toBe(run.branch)
 
-  // A double click takes a whole word out of the branch name itself, not
-  // just any text the page happens to have selected. Aimed at the start of
-  // the name so the word is a known one: run branches are
-  // aether/run-<slug>-<id>, and the name is truncated, so which word sits
-  // under the middle of the chip depends on how wide the card is today.
   await name.dblclick({ position: { x: 4, y: 4 } })
   const selected = await page.evaluate(
     () => window.getSelection()?.toString().trim() ?? '',

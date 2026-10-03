@@ -28,10 +28,10 @@ test('retained evidence stays tappable in a short phone sheet', async ({ page, a
   await page.setViewportSize({ width: 390, height: 600 })
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Open Run Room' }).tap()
-  const room = page.getByRole('complementary', { name: 'Run Room' })
-  const evidence = room.getByRole('region', { name: 'Run evidence' })
-  await evidence.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).tap()
+  const trigger = page.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ })
+  await expect(trigger).toHaveCount(1)
+  await trigger.tap()
+  const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
   await evidence.getByRole('button', { name: /^finish capture/ }).tap()
 
   await evidence.getByRole('tab', { name: 'Patch', exact: true }).tap()
@@ -45,6 +45,5 @@ test('retained evidence stays tappable in a short phone sheet', async ({ page, a
 
   await evidence.getByRole('button', { name: 'Close evidence', exact: true }).tap()
   await expect(evidence.getByRole('heading', { name: 'Retained evidence', exact: true })).toBeHidden()
-  await room.getByRole('button', { name: 'Close Run Room', exact: true }).tap()
-  await expect(room).toBeHidden()
+  await expect(trigger).toBeFocused()
 })

@@ -5,7 +5,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { ThemeToggle } from '@/components/theme'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { formatBytes } from '@/lib/format'
 import { UsageReader } from '@/components/shell/usage'
@@ -13,12 +12,11 @@ import { inModal } from '@/lib/keys'
 import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
+import { TeamStatusDetails } from '@/routes/team'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { UnreachableKind } from '@/store/server'
 
-const desktopStatusQuery = '(min-width: 768px)'
-const wideStatusQuery = '(min-width: 1280px)'
 const connectionLabel: Record<ConnectionState, string> = {
   connecting: 'Connecting',
   live: 'Live',
@@ -102,12 +100,11 @@ function ServerUpdateNotice() {
         : null
   if (!notice) return null
   return (
-    // `truncate` can clip this, and the chip takes no `title` of its own, so
-    // the span around it carries the whole sentence for a pointer.
+    // Keep the complete notice available to both pointer and touch readers.
     <span
       role="status"
       title={notice}
-      className="flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
+      className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
     >
       <Chip
         color="warning"
@@ -117,7 +114,7 @@ function ServerUpdateNotice() {
         // readout has always been the neutral the rest of the bar uses.
         className="flex min-w-0 shrink items-center bg-state-waiting/15 text-muted-foreground"
       >
-        <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
+        <Chip.Label className="min-w-0 break-words whitespace-normal">
           {notice}
         </Chip.Label>
       </Chip>
@@ -125,48 +122,23 @@ function ServerUpdateNotice() {
   )
 }
 
-/**
- * The desktop gateway's always-visible entry point: whether this machine
- * has a linked repository, jumping to onboarding until it does and to
- * settings after. Gated on the link.status verb, so the remote gateway
- * shows nothing.
- */
+/** Local repository state, never another path into navigation. */
 function LocalStatus() {
   const cap = useCapability()
   const link = useStore((s) => s.linkStatus)
-  const navigate = useStore((s) => s.navigate)
   if (!cap.hasLocal('link.status')) return null
   const linked = link?.linked === true
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              navigate(linked ? 'settings' : 'onboarding')
-            }}
-            className={cn(
-              focusRing,
-              'flex h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 rounded-sm px-1 hover:text-foreground',
-            )}
-          >
-            <span
-              className={cn(
-                'size-2 rounded-full',
-                linked ? 'bg-state-done' : 'bg-state-waiting',
-              )}
-              aria-hidden
-            />
-            {linked ? 'Linked' : 'Not linked'}
-          </button>
+    <span className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1">
+      <span
+        className={cn(
+          'size-2 shrink-0 rounded-full',
+          link === null ? 'bg-muted-foreground' : linked ? 'bg-state-done' : 'bg-state-waiting',
         )}
+        aria-hidden
       />
-      <Tooltip.Content>
-        {linked ? `Linked to ${link?.repo}` : 'Link a repository'}
-      </Tooltip.Content>
-    </Tooltip>
+      {link === null ? 'Link status unknown' : linked ? 'Linked' : 'Not linked'}
+    </span>
   )
 }
 
@@ -188,7 +160,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
   if (!available) {
     return (
       <span
-        className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
+        className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
         title={`${label} · protocol ${protocol}`}
       >
         {label}
@@ -210,7 +182,7 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
             aria-label={`Update available: ${latest}`}
             className={cn(
               focusRing,
-              'flex min-h-[var(--status-bar-height)] min-w-0 shrink items-center gap-1 rounded-sm px-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap hover:text-foreground',
+              'flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 rounded-sm px-1 break-words whitespace-normal hover:text-foreground',
             )}
           >
             {label}
@@ -254,64 +226,29 @@ function StatusFacts({ disk }: { disk?: DiskUsage }) {
   )
 }
 
-// Keep the connection and theme controls present at every width. Readouts use
-// a collapsible menu until the wide layout has room for the full row, while
-// registered status actions stay beside the theme from the desktop breakpoint.
+// Keep connection, shortcuts and phone attention outside the disclosure.
+// Both the outer Slot and the secondary readouts have one permanent home.
 export function StatusBar() {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
   const info = useStore((s) => s.info)
   const disk = info?.disk
-  const [desktop, setDesktop] = useState(
-    () => window.matchMedia?.(desktopStatusQuery).matches ?? false,
-  )
-  const [wide, setWide] = useState(
-    () => window.matchMedia?.(wideStatusQuery).matches ?? false,
-  )
-  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
-
-  useEffect(() => {
-    const desktopMedia = window.matchMedia?.(desktopStatusQuery)
-    const wideMedia = window.matchMedia?.(wideStatusQuery)
-    if (!desktopMedia && !wideMedia) return
-    const applyDesktop = (event: MediaQueryListEvent) => setDesktop(event.matches)
-    const applyWide = (event: MediaQueryListEvent) => setWide(event.matches)
-    desktopMedia?.addEventListener('change', applyDesktop)
-    wideMedia?.addEventListener('change', applyWide)
-    return () => {
-      desktopMedia?.removeEventListener('change', applyDesktop)
-      wideMedia?.removeEventListener('change', applyWide)
-    }
-  }, [])
-
-  const detailsOpen = wide || mobileDetailsOpen
-  const statusActions = <Slot name="statusbar" />
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const details = useRef<HTMLDivElement>(null)
 
-  // The compact popup covers the view it sits over, and the only thing that
-  // closes it is one small trigger at the screen edge. Touch has no hover to
-  // find that trigger with, so the popup dismisses the way every other
-  // overlay does: a tap or click anywhere else, or Escape. A dialog above it
-  // owns Escape first, which is what `inModal` answers. The popup is not a
-  // Radix overlay because the status Slot inside it stays mounted while it is
-  // closed - a contributor owns a keyboard shortcut of its own.
-  //
-  // Both listeners capture, because the shell's own Escape is a window
-  // listener registered when the workbench mounted, long before this one:
-  // in the bubble phase it would leave the run first and mark the key
-  // handled, which this handler reads as someone else's. Taking the key
-  // first and marking it handled is what makes Escape dismiss the topmost
-  // thing and only that.
+  // Capture Escape before the shell can leave the current run. Portalled
+  // Usage/select/dialog overlays own their interactions first. forceMount
+  // preserves readout state while closed; the outer Slot never moves.
   useEffect(() => {
-    if (wide || !mobileDetailsOpen) return
+    if (!detailsOpen) return
     const outside = (event: PointerEvent) => {
-      if (details.current?.contains(event.target as Node | null)) return
-      setMobileDetailsOpen(false)
+      if (details.current?.contains(event.target as Node | null) || inModal(event.target)) return
+      setDetailsOpen(false)
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || inModal(event.target)) return
       event.preventDefault()
-      setMobileDetailsOpen(false)
+      setDetailsOpen(false)
       // A dismissed popup can be holding the focus; the trigger is where it
       // came from and where it opens again.
       details.current
@@ -324,7 +261,7 @@ export function StatusBar() {
       window.removeEventListener('pointerdown', outside, true)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [mobileDetailsOpen, wide])
+  }, [detailsOpen])
 
   return (
     <footer className="relative flex min-h-[var(--status-bar-height)] shrink-0 items-center gap-1 border-0 bg-sidebar py-0 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] text-[12px] leading-none text-muted-foreground before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border before:content-['']">
@@ -338,18 +275,16 @@ export function StatusBar() {
         </span>
         <Collapsible
           ref={details}
-          className="relative block h-[var(--status-bar-height)] min-w-0 leading-none xl:flex-1"
+          className="relative block h-[var(--status-bar-height)] min-w-0 leading-none"
           open={detailsOpen}
-          onOpenChange={(open) => {
-            if (!wide) setMobileDetailsOpen(open)
-          }}
+          onOpenChange={setDetailsOpen}
         >
           <Tooltip>
             <Tooltip.Trigger<'button'>
               render={(triggerProps) => (
                 <CollapsibleTrigger
                   {...triggerProps}
-                  className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground xl:hidden"
+                  className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground"
                   aria-label="Show status details"
                   aria-controls="status-details"
                 />
@@ -360,10 +295,10 @@ export function StatusBar() {
           <CollapsibleContent
             id="status-details"
             forceMount
-            className="block min-w-0 data-[state=closed]:hidden xl:h-[var(--status-bar-height)] xl:flex-1"
+            className="block min-w-0 data-[state=closed]:hidden"
           >
             <div
-              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-normal shadow-lg xl:static xl:flex xl:h-[var(--status-bar-height)] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
+              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[min(70dvh,calc(100dvh_-_var(--status-bar-height)_-_env(safe-area-inset-bottom)_-_1rem))] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-normal shadow-lg"
             >
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the
@@ -372,14 +307,14 @@ export function StatusBar() {
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
-                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
                 >
                   <Chip
                     color="warning"
                     variant="soft"
                     className="flex min-w-0 shrink items-center bg-state-needs-attention/15 text-state-needs-attention"
                   >
-                    <Chip.Label className="min-w-0 break-words whitespace-normal xl:truncate xl:whitespace-nowrap">
+                    <Chip.Label className="min-w-0 break-words whitespace-normal">
                       {unreachableLabel[unreachable]}
                     </Chip.Label>
                   </Chip>
@@ -396,14 +331,14 @@ export function StatusBar() {
               {info && (
                 <span
                   title={info.member.display_name}
-                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:max-w-40 xl:shrink-0 xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
                 >
                   {info.member.display_name}
                 </span>
               )}
               {disk && disk.total_bytes > 0 && (
                 <span
-                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:shrink xl:truncate xl:whitespace-nowrap"
+                  className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal"
                   aria-label="Disk usage"
                   title={diskLines(disk).join(' · ')}
                 >
@@ -415,31 +350,20 @@ export function StatusBar() {
                       }}
                     />
                   </span>
-                  <span className="min-w-0 break-words xl:truncate xl:whitespace-nowrap">
+                  <span className="min-w-0 break-words">
                     {formatBytes(disk.used_bytes)} / {formatBytes(disk.total_bytes)}
                   </span>
                 </span>
               )}
-              {!wide && <StatusFacts disk={disk} />}
-              {/* Last, so a screen too short for the readouts reaches the
-                  controls by scrolling to the end of the popup. */}
-              {!desktop && (
-                <span className="flex min-w-0 flex-wrap items-center gap-1">
-                  {statusActions}
-                </span>
-              )}
+              <StatusFacts disk={disk} />
+              <TeamStatusDetails />
+              <UsageReader />
             </div>
           </CollapsibleContent>
         </Collapsible>
-        <UsageReader />
       </div>
       <span className="flex min-w-0 shrink-0 items-center gap-2">
-        {desktop && (
-          <span className="flex min-w-0 shrink-0 items-center gap-2">
-            {statusActions}
-          </span>
-        )}
-        <ThemeToggle />
+        <Slot name="statusbar" />
       </span>
     </footer>
   )

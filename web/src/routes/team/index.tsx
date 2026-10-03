@@ -1,7 +1,5 @@
-// The team surfaces: presence, the shared approval inbox, the workspace
-// activity feed, and budgets. They reach into the board and the status
-// bar through the slots those views expose, and the two full views are
-// ordinary registry routes.
+// Team routes and their concrete shell/card contributions. The outer status
+// contribution owns refresh; the details readouts never start another lifecycle.
 
 import { registerSlot } from '@/components/slots'
 import type { Api } from '@/lib/api'
@@ -10,20 +8,22 @@ import { BudgetStatus } from '@/routes/team/budget'
 import { PresenceStatus, Watchers } from '@/routes/team/presence'
 import { registerRoute } from '@/routes/registry'
 import { useTeamRefresh } from '@/routes/team/sync'
-import { TimelineFeed, TimelineStatus } from '@/routes/team/timeline'
+import { TimelineFeed } from '@/routes/team/timeline'
+import { useStore } from '@/store'
 
-/**
- * All four readouts share one status-bar entry, which is also where the
- * refresh they all depend on is mounted: the status bar is the one surface
- * that is always on screen.
- */
+/** Keep refresh and the phone attention signal alive outside status details. */
 export function TeamStatus({ client }: { client?: Api }) {
   useTeamRefresh(client)
+  return <ApprovalStatus />
+}
+
+/** Secondary readouts, mounted once inside the shell's persistent disclosure. */
+export function TeamStatusDetails() {
+  const error = useStore((s) => s.inboxError)
   return (
     <>
       <BudgetStatus />
-      <ApprovalStatus />
-      <TimelineStatus />
+      {error && <p role="alert" className="break-words text-state-failed">{error}</p>}
       <PresenceStatus />
     </>
   )
