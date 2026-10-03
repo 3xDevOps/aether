@@ -23,6 +23,8 @@ var (
 	// ErrOccupied means another session currently controls the run. Taking
 	// over an occupied run requires force=true.
 	ErrOccupied = errors.New("control: run is already controlled")
+	// ErrTakeoverRequired rejects bypassing the interactive handoff protocol.
+	ErrTakeoverRequired = errors.New("control: occupied takeover requires a timed hold and review")
 	// ErrAdmissionBusy means another action owns the run's admission boundary.
 	ErrAdmissionBusy = errors.New("control: run admission is busy")
 	// ErrStale means that the lease no longer names the current authority.
@@ -65,6 +67,8 @@ type Snapshot struct {
 	Connected  bool
 	AcquiredAt time.Time
 	ExpiresAt  time.Time
+	// Revoked closes when this exact lease is replaced, released, or fenced.
+	Revoked    <-chan struct{} `json:"-"`
 	revocation *atomic.Uint32
 }
 
@@ -94,6 +98,7 @@ type lease struct {
 	acquiredAt time.Time
 	expiresAt  time.Time
 	revocation atomic.Uint32
+	revoked    chan struct{}
 }
 
 func (l *lease) revoke(reason RevocationReason) {
@@ -104,7 +109,9 @@ func (l *lease) revoke(reason RevocationReason) {
 	case RevocationPermission:
 		value = 2
 	}
-	l.revocation.CompareAndSwap(0, value)
+	if l.revocation.CompareAndSwap(0, value) && l.revoked != nil {
+		close(l.revoked)
+	}
 }
 
 type runState struct {
@@ -154,7 +161,7 @@ func New(cfg Config) *Service {
 // be explicitly taken over so two transports never share one generation.
 // A forced takeover returns the displaced controller for notification.
 func (s *Service) Acquire(run, member, session string, force bool) (Snapshot, *Snapshot, error) {
-	return s.acquireAuthorized(run, member, session, force, 0, nil)
+	return s.acquireAuthorized(run, member, session, force, 0, nil, false)
 }
 
 // AcquireAuthorized performs authorization and lease installation as one
@@ -164,10 +171,17 @@ func (s *Service) Acquire(run, member, session string, force bool) (Snapshot, *S
 // but before a replacement lease is installed. It must be bounded and must
 // not call back into this Service.
 func (s *Service) AcquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error) (Snapshot, *Snapshot, error) {
-	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize)
+	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, false)
 }
 
-func (s *Service) acquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error) (Snapshot, *Snapshot, error) {
+// AcquireInteractiveAuthorized permits force only to replace this authenticated
+// session's exact transport generation. Cross-session handoffs must first finish
+// the timed takeover protocol and use AcquireAuthorized with its captured fence.
+func (s *Service) AcquireInteractiveAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error) (Snapshot, *Snapshot, error) {
+	return s.acquireAuthorized(run, member, session, force, expectedGeneration, authorize, true)
+}
+
+func (s *Service) acquireAuthorized(run, member, session string, force bool, expectedGeneration uint64, authorize func() error, sameSessionOnly bool) (Snapshot, *Snapshot, error) {
 	if err := s.validateRunMember(run, member); err != nil {
 		return Snapshot{}, nil, err
 	}
@@ -184,6 +198,10 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 	if expectedGeneration != 0 &&
 		(state.current == nil || state.generation != expectedGeneration) {
 		return Snapshot{}, nil, ErrStale
+	}
+	if force && sameSessionOnly && (expectedGeneration == 0 || state.current == nil ||
+		state.current.memberID != domain.MemberID(member) || state.current.sessionID != session) {
+		return Snapshot{}, nil, ErrTakeoverRequired
 	}
 
 	if current := state.current; current != nil {
@@ -223,6 +241,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 			generation: generation,
 			connected:  true,
 			acquiredAt: now,
+			revoked:    make(chan struct{}),
 		}
 		state.current = current
 		result := s.snapshotLocked(runID, current)
@@ -244,6 +263,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		generation: generation,
 		connected:  true,
 		acquiredAt: now,
+		revoked:    make(chan struct{}),
 	}
 	state.current = current
 	return s.snapshotLocked(runID, current), nil, nil
@@ -621,5 +641,6 @@ func (s *Service) snapshotLocked(run domain.RunID, current *lease) Snapshot {
 		AcquiredAt: current.acquiredAt,
 		ExpiresAt:  current.expiresAt,
 		revocation: &current.revocation,
+		Revoked:    current.revoked,
 	}
 }

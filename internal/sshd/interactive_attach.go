@@ -295,6 +295,9 @@ func (c *attachConn) Read(p []byte) (int, error) {
 	for len(c.pending) == 0 {
 		line, err := protocol.ReadLine(c.r)
 		if err != nil {
+			if c.controlCancel != nil {
+				c.controlCancel(err)
+			}
 			return 0, err
 		}
 		var control protocol.DashAttachControl
@@ -321,7 +324,7 @@ func (c *attachConn) Read(p []byte) (int, error) {
 			c.pending = data
 			c.pendingControl = control
 			c.pendingInputError = false
-		case protocol.DashAttachControlFrame:
+		case protocol.DashAttachControlFrame, protocol.DashAttachTakeover:
 			if c.controlHandler != nil {
 				c.controlHandler(control)
 			}
@@ -349,7 +352,12 @@ func (c *attachConn) reportPendingInputError(err error) {
 	}
 }
 
-func (c *attachConn) Close() error { return c.ch.Close() }
+func (c *attachConn) Close() error {
+	if c.controlCancel != nil {
+		c.controlCancel(context.Canceled)
+	}
+	return c.ch.Close()
+}
 
 func (c *attachConn) Write(p []byte) (int, error) {
 	c.mu.Lock()

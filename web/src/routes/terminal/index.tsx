@@ -22,6 +22,9 @@ import { TerminalHistory } from '@/routes/terminal/history'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useRunTerminalSession } from '@/routes/terminal/session'
+import { ControlButton } from '@/routes/terminal/control-button'
+import { useTakeover } from '@/routes/terminal/use-takeover'
+import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
@@ -160,12 +163,16 @@ function TerminalRoute({ params }: RouteProps) {
   const controllerName = controllerMember?.display_name || controllerID
   const controllerNote = localControl ? 'this tab' : stalePresence ? 'last known' :
     state.connection === 'live' && controlMetadata?.has_control === false && controllerID === self.id ? 'another session' : null
-  const takeControl = (takeover = false) => session.takeControl(takeover)
-  const releaseControl = () => session.releaseControl()
-  const toggleWrite = () => {
-    if (state.write) releaseControl()
-    else takeControl()
-  }
+  const takeover = useTakeover({
+    state: session.takeover,
+    error: session.takeoverError,
+    control: controlMetadata,
+    enabled: state.connection === 'live' && steerable && !state.steerDenied,
+    occupied: Boolean(roomStatus?.controller),
+    request: session.requestTakeover,
+  })
+  const controlUnavailable = state.connection !== 'live' || state.steerDenied || !steerable
+  const requesterID = takeover.review?.requester_member_id
 
   if (!run) {
     return <MissingRun />
@@ -225,15 +232,13 @@ function TerminalRoute({ params }: RouteProps) {
             {roomStatusError && roomStatus && <span className="shrink-0 text-muted-foreground">Last known presence</span>}
           </div>
         </div>
-        <Button
-          size="sm"
-          variant={state.write ? 'default' : 'outline'}
-          disabled={state.steerDenied || !steerable}
-          className="shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
-          onClick={toggleWrite}
-        >
-          {state.write ? 'Release' : 'Take control'}
-        </Button>
+        <ControlButton
+          ownsControl={localControl}
+          unavailable={controlUnavailable}
+          onTakeControl={session.takeControl}
+          onReleaseControl={session.releaseControl}
+          takeover={takeover.interaction}
+        />
       </div>
       {state.steerDenied && (
         <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
@@ -278,6 +283,7 @@ function TerminalRoute({ params }: RouteProps) {
               controlAppearance={liveWritable ? 'active' :
                 state.connection !== 'live' || state.steerDenied || !steerable || replaying || readingHistory
                   ? 'hidden' : controlMetadata?.loss ?? 'hidden'}
+              takeoverProgress={takeover.holderProgress}
               readingSurface={readingHistory ? historyTools : undefined}
               surface={
                 <TerminalHistory
@@ -307,8 +313,25 @@ function TerminalRoute({ params }: RouteProps) {
         run={run}
         selfID={self.id}
         control={roomControl}
-        onTakeControl={takeControl}
-        onReleaseControl={releaseControl}
+        onTakeControl={session.takeControl}
+        onReleaseControl={session.releaseControl}
+        controlUnavailable={controlUnavailable}
+        takeover={takeover.interaction}
+      />
+      <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {!localControl && takeover.interaction.phase === 'holding'
+          ? `Keep holding to request control. ${takeover.interaction.seconds} seconds remaining.`
+          : !localControl && takeover.interaction.phase === 'review'
+            ? `Control requested. Waiting for the controller's decision. ${takeover.interaction.seconds} seconds remaining.`
+            : ''}
+      </span>
+      <TakeoverDialog
+        open={Boolean(takeover.review)}
+        requesterName={requesterID ? members[requesterID]?.display_name || requesterID : ''}
+        seconds={takeover.interaction.seconds}
+        pending={takeover.decisionPending}
+        error={session.takeoverError}
+        onDecide={takeover.decide}
       />
     </div>
   )

@@ -70,11 +70,30 @@ keep automatic acquisition; other members and phones start as mirrors.
 The server grants an unoccupied lease only with Steer permission. A write
 request that cannot acquire the lease is refused rather than silently becoming
 a second writer. `aether attach` asks for control by default; use
-`aether attach --read-only <run>` to watch deliberately. An occupied attach
-does not silently displace the current controller. Open the Run Room and
-confirm **Take control** to perform an occupied takeover. The confirmation
-names the current controller; takeover ends that writable session and notifies
-it.
+`aether attach --read-only <run>` to watch deliberately. In either the terminal
+toolbar or Run Room, clicking **Take control** acquires an unoccupied terminal.
+An occupied click reports `run control is held by another session` and leaves
+the current controller in place.
+
+To request an occupied terminal, hold **Take control** for five seconds with
+the pointer, touch, Space, or Enter. A red fill with a forward-slash leading
+edge advances across the button; covered and uncovered text retain separate
+contrast. The holder sees the same fill on **Release** and red tracing over
+the teal border from the side midpoints toward the top and bottom centers.
+Releasing early, moving off the button, pressing Escape, or leaving the tab
+cancels the hold.
+
+After the full hold, the holder gets a focused dialog naming the requester.
+**Deny** keeps control; **Accept** transfers it immediately. With no response,
+the server transfers control after seven seconds. Releasing the button after
+the full hold does not cancel the request. The server cancels a pending request
+if either participant disconnects, authority changes, or the target lease is
+released or replaced. Progress never grants input before the server acknowledges
+the new controller.
+
+![The holder's takeover dialog with Deny focused](media/terminal-takeover-dialog.webp)
+
+![An occupied click reports the original conflict without taking control](media/terminal-takeover-refusal.webp)
 
 The development shell dock does not compete for the primary harness lease.
 Each shell has its own controller, named in the dock, and starts as a watcher.
@@ -97,9 +116,10 @@ becomes a mirror. After the window, the return acquires control only if the run
 is still unoccupied.
 **Control changes are acknowledged on the existing attach WebSocket.** A
 dashboard terminal sends a text frame such as
-`{"type":"control","request_id":17,"write":true}`. It may include
-`"takeover":true` for an explicit Run Room takeover and the current
-`"control_generation"` fence. The server answers on that same stream with
+`{"type":"control","request_id":17,"write":true}`. Occupied takeovers use the
+five-second hold and seven-second review exchange described in the
+[attach protocol](local-gateway.md#get-wsattachrun_id). The server answers on that
+same stream with
 `{"type":"control","request_id":17,"ok":true,"has_control":true,
 "control_session_id":"...","control_generation":8}`. Every result includes
 `has_control`, even when false; refusals also carry `code` and `error`.
@@ -154,18 +174,24 @@ Narrow toolbars use key and eye icons for controller and viewers, retaining
 accessible role labels. Session markers stay in the controller's hover title
 and screen-reader text instead of wrapping onto another row.
 Live local ownership is shown by the toolbar's **(this tab)** controller marker
-and **Release** action. A thin teal border traces only the terminal viewport,
-never the toolbar, search bar, or UI above it. After this tab acknowledges live
-input, the border propagates from the left and right side midpoints, splitting
-up and down to meet at the top and bottom centers. An acknowledged voluntary
-release reverses that path. An explicit server takeover notification for this
-session's current lease first fades the visible border to red, then retracts
-along the same reverse path. Presence names never trigger takeover feedback.
+and **Release** action. A 1.5px bright teal border traces only the terminal
+viewport, never the toolbar, search bar, or UI above it. After this tab
+acknowledges live input, the border propagates from the left and right side
+midpoints, splitting up and down to meet at the top and bottom centers. An
+acknowledged voluntary release reverses that path. Both decelerate toward their
+endpoints.
+An explicit server takeover notification for this session's current lease
+turns the border red, then retracts along the reverse path over about two
+seconds. A completed hold has already made the border red; it stays red through
+the handoff. Presence names never trigger takeover feedback.
 Input is fenced immediately; the exit animation is decoration, not authority.
 Replay, recorded history, disconnects, permission loss, and other fencing hide
 the border without takeover feedback. A fresh read-only mirror has no border.
-Reduced motion makes ownership changes instant. Resizing preserves the viewport
-boundary, and a rapid control change reverses from the currently visible point.
+Reduced motion makes ownership changes instant and replaces moving takeover
+fills with static red indicators and countdowns. Resizing preserves the
+viewport boundary, and a rapid control change reverses from the visible point.
+
+![A holder's red takeover progress traces over the active teal border](media/terminal-takeover-hold.webp)
 
 Presence refreshes on mount, every five seconds and after acknowledged control
 changes, independently of room history. A stalled refresh times out after 15

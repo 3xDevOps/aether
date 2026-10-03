@@ -111,13 +111,12 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     await expect(rows).toHaveCount(desktopRows)
     expect(await sessionGeometry()).toEqual(beforeOpen)
 
-    // The controller is this same member in a different session. The modal
-    // must remain visible and tappable above the full-screen room sheet.
+    // A tap cannot displace the same member's desktop session or open a
+    // requester-side confirmation. A takeover requires a continuous hold.
     await room.getByRole('button', { name: 'Take control' }).tap()
-    const takeover = page.getByRole('dialog', { name: 'Take control of this run?' })
-    await expect(takeover).toBeVisible()
-    await takeover.getByRole('button', { name: 'Cancel' }).tap()
-    await expect(takeover).toBeHidden()
+    await expect(page.getByRole('alertdialog')).toBeHidden()
+    await expect(room.getByRole('button', { name: 'Take control' })).toBeVisible()
+    expect(await sessionGeometry()).toEqual(beforeOpen)
 
     await page.getByRole('button', { name: 'Close Run Room' }).tap()
     await expect(room).toBeHidden()

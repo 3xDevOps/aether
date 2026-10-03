@@ -104,3 +104,35 @@ func TestTerminalRecordsRejectTruncatedFrames(t *testing.T) {
 		})
 	}
 }
+
+func TestTakeoverStateAndLegacyForceRoundTrip(t *testing.T) {
+	for _, want := range []DashAttachControl{
+		{Type: DashAttachControlFrame, RequestID: 1, Write: true, Takeover: true},
+		{Type: DashAttachTakeover, RequestID: 2, Action: "start", TakeoverID: "3c108774-c2e6-40e0-af51-2825ca226135"},
+		{Type: DashAttachTakeover, OK: true, TakeoverState: &TakeoverState{
+			ID: "3c108774-c2e6-40e0-af51-2825ca226135", Phase: "review",
+			RequesterMemberID: "member", RequesterSessionID: "requester",
+			HolderSessionID: "holder", HolderGeneration: 9,
+			HoldStartedAt: "2026-10-03T00:00:00Z", HoldDeadline: "2026-10-03T00:00:05Z",
+			DecisionDeadline: "2026-10-03T00:00:12Z", ServerNow: "2026-10-03T00:00:05Z",
+		}},
+	} {
+		payload, err := MarshalTerminalControl(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got DashAttachControl
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatalf("decode %s: %v", payload, err)
+		}
+		if got.Type != want.Type || got.Takeover != want.Takeover || got.Action != want.Action || got.TakeoverID != want.TakeoverID {
+			t.Fatalf("decoded record = %+v, want %+v", got, want)
+		}
+		if want.TakeoverState != nil && (got.TakeoverState == nil || *got.TakeoverState != *want.TakeoverState) {
+			t.Fatalf("decoded state = %+v, want %+v", got.TakeoverState, want.TakeoverState)
+		}
+		if want.Type == DashAttachTakeover && !bytes.Contains(payload, []byte(`"ok":`)) {
+			t.Fatalf("takeover omitted explicit result: %s", payload)
+		}
+	}
+}

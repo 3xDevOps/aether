@@ -323,8 +323,8 @@ describe('terminal view', () => {
       }),
     )
 
-    const toggle = screen.getByText('Take control') as HTMLButtonElement
-    expect(toggle.disabled).toBe(true)
+    const toggle = screen.getByRole('button', { name: 'Take control' })
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
@@ -348,7 +348,7 @@ describe('terminal view', () => {
         }),
       }),
     )
-    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Take control' }).getAttribute('aria-disabled')).toBe('true')
 
     view.unmount()
     act(() => useStore.getState().upsertRun(run()))
@@ -387,7 +387,7 @@ describe('terminal view', () => {
         }),
       }),
     )
-    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Take control' }).getAttribute('aria-disabled')).toBe('true')
 
     act(() =>
       useStore.setState({

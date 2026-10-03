@@ -126,7 +126,7 @@ test('two members share comments, moderated steering, and explicit control trans
     await expect(
       aliceRoom.getByRole('img', { name: aliceDisplayName, exact: true }),
     ).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Release control' })).toBeVisible()
+    await expect(aliceRoom.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
 
     // A comment is persisted once and the room event causes the other open
     // browser to refetch it; neither side relies on an optimistic echo.
@@ -166,29 +166,37 @@ test('two members share comments, moderated steering, and explicit control trans
     await expect(approvedRow).toContainText('Sent')
     await expect(messageRow(bobRoom, approvedSteer)).toContainText('Sent')
 
-    // Occupied control cannot transfer implicitly: Bob must see Alice named
-    // in a confirmation dialog before the takeover attach is sent.
     await bobRoom.getByRole('button', { name: 'Take control' }).click()
-    const takeover = bobPage.getByRole('dialog')
+    await expect(bobRoom.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
+    const takeControl = bobRoom.getByRole('button', { name: 'Take control' })
+    await takeControl.focus()
+    await bobPage.keyboard.down('Space')
+    const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
     await expect(takeover).toBeVisible()
-    await expect(takeover.getByRole('heading', { name: 'Take control of this run?', exact: true })).toBeVisible()
-    await expect(takeover).toContainText(
-      `${aliceDisplayName} currently controls the run`,
-    )
-    await takeover.getByRole('button', { name: 'Take control', exact: true }).click()
+    await bobPage.keyboard.up('Space')
+    await expect(takeover).toContainText(bobDisplayName)
+    await takeover.getByRole('button', { name: 'Deny', exact: true }).click()
+    await expect(takeover).toBeHidden()
+    await expect(aliceRoom.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
+
+    await takeControl.focus()
+    await bobPage.keyboard.down('Space')
+    await expect(takeover).toBeVisible()
+    await bobPage.keyboard.up('Space')
+    await takeover.getByRole('button', { name: 'Accept', exact: true }).click()
 
     // The open rooms follow the new lease without requiring a close/reopen.
     await expect(bobRoom).toContainText(
       `Controller: ${bobDisplayName}`,
     )
-    await expect(bobRoom.getByRole('button', { name: 'Release control' })).toBeVisible()
+    await expect(bobRoom.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     // Alice remains an observer after the server fences her stale writable
     // attach; she must not retain a second input path.
     await expect(aliceRoom.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
 
     // Bob's lease ends only through an explicit release, and both browsers
     // observe the server's post-release controller state in place.
-    await bobRoom.getByRole('button', { name: 'Release control' }).click()
+    await bobRoom.getByRole('button', { name: 'Release', exact: true }).click()
     await expect(bobRoom.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
     await expect(bobRoom).toContainText('No controller')
     await expect(aliceRoom).toContainText('No controller')

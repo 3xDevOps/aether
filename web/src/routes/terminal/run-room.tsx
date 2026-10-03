@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Bot, MessageSquare, Shield, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip } from '@/components/ui/heroui'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
@@ -10,6 +9,8 @@ import { inModal } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { ControlMetadata } from '@/routes/terminal/attach'
+import { ControlButton } from '@/routes/terminal/control-button'
+import type { TakeoverInteraction } from '@/routes/terminal/use-takeover'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { RoomMessage, RoomMessageKind, Run } from '@/lib/types'
 import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
@@ -41,8 +42,10 @@ export interface RunRoomProps {
   client?: Api
   selfID: string | null
   control?: ControlMetadata
-  onTakeControl: (takeover: boolean) => void
+  onTakeControl: () => void
   onReleaseControl: () => void
+  controlUnavailable?: boolean
+  takeover?: TakeoverInteraction
 }
 
 type PendingPost = {
@@ -64,7 +67,7 @@ function overlapsCached(messages: RoomMessage[], cached: RoomMessage[]): boolean
   return messages.some((message) => cachedIDs.has(message.id))
 }
 
-export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl }: RunRoomProps) {
+export function RunRoom({ run, client = api, selfID, control, onTakeControl, onReleaseControl, controlUnavailable = false, takeover }: RunRoomProps) {
   const runID = run.id
   const workspaceID = run.workspace_id
   const isPhone = useMediaQuery(phoneScreen)
@@ -87,7 +90,6 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   const setStatus = useStore((state) => state.setRoomStatus)
   const setStatusError = useStore((state) => state.setRoomStatusError)
   const [open, setOpen] = useState(false)
-  const [confirmTakeover, setConfirmTakeover] = useState(false)
   const [mode, setMode] = useState<'comment' | 'steer_request' | 'reply'>('comment')
   const [body, setBody] = useState('')
   const [correlationID, setCorrelationID] = useState<string | undefined>()
@@ -499,7 +501,8 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
                 {controllerID && <MemberAvatar member={members[controllerID]} fallback={controllerName ?? controllerID} className="size-5 shrink-0 text-[9px]" />}
                 <span className="min-w-0 break-words">{controllerName ? <>Controller: {controllerName}{!ownsControl && staleController && <span className="text-muted-foreground"> (last known)</span>}</> : status ? staleController ? 'Controller unknown' : 'No controller' : statusError ? 'Controller unavailable' : 'Loading presence…'}</span>
               </div>
-              {ownsControl ? <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={onReleaseControl}>Release control</Button> : <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={() => controller && !ownsControl ? setConfirmTakeover(true) : onTakeControl(false)}>Take control</Button>}
+              <ControlButton ownsControl={ownsControl} unavailable={!isLive || controlUnavailable}
+                onTakeControl={onTakeControl} onReleaseControl={onReleaseControl} takeover={takeover} />
             </div>
             <div className="flex items-start gap-1.5 text-muted-foreground" aria-live="polite">
               <Users className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -610,12 +613,6 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
           </footer>
         </aside>
       )}
-      <Dialog open={confirmTakeover} onOpenChange={setConfirmTakeover}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Take control of this run?</DialogTitle><DialogDescription>{controllerName ? `${controllerName} currently controls the run. Taking control will end their writable session and notify them.` : 'Taking control will make this tab the run controller.'}</DialogDescription></DialogHeader>
-          <DialogFooter><Button type="button" variant="outline" onClick={() => setConfirmTakeover(false)}>Cancel</Button><Button type="button" disabled={!isLive} onClick={() => { setConfirmTakeover(false); onTakeControl(true) }}>Take control</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }

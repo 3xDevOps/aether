@@ -1509,15 +1509,68 @@ resize, control, geometry, and acknowledgements.
    {"type":"resize","cols":132,"rows":50}
    {"type":"control","request_id":17,"write":true}
    {"type":"control","request_id":18,"write":false,"control_generation":8}
-   {"type":"control","request_id":19,"write":true,"takeover":true,
-    "control_generation":8}
+   {"type":"takeover","request_id":19,"action":"start",
+    "takeover_id":"3c108774-c2e6-40e0-af51-2825ca226135"}
+   {"type":"takeover","request_id":20,"action":"confirm",
+    "takeover_id":"3c108774-c2e6-40e0-af51-2825ca226135"}
    ```
 
    `control` changes the lease on this same WebSocket; it does not reconnect
-   or replay. The optional `takeover:true` explicitly displaces the current
-   controller. Include the current `control_generation` when fencing a
-   release, takeover, or input. Read-only input is ignored and stale input is
-   rejected rather than reaching the PTY.
+   or replay. An occupied primary terminal uses the timed `takeover` exchange
+   below, not an immediate forced acquisition. Interactive `takeover:true`
+   is accepted only for reconnect replacement of the exact authenticated
+   member, session, and nonzero `control_generation`; it cannot displace
+   another session. Raw legacy attaches keep their existing explicit takeover
+   behavior. Include the current `control_generation` for release and input.
+   Read-only input is ignored and stale input never reaches the PTY.
+
+   Takeover actions share the attach's increasing `request_id` sequence with
+   ordinary control requests. `start` supplies a fresh UUID `takeover_id` and
+   snapshots the occupied holder. The server refuses unoccupied or already-owned
+   targets, concurrent requests, and requesters without current Steer authority.
+   After a continuous five-second hold, the exact requesting attachment sends
+   `confirm` with the same ID. Early or foreign confirms are refused. Nothing
+   is granted without confirmation, even if the hold deadline has passed.
+   Early release sends `cancel`; release after confirmation does not. Escape,
+   blur, or leaving the terminal may explicitly cancel either phase.
+
+   Confirmation starts a seven-second server-timed review. The targeted holder
+   sends `accept` or `deny` with the same takeover ID and its exact
+   `control_generation`. Only that authenticated attachment can decide;
+   knowing another session's ID is insufficient. Acceptance or expiry grants
+   only after the server atomically rechecks the captured holder generation,
+   current requester authority, terminal readiness, and mission admission.
+   A raw CLI holder cannot answer the dashboard dialog; the same deadline
+   still applies. Requester disconnect, holder replacement/release, or lost
+   run/member authority cancels the request rather than transferring it to a
+   successor holder.
+
+   Both interactive participants receive prompt `type:"takeover"` snapshots:
+
+   ```json
+   {
+     "type":"takeover","request_id":20,"ok":true,
+     "takeover":{
+       "id":"3c108774-c2e6-40e0-af51-2825ca226135",
+       "requester_member_id":"member-2","requester_session_id":"tab-8",
+       "holder_session_id":"tab-7","holder_generation":8,
+       "phase":"review","hold_started_at":"2026-10-03T12:00:00Z",
+       "hold_deadline":"2026-10-03T12:00:05Z",
+       "decision_deadline":"2026-10-03T12:00:12Z",
+       "server_now":"2026-10-03T12:00:05Z"
+     }
+   }
+   ```
+
+   Phases are `holding`, `review`, `cancelled`, `denied`, and `granted`.
+   `decision_deadline` appears only once review begins; times are UTC RFC3339
+   with optional fractional seconds. `server_now` is refreshed for each
+   snapshot so clients can derive remaining time without matching wall clocks.
+   Unsolicited snapshots omit `request_id`. Refusals include `ok:false`, `code`,
+   and `error`; an invalidated request also carries its terminal snapshot.
+   A successful takeover queues the ordinary unsolicited `type:"control"`
+   acknowledgement with `ok:true` and `has_control:true` before `granted`.
+   Takeover progress itself never grants input authority.
 
 5. The server answers each requested control change on the same ordered
    stream:
