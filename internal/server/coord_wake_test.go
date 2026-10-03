@@ -74,8 +74,8 @@ func newWakeServerFixture(t *testing.T, worker bool) *wakeServerFixture {
 	if worker {
 		m := &domain.Mission{
 			WorkspaceID: workspace.ID, Objective: "wake worker", AccountableHumanID: member.ID,
-			Integrator:            domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "omp", Mode: domain.LaunchTUI},
-			MaxConcurrentAttempts: 2, MaxTotalAttempts: 4, IdempotencyKey: "wake-mission",
+			Integrator:       domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "omp", Mode: domain.LaunchTUI},
+			IdempotencyKey:   "wake-mission",
 			ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "omp", Mode: domain.LaunchTUI}},
 		}
 		if createErr := db.CreateMission(ctx, m); createErr != nil {

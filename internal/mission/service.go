@@ -767,7 +767,6 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		WorkspaceID: domain.WorkspaceID(p.WorkspaceID), Objective: p.Objective,
 		AccountableHumanID: domain.MemberID(p.AccountableHumanID),
 		Integrator:         choice, ExecutionChoices: choices,
-		MaxConcurrentAttempts: p.MaxConcurrentAttempts, MaxTotalAttempts: p.MaxTotalAttempts,
 		IdempotencyKey:               p.IdempotencyKey,
 		IntegratorAuthorizingHumanID: actor, IntegratorRunOwnerID: actor,
 	}

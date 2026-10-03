@@ -61,8 +61,6 @@ test('launches a bounded mission, controls a worker, and shows its candidate wit
   await workerChoice.getByRole('checkbox').check()
   await workerChoice.getByRole('combobox').click()
   await page.getByRole('option', { name: 'headless', exact: true }).click()
-  await launch.getByLabel('Max concurrent attempts').fill('1')
-  await launch.getByLabel('Max total attempts').fill('1')
   await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
   await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()
   const { missions } = await alice.api.rpc<{

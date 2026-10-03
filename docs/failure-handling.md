@@ -155,7 +155,7 @@ stopped. Mission launch uses a service-owned context; its durable attempt and
 reserved run ID survive the request. Replay the same start command with the
 **same dispatch key** to retrieve that attempt, then use `worker list` or
 `worker inspect` to observe it. Do not switch keys to work around an unknown
-result: the original attempt can still launch and hold concurrency.
+result: the original attempt can still launch.
 
 Before creating a run, strict base capture refreshes a configured mirror.
 A failed fetch never silently substitutes the previously accepted commit.
@@ -191,7 +191,7 @@ requires review and explicit candidate adoption; do not disable mirror
 protection merely to force a launch.
 
 After repair, inspect the original attempt before any retry. If it is still
-launching, running, or unknown and holds concurrency, either let reconciliation
+launching, running, or unknown, either let reconciliation
 settle it or use the normal authorized cancel operation and observe the settled
 state before retrying. Cancellation and takeover authority are unchanged.
 Only a launch path that explicitly supports `--cached-base <sha>` may use a

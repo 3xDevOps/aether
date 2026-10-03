@@ -73,7 +73,7 @@ const phaseTone: Record<MissionPhase, string> = {
 
 const phaseSentence: Record<MissionPhase, string> = {
   planning: 'The integrator asks you clarifying questions only if it needs answers, then proposes tasks and starts the swarm.',
-  active: 'Workers run within the authorized limits. The integrator accepts their work, verifies and delivers the result, then reports success.',
+  active: 'Workers run. The integrator accepts their work, verifies and delivers the result, then reports success.',
   completed: 'The integrator reported success. Leftover workers were stopped.',
   cancelled: 'The swarm was cancelled. Its workers and integrator run are stopped.',
 }

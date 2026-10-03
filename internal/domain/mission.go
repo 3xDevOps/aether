@@ -88,8 +88,6 @@ type Mission struct {
 	AccountableHumanID           MemberID
 	Integrator                   MissionIntegrator
 	ExecutionChoices             []MissionExecutionChoice
-	MaxConcurrentAttempts        int
-	MaxTotalAttempts             int
 	CurrentIntegratorRunID       RunID
 	IntegratorAuthorizingHumanID MemberID
 	IntegratorRunOwnerID         MemberID
@@ -115,14 +113,12 @@ type Mission struct {
 }
 
 const (
-	MaxMissionConcurrentAttempts = 8
-	MaxMissionTotalAttempts      = 128
-	MaxMissionTasks              = 128
-	MaxMissionQuestions          = 32
-	MaxTaskRevisions             = 64
-	MaxTaskDependencies          = 128
-	MaxTaskEvidenceRequirements  = 64
-	MaxMissionScopeBytes         = 64 << 10
+	MaxMissionTasks             = 128
+	MaxMissionQuestions         = 32
+	MaxTaskRevisions            = 64
+	MaxTaskDependencies         = 128
+	MaxTaskEvidenceRequirements = 64
+	MaxMissionScopeBytes        = 64 << 10
 )
 
 type TaskRevisionStatus string

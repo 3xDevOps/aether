@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -73,8 +72,6 @@ export function LaunchDialog() {
   const [task, setTask] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [workerChoices, setWorkerChoices] = useState<MissionExecutionChoice[]>([])
-  const [maxConcurrent, setMaxConcurrent] = useState('2')
-  const [maxAttempts, setMaxAttempts] = useState('8')
   const [swarmError, setSwarmError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   const [kind, setKind] = useState<LaunchKind>(() => {
@@ -209,12 +206,10 @@ export function LaunchDialog() {
         navigate('terminal', { runId: run.id })
         toast.success('Run launched')
       } else {
-        const concurrent = Number(maxConcurrent)
-        const attempts = Number(maxAttempts)
         const accountableHumanID = self?.id ?? ''
-        if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness || !Number.isInteger(concurrent) || concurrent < 1 || concurrent > 8 || !Number.isInteger(attempts) || attempts < concurrent || attempts > 128) {
+        if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness) {
           setLaunching(false)
-          setSwarmError('Enter an objective, an integrator account and harness, and finite limits (1–8 concurrent, 1–128 total attempts; total must cover concurrency).')
+          setSwarmError('Enter an objective and an integrator account and harness.')
           return
         }
         const contents = {
@@ -227,8 +222,6 @@ export function LaunchDialog() {
           // compares the encoded list.
           execution_choices: [integratorChoice, ...workerChoices.filter((choice) => choice.account_member_id !== account || choice.harness !== harness || choice.mode !== integratorChoice.mode)]
             .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode)),
-          max_concurrent_attempts: concurrent,
-          max_total_attempts: attempts,
         }
         const serialized = JSON.stringify(contents)
         const key = swarmKeys.get(serialized) ?? idempotencyKey()
@@ -279,7 +272,7 @@ export function LaunchDialog() {
             <div className="min-w-0 space-y-1 text-sm"><Label htmlFor="launch-agent">{kind === 'swarm' ? 'Integrator harness' : 'Agent'}</Label><Select value={harness} onValueChange={setHarness}><SelectTrigger id="launch-agent" disabled={harnessLoading || launching}><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{launchableAgents.map((agent) => <SelectItem key={agent.name} value={agent.name}>{agent.name}</SelectItem>)}{loggedOutAgents.map((agent) => <SelectItem key={agent.name} value={agent.name} disabled>{agent.name} (not logged in)</SelectItem>)}{ownOnlyAgents.map((agent) => <SelectItem key={agent.name} value={agent.name} disabled>{agent.name} (your account only)</SelectItem>)}{unavailableAgents.map((agent) => <SelectItem key={agent.name} value={agent.name} disabled>{agent.name} (unavailable)</SelectItem>)}<SelectItem value="custom">custom</SelectItem></SelectContent></Select></div>
             {kind === 'single' && <div className="min-w-0 space-y-1 text-sm"><Label htmlFor="launch-mode">Mode</Label><Select value={mode} onValueChange={(value) => setMode(value as LaunchMode)}><SelectTrigger id="launch-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tui">Interactive (tui)</SelectItem><SelectItem value="headless">Headless</SelectItem></SelectContent></Select></div>}
           </div>
-          {kind === 'swarm' && <SwarmFields integrator={integratorChoice} accounts={accounts} agentsByAccount={agentsByAccount} choices={workerChoices} onToggle={toggleChoice} onMode={setChoiceMode} maxConcurrent={maxConcurrent} maxAttempts={maxAttempts} onConcurrent={setMaxConcurrent} onAttempts={setMaxAttempts} />}
+          {kind === 'swarm' && <SwarmFields integrator={integratorChoice} accounts={accounts} agentsByAccount={agentsByAccount} choices={workerChoices} onToggle={toggleChoice} onMode={setChoiceMode} />}
           {agentError && <p role="alert" className="break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{agentError}</p>}
           {swarmError && <p role="alert" className="break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{swarmError}</p>}
           {noAgents && !agentError && <div className="border-y border-border/70 px-2 py-2"><p className="text-[13px] font-medium">No agent is installed in your environment.</p><p className="mt-0.5 text-xs leading-4 text-muted-foreground">{sharedAccount ? `A run on ${accountName}'s account starts the agent installed in your environment with ${accountName}'s login, so install it in your environment; you need not log in to it. Set up an agent opens Agents, where Add agent installs it.` : 'Set one up before launching work. Set up an agent opens Agents, where Add agent installs it.'}</p><Button type="button" size="sm" className="mt-2" onClick={setUpAgent}>Set up an agent</Button></div>}
@@ -302,10 +295,6 @@ function SwarmFields({
   choices,
   onToggle,
   onMode,
-  maxConcurrent,
-  maxAttempts,
-  onConcurrent,
-  onAttempts,
 }: {
   integrator: MissionExecutionChoice
   accounts: Member[]
@@ -313,10 +302,6 @@ function SwarmFields({
   choices: MissionExecutionChoice[]
   onToggle: (choice: MissionExecutionChoice, enabled: boolean) => void
   onMode: (choice: MissionExecutionChoice, mode: LaunchMode) => void
-  maxConcurrent: string
-  maxAttempts: string
-  onConcurrent: (value: string) => void
-  onAttempts: (value: string) => void
 }) {
-  return <div className="space-y-3 border-y border-border/70 px-2 py-2"><div><p className="text-xs font-medium">Allowed execution choices</p><p className="mt-0.5 text-xs text-muted-foreground">The integrator and its workers run only as these account, harness, and mode combinations. The integrator&apos;s own choice is always included and always interactive (tui).</p></div><div className="grid gap-1"><div className="flex items-center gap-2 text-xs"><input type="checkbox" checked disabled aria-label="Integrator execution choice" /><span className="min-w-0 flex-1">Integrator · {accounts.find((member) => member.id === integrator.account_member_id)?.display_name ?? integrator.account_member_id} · {integrator.harness || 'no harness'} · {integrator.mode}</span></div>{accounts.flatMap((member) => (agentsByAccount[member.id] ?? []).map((agent) => { const selected = choices.find((choice) => choice.account_member_id === member.id && choice.harness === agent.name); const base = selected ?? { account_member_id: member.id, harness: agent.name, mode: 'headless' }; return <label key={`${member.id}:${agent.name}`} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(selected)} disabled={!launchable(agent)} onChange={(event) => onToggle(base, event.target.checked)} /><span className="min-w-0 flex-1">{member.display_name} · {agent.name}{agent.login_missing === true && <span className="text-muted-foreground"> · {member.display_name} is not logged in to {agent.name}</span>}{agent.own_account_only === true && <span className="text-muted-foreground"> · your own definition runs only on your own account</span>}{agent.unavailable && <span className="text-muted-foreground"> · {agent.unavailable}</span>}</span>{selected && <Select value={selected.mode} onValueChange={(value) => onMode(selected, value as LaunchMode)}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tui">tui</SelectItem><SelectItem value="headless">headless</SelectItem></SelectContent></Select>}</label> }))}</div>{!accounts.some((member) => (agentsByAccount[member.id] ?? []).length) && <p className="text-xs text-muted-foreground">Loading installed worker harnesses…</p>}<div className="grid gap-2 sm:grid-cols-2"><Label className="space-y-1"><span>Max concurrent attempts</span><Input type="number" min={1} step={1} value={maxConcurrent} onChange={(event) => onConcurrent(event.target.value)} /></Label><Label className="space-y-1"><span>Max total attempts</span><Input type="number" min={1} step={1} value={maxAttempts} onChange={(event) => onAttempts(event.target.value)} /></Label></div></div>
+  return <div className="space-y-3 border-y border-border/70 px-2 py-2"><div><p className="text-xs font-medium">Allowed execution choices</p><p className="mt-0.5 text-xs text-muted-foreground">The integrator and its workers run only as these account, harness, and mode combinations. The integrator&apos;s own choice is always included and always interactive (tui).</p></div><div className="grid gap-1"><div className="flex items-center gap-2 text-xs"><input type="checkbox" checked disabled aria-label="Integrator execution choice" /><span className="min-w-0 flex-1">Integrator · {accounts.find((member) => member.id === integrator.account_member_id)?.display_name ?? integrator.account_member_id} · {integrator.harness || 'no harness'} · {integrator.mode}</span></div>{accounts.flatMap((member) => (agentsByAccount[member.id] ?? []).map((agent) => { const selected = choices.find((choice) => choice.account_member_id === member.id && choice.harness === agent.name); const base = selected ?? { account_member_id: member.id, harness: agent.name, mode: 'headless' }; return <label key={`${member.id}:${agent.name}`} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(selected)} disabled={!launchable(agent)} onChange={(event) => onToggle(base, event.target.checked)} /><span className="min-w-0 flex-1">{member.display_name} · {agent.name}{agent.login_missing === true && <span className="text-muted-foreground"> · {member.display_name} is not logged in to {agent.name}</span>}{agent.own_account_only === true && <span className="text-muted-foreground"> · your own definition runs only on your own account</span>}{agent.unavailable && <span className="text-muted-foreground"> · {agent.unavailable}</span>}</span>{selected && <Select value={selected.mode} onValueChange={(value) => onMode(selected, value as LaunchMode)}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tui">tui</SelectItem><SelectItem value="headless">headless</SelectItem></SelectContent></Select>}</label> }))}</div>{!accounts.some((member) => (agentsByAccount[member.id] ?? []).length) && <p className="text-xs text-muted-foreground">Loading installed worker harnesses…</p>}</div>
 }

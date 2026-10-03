@@ -130,9 +130,8 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
 	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
 		WorkspaceID: string(e.ws.ID), Objective: "swarm with coordination off", IdempotencyKey: "kill-switch-swarm",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	}, nil)
 	if createErr == nil {
 		t.Error("mission.create succeeded with coordination off")

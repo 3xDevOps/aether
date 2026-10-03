@@ -272,8 +272,6 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>Integrator {mission.integrator.harness}</span>
-                  <span>{mission.max_concurrent_attempts} concurrent</span>
-                  <span>{mission.max_total_attempts} attempts total</span>
                   <span>Generation {mission.integrator_generation}</span>
                 </div>
                 {mission.integrator_launch_error && !missionFinal(mission) && (
@@ -473,8 +471,6 @@ function MissionDetailView({
               </div>
               <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>{mission.execution_choices.length} execution choices allowed</span>
-                <span>Max {mission.max_concurrent_attempts} concurrent</span>
-                <span>Max {mission.max_total_attempts} total attempts</span>
                 <span>Accepted set {mission.accepted_set_version}</span>
               </div>
               <div className="mt-3 flex flex-wrap gap-1">

@@ -70,7 +70,7 @@ func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.C
 func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
 		"-", "--agent", "claude", "--worker", "codex:headless", "--worker", "claude", "--worker", "codex:headless",
-		"--max-concurrent", "3", "--max-attempts", "12", "--workspace", "ws-name",
+		"--workspace", "ws-name",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
 		t.Fatalf("parseSwarmCreate: %v", err)
@@ -93,9 +93,7 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless"},
 		},
-		MaxConcurrentAttempts: 3,
-		MaxTotalAttempts:      12,
-		IdempotencyKey:        "key-1",
+		IdempotencyKey: "key-1",
 	}
 	if sentJSON, wantJSON := mustJSON(t, sent), mustJSON(t, want); sentJSON != wantJSON {
 		t.Errorf("mission.create params = %s, want %s", sentJSON, wantJSON)
@@ -110,12 +108,9 @@ func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		args []string
 		want string
 	}{
-		"no agent":               {args: []string{"objective"}, want: "usage: aether swarm create"},
-		"bad worker mode":        {args: []string{"objective", "--agent", "claude", "--worker", "codex:batch"}, want: `invalid --worker "codex:batch"`},
-		"empty worker":           {args: []string{"objective", "--agent", "claude", "--worker", ":tui"}, want: `invalid --worker ":tui"`},
-		"concurrent too big":     {args: []string{"objective", "--agent", "claude", "--max-concurrent", "9"}, want: "--max-concurrent 9 is out of range (want 1..8)"},
-		"total too big":          {args: []string{"objective", "--agent", "claude", "--max-attempts", "129"}, want: "--max-attempts 129 is out of range (want 1..128)"},
-		"total below concurrent": {args: []string{"objective", "--agent", "claude", "--max-concurrent", "4", "--max-attempts", "2"}, want: "--max-attempts 2 is below --max-concurrent 4"},
+		"no agent":        {args: []string{"objective"}, want: "usage: aether swarm create"},
+		"bad worker mode": {args: []string{"objective", "--agent", "claude", "--worker", "codex:batch"}, want: `invalid --worker "codex:batch"`},
+		"empty worker":    {args: []string{"objective", "--agent", "claude", "--worker", ":tui"}, want: `invalid --worker ":tui"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// swarmCreate reaches withControl only after validation, and no

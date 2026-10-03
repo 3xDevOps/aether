@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -15,9 +14,9 @@ import (
 // between creation and that state, is covered on its own in
 // mission_plan_test.go; every other mission test is about what an active
 // mission does, so it skips straight past it.
-func mustCreateMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID, concurrent, total int) *domain.Mission {
+func mustCreateMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID) *domain.Mission {
 	t.Helper()
-	m := mustCreatePlanningMission(t, db, workspace, member, concurrent, total, "mission-create-1")
+	m := mustCreatePlanningMission(t, db, workspace, member, "mission-create-1")
 	if _, err := db.db.ExecContext(context.Background(), `UPDATE missions SET phase=? WHERE id=?`, domain.MissionPhaseActive, m.ID); err != nil {
 		t.Fatalf("start mission: %v", err)
 	}
@@ -25,12 +24,12 @@ func mustCreateMission(t *testing.T, db *DB, workspace domain.WorkspaceID, membe
 	return m
 }
 
-func mustCreatePlanningMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID, concurrent, total int, key string) *domain.Mission {
+func mustCreatePlanningMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID, key string) *domain.Mission {
 	t.Helper()
 	m := &domain.Mission{
 		WorkspaceID: workspace, Objective: "ship the bounded change", AccountableHumanID: member,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: member, Harness: "claude", Mode: domain.LaunchTUI},
-		MaxConcurrentAttempts: concurrent, MaxTotalAttempts: total, IdempotencyKey: key,
+		Integrator:     domain.MissionIntegrator{AccountMemberID: member, Harness: "claude", Mode: domain.LaunchTUI},
+		IdempotencyKey: key,
 	}
 	if err := db.CreateMission(context.Background(), m); err != nil {
 		t.Fatalf("CreateMission: %v", err)
@@ -59,43 +58,15 @@ func reserveMissionAttempt(t *testing.T, db *DB, mission *domain.Mission, task *
 	})
 }
 
-func TestMissionAttemptReservationIsAtomicAndIdempotent(t *testing.T) {
+func TestMissionAttemptReservationIsIdempotent(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
-	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
-
-	var wg sync.WaitGroup
-	type reservationResult struct {
-		key string
-		err error
-	}
-	results := make(chan reservationResult, 2)
-	for _, key := range []string{"dispatch-a", "dispatch-b"} {
-		wg.Add(1)
-		go func(key string) {
-			defer wg.Done()
-			_, _, err := reserveMissionAttempt(t, db, mission, task, key)
-			results <- reservationResult{key: key, err: err}
-		}(key)
-	}
-	wg.Wait()
-	close(results)
-	var admitted, limited int
-	var admittedKey string
-	for result := range results {
-		if result.err == nil {
-			admitted++
-			admittedKey = result.key
-		} else if errors.Is(result.err, ErrMissionLimit) {
-			limited++
-		} else {
-			t.Fatalf("reserve concurrent attempt: %v", result.err)
-		}
-	}
-	if admitted != 1 || limited != 1 {
-		t.Fatalf("concurrent admission = admitted %d limited %d, want one each", admitted, limited)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
+	task := mustCreateMissionTask(t, db, mission.ID, "worker")
+	const admittedKey = "dispatch-a"
+	if _, _, err := reserveMissionAttempt(t, db, mission, task, admittedKey); err != nil {
+		t.Fatalf("reserve attempt: %v", err)
 	}
 
 	attempt, replay, err := reserveMissionAttempt(t, db, mission, task, admittedKey)
@@ -109,15 +80,6 @@ func TestMissionAttemptReservationIsAtomicAndIdempotent(t *testing.T) {
 	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
 		t.Fatalf("semantic replay conflict = %v", reserveErr)
 	}
-	if updateErr := db.UpdateAttemptState(context.Background(), attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, ""); updateErr != nil {
-		t.Fatalf("settle first attempt: %v", updateErr)
-	}
-	if _, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "dispatch-c"); reserveErr != nil {
-		t.Fatalf("retry within total allowance: %v", reserveErr)
-	}
-	if _, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "dispatch-d"); !errors.Is(reserveErr, ErrMissionLimit) {
-		t.Fatalf("total allowance = %v, want ErrMissionLimit", reserveErr)
-	}
 }
 
 // TestMissionDependenciesFollowTheDependencyCurrentRevision: a dependency is
@@ -129,7 +91,7 @@ func TestMissionDependenciesFollowTheDependencyCurrentRevision(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 2, 4)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	// Both tasks carry an approved revision 1: the integrator may only accept
 	// revisions of work a human already approved. The dependency is declared
 	// on the proposed revision 2, which acceptance then makes current.
@@ -217,7 +179,7 @@ func TestMissionAcceptanceRequiresExactEvidenceAndRevision(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "verify", Objective: "verify", Status: domain.TaskRevisionAccepted, EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "test"}}}}
 	if createErr := db.CreateTask(context.Background(), task); createErr != nil {
 		t.Fatalf("CreateTask: %v", createErr)
@@ -249,7 +211,7 @@ func TestMissionTaskRevisionAcceptanceFencesOlderProposal(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 2, 4)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "revision fence")
 	second, err := db.ProposeTaskRevision(context.Background(), task.ID, &domain.TaskRevision{Title: "second", Objective: "second"}, "rev-2")
 	if err != nil {
@@ -277,7 +239,7 @@ func TestMissionInitialIntegratorRunBecomesRetiredAfterReplacement(t *testing.T)
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	initialRun := mission.CurrentIntegratorRunID
 	replaced, err := db.ReplaceIntegrator(context.Background(), mission.ID, mission.IntegratorGeneration, mission.Integrator, member.ID, member.ID, "replace-initial")
 	if err != nil {
@@ -306,7 +268,7 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "control outbox")
 	attempt, _, err := reserveMissionAttempt(t, db, mission, task, "control-outbox")
 	if err != nil {
@@ -401,7 +363,7 @@ func TestMissionAcceptedSetVersionAdvancesWhenCurrentOutputLeavesSet(t *testing.
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "accepted output")
 	submission := mustSubmitMissionAttempt(t, db, mission, task, "accepted-output")
 	mustAcceptMissionSubmission(t, db, mission, submission, "accept-output")
@@ -447,7 +409,7 @@ func TestMissionAcceptedSetVersionDoesNotAdvanceForProposedWorkOrAbandonment(t *
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	// The task's approved revision produced no output, so replacing it takes
 	// nothing out of the current accepted set.
 	task := mustCreateMissionTask(t, db, mission.ID, "proposed")
@@ -491,7 +453,7 @@ func TestMissionAcceptedSetVersionRejectsStaleAcceptanceAfterCurrentOutputRemova
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	firstTask := mustCreateMissionTask(t, db, mission.ID, "first output")
 	firstSubmission := mustSubmitMissionAttempt(t, db, mission, firstTask, "first-output")
 	mustAcceptMissionSubmission(t, db, mission, firstSubmission, "accept-first-output")
@@ -523,7 +485,7 @@ func TestMissionAcceptedSetVersionAdvancesOnAbandonmentOfCurrentOutput(t *testin
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "abandoned output")
 	submission := mustSubmitMissionAttempt(t, db, mission, task, "abandoned-output")
 	mustAcceptMissionSubmission(t, db, mission, submission, "accept-abandoned-output")

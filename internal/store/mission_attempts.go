@@ -116,20 +116,6 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if takeover > 0 {
 		return nil, false, ErrMissionTakeover
 	}
-	var total int
-	if totalErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ?`, r.MissionID).Scan(&total); totalErr != nil {
-		return nil, false, totalErr
-	}
-	if total >= m.MaxTotalAttempts {
-		return nil, false, ErrMissionLimit
-	}
-	var active int
-	if activeErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ? AND state IN ('reserved','launching','running','unknown','submitted')`, r.MissionID).Scan(&active); activeErr != nil {
-		return nil, false, activeErr
-	}
-	if active >= m.MaxConcurrentAttempts {
-		return nil, false, ErrMissionLimit
-	}
 	var number int
 	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {
 		return nil, false, numberErr

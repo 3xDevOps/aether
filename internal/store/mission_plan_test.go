@@ -16,7 +16,7 @@ func planningFixture(t *testing.T) (*DB, *domain.Mission, domain.MemberID) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	return db, mustCreatePlanningMission(t, db, workspace.ID, member.ID, 2, 8, "plan-mission-1"), member.ID
+	return db, mustCreatePlanningMission(t, db, workspace.ID, member.ID, "plan-mission-1"), member.ID
 }
 
 func mustProposePlanTask(t *testing.T, db *DB, m *domain.Mission, title, key string) *domain.Task {
@@ -128,7 +128,7 @@ func TestMissionActiveReviseLeavesCurrentRevisionForAcceptance(t *testing.T) {
 	ctx := context.Background()
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
 
 	if _, err := db.ProposeTaskRevision(ctx, task.ID, &domain.TaskRevision{Title: "sharper", Objective: "sharper", ProposedByRunID: mission.CurrentIntegratorRunID}, "propose-2"); err != nil {
@@ -413,8 +413,8 @@ func TestListMissionsPageReportsOpenQuestionsPerMission(t *testing.T) {
 	ctx := context.Background()
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	first := mustCreatePlanningMission(t, db, workspace.ID, member.ID, 1, 2, "plan-mission-1")
-	second := mustCreatePlanningMission(t, db, workspace.ID, member.ID, 1, 2, "plan-mission-2")
+	first := mustCreatePlanningMission(t, db, workspace.ID, member.ID, "plan-mission-1")
+	second := mustCreatePlanningMission(t, db, workspace.ID, member.ID, "plan-mission-2")
 
 	open, err := db.InsertMissionQuestion(ctx, first.ID, first.CurrentIntegratorRunID, "which checkout flow?", "ask-1")
 	if err != nil {

@@ -538,8 +538,6 @@ export const api = {
       harness: string
       mode: string
     }>
-    max_concurrent_attempts: number
-    max_total_attempts: number
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>

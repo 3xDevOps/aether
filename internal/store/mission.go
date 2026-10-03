@@ -16,7 +16,7 @@ var (
 	ErrMissionCycle               = errors.New("store: mission dependency cycle")
 	ErrMissionStale               = errors.New("store: stale mission authority")
 	ErrMissionIdempotencyConflict = errors.New("store: mission idempotency conflict")
-	ErrMissionLimit               = errors.New("store: mission attempt limit")
+	ErrMissionLimit               = errors.New("store: mission limit")
 	ErrMissionNotReady            = errors.New("store: mission task not ready")
 	ErrMissionTakeover            = errors.New("store: mission worker under human control")
 	ErrMissionPhase               = errors.New("store: mission phase forbids this operation")
@@ -133,11 +133,6 @@ func validateMission(m *domain.Mission) error {
 	if m == nil || m.WorkspaceID == "" || m.Objective == "" || m.AccountableHumanID == "" {
 		return errors.New("store: mission requires workspace_id, objective, and accountable_human_id")
 	}
-	if m.MaxConcurrentAttempts <= 0 || m.MaxConcurrentAttempts > domain.MaxMissionConcurrentAttempts ||
-		m.MaxTotalAttempts <= 0 || m.MaxTotalAttempts > domain.MaxMissionTotalAttempts ||
-		m.MaxConcurrentAttempts > m.MaxTotalAttempts {
-		return errors.New("store: mission attempt limits exceed bounded positive caps")
-	}
 	if m.Integrator.AccountMemberID == "" || m.Integrator.Harness == "" || !m.Integrator.Mode.Valid() {
 		return errors.New("store: mission integrator choice is invalid")
 	}
@@ -160,7 +155,7 @@ func validateMission(m *domain.Mission) error {
 
 const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	integrator_account_member_id, integrator_harness, integrator_mode,
-	execution_choices, max_concurrent_attempts, max_total_attempts,
+	execution_choices,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
@@ -175,7 +170,7 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var mode, phase string
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
-		&m.MaxConcurrentAttempts, &m.MaxTotalAttempts, &runID, &authorizingHumanID, &runOwnerID,
+		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
 		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
 		return nil, err
@@ -212,10 +207,9 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	var receiptMission domain.MissionID
 	var receiptObjective string
 	var receiptAccount, receiptIntAccount, receiptHarness, receiptMode, receiptChoices string
-	var receiptMaxConcurrent, receiptMaxTotal int
-	receiptErr := d.db.QueryRowContext(ctx, `SELECT mission_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts, max_total_attempts FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, m.WorkspaceID, m.IdempotencyKey).Scan(&receiptMission, &receiptObjective, &receiptAccount, &receiptIntAccount, &receiptHarness, &receiptMode, &receiptChoices, &receiptMaxConcurrent, &receiptMaxTotal)
+	receiptErr := d.db.QueryRowContext(ctx, `SELECT mission_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, m.WorkspaceID, m.IdempotencyKey).Scan(&receiptMission, &receiptObjective, &receiptAccount, &receiptIntAccount, &receiptHarness, &receiptMode, &receiptChoices)
 	if receiptErr == nil {
-		if receiptObjective != m.Objective || receiptAccount != string(m.AccountableHumanID) || receiptIntAccount != string(m.Integrator.AccountMemberID) || receiptHarness != m.Integrator.Harness || receiptMode != string(m.Integrator.Mode) || receiptChoices != choices || receiptMaxConcurrent != m.MaxConcurrentAttempts || receiptMaxTotal != m.MaxTotalAttempts {
+		if receiptObjective != m.Objective || receiptAccount != string(m.AccountableHumanID) || receiptIntAccount != string(m.Integrator.AccountMemberID) || receiptHarness != m.Integrator.Harness || receiptMode != string(m.Integrator.Mode) || receiptChoices != choices {
 			return ErrMissionIdempotencyConflict
 		}
 		existing, getErr := d.GetMission(ctx, receiptMission)
@@ -264,16 +258,16 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
-		choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID,
+		choices, runID,
 		authorizingHumanID, runOwnerID, generation, m.AcceptedSetVersion,
 		domain.MissionPhasePlanning, m.IdempotencyKey, n, n)
 	if err != nil {
 		return fmt.Errorf("store: create mission: %w", mapConstraint(err, ErrNotFound))
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_create_receipts (workspace_id,idempotency_key,mission_id,objective,accountable_human_id,integrator_account_member_id,integrator_harness,integrator_mode,execution_choices,max_concurrent_attempts,max_total_attempts,initial_run_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, m.WorkspaceID, m.IdempotencyKey, id, m.Objective, m.AccountableHumanID, m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode, choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID, n); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_create_receipts (workspace_id,idempotency_key,mission_id,objective,accountable_human_id,integrator_account_member_id,integrator_harness,integrator_mode,execution_choices,initial_run_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, m.WorkspaceID, m.IdempotencyKey, id, m.Objective, m.AccountableHumanID, m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode, choices, runID, n); err != nil {
 		return fmt.Errorf("store: create mission receipt: %w", mapConstraint(err, ErrConflict))
 	}
 	if err := tx.Commit(); err != nil {

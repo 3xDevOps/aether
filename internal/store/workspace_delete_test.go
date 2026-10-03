@@ -14,7 +14,7 @@ func TestWorkspaceDeletionRetiresFinishedMissionReferences(t *testing.T) {
 	ctx := t.Context()
 	ws := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
-	mission := mustCreateMission(t, db, ws.ID, member.ID, 1, 2)
+	mission := mustCreateMission(t, db, ws.ID, member.ID)
 	if err := db.CheckWorkspaceDeletion(ctx, ws.ID); !errors.Is(err, ErrInUse) {
 		t.Fatalf("pending integrator deletion = %v", err)
 	}

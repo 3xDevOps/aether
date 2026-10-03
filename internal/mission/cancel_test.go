@@ -176,9 +176,9 @@ func TestCancelReplaysOnItsKeyAndRefusesItOnAnotherMission(t *testing.T) {
 
 	second := &domain.Mission{
 		WorkspaceID: f.workspace.ID, Objective: "second mission", AccountableHumanID: f.member.ID,
-		Integrator:            f.mission.Integrator,
-		ExecutionChoices:      f.mission.ExecutionChoices,
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "second-mission",
+		Integrator:       f.mission.Integrator,
+		ExecutionChoices: f.mission.ExecutionChoices,
+		IdempotencyKey:   "second-mission",
 	}
 	if err := f.db.CreateMission(context.Background(), second); err != nil {
 		t.Fatalf("create second mission: %v", err)

@@ -101,9 +101,8 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 				Harness:         "claude",
 				Mode:            domain.LaunchTUI,
 			},
-			MaxConcurrentAttempts: 1,
-			MaxTotalAttempts:      2,
-			IdempotencyKey:        "takeover-regression",
+
+			IdempotencyKey: "takeover-regression",
 		}
 		if err := db.CreateMission(ctx, mission); err != nil {
 			t.Fatalf("create mission: %v", err)

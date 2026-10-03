@@ -78,9 +78,8 @@ func TestCreateNamesIntegratorChoiceMissingFromExecutionChoices(t *testing.T) {
 	}
 	_, err = svc.Create(context.Background(), member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:            protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"},
-		ExecutionChoices:      []protocol.MissionExecutionChoice{{AccountMemberID: string(member.ID), Harness: "claude", Mode: "headless"}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"},
+		ExecutionChoices: []protocol.MissionExecutionChoice{{AccountMemberID: string(member.ID), Harness: "claude", Mode: "headless"}},
 	})
 	want := "integrator choice account=" + string(member.ID) + " harness=claude mode=tui must be one of execution_choices"
 	if err == nil || err.Error() != want {
@@ -113,9 +112,8 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 			integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 			out, err := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
 				WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-				Integrator:            protocol.MissionIntegrator(integrator),
-				ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-				MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+				Integrator:       protocol.MissionIntegrator(integrator),
+				ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 			})
 			if !errors.Is(err, cause) {
 				t.Fatalf("create error = %v, want launch failure %v", err, cause)
@@ -153,9 +151,8 @@ func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 	out, _ := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	})
 	id := domain.MissionID(out.Mission.ID)
 	reconcile := func() *domain.Mission {
@@ -220,9 +217,8 @@ func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 	out, err := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	})
 	if err != nil || !out.Mission.IntegratorRunLaunched {
 		t.Fatalf("create = %+v, %v; want a launched integrator", out.Mission, err)
@@ -262,9 +258,8 @@ func TestHeadlessIntegratorIsRefused(t *testing.T) {
 	headless := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)}
 	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-headless",
-		Integrator:            protocol.MissionIntegrator(headless),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{headless},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(headless),
+		ExecutionChoices: []protocol.MissionExecutionChoice{headless},
 	})
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
@@ -298,9 +293,9 @@ func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 	member := regressionMember(t, db, "accountable")
 	legacy := &domain.Mission{
 		WorkspaceID: workspace.ID, Objective: "legacy swarm", AccountableHumanID: member.ID,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
-		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "legacy",
+		Integrator:       domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless}},
+		IdempotencyKey:   "legacy",
 	}
 	if err := db.CreateMission(ctx, legacy); err != nil {
 		t.Fatalf("create legacy mission: %v", err)
@@ -369,9 +364,8 @@ func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 			integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 			params := protocol.MissionCreateParams{
 				WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-				Integrator:            protocol.MissionIntegrator(integrator),
-				ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-				MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+				Integrator:       protocol.MissionIntegrator(integrator),
+				ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 			}
 			created, _ := svc.Create(ctx, member.ID, params)
 			tc.settle(t, db, created.Mission, member.ID)
@@ -402,9 +396,8 @@ func TestReplaceReplayLaunchesNothingForADeletedRun(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 	created, err := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -482,9 +475,8 @@ func TestReconcileMarksAFailedRowLaunched(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
 	out, _ := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	})
 	m, err := db.GetMission(ctx, domain.MissionID(out.Mission.ID))
 	if err != nil {
@@ -543,9 +535,8 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	legacy := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "legacy", Mode: string(domain.LaunchTUI)}
 	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-legacy",
-		Integrator:            protocol.MissionIntegrator(legacy),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{legacy},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(legacy),
+		ExecutionChoices: []protocol.MissionExecutionChoice{legacy},
 	})
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
@@ -557,9 +548,9 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 
 	legacyMission := &domain.Mission{
 		WorkspaceID: f.workspace.ID, Objective: "legacy swarm", AccountableHumanID: f.member.ID,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless},
-		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "legacy-mission",
+		Integrator:       domain.MissionIntegrator{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless},
+		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless}},
+		IdempotencyKey:   "legacy-mission",
 	}
 	if createErr := f.db.CreateMission(ctx, legacyMission); createErr != nil {
 		t.Fatalf("create legacy mission: %v", createErr)
@@ -600,9 +591,8 @@ func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(owner.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}
 	created, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
 		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-shared",
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -632,9 +622,8 @@ func TestLaunchValidationDoesNotRefuseAReplay(t *testing.T) {
 	create := func(key string) (protocol.MissionCreateResult, error) {
 		return f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
 			WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: key,
-			Integrator:            protocol.MissionIntegrator(integrator),
-			ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
-			MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+			Integrator:       protocol.MissionIntegrator(integrator),
+			ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
 		})
 	}
 	created, err := create("create-lost")

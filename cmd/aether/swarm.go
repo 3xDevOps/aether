@@ -10,7 +10,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -22,7 +21,7 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--max-concurrent N] [--max-attempts N] [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <mission-id>\n" +
 	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
@@ -53,13 +52,11 @@ func runSwarm(args []string) error {
 // swarmSpec is a validated create request before the account and workspace
 // are resolved over the control channel.
 type swarmSpec struct {
-	objective     string
-	agent         string
-	account       string
-	workspace     string
-	workers       []protocol.MissionExecutionChoice
-	maxConcurrent int
-	maxAttempts   int
+	objective string
+	agent     string
+	account   string
+	workspace string
+	workers   []protocol.MissionExecutionChoice
 }
 
 func swarmCreate(args []string, stdin io.Reader) error {
@@ -91,8 +88,6 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	agent := fs.String("agent", "", "integrator harness name (runs in tui mode)")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	maxConcurrent := fs.Int("max-concurrent", 2, "worker attempts running at once (1..8)")
-	maxAttempts := fs.Int("max-attempts", 8, "worker attempts over the whole swarm (1..128)")
 	var workers stringList
 	fs.Var(&workers, "worker", "allow workers on this harness, harness[:tui|headless] (repeatable, default mode tui)")
 	objective, err := parseLeadingArg(fs, args)
@@ -103,19 +98,13 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if err != nil {
 		return swarmSpec{}, err
 	}
-	spec := swarmSpec{
-		objective: objective, agent: *agent, account: *account, workspace: *workspace,
-		maxConcurrent: *maxConcurrent, maxAttempts: *maxAttempts,
-	}
+	spec := swarmSpec{objective: objective, agent: *agent, account: *account, workspace: *workspace}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
 		if parseErr != nil {
 			return swarmSpec{}, parseErr
 		}
 		spec.workers = append(spec.workers, choice)
-	}
-	if err := validateSwarmLimits(spec.maxConcurrent, spec.maxAttempts); err != nil {
-		return swarmSpec{}, err
 	}
 	return spec, nil
 }
@@ -149,19 +138,6 @@ func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
 }
 
-func validateSwarmLimits(concurrent, total int) error {
-	if concurrent < 1 || concurrent > domain.MaxMissionConcurrentAttempts {
-		return fmt.Errorf("--max-concurrent %d is out of range (want 1..%d)", concurrent, domain.MaxMissionConcurrentAttempts)
-	}
-	if total < 1 || total > domain.MaxMissionTotalAttempts {
-		return fmt.Errorf("--max-attempts %d is out of range (want 1..%d)", total, domain.MaxMissionTotalAttempts)
-	}
-	if total < concurrent {
-		return fmt.Errorf("--max-attempts %d is below --max-concurrent %d", total, concurrent)
-	}
-	return nil
-}
-
 // missionCreateParams builds the request the server accepts: the integrator
 // tuple is always the first execution choice, and a --worker that repeats it
 // or another worker is sent once, because the store refuses duplicates.
@@ -182,13 +158,11 @@ func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key stri
 		}
 	}
 	return protocol.MissionCreateParams{
-		WorkspaceID:           workspaceID,
-		Objective:             spec.objective,
-		Integrator:            protocol.MissionIntegrator(integrator),
-		ExecutionChoices:      choices,
-		MaxConcurrentAttempts: spec.maxConcurrent,
-		MaxTotalAttempts:      spec.maxAttempts,
-		IdempotencyKey:        key,
+		WorkspaceID:      workspaceID,
+		Objective:        spec.objective,
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: choices,
+		IdempotencyKey:   key,
 	}
 }
 

@@ -531,11 +531,6 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
 					}
 				}
-				if _, err := fmt.Fprintf(out, "Attempt allowance: active=%d/%d total=%d/%d remaining_concurrent=%d remaining_total=%d\n",
-					assignment.ActiveAttempts, assignment.MaxConcurrentAttempts, assignment.TotalAttempts, assignment.MaxTotalAttempts,
-					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts, assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
-					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
-				}
 				if assignment.Phase == "active" {
 					if _, err := io.WriteString(out, integratorWorkflow); err != nil {
 						return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)

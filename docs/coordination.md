@@ -350,8 +350,8 @@ Every role gets `status`, `inbox`, and top-level help bootstrap commands.
 An integrator's skill states its role before its phase guidance: turn the
 objective into tasks for workers and coordinate them, not implement the
 objective itself. Integrators additionally get task/worker help, list
-commands using the current mission ID, integrator generation, approved
-account/harness/mode choices, and active/total attempt allowance.
+commands using the current mission ID, integrator generation, and approved
+account/harness/mode choices.
 Integration guidance appears only in `active`. Use the full
 status result for the current capability set.
 

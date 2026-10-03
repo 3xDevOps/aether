@@ -123,28 +123,16 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	if m == nil {
 		return protocol.CoordMissionAssignment{}, nil
 	}
-	attempts, err := s.cfg.Missions.ListAttempts(ctx, m.ID, "")
-	if err != nil {
-		return protocol.CoordMissionAssignment{}, err
-	}
 	choices := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
 	for _, choice := range m.ExecutionChoices {
 		choices = append(choices, protocol.MissionExecutionChoice{AccountMemberID: string(choice.AccountMemberID), Harness: choice.Harness, Mode: string(choice.Mode)})
 	}
 	out := protocol.CoordMissionAssignment{
-		MissionID:             string(m.ID),
-		IntegratorRunID:       string(m.CurrentIntegratorRunID),
-		IntegratorGeneration:  m.IntegratorGeneration,
-		ExecutionChoices:      choices,
-		MaxConcurrentAttempts: m.MaxConcurrentAttempts,
-		MaxTotalAttempts:      m.MaxTotalAttempts,
-		TotalAttempts:         len(attempts),
-		Phase:                 string(m.Phase),
-	}
-	for _, candidate := range attempts {
-		if candidate != nil && candidate.State.HoldsConcurrency() {
-			out.ActiveAttempts++
-		}
+		MissionID:            string(m.ID),
+		IntegratorRunID:      string(m.CurrentIntegratorRunID),
+		IntegratorGeneration: m.IntegratorGeneration,
+		ExecutionChoices:     choices,
+		Phase:                string(m.Phase),
 	}
 	if attempt == nil {
 		out.Role = missionRoleIntegrator

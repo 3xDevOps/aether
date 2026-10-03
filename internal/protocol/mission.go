@@ -49,8 +49,6 @@ type Mission struct {
 	AccountableHumanID           string                   `json:"accountable_human_id"`
 	Integrator                   MissionIntegrator        `json:"integrator"`
 	ExecutionChoices             []MissionExecutionChoice `json:"execution_choices"`
-	MaxConcurrentAttempts        int                      `json:"max_concurrent_attempts"`
-	MaxTotalAttempts             int                      `json:"max_total_attempts"`
 	CurrentIntegratorRunID       string                   `json:"current_integrator_run_id,omitempty"`
 	IntegratorAuthorizingHumanID string                   `json:"integrator_authorizing_human_id,omitempty"`
 	IntegratorRunOwnerID         string                   `json:"integrator_run_owner_id,omitempty"`
@@ -230,14 +228,12 @@ type Acceptance struct {
 }
 
 type MissionCreateParams struct {
-	WorkspaceID           string                   `json:"workspace_id"`
-	Objective             string                   `json:"objective"`
-	AccountableHumanID    string                   `json:"accountable_human_id"`
-	Integrator            MissionIntegrator        `json:"integrator"`
-	ExecutionChoices      []MissionExecutionChoice `json:"execution_choices"`
-	MaxConcurrentAttempts int                      `json:"max_concurrent_attempts"`
-	MaxTotalAttempts      int                      `json:"max_total_attempts"`
-	IdempotencyKey        string                   `json:"idempotency_key"`
+	WorkspaceID        string                   `json:"workspace_id"`
+	Objective          string                   `json:"objective"`
+	AccountableHumanID string                   `json:"accountable_human_id"`
+	Integrator         MissionIntegrator        `json:"integrator"`
+	ExecutionChoices   []MissionExecutionChoice `json:"execution_choices"`
+	IdempotencyKey     string                   `json:"idempotency_key"`
 }
 
 type MissionCreateResult struct {
@@ -439,7 +435,7 @@ type WorkerMutationResult struct {
 }
 
 func MissionFromDomain(m *domain.Mission) Mission {
-	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, MaxConcurrentAttempts: m.MaxConcurrentAttempts, MaxTotalAttempts: m.MaxTotalAttempts, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
+	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
 	if m.IntegratorLaunchErrorAt != nil {
 		out.IntegratorLaunchErrorAt = rfc3339(*m.IntegratorLaunchErrorAt)
 	}

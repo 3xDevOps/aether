@@ -102,8 +102,6 @@ export interface Mission {
   accountable_human_id: string
   integrator: MissionIntegrator
   execution_choices: MissionExecutionChoice[]
-  max_concurrent_attempts: number
-  max_total_attempts: number
   current_integrator_run_id: string
   integrator_generation: number
   accepted_set_version: number

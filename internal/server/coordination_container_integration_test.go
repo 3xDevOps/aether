@@ -332,7 +332,7 @@ func TestIntegrationCoordinationMissionIntegratorInContainer(t *testing.T) {
 		ExecutionChoices: []protocol.MissionExecutionChoice{{
 			AccountMemberID: integrator.AccountMemberID, Harness: integrator.Harness, Mode: integrator.Mode,
 		}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "container-integrator",
+		IdempotencyKey: "container-integrator",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)
 	}

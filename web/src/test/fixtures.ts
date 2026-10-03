@@ -87,8 +87,6 @@ export function mission(over: Partial<Mission> = {}): Mission {
       { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
       { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
     ],
-    max_concurrent_attempts: 2,
-    max_total_attempts: 8,
     current_integrator_run_id: 'run_integrator',
     integrator_generation: 1,
     accepted_set_version: 0,

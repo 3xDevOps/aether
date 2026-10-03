@@ -24,7 +24,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // TestIntegrationMissionOrchestration drives the mission authority through the
@@ -74,7 +73,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		AccountableHumanID: string(e.ada.id), Integrator: protocol.MissionIntegrator{
 			AccountMemberID: string(e.ada.id), Harness: "fake", Mode: string(domain.LaunchTUI),
 		}, ExecutionChoices: []protocol.MissionExecutionChoice{choiceAda, choiceBo},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 3, IdempotencyKey: "mission-create-1",
+		IdempotencyKey: "mission-create-1",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)
 	}
@@ -91,8 +90,8 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if err := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
 		WorkspaceID: string(e.ws.ID), Objective: missionObjective,
 		AccountableHumanID: string(e.ada.id), Integrator: created.Mission.Integrator,
-		ExecutionChoices:      created.Mission.ExecutionChoices,
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 3, IdempotencyKey: "mission-create-1",
+		ExecutionChoices: created.Mission.ExecutionChoices,
+		IdempotencyKey:   "mission-create-1",
 	}, &replay); err != nil {
 		t.Fatalf("mission.create replay: %v", err)
 	}
@@ -352,16 +351,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		t.Fatalf("denied cancellation fired after explicit release: %+v", inspected.Attempt)
 	}
 
-	// No third active attempt fits the concurrent bound. Cancel A, consume the
-	// one remaining total-attempt slot with retry, then prove the total bound.
-	var tooMany protocol.WorkerStartResult
-	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
-		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-C",
-		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
-	}, &tooMany)
-	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
-		t.Fatalf("worker.start over concurrency bound error = %v, want mission attempt limit conflict", err)
-	}
 	var cancelled protocol.WorkerMutationResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
 		AttemptID: attemptA.Attempt.ID, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "cancel-A",
@@ -388,14 +377,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if retried.Attempt.ID == attemptA.Attempt.ID || retried.Attempt.RunID == "" {
 		t.Fatalf("worker.retry A did not reserve a new attempt: %+v", retried)
-	}
-	var overTotal protocol.WorkerStartResult
-	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
-		MissionID: missionID, TaskID: string(taskB), TaskRevision: 1, DispatchKey: "dispatch-D",
-		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
-	}, &overTotal)
-	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
-		t.Fatalf("worker.start over total bound error = %v, want mission attempt limit conflict", err)
 	}
 
 	// A report with no user evidence refs still captures the retained packet and
@@ -616,7 +597,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 			{AccountMemberID: string(e.ada.id), Harness: "omp", Mode: string(domain.LaunchTUI)},
 			{AccountMemberID: string(e.bo.id), Harness: "claude", Mode: string(domain.LaunchTUI)},
 		},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4,
+
 		IdempotencyKey: "docker-mission-create",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)

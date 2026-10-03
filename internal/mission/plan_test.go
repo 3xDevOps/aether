@@ -66,7 +66,7 @@ func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMo
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI},
 		},
-		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4, IdempotencyKey: "fixture-mission",
+		IdempotencyKey:               "fixture-mission",
 		IntegratorAuthorizingHumanID: member.ID, IntegratorRunOwnerID: member.ID,
 	}
 	if err := db.CreateMission(ctx, m); err != nil {

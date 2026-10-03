@@ -932,7 +932,7 @@ not presented as current after a reset has passed without a fresh measurement.
 
 A **swarm** is a mission: one objective handed to an interactive integrator
 run that asks you clarifying questions only if it needs answers, splits the
-objective into tasks, runs workers on them within the attempt limits you set,
+objective into tasks, runs as many workers on them as it judges useful,
 delivers the verified result, and reports success. No human approves the plan
 or the delivery.
 The dashboard's launch dialog creates one under **Swarm**; the CLI does the
@@ -944,8 +944,7 @@ of the objective reads it from stdin.
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --worker claude:headless --worker codex:headless \
-  --max-concurrent 2 --max-attempts 8
+  --agent claude --worker claude:headless --worker codex:headless
 ```
 
 ```
@@ -953,10 +952,7 @@ swarm 01m3bnfkwbqx7y9m98m351mxq2 planning
 integrator run 01m3bnfkwbfdna6tbtq2vw5e62
 ```
 
-`--max-concurrent` bounds worker attempts running at once (1 to 8) and
-`--max-attempts` bounds them over the whole swarm (1 to 128, at least the
-concurrent limit). The command refuses values outside those bounds before
-calling the server. If the server stored the mission but could not start the
+If the server stored the mission but could not start the
 integrator, the command prints the server's error verbatim and the
 `aether swarm show` command to follow it; see
 [failure-handling.md](failure-handling.md#integrator-launch-failures).
@@ -1044,10 +1040,7 @@ Record these roles separately:
   run owner's.
 
 The actor is not rewritten as the authorizing human, run owner, or account
-owner merely because the operation was performed on somebody's behalf. A
-mission's finite concurrency and total-attempt limits bound Aether admission;
-they do not narrow what the credentials in the home the run's container
-mounts and the selected agent login can do inside the container.
+owner merely because the operation was performed on somebody's behalf.
 
 Release B rechecks the current member role, account-sharing authority,
 mission assignment, and control/assignment generation at each consequential

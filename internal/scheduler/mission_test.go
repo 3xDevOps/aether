@@ -255,8 +255,8 @@ func TestIntegratorReportArmsTheReportedFinish(t *testing.T) {
 	e := newTestEnv(t, nil)
 	m := &domain.Mission{
 		WorkspaceID: e.ws.ID, Objective: "integrator finish", AccountableHumanID: e.member.ID,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "fake", Mode: domain.LaunchTUI},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "integrator-finish",
+		Integrator:     domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "fake", Mode: domain.LaunchTUI},
+		IdempotencyKey: "integrator-finish",
 	}
 	if err := e.db.CreateMission(t.Context(), m); err != nil {
 		t.Fatal(err)

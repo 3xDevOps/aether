@@ -3054,9 +3054,8 @@ concluding the page is wrong.
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
-an integrator account and harness, an explicit list of allowed
-account/harness/mode execution choices, and finite concurrent and
-total-attempt limits. The integrator always runs in `tui` mode, because
+an integrator account and harness, and an explicit list of allowed
+account/harness/mode execution choices. The integrator always runs in `tui` mode, because
 `mission.create` and `mission.replace-integrator` refuse a headless
 integrator, so the swarm form has no integrator mode field; worker rows keep
 their own mode. `mission.create` refuses an integrator whose exact
@@ -3095,9 +3094,7 @@ dialog - sends the same key and the server replays that mission. Changed
 contents get their own key, because the server refuses changed contents
 under a used key as `store: mission idempotency conflict`. After a success
 the same contents start a new swarm. Client-generated IDs are never used as
-mission authority. The server bounds these finite limits at eight concurrent
-attempts and 128 total attempts; the form rejects values outside those
-bounds before sending.
+mission authority.
 
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads

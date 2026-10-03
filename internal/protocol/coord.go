@@ -77,21 +77,17 @@ const (
 // coordination socket. Role is descriptive authority, never a client-provided
 // role flag; an omitted assignment means this is an ordinary run.
 type CoordMissionAssignment struct {
-	MissionID             string                   `json:"mission_id,omitempty"`
-	Role                  string                   `json:"role,omitempty"`
-	TaskID                string                   `json:"task_id,omitempty"`
-	TaskRevision          int                      `json:"task_revision,omitempty"`
-	AttemptID             string                   `json:"attempt_id,omitempty"`
-	IntegratorRunID       string                   `json:"integrator_run_id,omitempty"`
-	IntegratorGeneration  uint64                   `json:"integrator_generation,omitempty"`
-	ExecutionChoices      []MissionExecutionChoice `json:"execution_choices,omitempty"`
-	MaxConcurrentAttempts int                      `json:"max_concurrent_attempts,omitempty"`
-	MaxTotalAttempts      int                      `json:"max_total_attempts,omitempty"`
-	ActiveAttempts        int                      `json:"active_attempts,omitempty"`
-	TotalAttempts         int                      `json:"total_attempts,omitempty"`
-	Phase                 string                   `json:"phase,omitempty"`
-	OpenQuestions         int                      `json:"open_questions,omitempty"`
-	Capabilities          []string                 `json:"capabilities,omitempty"`
+	MissionID            string                   `json:"mission_id,omitempty"`
+	Role                 string                   `json:"role,omitempty"`
+	TaskID               string                   `json:"task_id,omitempty"`
+	TaskRevision         int                      `json:"task_revision,omitempty"`
+	AttemptID            string                   `json:"attempt_id,omitempty"`
+	IntegratorRunID      string                   `json:"integrator_run_id,omitempty"`
+	IntegratorGeneration uint64                   `json:"integrator_generation,omitempty"`
+	ExecutionChoices     []MissionExecutionChoice `json:"execution_choices,omitempty"`
+	Phase                string                   `json:"phase,omitempty"`
+	OpenQuestions        int                      `json:"open_questions,omitempty"`
+	Capabilities         []string                 `json:"capabilities,omitempty"`
 }
 
 // Status output limits are intentionally smaller than the request budget:

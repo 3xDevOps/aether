@@ -1430,6 +1430,8 @@ ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
 DROP TABLE mission_plan_items;
 DROP TABLE mission_plan_reviews;
 ALTER TABLE mission_task_revisions DROP COLUMN material;
+ALTER TABLE mission_create_receipts DROP COLUMN max_concurrent_attempts;
+ALTER TABLE mission_create_receipts DROP COLUMN max_total_attempts;
 CREATE TABLE missions_migrate AS SELECT * FROM missions;
 DROP TABLE missions;
 CREATE TABLE missions (
@@ -1441,8 +1443,6 @@ CREATE TABLE missions (
 	integrator_harness              TEXT NOT NULL DEFAULT '',
 	integrator_mode                 TEXT NOT NULL DEFAULT 'headless',
 	execution_choices               TEXT NOT NULL DEFAULT '[]',
-	max_concurrent_attempts         INTEGER NOT NULL CHECK (max_concurrent_attempts > 0),
-	max_total_attempts              INTEGER NOT NULL CHECK (max_total_attempts > 0),
 	current_integrator_run_id       TEXT,
 	integrator_generation           INTEGER NOT NULL DEFAULT 1,
 	accepted_set_version            INTEGER NOT NULL DEFAULT 0,
@@ -1460,14 +1460,14 @@ CREATE TABLE missions (
 	UNIQUE (workspace_id, idempotency_key)
 );
 INSERT INTO missions (id, workspace_id, objective, accountable_human_id, integrator_account_member_id,
-                      integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts,
-                      max_total_attempts, current_integrator_run_id, integrator_generation,
+                      integrator_harness, integrator_mode, execution_choices,
+                      current_integrator_run_id, integrator_generation,
                       accepted_set_version, idempotency_key, created_at, updated_at,
                       integrator_authorizing_human_id, integrator_run_owner_id, phase,
                       integrator_launch_error, integrator_launch_error_at, integrator_run_launched)
 	SELECT id, workspace_id, objective, accountable_human_id, integrator_account_member_id,
-	       integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts,
-	       max_total_attempts, current_integrator_run_id, integrator_generation,
+	       integrator_harness, integrator_mode, execution_choices,
+	       current_integrator_run_id, integrator_generation,
 	       accepted_set_version, idempotency_key, created_at, updated_at,
 	       integrator_authorizing_human_id, integrator_run_owner_id,
 	       CASE phase
