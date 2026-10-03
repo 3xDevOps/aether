@@ -5,12 +5,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { Api } from '@/lib/api'
+import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { WorkspaceImportResult, WorkspaceMirrorAuth } from '@/lib/types'
+import type { Workspace, WorkspaceImportResult, WorkspaceMirrorAuth } from '@/lib/types'
 import { useStore } from '@/store'
 
-export function ImportRepositoryDialog({ client, onClose, onImported }: { client: Api; onClose: () => void; onImported: () => void }) {
+export function ImportRepositoryDialog({ client, onClose, onImported }: { client: Api; onClose: () => void; onImported: (workspace?: Workspace) => void }) {
   const [name, setName] = useState('')
   const [source, setSource] = useState('')
   const [base, setBase] = useState('main')
@@ -36,17 +36,17 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
       setResult(current)
       if (current.created) {
         useStore.getState().upsertWorkspace(current.workspace)
-        onImported()
+        onImported(current.workspace)
       }
     } catch (cause) {
       setError(message(cause))
-      setUncertain(true)
+      setUncertain(!(cause instanceof ApiError && (cause.code === -32602 || cause.code === -32001)))
       onImported()
     } finally { setBusy(false) }
   }
 
   if (sourceOpen && result?.created) {
-    return <WorkspaceMirrorDialog workspaceID={result.workspace.id} client={client} suggestedSource={source.trim()} onClose={() => { onImported(); onClose() }} />
+    return <WorkspaceMirrorDialog workspaceID={result.workspace.id} client={client} suggestedSource={source.trim()} onClose={() => { onImported(result.workspace); onClose() }} />
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
@@ -58,10 +58,10 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
           <Label className="block space-y-1">Source URL<Input value={source} onChange={(event) => setSource(event.target.value)} placeholder="https://github.com/upstream/repository.git" required /></Label>
           <Label className="block space-y-1">Source / base branch<Input value={base} onChange={(event) => setBase(event.target.value)} required /></Label>
           <Label className="block space-y-1">Checkout Origin (optional)<Input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Leave blank for no push destination" /></Label>
-          <p className="text-xs text-muted-foreground">Origin is a separate checkout push destination. It is never inferred from the read-only source; you may use a writable fork or leave it blank.</p>
+          <p className="text-xs text-muted-foreground">Use credential-free URLs. Origin is a separate checkout push destination, never inferred from the read-only source. Publishing requires your own native Git/gh credentials and upstream permission; a deploy key here grants read access only. Use a writable fork or leave Origin blank.</p>
           <Label className="block space-y-1">Source authentication<select className="h-9 w-full rounded border bg-background px-2" value={auth} onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}><option value="public">Public HTTPS</option><option value="deploy-key">Read-only deploy key</option></select></Label>
           {auth === 'deploy-key' && <>
-            <p className="text-xs text-muted-foreground">Use GitHub HTTPS or a generic ssh:// source. Import generates a public deploy key without fetching. Install it read-only at the source, then Verify / Refresh in Source control. Do not reconfigure after installing the key: reconfiguration rotates it.</p>
+            <p className="text-xs text-muted-foreground">Use GitHub HTTPS or a generic ssh:// source. Import generates a public deploy key without fetching. A repository administrator must install it read-only at the source, then Verify / Refresh in Source control and explicitly adopt the candidate. Generic SSH requires known_hosts verified with the host administrator, not a blindly trusted scan. Do not reconfigure after installing the key: reconfiguration rotates it.</p>
             <Label className="block space-y-1">Pinned known_hosts (required for generic SSH)<Textarea value={knownHosts} onChange={(event) => setKnownHosts(event.target.value)} className="font-mono text-xs" /></Label>
           </>}
         </fieldset>

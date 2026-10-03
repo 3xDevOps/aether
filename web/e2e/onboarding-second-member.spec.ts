@@ -27,6 +27,7 @@ test('a second member finds the workspace already seeded', async ({ page, aether
   await wizard.workspace.use('project').click()
 
   await wizard.expectStep('Repository')
+  await wizard.repository.localClone().click()
   await wizard.repository.addRemote(clone)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText(

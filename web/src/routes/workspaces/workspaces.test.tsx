@@ -26,24 +26,77 @@ function seed(extra: Partial<RootState> = {}) {
 // so these tests advertise every method; a desktop gateway narrows this
 // via /capabilities.
 describe('workspaces view', () => {
-  it('submits a workspace with no image selection', async () => {
+
+  it('keeps additional remote import available and retains a partially created workspace', async () => {
     const client = fakeApi({
-      workspaceListFull: vi.fn(async () => []),
-      workspaceAdd: vi.fn(async () => workspace),
+      workspaceImport: vi.fn(async () => ({
+        created: true, workspace: otherWorkspace,
+        mirror: { enabled: true, status: 'pending' as const },
+        error: 'source authentication not installed',
+      })),
     })
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
-
-    const form = within(await screen.findByRole('form', { name: 'Add workspace' }))
-    fireEvent.change(form.getByLabelText(/^Name/), { target: { value: 'bare' } })
-    fireEvent.click(form.getByRole('button', { name: 'Add' }))
-
-    expect(client.workspaceAdd).toHaveBeenCalledWith({
-      name: 'bare',
-      base_branch: 'main',
-      environment: {},
-    })
+    await screen.findByRole('list', { name: 'Workspace list' })
+    fireEvent.click(screen.getByRole('button', { name: 'Import repository' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText('Workspace name'), { target: { value: 'private-project' } })
+    fireEvent.change(dialog.getByLabelText('Source URL'), { target: { value: 'ssh://git@example.test/team/project.git' } })
+    fireEvent.change(dialog.getByLabelText('Source authentication'), { target: { value: 'deploy-key' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Import repository' }))
+    await dialog.findByText('source authentication not installed')
+    expect(dialog.queryByRole('button', { name: 'Import repository' })).toBeNull()
+    fireEvent.click(dialog.getAllByRole('button', { name: 'Close' })[0])
+    await waitFor(() => expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: otherWorkspace.id, repository: 'remote' } }))
+    expect(client.workspaceImport).toHaveBeenCalledTimes(1)
+    expect(client.workspaceMirrorAdopt).not.toHaveBeenCalled()
   })
+
+  it('never creates a hosted local workspace or opens a filesystem picker', async () => {
+    const client = fakeApi()
+    seed()
+    render(<WorkspacesRoute params={{}} client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Create from local clone' }))
+    expect(screen.queryByLabelText('Repository path')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Choose folder' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull()
+    expect(client.workspaceAdd).not.toHaveBeenCalled()
+    expect(client.localLinkRepo).not.toHaveBeenCalled()
+  })
+
+  it.each(['unmount', 'identity', 'connection'] as const)(
+    'ignores a late creation response after %s without replaying creation',
+    async (transition) => {
+      const createdWorkspace = { ...workspace, id: 'wsp_pending', name: 'pending-repo' }
+      const pending = Promise.withResolvers<typeof createdWorkspace>()
+      const client = fakeApi({ workspaceAdd: vi.fn(() => pending.promise) })
+      seed({
+        identityKey: 'server:alice', connectionEpoch: 0,
+        capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['link.repo'] },
+      })
+      const view = render(<WorkspacesRoute params={{}} client={client} />)
+      await screen.findByRole('list', { name: 'Workspace list' })
+      fireEvent.click(screen.getByRole('button', { name: 'Create from local clone' }))
+      fireEvent.change(screen.getByLabelText('Workspace name'), { target: { value: createdWorkspace.name } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
+      await waitFor(() => expect(client.workspaceAdd).toHaveBeenCalledTimes(1))
+      if (transition === 'unmount') {
+        act(() => useStore.getState().navigate('agents'))
+        view.unmount()
+      } else {
+        act(() => useStore.setState(transition === 'identity' ? { identityKey: 'server:bob' } : { connectionEpoch: 1 }))
+      }
+      const route = useStore.getState().route
+      await act(async () => pending.resolve(createdWorkspace))
+      expect(useStore.getState().route).toEqual(route)
+      expect(useStore.getState().workspaces[createdWorkspace.id]).toBeUndefined()
+      expect(client.workspaceAdd).toHaveBeenCalledTimes(1)
+      if (transition !== 'unmount') {
+        expect(screen.getByRole('button', { name: 'Create from local clone' })).toHaveProperty('disabled', false)
+        view.unmount()
+      }
+    },
+  )
 
   it('opens a workspace by making it the active scope', async () => {
     const client = fakeApi({

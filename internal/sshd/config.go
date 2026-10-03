@@ -102,7 +102,8 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 		seen[p.Name] = struct{}{}
 		out = append(out, protocol.ConfigRoot{
 			Harness: p.Name, Path: displayRoot(p.LocalRoot),
-			RuntimeIgnores: configRuntimeIgnores(p.Name),
+			RuntimeIgnores:  configRuntimeIgnores(p.Name),
+			CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 		})
 	}
 	if b.store != nil {
@@ -125,7 +126,8 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 			seen[row.Name] = struct{}{}
 			out = append(out, protocol.ConfigRoot{
 				Harness: row.Name, Path: displayRoot(p.LocalRoot),
-				RuntimeIgnores: configRuntimeIgnores(row.Name),
+				RuntimeIgnores:  configRuntimeIgnores(row.Name),
+				CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 			})
 		}
 	}
@@ -196,10 +198,10 @@ func (b *HomeConfigBackend) Import(ctx context.Context, member domain.MemberID, 
 		out.Excluded = append(out.Excluded, protocol.ConfigExcluded{Path: excluded.Path, Reason: excluded.Reason, Detail: excluded.Detail})
 	}
 	if err != nil {
-		if result.Files == 0 {
-			return protocol.ConfigImportResult{}, err
-		}
 		out.Error = err.Error()
+		if result.Files == 0 {
+			out.Error = configError(err).Message
+		}
 		out.ImportedPaths = result.ImportedPaths
 	}
 	return out, nil

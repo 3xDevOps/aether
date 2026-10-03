@@ -12,13 +12,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { WorkspaceCreate } from '@/components/workspace-create'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
-import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -33,7 +31,6 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const workspaces = useMemo(() => Object.values(workspaceMap), [workspaceMap])
   const [loaded, setLoaded] = useState(useStore.getState().hydrated)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
-  const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const loading = useDelayed(!loaded && error === null)
   const fetchVersion = useRef(0)
@@ -53,6 +50,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
 
   useEffect(() => {
     void refetch()
+    return () => { fetchVersion.current += 1 }
   }, [refetch])
 
   return (
@@ -63,15 +61,10 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1200px] min-w-0 flex-col gap-4 p-4 sm:p-6">
-          {caps.hasMethod('workspace.add') && (
-            <AddForm client={client} onAdded={() => void refetch()} />
-          )}
-          {isAdmin && caps.hasMethod('workspace.import') && (
-            <section className="flex flex-wrap items-center justify-between gap-3 border-y bg-sidebar px-3 py-3 sm:px-4" aria-label="Remote repository">
-              <p className="text-xs text-muted-foreground">Start from a remote repository without a local clone. Source, checkout Origin and candidate adoption remain explicit.</p>
-              <Button size="sm" variant="outline" onClick={() => setImporting(true)}>Import repository</Button>
-            </section>
-          )}
+          <WorkspaceCreate client={client} onRefresh={() => void refetch()} onCreated={(workspace, source) => {
+            useStore.getState().upsertWorkspace(workspace)
+            navigate('workspace', { workspaceId: workspace.id, repository: source })
+          }} />
 
           {loading && (
             <div className="space-y-1 border-y py-2">
@@ -127,6 +120,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                         >
                           Open
                         </Button>
+                        <Button size="sm" variant="outline" onClick={() => navigate('workspace', { workspaceId: workspace.id, repository: 'local' })}>
+                          Link local repository
+                        </Button>
                         {canDelete && (
                           <Button
                             size="sm"
@@ -162,7 +158,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                 <p className="text-[13px] font-medium">No workspaces yet.</p>
                 {caps.hasMethod('workspace.add') && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Add one above to give runs a shared scope.
+                    Choose a public/private remote repository or local clone above.
                   </p>
                 )}
               </div>
@@ -179,13 +175,6 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
             useStore.getState().removeWorkspace(deleting.id)
             void refetch()
           }}
-        />
-      )}
-      {importing && isAdmin && caps.hasMethod('workspace.import') && (
-        <ImportRepositoryDialog
-          client={client}
-          onClose={() => setImporting(false)}
-          onImported={() => void refetch()}
         />
       )}
     </div>
@@ -259,70 +248,5 @@ function DeleteDialog({
   )
 }
 
-function AddForm({ client, onAdded }: { client: Api; onAdded: () => void }) {
-  const [name, setName] = useState('')
-  const [baseBranch, setBaseBranch] = useState('main')
-  const [busy, setBusy] = useState(false)
-
-  const add = async () => {
-    setBusy(true)
-    try {
-      await client.workspaceAdd({
-        name: name.trim(),
-        base_branch: baseBranch.trim(),
-        environment: {},
-      })
-      setName('')
-      onAdded()
-      toast.success('Workspace added')
-    } catch (err) {
-      toast.error(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form
-      className="w-full border-y bg-sidebar px-3 py-3 sm:px-4"
-      aria-label="Add workspace"
-      onSubmit={(e) => {
-        e.preventDefault()
-        void add()
-      }}
-    >
-      <div className="mb-3">
-        <h2 className="text-[13px] font-semibold">Add workspace</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Set a name and the base branch new runs should start from.
-        </p>
-      </div>
-      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-        <Label className="block min-w-0 space-y-1">
-          Name
-          <Input
-            value={name}
-            placeholder="team"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Label>
-        <Label className="block min-w-0 space-y-1">
-          Base branch
-          <Input
-            value={baseBranch}
-            onChange={(e) => setBaseBranch(e.target.value)}
-          />
-        </Label>
-        <Button
-          className="w-full sm:w-auto"
-          type="submit"
-          disabled={busy || !name.trim() || !baseBranch.trim()}
-        >
-          Add
-        </Button>
-      </div>
-    </form>
-  )
-}
 
 registerRoute('workspaces', WorkspacesRoute)

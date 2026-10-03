@@ -42,7 +42,7 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText('Pushed main to aether')

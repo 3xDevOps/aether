@@ -168,23 +168,27 @@ export async function hydrate(
         const linkStatus = await client.localLinkStatus()
         if (signal?.aborted) return false
         s.setLinkStatus(linkStatus)
-        if (linkStatus.linked === true) s.setOnboarded(true)
+        if (!s.hydrated && linkStatus.linked === true && !s.onboardingWorkspace) s.setOnboarded(true)
       } catch {
         ignore()
       }
     }
     if (signal?.aborted) return false
     s.setHydrated(true)
+    const current = store.getState()
     if (
       !s.hydrated &&
       s.route.name === 'board' &&
-      store.getState().route === s.route &&
-      !store.getState().onboarded &&
-      capabilities?.local?.includes('link.status') === true
+      current.route === s.route &&
+      !current.onboarded &&
+      (capabilities?.local?.includes('link.status') === true ||
+        ((workspaces.length === 0 || !!current.workspaces[current.onboardingWorkspace]) &&
+          (capabilities?.methods.includes('*') ||
+            (capabilities?.methods.includes('member.git') && capabilities.methods.includes('agent.list')))))
     ) {
       store.setState({ route: { name: 'onboarding', params: {} } })
     }
-    // An authorized run link outranks optional local-repository onboarding.
+    // An authorized run link outranks onboarding.
     const requested = takeRequestedRun()
     if (requested && store.getState().runs[requested]) {
       store.getState().navigate('terminal', { runId: requested })

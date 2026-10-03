@@ -72,6 +72,7 @@ function LinkCard({ client }: { client: Api }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const link = useStore((s) => s.linkStatus)
   const [error, setError] = useState<string | null>(null)
+  const navigate = useStore((s) => s.navigate)
   const serverConfigured = link !== null && link.server_configured
   // The gateway's SSH identity is process-lifetime, so link.switch always
   // answers an instruction to restart; show it verbatim.
@@ -180,10 +181,11 @@ function LinkCard({ client }: { client: Api }) {
       )}
       {link && serverConfigured && !link.linked && (
         <p className="border-t border-border/70 py-3 text-sm text-muted-foreground">
-          No repository linked. Start onboarding or link a repository from a
-          terminal.
+          No repository linked. Open Manage workspaces to create a workspace
+          from a clone or link a clone to an existing workspace.
         </p>
       )}
+      {serverConfigured && <Button size="sm" variant="outline" onClick={() => navigate('workspaces')}>Manage repositories and workspaces</Button>}
       {link && !serverConfigured && (
         <p className="border-t border-border/70 py-3 text-sm text-muted-foreground">
           No server configured. Run `aether link` in a terminal to get started.

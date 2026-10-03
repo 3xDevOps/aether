@@ -348,6 +348,22 @@ aether workspace init myproject [--base <branch>]
 aether workspace add myproject [--base <branch>]
 ```
 
+In the dashboard, open **Manage workspaces** from the workspace selector or
+navigation. **Add a workspace** remains available after the first workspace:
+choose **Import repository** for public HTTPS or a private read-only deploy
+key, or **Create from local clone** in the desktop app or `aether gui`.
+Onboarding offers the same choices. A hosted gateway can import remotely but
+cannot browse a clone on your computer; its local-clone choice shows the
+desktop and CLI handoff.
+
+For a local clone, select its existing base branch when creating the workspace,
+then link its absolute path and use **Push now**. For a remote import, creation
+retains a workspace even if configuring or fetching fails. Open that workspace's
+**Repository settings** or **Source control**, repair the source, verify it,
+and explicitly adopt the observed generation; do not import again. Use
+**Repository settings** to link or relink a clone later, with the workspace ID
+and base branch shown before the operation.
+
 An admin can permanently delete an inactive workspace by name or ID:
 
 ```sh
@@ -378,8 +394,8 @@ Four settings belong to the workspace rather than to any run in it:
   sets it at creation; it defaults to `main`.
 - **The checkout Origin** is the git URL every new run checkout gets as its
   `origin` remote - the place a run branch can be pushed for review. Normally
-  the first `aether link --repo` (or the Repository step in the local
-  dashboard's onboarding wizard) reads that clone's own `origin` and records it.
+  the first `aether link --repo` (or **Link local repository** in the dashboard)
+  reads that clone's own `origin` and records it.
   Recording happens only when the caller may push - a viewer may not - and the
   clone's origin is one the server accepts. When either does not hold, the link
   succeeds and nothing is recorded; set it later with `aether workspace origin`.
@@ -388,18 +404,18 @@ Four settings belong to the workspace rather than to any run in it:
   everyone's runs. Change it deliberately:
 
   ```sh
-  aether workspace origin                          # show
-  aether workspace origin https://github.com/acme/myproject.git
-  aether workspace origin --clear
+  aether workspace origin --workspace myproject
+  aether workspace origin --workspace myproject https://github.com/acme/myproject.git
+  aether workspace origin --workspace myproject --clear
   ```
 
   A `github.com` origin in scp-like or ssh form - `git@github.com:acme/app.git`
   or `ssh://git@github.com/acme/app.git` - is recorded as
   `https://github.com/acme/app.git`. gh's credential helper authenticates
   HTTPS only and nothing in the member home authenticates SSH, so the HTTPS
-  form is the one a run can push to. Every other host is recorded verbatim,
-  and an SSH origin on another host cannot be pushed to from a run: give the
-  workspace an HTTPS URL if runs need to push there.
+  form is the one a run can push to. Every other host is recorded verbatim.
+  Its native Git credentials and upstream write permission remain the member's
+  responsibility; a read-only source deploy key never grants publishing access.
 
   The remote is set when a run's checkout is created, so a change reaches new
   runs only; runs already going keep the URL they were given. With no checkout
@@ -421,8 +437,10 @@ Four settings belong to the workspace rather than to any run in it:
   exact `https://github.com/<owner>/<repo>/settings/keys/new` URL. Add the key
   as a read-only repository deploy key, then verify it. For generic SSH, use
   `--auth deploy-key` with an `ssh://` source and
-  `--known-hosts-file <file>` containing the verified host key. The private
-  key is never printed or sent to a member.
+  `--known-hosts-file <file>` containing a host key verified with the host
+  administrator, not a blindly trusted scan. The private key is never printed
+  or sent to a member. Installing the public key needs upstream repository
+  administration; an Aether admin role alone does not grant that access.
 
 Configuration starts **pending**. In the dashboard's Workspace **Source
 control** panel, use **Verify** or **Refresh**; from the CLI:
@@ -433,8 +451,9 @@ control** panel, use **Verify** or **Refresh**; from the CLI:
   ```
 
   The panel shows source, branch, accepted and observed candidate commits,
-  and check times. A forward-only source update becomes **ready** and moves
-  the mirrored base. A rewrite or local/server divergence retains the
+  and check times. A newly imported source needs explicit adoption before the
+  first run; fetching alone is not approval. A subsequent forward-only update
+  becomes **ready** and moves the mirrored base. A rewrite or local/server divergence retains the
   candidate without moving the accepted base; an administrator must review
   and explicitly **Adopt candidate** (`aether workspace mirror adopt
   --workspace myproject --generation <n> --yes`). **Disable** requires
@@ -459,8 +478,8 @@ control** panel, use **Verify** or **Refresh**; from the CLI:
 
 Scoped commands - `run`, `budget`, `cost`, `inbox`, `who`, `timeline`,
 `template`, `schedule` - take `--workspace <name-or-id>` and default to the
-only workspace when there is exactly one. That is why the solo path never
-types it. With more than one they insist:
+only workspace when there is exactly one. Explicit selectors keep commands
+unambiguous as you add workspaces. With more than one they insist:
 `--workspace is required when more than one workspace exists`.
 
 Two commands sit outside that rule. `aether runs` takes no `--workspace` at
@@ -537,9 +556,9 @@ for restart and cleanup behavior.
 
 In a **local-only** workspace, the base branch is client-writable. It is
 usually already there by the time the second member links: whoever created the
-workspace pushed it. Nothing guarantees that, so the local dashboard wizard's
-**Push now** button (step 4 of [quickstart.md](quickstart.md)) compares your
-clone with the workspace's copy of the branch before it pushes, and reports
+workspace pushed it. Nothing guarantees that, so **Push now** in onboarding or
+workspace repository settings compares your clone with the workspace's base
+branch before it pushes, and reports
 what it found instead of failing with git's
 `! [rejected] main -> main (fetch first)`:
 
@@ -699,8 +718,9 @@ stamped into every workspace's timeline, since it affects all of them.
 Permissive by default, always attributed.
 
 That attribution reaches git too. Each member has a git identity - the real
-name and email their commits are authored as - collected by the local
-dashboard's onboarding wizard and shown or changed with `aether member git`. The
+name and email their commits are authored as - collected by onboarding on
+either gateway and editable from **Agents → Git commit identity** or
+`aether member git`. This is attribution, not repository authentication. The
 agent in a run container commits with the identity of the member who launched
 it, baked into the container when it is created, and the commits Aether makes
 itself when a run finishes, is killed, or is recovered are authored as the
@@ -839,11 +859,9 @@ Before launching on a shared account, the recipient:
   the recipient's container, except an `omp` owner's extensions and MCP
   servers.
 - Connects their own GitHub; the run pushes and opens pull requests as the
-  recipient. In the local dashboard (`aether gui`), that is **Connect
-  GitHub** in the onboarding wizard's Agents step. The server-hosted
-  dashboard has no GitHub control, so there it is `aether github connect`
-  ([environment-home.md](environment-home.md#connect-github)), which is also
-  the CLI equivalent.
+  recipient. **Connect GitHub** is available from the Agents page and the
+  onboarding Agents step on local and hosted gateways. `aether github connect`
+  ([environment-home.md](environment-home.md#connect-github)) is the CLI equivalent.
 
 A member-defined agent (`aether agent add`) runs only on its member's own
 account. On a shared account the launch dialog lists it as `<name> (your

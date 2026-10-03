@@ -3,9 +3,10 @@
 // are stored in the UI slice, while link status is checked against the local
 // gateway whenever this route is entered or refocused.
 
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { edgeHost, linkTarget, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { WorkspaceCreate } from '@/components/workspace-create'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -29,7 +30,8 @@ import type {
 import { EdgeSignIn } from '@/routes/onboarding/edge-link'
 import { useStore } from '@/store'
 import { onboardingStepIndex } from '@/store/ui'
-import type { Capability } from '@/store/hooks'
+import { useCapability, useIsAdmin, useSelfRole, type Capability } from '@/store/hooks'
+import { canLaunch } from '@/lib/commands'
 
 /**
  * The row a step ends with, Back included. It sticks to the bottom of the
@@ -292,12 +294,6 @@ export function LinkStep({
   )
 }
 
-/**
- * The Workspace step: pick the workspace runs will live in. With none on the
- * server and the add capability present, creation is inline. The base branch
- * is the ref every run in the workspace forks from, so it is settled here
- * rather than per run.
- */
 export function WorkspaceStep({
   client,
   caps,
@@ -307,42 +303,27 @@ export function WorkspaceStep({
   client: Api
   caps: Capability
   back?: ReactNode
-  onNext: (workspace: Workspace) => void
+  onNext: (workspace: Workspace, source?: 'local' | 'remote') => void
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [baseBranch, setBaseBranch] = useState('main')
-  const [busy, setBusy] = useState(false)
+  const fetchVersion = useRef(0)
 
-  useEffect(() => {
-    client
-      .workspaceListFull()
-      .then(setWorkspaces)
-      .catch((err) => setError(message(err)))
+  const refetch = useCallback(() => {
+    const version = ++fetchVersion.current
+    setError(null)
+    return client.workspaceListFull().then((list) => {
+      if (version !== fetchVersion.current) return
+      setWorkspaces(list)
+      useStore.getState().setWorkspaces(list)
+    }).catch((err) => { if (version === fetchVersion.current) setError(message(err)) })
   }, [client])
 
+  useEffect(() => {
+    void refetch()
+    return () => { fetchVersion.current += 1 }
+  }, [refetch])
   const loading = useDelayed(workspaces === null && error === null)
-  // The one state with an action row of its own for Back to join.
-  const creating = workspaces?.length === 0 && caps.hasMethod('workspace.add')
-
-  const create = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      onNext(
-        await client.workspaceAdd({
-          name: name.trim(),
-          base_branch: baseBranch.trim(),
-          environment: {},
-        }),
-      )
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <section
@@ -350,9 +331,6 @@ export function WorkspaceStep({
       className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Step 3
-        </p>
         <h2 className="text-base font-semibold">Choose a workspace</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           Runs share a repository and base branch inside one workspace.
@@ -360,9 +338,10 @@ export function WorkspaceStep({
       </div>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {error && (
-        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
-          {error}
-        </p>
+        <div role="alert" className="space-y-2 text-sm text-state-failed">
+          <p>{error}</p>
+          <Button size="sm" variant="outline" onClick={() => void refetch()}>Retry workspace list</Button>
+        </div>
       )}
       {workspaces && workspaces.length > 0 && (
         <ul className="min-w-0 border-y border-border/70 bg-background">
@@ -387,56 +366,9 @@ export function WorkspaceStep({
           ))}
         </ul>
       )}
-      {workspaces?.length === 0 &&
-        (creating ? (
-          <form
-            className="min-w-0 max-w-2xl space-y-3"
-            aria-label="Create workspace"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void create()
-            }}
-          >
-            <p className="border-y border-border/70 bg-muted/30 px-3 py-2.5 text-sm leading-5 text-muted-foreground">
-              No workspaces yet. Create the first one so the server has a
-              repository and container setup to use for every run.
-            </p>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-              <Label className="block min-w-0 space-y-1">
-                Name
-                <Input className="min-w-0"
-                  value={name}
-                  placeholder="myproject"
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </Label>
-              <Label className="block min-w-0 space-y-1">
-                Base branch
-                <Input className="min-w-0"
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                />
-              </Label>
-            </div>
-            <div className={actionRow}>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={busy || !name.trim() || !baseBranch.trim()}
-              >
-                Create workspace
-              </Button>
-              {back}
-            </div>
-          </form>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No workspaces yet, and workspace creation is an administrator
-            operation this membership does not have. Ask an admin to run
-            workspace init, then come back.
-          </p>
-        ))}
-      {back && !creating && <div className={actionRow}>{back}</div>}
+      <WorkspaceCreate client={client} onCreated={onNext} onRefresh={() => void refetch()} />
+      {workspaces?.length === 0 && !caps.hasMethod('workspace.add') && <p className="text-sm text-muted-foreground">No workspaces yet. Ask an administrator to add a repository, then refresh this list.</p>}
+      {back && <div className={actionRow}>{back}</div>}
     </section>
   )
 }
@@ -457,6 +389,7 @@ export function FirstRunStep({
   back,
   onBackToWorkspace,
   onBackToAgents,
+  onBackToRepository,
 }: {
   client: Api
   workspace: Workspace | null
@@ -464,6 +397,7 @@ export function FirstRunStep({
   back?: ReactNode
   onBackToWorkspace?: () => void
   onBackToAgents: () => void
+  onBackToRepository?: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
   const setOnboarded = useStore((s) => s.setOnboarded)
@@ -478,6 +412,32 @@ export function FirstRunStep({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const { harness, task } = draft
+  const caps = useCapability()
+  const isAdmin = useIsAdmin()
+  const launchable = canLaunch({ cap: caps, role: useSelfRole() })
+  const [sourceCheck, setSourceCheck] = useState<{ workspace: string; error: string | null } | null>(null)
+  const [sourceAttempt, setSourceAttempt] = useState(0)
+  const workspaceID = workspace?.id
+  useEffect(() => {
+    let live = true
+    setSourceCheck(null)
+    if (!workspaceID) return
+    void (async () => {
+      try {
+        if (caps.hasMethod('files.tree')) await client.filesTree({ workspace_id: workspaceID, path: '' })
+        if (isAdmin && caps.hasMethod('workspace.mirror.status')) {
+          const source = await client.workspaceMirrorStatus(workspaceID)
+          if (source.enabled && (source.status !== 'ready' || !source.accepted_commit)) {
+            throw new Error(source.last_error || `Source is ${source.status ?? 'pending'}; verify and adopt the candidate in repository setup before launching.`)
+          }
+        }
+        if (live) setSourceCheck({ workspace: workspaceID, error: null })
+      } catch (cause) {
+        if (live) setSourceCheck({ workspace: workspaceID, error: message(cause) })
+      }
+    })()
+    return () => { live = false }
+  }, [client, caps, isAdmin, workspaceID, sourceAttempt])
 
   const loadAgents = useCallback(() => {
     let live = true
@@ -524,11 +484,15 @@ export function FirstRunStep({
   // persisted draft is on screen before agent.list answers, so a name it is
   // about to reject must not be launchable in the meantime.
   const ready =
+    launchable &&
+    sourceCheck?.workspace === workspace?.id &&
+    sourceCheck?.error === null &&
     task.trim() !== '' &&
     workspace !== null &&
     (agents ?? []).some((a) => a.name === harness)
 
   const launch = async () => {
+    if (!ready) return
     setBusy(true)
     setError(null)
     try {
@@ -579,9 +543,6 @@ export function FirstRunStep({
         className="min-w-0 space-y-4 border-b border-border/70 py-4"
       >
         <div className="space-y-1">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Step 6
-          </p>
           <h2 className="text-base font-semibold">Launch your first run</h2>
         </div>
         <p className="border-t border-border/70 bg-muted/30 py-3 text-sm text-muted-foreground">
@@ -603,9 +564,6 @@ export function FirstRunStep({
         className="min-w-0 space-y-4 border-b border-border/70 py-4"
       >
         <div className="space-y-1">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            Step 6
-          </p>
           <h2 className="text-base font-semibold">Launch your first run</h2>
         </div>
         {agentsError ? (
@@ -619,6 +577,7 @@ export function FirstRunStep({
           </p>
         )}
         {withoutASubscription}
+        {onBackToRepository && <Button size="sm" variant="outline" onClick={onBackToRepository}>Review repository setup</Button>}
         <div className={actionRow}>
           {/* Setting an agent up cannot fix a gateway that did not answer,
               so the failed list asks for the call again instead. */}
@@ -646,15 +605,17 @@ export function FirstRunStep({
       className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Step 6
-        </p>
         <h2 className="text-base font-semibold">Launch your first run</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           The run forks from <span className="font-mono">{workspace.base_branch}</span>{' '}
           in {workspace.name}.
         </p>
       </div>
+      {!launchable && <p className="text-sm text-muted-foreground">Your membership or this gateway cannot launch runs. Ask an administrator for launch access; you can still prepare your account.</p>}
+      <section aria-label="Source readiness" className="space-y-2 border-y py-3 text-sm">
+        {sourceCheck?.workspace !== workspace.id ? <p>Checking the workspace base branch...</p> : sourceCheck.error ? <p role="alert" className="whitespace-pre-wrap break-words text-state-failed">{sourceCheck.error}</p> : <p>{caps.hasMethod('files.tree') ? 'The workspace base branch is available.' : 'This gateway checks the base branch at launch.'} The server rechecks source policy when launching.</p>}
+        <Button size="sm" variant="outline" onClick={() => { setSourceCheck(null); setSourceAttempt((attempt) => attempt + 1) }}>Check source again</Button>
+      </section>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {agents && (
         <div className="min-w-0 max-w-sm space-y-1.5 text-sm">
@@ -691,6 +652,7 @@ export function FirstRunStep({
         </p>
       )}
       {withoutASubscription}
+      {onBackToRepository && <Button size="sm" variant="outline" onClick={onBackToRepository}>Review repository setup</Button>}
       <div className={actionRow}>
         <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
           Launch

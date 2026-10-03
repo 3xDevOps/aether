@@ -24,7 +24,7 @@ test('the first run completes', async ({ page, aether }) => {
   await wizard.link.continue().click()
   // The git identity is optional and this scenario is not about it.
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   // Every run forks from the workspace's base branch, so the push is what
   // makes a first run possible at all.
@@ -91,7 +91,7 @@ test('with no agent installed the first run sends you back to Agents', async ({
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
   await wizard.link.continue().click()
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   // Skipping the setup is exactly how a member arrives here with nothing

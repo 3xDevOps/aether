@@ -510,7 +510,6 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
-    expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Templates')).toBeNull()
     expect(screen.queryByText('Agents')).toBeNull()
   })

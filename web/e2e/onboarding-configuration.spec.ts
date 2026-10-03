@@ -1,7 +1,7 @@
 // Exercise a complete directory beyond both request budgets through a real
 // browser, gateway, and SSH server, including a server-side secret exclusion.
 
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,7 +41,7 @@ test('a directory exceeding request budgets imports completely and reports polic
   await wizard.link.continue().click()
   // The git identity is optional and this scenario is not about it.
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.expectStep('Agents')
@@ -60,7 +60,6 @@ test('a directory exceeding request budgets imports completely and reports polic
   }
   await configuration.destination().selectOption('claude')
   await expect(configuration.preview()).toBeVisible()
-  await configuration.section.getByText(/^Accepted paths:/).click()
   for (const path of Object.keys(destinationSpecificFiles)) {
     await expect(configuration.section.getByText(path, { exact: true })).toBeVisible()
   }
@@ -105,4 +104,51 @@ test('a directory exceeding request budgets imports completely and reports polic
     revision: settings.revision,
   })
   expect(edited.content).toBe('{"theme":"light"}')
+
+  const ompSource = join(alice.home, '.omp')
+  const ompHome = join(aether.server.memberHome(member.id), '.omp')
+  const config: Record<string, string | Buffer> = {
+    'agent/config.yml': 'theme: dark\n',
+    'agent/mcp.json': '{"mcpServers":{}}\n',
+    'agent/skills/review/SKILL.md': '# review\n',
+    'agent/extensions/review.ts': 'export {}\n',
+    'agent/extensions/bytes.bin': Buffer.from([0, 255, 128, 1]),
+    'agent/skills/empty.md': '',
+  }
+  const runtime = ['stats.db', 'stats.db-wal', 'stats.db-shm']
+  const credentials = ['agent/agent.db', 'agent/agent.db-wal', 'agent/agent.db-shm', 'agent/auth.json']
+  for (const [path, content] of Object.entries(config)) {
+    mkdirSync(dirname(join(ompSource, path)), { recursive: true })
+    writeFileSync(join(ompSource, path), content)
+  }
+  for (const path of [...runtime, ...credentials, 'unknown-user.bin']) {
+    writeFileSync(join(ompSource, path), '')
+    truncateSync(join(ompSource, path), 64 * 1024 * 1024 + 1)
+  }
+  writeFileSync(join(ompSource, 'notes.txt'), 'token=QmFzZTY0c2VjcmV0LWFldGhlci10ZXN0LTQy')
+  await configuration.chooseDirectory(ompSource)
+  await expect(configuration.destination()).toHaveValue('omp')
+  await expect(configuration.import()).toBeDisabled()
+  for (const path of [...runtime, ...credentials]) {
+    await expect(configuration.section.getByLabel(`Include ${path}`, { exact: true })).toHaveCount(0)
+    await expect(configuration.section.getByText(path, { exact: true })).toBeVisible()
+  }
+  await configuration.section.getByRole('button', { name: 'Exclude unsupported files', exact: true }).click()
+  await expect(configuration.section.getByLabel('Include unknown-user.bin')).not.toBeChecked()
+  await configuration.import().click()
+  await expect(configuration.section).toContainText('Imported 6 files')
+  await expect(configuration.section).toContainText('Import finished with omissions: 9')
+  for (const [path, content] of Object.entries(config)) {
+    expect(readFileSync(join(ompHome, path)).equals(Buffer.from(content))).toBe(true)
+  }
+  for (const path of [...runtime, ...credentials, 'unknown-user.bin', 'notes.txt']) {
+    expect(existsSync(join(ompHome, path))).toBe(false)
+  }
+  writeFileSync(join(ompSource, 'agent/config.yml'), 'theme: light\n')
+  await configuration.chooseDirectory(ompSource)
+  await configuration.section.getByRole('button', { name: 'Exclude unsupported files', exact: true }).click()
+  await configuration.import().click()
+  await expect(configuration.section).toContainText('Imported 6 files')
+  expect(readFileSync(join(ompHome, 'agent/config.yml'), 'utf8')).toBe('theme: light\n')
+  expect(readFileSync(join(ompHome, 'agent/extensions/bytes.bin'))).toEqual(Buffer.from([0, 255, 128, 1]))
 })

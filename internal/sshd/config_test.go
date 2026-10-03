@@ -100,6 +100,123 @@ func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {
 	}
 }
 
+func TestOpenCodeConfigUsesNativeHomeAndPreservesAuth(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) {
+		c.Homes = homes
+		c.Config = NewConfigBackend(homes, c.Store)
+	})
+	client := controlClient(t, e)
+	home, err := homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinels := map[string]string{
+		".local/share/opencode/auth.json":     "data-login-sentinel",
+		".local/share/opencode/opencode.json": "previous-import-sentinel",
+		".config/opencode/auth.json":          "config-login-sentinel",
+	}
+	for rel, content := range sentinels {
+		dest := filepath.Join(home, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var roots protocol.ConfigRootsResult
+	if err := client.Call(protocol.MethodConfigRoots, struct{}{}, &roots); err != nil {
+		t.Fatal(err)
+	}
+	var root protocol.ConfigRoot
+	for _, candidate := range roots.Roots {
+		if candidate.Harness == "opencode" {
+			root = candidate
+			break
+		}
+	}
+	if root.Path != "~/.config/opencode" || !containsString(root.CredentialNames, "auth.json") {
+		t.Fatalf("OpenCode destination/credential policy = %+v", root)
+	}
+	const settings = "{\"model\":\"example/initial\"}\n"
+	const plugin = "export default async () => ({})\n"
+	var imported protocol.ConfigImportResult
+	if err := client.Call(protocol.MethodConfigImport, protocol.ConfigImportParams{
+		Harness: "opencode",
+		Files: []protocol.ConfigImportFile{
+			{Path: "opencode.json", ContentBase64: base64.StdEncoding.EncodeToString([]byte(settings)), Mode: 0o644},
+			{Path: "plugins/local.js", ContentBase64: base64.StdEncoding.EncodeToString([]byte(plugin)), Mode: 0o644},
+			{Path: "auth.json", ContentBase64: base64.StdEncoding.EncodeToString([]byte("must-not-overwrite"))},
+		},
+	}, &imported); err != nil {
+		t.Fatal(err)
+	}
+	if imported.Error != "" || imported.Files != 2 || imported.Bytes != int64(len(settings)+len(plugin)) {
+		t.Fatalf("config.import = %+v", imported)
+	}
+	if len(imported.Excluded) != 1 || imported.Excluded[0].Path != "auth.json" || imported.Excluded[0].Reason != "credential" {
+		t.Fatalf("credential exclusion = %+v", imported.Excluded)
+	}
+	for rel, content := range map[string]string{"opencode.json": settings, "plugins/local.js": plugin} {
+		var read protocol.ConfigFileReadResult
+		if err := client.Call(protocol.MethodConfigRead, protocol.ConfigReadParams{Harness: "opencode", Path: rel}, &read); err != nil {
+			t.Fatal(err)
+		}
+		if read.Content != content || !read.Writable {
+			t.Fatalf("config.read %s = %+v", rel, read)
+		}
+		persisted, err := os.ReadFile(filepath.Join(home, ".config", "opencode", filepath.FromSlash(rel)))
+		if err != nil || string(persisted) != content {
+			t.Fatalf("native configuration %s = %q, %v", rel, persisted, err)
+		}
+		if rel == "opencode.json" {
+			const updated = "{\"model\":\"example/updated\"}\n"
+			if err := client.Call(protocol.MethodConfigWrite, protocol.ConfigWriteParams{
+				Harness: "opencode", Path: rel, Content: updated, Revision: read.Revision,
+			}, &read); err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := os.ReadFile(filepath.Join(home, ".config", "opencode", rel))
+			if err != nil || string(persisted) != updated || read.Content != updated {
+				t.Fatalf("updated native configuration = %q, %v; response %+v", persisted, err, read)
+			}
+		}
+	}
+	var tree protocol.ConfigTreeResult
+	if err := client.Call(protocol.MethodConfigTree, protocol.ConfigTreeParams{Harness: "opencode"}, &tree); err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Entries) != 2 || tree.Entries[0].Name != "opencode.json" || tree.Entries[1].Name != "plugins" {
+		t.Fatalf("native configuration tree = %+v", tree.Entries)
+	}
+	for _, call := range []struct {
+		method string
+		params any
+	}{
+		{protocol.MethodConfigRead, protocol.ConfigReadParams{Harness: "opencode", Path: "auth.json"}},
+		{protocol.MethodConfigWrite, protocol.ConfigWriteParams{Harness: "opencode", Path: "auth.json", Content: "must-not-overwrite"}},
+	} {
+		var perr *protocol.Error
+		if err := client.Call(call.method, call.params, nil); !errors.As(err, &perr) || perr.Code != protocol.CodeDenied {
+			t.Errorf("%s auth.json = %v, want CodeDenied", call.method, err)
+		}
+	}
+	for rel, content := range sentinels {
+		persisted, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(rel)))
+		if err != nil || string(persisted) != content {
+			t.Errorf("sentinel %s changed: %q, %v", rel, persisted, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "share", "opencode", "plugins")); !os.IsNotExist(err) {
+		t.Fatalf("plugin written into data home: %v", err)
+	}
+}
+
 func TestConfigImportPartialResultSurvivesCancellation(t *testing.T) {
 	t.Parallel()
 	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
@@ -154,6 +271,52 @@ func TestConfigImportPartialResultSurvivesCancellation(t *testing.T) {
 	}
 }
 
+func TestConfigImportReportsZeroWritesAfterPreflightFailure(t *testing.T) {
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) {
+		c.Homes = homes
+		c.Config = NewConfigBackend(homes, c.Store)
+	})
+	home, err := homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(home, ".claude", "blocked.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	params, err := json.Marshal(protocol.ConfigImportParams{
+		Harness: "claude",
+		Files: []protocol.ConfigImportFile{
+			{Path: "settings.json", ContentBase64: "e30="},
+			{Path: "auth.json", ContentBase64: "e30="},
+			{Path: "blocked.json", ContentBase64: "e30="},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, perr := e.srv.Local(e.member.ID).Call(context.Background(), protocol.MethodConfigImport, params)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var result protocol.ConfigImportResult
+	if err = json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == "" || result.Files != 0 || result.Bytes != 0 || len(result.ImportedPaths) != 0 {
+		t.Fatalf("preflight result must confirm no writes: %+v", result)
+	}
+	if len(result.Excluded) != 1 || result.Excluded[0].Path != "auth.json" || result.Excluded[0].Reason != "credential" {
+		t.Fatalf("preflight lost exclusions: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("preflight mutated settings: %v", err)
+	}
+}
+
 type cancelWhenFileAppears struct {
 	context.Context
 	path string
@@ -196,6 +359,7 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 		HeadlessArgs: []string{"mybot", "-p", harness.TaskPlaceholder},
 		Executable:   "mybot",
 		ProfileRoot:  "/root/.mybot",
+		DenyNames:    []string{"session-store.json"},
 	}
 	definition, err := json.Marshal(custom)
 	if err != nil {
@@ -257,17 +421,25 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 			files: []memberhome.ConfigFile{
 				{Path: "projects/transcript.json", Content: []byte{}},
 				{Path: "agent/sessions/session.json", Content: []byte{}},
+				{Path: "stats.db", Content: []byte{}},
+				{Path: "stats.db-wal", Content: []byte{}},
+				{Path: "stats.db-shm", Content: []byte{}},
+				{Path: "agent/extensions/stats.db", Content: []byte{}},
 			},
-			accepted: []string{"projects/transcript.json"},
-			excluded: map[string]string{"agent/sessions/session.json": "ignored"},
+			accepted: []string{"projects/transcript.json", "agent/extensions/stats.db"},
+			excluded: map[string]string{
+				"agent/sessions/session.json": "ignored",
+				"stats.db":                    "ignored", "stats.db-wal": "ignored", "stats.db-shm": "ignored",
+			},
 		},
 		{
 			name: "mybot",
 			files: []memberhome.ConfigFile{
 				{Path: "projects/transcript.json", Content: []byte{}},
+				{Path: "SESSION-STORE.JSON/data", Content: []byte("not a real credential")},
 			},
 			accepted: []string{"projects/transcript.json"},
-			excluded: map[string]string{},
+			excluded: map[string]string{"SESSION-STORE.JSON/data": "credential"},
 		},
 	}
 	home, err := homes.Path(e.member.ID)
@@ -289,6 +461,21 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 			for _, excluded := range result.Excluded {
 				if want, ok := tc.excluded[excluded.Path]; !ok || excluded.Reason != want {
 					t.Errorf("excluded %q reason = %q, want %q", excluded.Path, excluded.Reason, want)
+				}
+				matched := false
+				for _, pattern := range byHarness[tc.name].RuntimeIgnores {
+					prefix := strings.TrimSuffix(pattern, "/")
+					matched = matched || excluded.Path == prefix || strings.HasPrefix(excluded.Path, prefix+"/")
+				}
+				if excluded.Reason == "credential" {
+					for component := range strings.SplitSeq(excluded.Path, "/") {
+						for _, name := range byHarness[tc.name].CredentialNames {
+							matched = matched || strings.EqualFold(component, name)
+						}
+					}
+				}
+				if !matched {
+					t.Errorf("server exclusion %s is absent from browser policy", excluded.Path)
 				}
 			}
 			rootPath := filepath.FromSlash(strings.TrimPrefix(byHarness[tc.name].Path, "~/"))

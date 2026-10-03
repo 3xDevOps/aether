@@ -28,15 +28,14 @@ test('back walks the steps without losing what they settled', async ({
   await wizard.expectStep('Git identity')
 
   await wizard.gitIdentity.skip().click()
-  await wizard.workspace.create('project')
+  await wizard.workspace.createFromClone('project')
   await wizard.expectStep('Repository')
   await wizard.back().click()
-  // The workspace exists now, so this step lists it rather than offering
-  // the creation form again.
   await wizard.expectStep('Workspace')
   await expect(wizard.workspace.use('project')).toBeVisible()
 
   await wizard.workspace.use('project').click()
+  await wizard.repository.localClone().click()
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.expectStep('Agents')

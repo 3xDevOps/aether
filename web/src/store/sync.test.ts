@@ -546,6 +546,52 @@ describe('hydrate', () => {
     }
   })
 
+  it('opens onboarding on a fresh hosted server and preserves a repository draft through reconnect', async () => {
+    const hosted = createRootStore()
+    await hydrate(hosted, fakeApi({ workspaceListFull: vi.fn(async () => []) }))
+    expect(hosted.getState().route.name).toBe('onboarding')
+
+    const local = createRootStore()
+    local.setState({ onboardingWorkspace: workspace.id, onboardingStep: 'Repository', route: { name: 'onboarding', params: {} } })
+    const client = fakeApi({ capabilities: vi.fn(async () => ({ gateway: 'local', methods: ['*'], ws: [], local: ['link.status'] })) })
+    await hydrate(local, client)
+    await hydrate(local, client)
+    expect(local.getState().onboardingWorkspace).toBe(workspace.id)
+    expect(local.getState().onboardingStep).toBe('Repository')
+    expect(local.getState().route.name).toBe('onboarding')
+  })
+
+  it('resumes a saved hosted first-run draft after a workspace import and reload', async () => {
+    const store = createRootStore()
+    const draft = { harness: 'claude', task: 'Review the imported repository' }
+    store.setState({
+      hydrated: false, onboarded: false, route: { name: 'board', params: {} },
+      onboardingWorkspace: workspace.id, onboardingStep: 'First run', onboardingFurthest: 'First run',
+      onboardingSource: 'remote', onboardingFirstRun: draft,
+    })
+    await hydrate(store, fakeApi())
+    expect(store.getState().route.name).toBe('onboarding')
+    expect(store.getState().onboardingWorkspace).toBe(workspace.id)
+    expect(store.getState().onboardingStep).toBe('First run')
+    expect(store.getState().onboardingFirstRun).toEqual(draft)
+  })
+
+  it.each(['finished', 'deleted workspace', 'explicit navigation'] as const)(
+    'does not resume hosted onboarding after %s',
+    async (reason) => {
+      const store = createRootStore()
+      store.setState({
+        hydrated: false, onboarded: reason === 'finished',
+        route: { name: reason === 'explicit navigation' ? 'agents' : 'board', params: {} },
+        onboardingWorkspace: reason === 'deleted workspace' ? 'deleted' : workspace.id,
+        onboardingStep: 'Repository',
+      })
+      const route = store.getState().route
+      await hydrate(store, fakeApi())
+      expect(store.getState().route).toEqual(route)
+    },
+  )
+
   it.each(['before', 'during'])('preserves navigation %s initial hydration without a local clone', async (when) => {
     const store = createRootStore()
     let resolveInfo!: (value: typeof serverInfoFixture) => void

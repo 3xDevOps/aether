@@ -1,8 +1,9 @@
 // The Repository step: point a local clone at the workspace, then seed the
 // workspace from it through link.repo, repo.push and repo.fast-forward.
 
-import { type ReactNode, useId, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { message } from '@/lib/format'
+import { shellQuote } from '@/lib/shell'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -15,9 +16,8 @@ import { desktopBridge } from '@/components/shell/title-bar'
 import type { Api } from '@/lib/api'
 import type { LinkStatus, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
-import { useIsAdmin, type Capability } from '@/store/hooks'
+import { useSelfRole, type Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
-import { OnboardingSourceOption } from '@/routes/onboarding/source-option'
 import { actionRow, pane } from '@/routes/onboarding/steps'
 
 /**
@@ -70,12 +70,16 @@ export function RepoStep({
   workspace,
   back,
   onNext,
+  mirrored = false,
+  sourcePending = false,
 }: {
   client: Api
   caps: Capability
   workspace: Workspace | null
   back?: ReactNode
   onNext: () => void
+  mirrored?: boolean
+  sourcePending?: boolean
 }) {
   // What the step settled lives in the UI slice, not here: walking back to
   // this step must not ask for a path that is already connected. A remote
@@ -83,8 +87,11 @@ export function RepoStep({
   // the user changed their mind about leaves the form empty again.
   const remembered = useStore((s) => s.onboardingRepo)
   const setConnected = useStore((s) => s.setOnboardingRepo)
+  const currentLink = useStore((s) => s.linkStatus)
+  const [linkChecked, setLinkChecked] = useState(!remembered || currentLink?.repo === remembered.remote.repo)
   const connected =
-    remembered && remembered.workspace === (workspace?.id ?? '')
+    linkChecked && remembered && remembered.workspace === (workspace?.id ?? '') &&
+      currentLink?.repo === remembered.remote.repo
       ? remembered
       : null
   const [repo, setRepo] = useState('')
@@ -115,13 +122,57 @@ export function RepoStep({
   // other's success.
   const [copied, setCopied] = useState('')
   const cmdRef = useRef<HTMLInputElement>(null)
-  const isAdmin = useIsAdmin()
+  const linkVersion = useRef(0)
+  const role = useSelfRole()
+  useEffect(() => {
+    setBusy(false)
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (state.identityKey === previous.identityKey && state.connectionEpoch === previous.connectionEpoch && state.route === previous.route) return
+      linkVersion.current += 1
+      setConnected(null)
+      setLinkChecked(false)
+      setRepo('')
+      setBusy(false)
+      setPushing(false)
+      setForwarding(false)
+      setError(null)
+      setPushError(null)
+      setForwardError(null)
+    })
+    return () => { linkVersion.current += 1; unsubscribe() }
+  }, [client, workspace?.id, setConnected])
+  useEffect(() => {
+    if (!caps.hasLocal('link.status')) return
+    let live = true
+    const check = async () => {
+      const version = linkVersion.current
+      try {
+        const status = await client.localLinkStatus()
+        if (live && version === linkVersion.current) { setLinkStatus(status); setLinkChecked(true) }
+      } catch (cause) {
+        if (live && version === linkVersion.current) { setLinkChecked(false); setError(message(cause)) }
+      }
+    }
+    void check()
+    window.addEventListener('focus', check)
+    return () => { live = false; window.removeEventListener('focus', check) }
+  }, [client, caps, setLinkStatus])
+
+  const verifyConnection = async (origin: OnboardingRepo, version: number) => {
+    const status = await client.localLinkStatus()
+    if (version !== linkVersion.current || !stillLinked(origin)) return
+    setLinkStatus(status)
+    if (!status.linked || status.repo !== origin.remote.repo) {
+      throw new Error(`The gateway now uses ${status.repo || 'no clone'}. Link ${origin.path} to this workspace again before running Git operations.`)
+    }
+  }
 
   // Every run forks from the workspace's base branch, so that is the branch
   // to seed - not always `main`.
   const branch = workspace?.base_branch ?? 'main'
-  const pushCmd = `git push -u aether ${branch}`
-  const canPush = caps.hasLocal('repo.push')
+  const pushCmd = `git push -u aether ${shellQuote(branch)}`
+  const canWrite = role === 'admin' || role === 'collaborator'
+  const canPush = caps.hasLocal('repo.push') && canWrite && !mirrored && !sourcePending
   const absolute = rooted(repo.trim())
   const pushed = connected?.push ?? null
   const forwarded = connected?.fastForward ?? null
@@ -134,71 +185,99 @@ export function RepoStep({
   // `git push` is the command to run only while the two tips have not
   // parted: offering it to a clone the workspace has moved past is offering
   // the `! [rejected] main -> main` this comparison exists to prevent.
-  const manual = !pushed?.state || pushed.state === 'pushed'
+  const manual = !mirrored && !sourcePending && canWrite && (!pushed?.state || pushed.state === 'pushed')
   // The commands that resolve a divergence by hand, in the order they run.
   const resolveCmds =
     pushed?.state === 'diverged'
       ? [
-          `git fetch ${pushed.remote} ${pushed.branch}`,
-          `git log --oneline --left-right ${pushed.branch}...${pushed.remote}/${pushed.branch}`,
-          `git rebase ${pushed.remote}/${pushed.branch}`,
-          `git push ${pushed.remote} ${pushed.branch}`,
+          `git fetch ${shellQuote(pushed.remote)} ${shellQuote(pushed.branch)}`,
+          `git log --oneline --left-right ${shellQuote(`${pushed.branch}...${pushed.remote}/${pushed.branch}`)}`,
+          `git rebase ${shellQuote(`${pushed.remote}/${pushed.branch}`)}`,
+          `git push ${shellQuote(pushed.remote)} ${shellQuote(pushed.branch)}`,
         ].join('\n')
       : ''
 
   const link = async () => {
+    if (busy || !workspace || !caps.hasLocal('link.repo')) return
     const path = repo.trim()
+    let version = ++linkVersion.current
     setBusy(true)
     setError(null)
     try {
+      const remote = await client.localLinkRepo(path, workspace.id)
+      if (version !== linkVersion.current) return
+      version = ++linkVersion.current
+      const status = await client.localLinkStatus()
+      if (version !== linkVersion.current) return
+      setLinkStatus(status)
+      if (!status.linked || status.repo !== remote.repo) {
+        throw new Error(`The gateway now uses ${status.repo || 'no clone'}, not ${remote.repo}. Link the intended clone again before running Git operations.`)
+      }
+      if (version !== linkVersion.current) return
       setConnected({
         link: crypto.randomUUID(),
-        workspace: workspace?.id ?? '',
+        workspace: workspace.id,
         path,
-        remote: await client.localLinkRepo(path, workspace?.id),
+        remote,
         push: null,
         fastForward: null,
       })
-      void client.localLinkStatus().then(setLinkStatus).catch(() => undefined)
+      setLinkChecked(true)
+      if (version === linkVersion.current && remote.origin) {
+        const current = useStore.getState().workspaces[workspace.id]
+        if (current) useStore.getState().upsertWorkspace({ ...current, origin: remote.origin })
+      }
     } catch (err) {
-      setError(message(err))
+      if (version === linkVersion.current) setError(message(err))
     } finally {
-      setBusy(false)
+      if (version === linkVersion.current) setBusy(false)
     }
   }
 
   const push = async () => {
     if (!connected) return
     const origin = connected
+    const version = linkVersion.current
     setPushing(true)
     setPushError(null)
     try {
       // The step stays put on success so git's own answer is readable:
       // "Everything up-to-date" and "[new branch]" mean different things,
       // and only git can tell them apart.
-      const result = await client.localRepoPush(workspace?.id)
+      await verifyConnection(origin, version)
+      if (version !== linkVersion.current || !stillLinked(origin)) return
+      const result = await client.localRepoPush(origin.workspace)
       const current = stillLinked(origin)
-      if (current) setConnected({ ...current, push: result })
+      if (version === linkVersion.current && current) setConnected({ ...current, push: result })
     } catch (err) {
-      if (stillLinked(origin)) setPushError(message(err))
+      if (version === linkVersion.current && stillLinked(origin)) {
+        setPushError(message(err))
+        setError(message(err))
+      }
     } finally {
-      if (stillLinked(origin)) setPushing(false)
+      if (version === linkVersion.current && stillLinked(origin)) setPushing(false)
     }
   }
 
   const fastForward = async () => {
     if (!connected) return
     const origin = connected
+    const version = linkVersion.current
     setForwarding(true)
     setForwardError(null)
     try {
-      const result = await client.localRepoFastForward(workspace?.id)
+      await verifyConnection(origin, version)
+      if (version !== linkVersion.current || !stillLinked(origin)) return
+      const result = await client.localRepoFastForward(origin.workspace)
       const current = stillLinked(origin)
-      if (current) setConnected({ ...current, fastForward: result })
+      if (version === linkVersion.current && current) setConnected({ ...current, fastForward: result })
     } catch (err) {
-      if (stillLinked(origin)) setForwardError(message(err))
+      if (version === linkVersion.current && stillLinked(origin)) {
+        setForwardError(message(err))
+        setError(message(err))
+      }
     } finally {
-      if (stillLinked(origin)) setForwarding(false)
+      if (version === linkVersion.current && stillLinked(origin)) setForwarding(false)
     }
   }
 
@@ -222,6 +301,7 @@ export function RepoStep({
   }
 
   const repoint = () => {
+    linkVersion.current += 1
     setRepo(connected?.path ?? '')
     setConnected(null)
     setError(null)
@@ -244,24 +324,33 @@ export function RepoStep({
     }
   }
 
+  if (!caps.hasLocal('link.repo')) {
+    return <section aria-label="Local repository" className="space-y-3 border-t py-3 text-sm">
+      <h3 className="font-semibold">Link from the computer holding your clone</h3>
+      <p>This hosted gateway cannot read your filesystem or use your SSH identity. Open the desktop app or run <code>aether gui</code> on that computer, connected to this server, then open this workspace's repository settings.</p>
+      {workspace && <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link --repo /absolute/path/to/clone --workspace ${shellQuote(workspace.id)}\n${mirrored ? '# The mirrored base is server-owned; do not push it.' : canWrite && !sourcePending ? `git -C /absolute/path/to/clone push -u aether ${shellQuote(branch)}` : '# Base pushes require write access and a local-only workspace.'}`}</pre>}
+      {back}
+    </section>
+  }
+
   return (
     <section
       aria-label="Repository"
       className="min-w-0 space-y-4 border-b border-border/70 py-4"
     >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Step 4
-        </p>
-        <h2 className="text-base font-semibold">Connect your repository</h2>
+        <h2 className="text-base font-semibold">Connect your local repository</h2>
         <p className="text-sm leading-6 text-muted-foreground">
           The gateway adds an <span className="font-mono">aether</span> git
-          remote to a clone on this machine.{' '}
+          remote to a clone on the gateway's computer for <strong>{workspace?.name}</strong>, base <code>{branch}</code>.{' '}
           {canPush
             ? 'Aether can then push your base branch for you. The history stays yours.'
-            : 'Pushing stays manual. The history is yours.'}
+            : 'Linking does not publish to the upstream or grant credentials.'}
         </p>
       </div>
+      {mirrored && <p className="text-sm text-muted-foreground">This workspace has a server-owned source. Link the clone to pull run branches; use Source control to verify or adopt the base instead of pushing it.</p>}
+      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is not confirmed yet. Linking is available, but base pushes wait for source status.</p>}
+      {remembered && !connected && <p className="text-sm text-muted-foreground">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
       {!connected && (
         <>
           <form
@@ -308,7 +397,7 @@ export function RepoStep({
               <Button
                 type="submit"
                 size="sm"
-                disabled={busy || picking || !absolute}
+                disabled={busy || picking || !absolute || !workspace}
               >
                 Add remote
               </Button>
@@ -356,14 +445,14 @@ export function RepoStep({
                 . Nothing to push.
               </>
             )}
-            {!pushed && (
+            {!pushed && !mirrored && (
               <>
                 Seed the workspace with{' '}
                 <span className="font-mono">{branch}</span>:
               </>
             )}
           </p>
-          {pushed?.state === 'behind' && !forwarded && (
+          {pushed?.state === 'behind' && !forwarded && caps.hasLocal('repo.fast-forward') && (
             <div className="space-y-3 border-l-2 border-state-waiting/60 bg-state-waiting/5 px-3 py-2" aria-live="polite">
               <p className="text-sm">
                 The workspace is {commits(pushed.behind)} ahead of your clone.
@@ -515,17 +604,6 @@ export function RepoStep({
               </div>
             </>
           )}
-          {workspace &&
-            connected &&
-            settled &&
-            isAdmin &&
-            caps.hasMethod('workspace.mirror.status') && (
-              <OnboardingSourceOption
-                client={client}
-                workspaceID={workspace.id}
-                suggestedSource={connected.remote.origin}
-              />
-            )}
           <div className={actionRow}>
             <Button
               size="sm"

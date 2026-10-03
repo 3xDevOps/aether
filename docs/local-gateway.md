@@ -75,10 +75,11 @@ Android app (`android/`) append it to the dashboard URL and load that -
 and removing it is what stops a reload, or the re-hydration a reconnect runs,
 from reopening a run the member has since left.
 
-Once a server is configured, local-repository onboarding is only an initial
-landing page. Choosing **Manage workspaces** during startup keeps that route;
-reconnecting does not send it back to onboarding. Remote import needs no local
-clone.
+Onboarding is an initial landing page, not a reconnect redirect. Choosing
+**Manage workspaces** during startup keeps that route, and linking a clone
+must not erase an in-progress wizard's workspace or first-run draft. Public
+and private remote import need no local clone and remain available from
+onboarding and workspace management on hosted gateways.
 
 ### Agent OAuth logins
 
@@ -501,10 +502,11 @@ cannot run verbs on the browser's machine:
 `methods` is `["*"]` because both transports dispatch every control-channel
 method; `ws` lists the WebSocket surfaces served; `local` is the sorted
 `/local/v1` verb list, absent where there are none. A client probes this
-descriptor rather than hard-coding its transport. The SPA uses it to hide
-machine-local onboarding, linking, repository and update controls while
-leaving shared server surfaces, including Files and member configuration,
-available through either gateway.
+descriptor rather than hard-coding its transport. The SPA gates local linking,
+folder picking, Git operations and updates independently of shared server
+onboarding. Git identity, remote repository import, agents, GitHub connection,
+Files and member configuration work through either gateway when their methods
+are available.
 
 `version` and `commit` are the build serving the gateway, which is the only
 way the SPA can learn what CLI it is running against - `server.info` answers
@@ -650,8 +652,10 @@ reads and encodes only the current batch: at most 2,000 files and a target of
 20 MiB decoded. A larger individual file is sent alone. Each `config.import`
 request permits at most 2,000 files and 64 MiB decoded, with a 64 MiB per-file
 ceiling matching configuration editing. These bounds limit a request, not the
-directory. Oversized files and invalid paths block preparation rather than
-offering to import a truncated subset.
+directory. Oversized eligible files stay visible and block import until the
+user unchecks them or chooses **Exclude unsupported files**, then confirms
+the reviewed remainder. Nothing is silently truncated. Invalid paths still
+reject preparation.
 Preparation checks canonical destination keys across the whole selection, so
 root-prefixed aliases cannot overwrite each other in separate batches.
 Accepted bytes are uploaded and server-scanned, so a secret finding does not
@@ -1012,17 +1016,33 @@ An unreadable preference produces a dashboard error toast but does not prevent
 the server snapshot from loading.
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
-  must carry (the onboarding wizard sends the one just picked). Without
-  it the workspace resolves exactly like `aether link --repo`: a single
-  workspace resolves implicitly; none or several answers `-32002`
-  (invalid state) and is resolved server-side or with the CLI's
-  `--workspace` flag first.
+  must carry. Onboarding and workspace repository settings always send the
+  selected ID, as do `repo.push` and `repo.fast-forward`; they never rely on
+  single-workspace inference. Without it, the API still resolves like
+  `aether link --repo`: a single workspace resolves implicitly; none or several
+  answers `-32002` (invalid state). Use `--workspace <name-or-id>` from the CLI.
+- The gateway keeps one current repository per server profile. Linking another
+  workspace replaces that current clone, not a hidden per-workspace mapping.
+  The UI checks `link.status` before mutations; the gateway verifies that the
+  current clone's `aether` remote targets the supplied workspace.
+  Linking under `aether gui --server <name>` saves the repository in that named
+  profile without overwriting defaults or siblings. If its saved server
+  identity changed or disappeared, restart the GUI before linking.
+  Creation and linking responses belong to the initiating form, connection and
+  authenticated identity. Closing that form or changing context invalidates
+  late UI updates without replaying the mutation. After linking, the dashboard
+  reads authoritative `link.status` before showing the connected clone.
 - `workspace.mirror.*` methods are admin-only. `configure` receives the
   verified source URL, branch, auth mode, and (for generic SSH) the
   `known_hosts` file contents; the server generates and stores any deploy key.
   Results expose source, branch, status, observed/accepted commits, check
   times, and the public key only. The dashboard's Workspace **Source control**
   panel calls these same methods.
+  If refresh fails before observing a commit, `status` retains the last observed
+  and accepted commits alongside the new status and `last_error`. Sources with no
+  observation keep empty commit fields. Retention does not make the source
+  fresh or permit an ordinary launch after failure. Reconfiguration clears
+  the commit fields; disabling removes mirror metadata.
 - A mirrored workspace's base branch is server-owned. `repo.push` and
   `repo.fast-forward` retain their normal local-only behavior, but a direct
   base write against a mirrored policy is rejected; refresh or explicitly

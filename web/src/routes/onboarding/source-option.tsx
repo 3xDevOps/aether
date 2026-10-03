@@ -6,19 +6,16 @@ import { message } from '@/lib/format'
 import type { WorkspaceMirrorResult } from '@/lib/types'
 
 
-/**
- * The optional source mirror affordance in onboarding. Checkout Origin is
- * where runs push review branches; this mirror is server-owned and refreshed
- * before each fresh run.
- */
 export function OnboardingSourceOption({
   client,
   workspaceID,
   suggestedSource,
+  onStatusChange,
 }: {
   client: Api
   workspaceID: string
   suggestedSource?: string
+  onStatusChange?: (status: WorkspaceMirrorResult) => void
 }) {
   const headingID = useId()
   const [status, setStatus] = useState<WorkspaceMirrorResult | null>(null)
@@ -31,7 +28,8 @@ export function OnboardingSourceOption({
     setStatusError(null)
     setStatus(current)
     setLoading(false)
-  }, [])
+    onStatusChange?.(current)
+  }, [onStatusChange])
 
   useEffect(() => {
     const revision = ++statusRevision.current
@@ -44,6 +42,7 @@ export function OnboardingSourceOption({
         if (!live || statusRevision.current !== revision) return
         setStatus(current)
         setLoading(false)
+        onStatusChange?.(current)
       },
       (err) => {
         if (!live || statusRevision.current !== revision) return
@@ -57,7 +56,7 @@ export function OnboardingSourceOption({
         statusRevision.current += 1
       }
     }
-  }, [client, workspaceID])
+  }, [client, workspaceID, onStatusChange])
 
   const configured = status?.enabled === true
   const statusText = status?.status ?? 'configured'
@@ -65,9 +64,9 @@ export function OnboardingSourceOption({
   return (
     <section aria-labelledby={headingID} className="mt-4 space-y-3 border-t border-border/70 pt-3">
       <div className="space-y-1">
-        <h2 id={headingID} className="text-sm font-medium">Optional source mirror</h2>
+        <h2 id={headingID} className="text-sm font-medium">Public or private remote repository</h2>
         <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
-          Checkout Origin is where runs push branches for review. A source mirror is server-owned and refreshed before each fresh run. This setup is optional and does not block onboarding.
+          Configure a server-fetched source using public HTTPS or a read-only deploy key. No local clone is needed. Checkout Origin is a separate publishing destination.
         </p>
       </div>
 
@@ -106,11 +105,13 @@ export function OnboardingSourceOption({
                 <dd className="break-all font-mono">{status.branch || 'Not reported'}</dd>
               </div>
             </dl>
+            <p>Accepted base: <code className="break-all">{status.accepted_commit || 'None — verify and explicitly adopt a candidate before launch'}</code></p>
             {status.last_error && (
               <p role="alert" className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-state-failed">
                 {status.last_error}
               </p>
             )}
+            {status.status !== 'ready' && <p>Source is not ready for a new run. Open Source control to repair, verify or review the candidate. The workspace is retained; do not import it again.</p>}
           </div>
         )}
       </div>

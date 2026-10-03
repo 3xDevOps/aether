@@ -686,10 +686,11 @@ func mirrorStatus(kind gitengine.MirrorErrorKind) domain.MirrorStatus {
 func applyGitResult(m *domain.WorkspaceMirror, r gitengine.MirrorResult) {
 	observed := r.ObservedCommit
 	accepted := r.AcceptedCommit
-	if domain.ValidMirrorSHA(observed) {
+	// Empty fields mean no observation, not a request to clear prior state.
+	if observed != "" && domain.ValidMirrorSHA(observed) {
 		m.ObservedCommit = observed
 	}
-	if domain.ValidMirrorSHA(accepted) {
+	if accepted != "" && domain.ValidMirrorSHA(accepted) {
 		m.AcceptedCommit = accepted
 	}
 }

@@ -56,6 +56,7 @@ test('two members share comments, moderated steering, and explicit control trans
     await wizard.expectStep('Workspace')
     await wizard.workspace.use('project').click()
     await wizard.expectStep('Repository')
+    await wizard.repository.localClone().click()
     const clone = await aether.cloneRepo(repo, 'project-bob')
     await wizard.repository.addRemote(clone)
     await expect(wizard.repository.section).toContainText(`Connected ${clone}`)

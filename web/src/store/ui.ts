@@ -111,6 +111,7 @@ const wizardReset = {
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
   onboardingWorkspace: '',
+  onboardingSource: 'remote',
   onboardingRepo: null,
   onboardingFirstRun: emptyFirstRun,
 } as const
@@ -123,14 +124,24 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 export const minSidebarWidth = 320
 export const maxSidebarWidth = 520
 
+export interface ConfigImportCandidate {
+  path: string
+  destinationPath: string
+  file: File
+  problem?: ConfigExclusion
+}
+
 export interface ConfigImportStatus {
   owner: string | null
   basename: string
+  destination: string
   totalFiles: number
   excluded: ConfigExclusion[]
   phase: 'reading' | 'uploading' | 'complete'
   result: ConfigImportResult
   unknownPaths: string[]
+  remaining: ConfigImportCandidate[]
+  errors: string[]
 }
 
 export interface UiSlice {
@@ -158,6 +169,7 @@ export interface UiSlice {
    */
   onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
+  onboardingSource: 'local' | 'remote'
   onboardingRepo: OnboardingRepo | null
   configImportPending: boolean
   configImportStatus: ConfigImportStatus | null
@@ -196,6 +208,7 @@ export interface UiSlice {
   setOnboarded: (onboarded: boolean) => void
   setOnboardingStep: (step: OnboardingStep) => void
   setOnboardingWorkspace: (workspaceID: string) => void
+  setOnboardingSource: (source: 'local' | 'remote') => void
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
@@ -221,6 +234,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
   onboardingWorkspace: '',
+  onboardingSource: 'remote',
   onboardingRepo: null,
   configImportPending: false,
   configImportStatus: null,
@@ -255,6 +269,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           : s.onboardingFurthest,
     })),
   setOnboardingWorkspace: (onboardingWorkspace) => set({ onboardingWorkspace }),
+  setOnboardingSource: (onboardingSource) => set({ onboardingSource }),
   setOnboardingRepo: (onboardingRepo) => set({ onboardingRepo }),
   setOnboardingFirstRun: (onboardingFirstRun) => set({ onboardingFirstRun }),
   // Switching scope carries the workspace route with it. Otherwise the

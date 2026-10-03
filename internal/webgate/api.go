@@ -55,10 +55,15 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var refusalData json.RawMessage
+	if r.PathValue("method") == protocol.MethodConfigImport {
+		refusalData = json.RawMessage(`{"config_import_not_started":true}`)
+	}
 	if mediaType, _, cerr := mime.ParseMediaType(r.Header.Get("Content-Type")); cerr != nil || mediaType != "application/json" {
 		WriteError(w, http.StatusUnsupportedMediaType, &protocol.Error{
 			Code:    protocol.CodeInvalidRequest,
 			Message: "request body must be application/json",
+			Data:    refusalData,
 		})
 		return
 	}
@@ -73,6 +78,7 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close")
 			WriteError(w, http.StatusServiceUnavailable, &protocol.Error{
 				Code: protocol.CodeUnavailable, Message: "configuration import capacity is busy; retry later",
+				Data: refusalData,
 			})
 			return
 		}
@@ -84,7 +90,7 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 			if status == http.StatusInternalServerError {
 				code = protocol.CodeInternal
 			}
-			WriteError(w, status, &protocol.Error{Code: code, Message: "read body: " + err.Error()})
+			WriteError(w, status, &protocol.Error{Code: code, Message: "read body: " + err.Error(), Data: refusalData})
 			return
 		}
 	} else {
@@ -98,7 +104,7 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 	if len(params) == 0 {
 		params = nil
 	} else if !json.Valid(params) {
-		WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "request body is not valid JSON"})
+		WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "request body is not valid JSON", Data: refusalData})
 		return
 	}
 	result, perr := backend.Call(r.Context(), r.PathValue("method"), params)
