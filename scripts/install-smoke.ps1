@@ -287,8 +287,10 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $debugPort = $listener.LocalEndpoint.Port
     $listener.Stop()
     $app = Start-Process -FilePath $discoveredShortcut.Path -ArgumentList @("--remote-debugging-port=$debugPort", ('--user-data-dir="' + $profile + '"')) -PassThru
-    if ($app.Path -ne $desktop) { throw "The Start Menu shortcut launched $($app.Path), not $desktop." }
     $appChild = Wait-DesktopSidecar $app
+    # Start-Process can return before MainModule (and therefore Path) is available.
+    $launchedPath = $app.Path
+    if ($launchedPath -ine $desktop) { throw "The Start Menu shortcut launched $launchedPath, not $desktop." }
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
         if ($app.HasExited) { throw "The Start Menu app exited with code $($app.ExitCode)." }
