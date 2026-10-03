@@ -92,7 +92,10 @@ describe('paletteFilter', () => {
   })
 
   it('keeps exact scores and ties when distant suffix maxima have different gap penalties', () => {
-    const gaps = ['x'.repeat(512), ' /-'.repeat(32), '\t-'.repeat(32)]
+    const gaps = [
+      'x'.repeat(512), 'x'.repeat(8_191), 'x'.repeat(8_192),
+      ' /-'.repeat(32), '\t-'.repeat(32),
+    ]
     const values = [
       'profile', 'Profile', 'user/profile', 'user profile',
       ...gaps.flatMap((gap) => [

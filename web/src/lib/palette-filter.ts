@@ -7,7 +7,20 @@ const categoryOrder = [2, 3, 0, 1, 4, 5] // Word, segment, interior; exact case 
 
 // These are constants of the scoring formula, not cached values or queries.
 // Calculate each power directly: repeated multiplication changes score ties.
-const gapPowers: number[] = [1]
+// Retain at most 64 KiB of formula values; larger gaps are scored directly.
+const gapPowers = new Float64Array(64 * 1024 / Float64Array.BYTES_PER_ELEMENT)
+gapPowers[0] = 1
+
+function gapPenalty(gap: number): number {
+  if (gap >= gapPowers.length) return Math.pow(0.999, gap)
+  let penalty = gapPowers[gap]
+  // Every retained exponent has a positive normal result, so zero is unused.
+  if (penalty === 0) {
+    penalty = Math.pow(0.999, gap)
+    gapPowers[gap] = penalty
+  }
+  return penalty
+}
 
 // Synchronous scratch space only. Every cell is written before it is read in
 // a later invocation; no run, query, matching list or score is reused as data.
@@ -91,7 +104,7 @@ function preparePrefixPruning(value: string, search: string, text: string, query
       if (start > 0) {
         const gap = boundary === 0 ? segments[match - 1] - segments[start]
           : boundary === 1 ? words[match - 1] - words[start] : match - start
-        lowerBound *= gapPowers[gap] ?? (gapPowers[gap] = Math.pow(0.999, gap))
+        lowerBound *= gapPenalty(gap)
       }
     }
     if (value.charAt(match) !== search.charAt(q)) lowerBound *= 0.9999
@@ -424,7 +437,7 @@ export function paletteFilter(value: string, search: string, keywords?: string[]
             if (start > 0) {
               const gap = boundary === 0 ? segments[winner - 1] - segments[start]
                 : boundary === 1 ? words[winner - 1] - words[start] : winner - start
-              winningScore *= gapPowers[gap] ?? (gapPowers[gap] = Math.pow(0.999, gap))
+              winningScore *= gapPenalty(gap)
             }
             if (differentCase) winningScore *= 0.9999
             if (winningScore > best) best = winningScore
@@ -433,7 +446,7 @@ export function paletteFilter(value: string, search: string, keywords?: string[]
               if (start > 0) {
                 const gap = boundary === 0 ? segments[match - 1] - segments[start]
                   : boundary === 1 ? words[match - 1] - words[start] : match - start
-                penalty = gapPowers[gap] ?? (gapPowers[gap] = Math.pow(0.999, gap))
+                penalty = gapPenalty(gap)
               }
               let upper = suffix[match] * penalty
               if (differentCase) upper *= 0.9999
