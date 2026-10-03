@@ -1,12 +1,14 @@
 package memberhome
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -126,4 +128,79 @@ func openLoginParent(home *os.Root, rel string) (*os.Root, string, error) {
 		current = next
 	}
 	return current, parts[len(parts)-1], nil
+}
+
+// maxBorrowedStateBytes bounds the JSON file MarkBorrowedState rewrites; a
+// CLI's own state file is small, and anything larger is not rewritten.
+const maxBorrowedStateBytes = 4 << 20
+
+// MarkBorrowedState makes rel, a JSON object file in member's home, carry
+// each value in keys, creating the file with mode 0600 when it is missing.
+// A file that cannot be read as a small regular JSON object is left alone
+// and the launch goes on: the CLI owns it and recovers from it in its own
+// way. Two launches creating the file at once both succeed: the loser of the
+// exclusive create re-reads what the winner wrote.
+func (m *Manager) MarkBorrowedState(member domain.MemberID, rel string, keys map[string]any) error {
+	home, err := m.openHome(member)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = home.Close() }()
+	parent, leaf, err := openLoginParent(home, rel)
+	if err != nil {
+		return fmt.Errorf("memberhome: mark %s in %q: %w", rel, member, err)
+	}
+	defer func() { _ = parent.Close() }()
+	for {
+		data, err := readRegularFile(parent, leaf, maxBorrowedStateBytes)
+		if err != nil {
+			return nil
+		}
+		state := map[string]any{}
+		if data != nil {
+			if json.Unmarshal(data, &state) != nil || state == nil {
+				return nil
+			}
+		}
+		changed := false
+		for key, value := range keys {
+			if !reflect.DeepEqual(state[key], value) {
+				state[key] = value
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		out, err := json.Marshal(state)
+		if err != nil {
+			return fmt.Errorf("memberhome: mark %s in %q: %w", rel, member, err)
+		}
+		if data == nil {
+			err = writeNew(parent, leaf, out, 0o600)
+			if errors.Is(err, fs.ErrExist) {
+				continue
+			}
+		} else {
+			err = writeInPlace(parent, leaf, out)
+		}
+		if err != nil {
+			return fmt.Errorf("memberhome: mark %s in %q: %w", rel, member, err)
+		}
+		return nil
+	}
+}
+
+// writeInPlace rewrites the regular file name under root on its own inode,
+// so a container that holds the file open or mounted keeps seeing it.
+func writeInPlace(root *os.Root, name string, data []byte) error {
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }

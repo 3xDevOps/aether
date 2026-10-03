@@ -855,7 +855,10 @@ and otherwise the owner's, mounted read-only. The launch dialog lists every
 agent installed in either home (`agent.list` reports `installed` for either).
 With nothing installed on either side, it says **Neither you nor `<owner>`
 has an agent installed.** and offers **Set up an agent**, which installs one
-in the recipient's environment.
+in the recipient's environment. A borrowed Claude Code login starts signed in
+as the owner: Aether marks Claude's first-time setup complete in the
+recipient's own `~/.claude.json`, since that wizard asks to sign in whatever
+login is present.
 
 Before launching on a shared account, the recipient connects their own
 GitHub; the run pushes and opens pull requests as the recipient. **Connect

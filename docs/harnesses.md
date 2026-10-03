@@ -70,7 +70,10 @@ and `~/.local/lib` mounted read-only at `~/.aether/account/bin` and
 `~/.aether/account/lib`, last on `PATH`, and each directory in
 `harness.Profile.InstallPaths` read-only at its own path (`claude`:
 `~/.local/share/claude`, where the native installer keeps the versions
-`~/.local/bin/claude` links to).
+`~/.local/bin/claude` links to). A borrowed `claude` login also marks setup
+complete in the launcher's own `~/.claude.json` (`hasCompletedOnboarding`),
+because Claude Code's setup wizard asks to sign in even when a login is
+present; Claude Code then records the owner's account email there itself.
 `omp` shares a directory because its login is a SQLite WAL database beside its
 settings, MCP configuration, extensions, and sessions. omp loads extensions and
 MCP server commands from that directory, so a recipient's run can plant code

@@ -197,6 +197,11 @@ func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.Me
 			ContainerPath: path.Join(home, login.rel),
 		})
 	}
+	for rel, keys := range profile.BorrowedState {
+		if err := s.cfg.Homes.MarkBorrowedState(launcher, rel, keys); err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+	}
 	return mounts, nil
 }
 

@@ -268,6 +268,12 @@ type Profile struct {
 	// borrows the owner's installation mounts each read-only from the
 	// owner's home at the same path. Definitions never set them.
 	InstallPaths []string
+	// BorrowedState maps a home-relative JSON file to the keys a launch
+	// that borrows this harness's login sets in the LAUNCHER's copy of it
+	// when they are absent, so the CLI starts signed in with the owner's
+	// login instead of running first-time setup against an empty home.
+	// Definitions never set it.
+	BorrowedState map[string]map[string]any
 	// PinLogin means the CLI replaces its login file by rename instead of
 	// rewriting it, so once the member has shared their account the file is
 	// mounted in place in their own containers too; the rename then fails
@@ -398,6 +404,9 @@ var profiles = map[string]Profile{
 		// The native installer links ~/.local/bin/claude, by absolute
 		// path, to ~/.local/share/claude/versions/<version>.
 		InstallPaths: []string{".local/share/claude"},
+		// Claude Code runs its setup wizard, whose sign-in step ignores an
+		// existing login, until ~/.claude.json says setup is complete.
+		BorrowedState: map[string]map[string]any{".claude.json": {"hasCompletedOnboarding": true}},
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.

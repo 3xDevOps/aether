@@ -75,7 +75,13 @@ it exists, `~/.local/lib` are mounted read-only at `~/.aether/account/bin` and
 `~/.aether/account/lib`, and `~/.aether/account/bin` is appended to the end of
 `PATH`. Each install directory the harness declares
 (`harness.Profile.InstallPaths`; `~/.local/share/claude` for `claude`) is
-mounted read-only at its own path. Nothing else of the owner's home is
+mounted read-only at its own path. A borrowed login also gets the
+launcher's own copy of the harness's state file the CLI consults before
+using a login (`harness.Profile.BorrowedState`; for `claude`,
+`hasCompletedOnboarding: true` in `~/.claude.json`, created with mode 0600 or
+rewritten in place, never replaced), so the CLI starts signed in rather than
+running first-time setup; Claude Code then writes the owner's account email
+into that file. Nothing else of the owner's home is
 mounted, and `~/.local/share` as a whole never is: opencode keeps its login
 there. The owner's `~/.local/bin/<executable>` counts as an installation only
 when every link it follows stays inside those mounted directories; a link

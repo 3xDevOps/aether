@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func newLoginHomes(t *testing.T) (*Manager, string, string) {
@@ -152,5 +155,39 @@ func replaceWithSymlink(t *testing.T, name, target string) {
 	}
 	if err := os.Symlink(target, name); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Two launches that find no state file both succeed: the exclusive create
+// lets one through, and the other re-reads what it wrote.
+func TestMarkBorrowedStateConcurrentCreate(t *testing.T) {
+	t.Parallel()
+	m, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const member = domain.MemberID("m1")
+	if _, err = m.Path(member); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]any{"hasCompletedOnboarding": true}
+	errs := make([]error, 8)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = m.MarkBorrowedState(member, ".claude.json", keys)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("mark %d: %v", i, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(m.Root(), string(member), ".claude.json"))
+	if err != nil || string(data) != `{"hasCompletedOnboarding":true}` {
+		t.Fatalf("state = %q, %v", data, err)
 	}
 }
