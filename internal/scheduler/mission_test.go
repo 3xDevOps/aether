@@ -216,6 +216,10 @@ func TestMissionNegativeTTLAndCancellationRemainDestructive(t *testing.T) {
 			}
 			waitFor(t, "destroyed worker", func() bool { return e.rt.byName(string(run.ID)) == nil })
 			if operation == "cancel" {
+				waitFor(t, "settled cancellation", func() bool {
+					obs, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+					return err == nil && obs.State == MissionRunStopped && obs.RetentionSettled
+				})
 				if err := e.sched.CompleteMission(t.Context(), run.ID, domain.RunCompleted); err != nil {
 					t.Fatal(err)
 				}
