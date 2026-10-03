@@ -404,7 +404,7 @@ export function TerminalPane({
         <div className="flex min-h-[35px] max-w-full shrink-0 items-center coarse:min-h-[47px]">
           {!controller.findOpen ? (
             <>
-              {phone ? (
+              <div className={coarse ? undefined : toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="ghost" size="icon" aria-label="Terminal tools">
@@ -415,8 +415,11 @@ export function TerminalPane({
                     <TerminalTools controller={controller} image={image} readingSurface={readingSurface} expanded />
                   </PopoverContent>
                 </Popover>
-              ) : (
-                <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
+              </div>
+              {!coarse && (
+                <div className={toolbarEnd ? 'hidden @[70rem]/terminal-pane:block' : 'hidden @[42rem]/terminal-pane:block'}>
+                  <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
+                </div>
               )}
             </>
           ) : (

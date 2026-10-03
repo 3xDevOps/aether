@@ -5,6 +5,7 @@ import { Chip, Tooltip } from '@/components/ui/heroui'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
+import { useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
@@ -12,13 +13,16 @@ import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { pendingApprovals, sortByCreated } from '@/store/approvals'
-/** The queue's size, in the status bar. Absent while nothing is waiting. */
+import { useCapability } from '@/store/hooks'
+/** The visible queue signal while the navigation rail lives in the phone drawer. */
 export function ApprovalStatus() {
   const inbox = useStore((s) => s.inbox)
   const error = useStore((s) => s.inboxError)
   const navigate = useStore((s) => s.navigate)
+  const phone = useMediaQuery('(max-width: 640px)')
+  const cap = useCapability()
   const waiting = pendingApprovals(inbox).length
-  if (waiting === 0 && !error) return null
+  if (!phone || !cap.hasMethod('approval.list') || (waiting === 0 && !error)) return null
 
   return (
     <Tooltip>
@@ -94,23 +98,17 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
       <ViewHeader
         title="Approvals"
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
+        actions={
+          <Button
+            variant="outline"
+            size="default"
+            aria-pressed={showDecided}
+            onClick={() => setShowDecided(!showDecided)}
+          >
+            {showDecided ? 'Hide decided' : 'Show decided'}
+          </Button>
+        }
       />
-      <div className="flex min-h-[35px] shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-1.5 sm:px-4">
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium">Decision queue</p>
-          <p className="text-xs text-muted-foreground">
-            Review requests before an agent continues.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="default"
-          aria-pressed={showDecided}
-          onClick={() => setShowDecided(!showDecided)}
-        >
-          {showDecided ? 'Hide decided' : 'Show decided'}
-        </Button>
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         <div className="mx-auto w-full max-w-5xl">
           {error && (

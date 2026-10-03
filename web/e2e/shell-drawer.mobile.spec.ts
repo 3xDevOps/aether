@@ -43,9 +43,9 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
 
   // The status bar is the tightest row in the shell, and on a coarse pointer
   // its controls are finger-sized rather than the desktop's 22px.
-  const theme = page.getByRole('button', { name: /^Theme:/ })
-  await expect(theme).toBeVisible()
-  expect((await theme.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
+  const details = page.getByRole('button', { name: 'Show status details' })
+  await expect(details).toBeVisible()
+  expect((await details.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
 
   // Nothing the drawer left behind is over the run: the shell still fits the
   // phone in both directions.

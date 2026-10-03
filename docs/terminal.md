@@ -175,7 +175,7 @@ Narrow toolbars use key and eye icons for controller and viewers, retaining
 accessible role labels. Session markers stay in the controller's hover title
 and screen-reader text instead of wrapping onto another row.
 Live local ownership is shown by the toolbar's **(this tab)** controller marker
-and **Release** action. A 1.5px bright teal border traces only the terminal
+and **Release** action. A 1px subdued teal border traces only the terminal
 viewport, never the toolbar, search bar, or UI above it. After this tab
 acknowledges live input, the border propagates from the left and right side
 midpoints, splitting up and down to meet at the top and bottom centers. An

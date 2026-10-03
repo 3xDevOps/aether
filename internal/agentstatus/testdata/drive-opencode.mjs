@@ -2,15 +2,21 @@
 // boundaries for the scheduler's deterministic activity-clock regression.
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { setTimeout as delay } from 'node:timers/promises'
 import vm from 'node:vm'
 
 const version = process.argv[2]
 const logPath = process.argv[3]
 const flush = () => new Promise(resolve => setImmediate(resolve))
 const children = new Set()
-const sandbox = vm.createContext({ process, AbortController, AbortSignal, console })
+const sandbox = vm.createContext({ process, AbortController, AbortSignal, console, setTimeout, clearTimeout })
 const module = new vm.SourceTextModule(readFileSync(new URL('status.js', import.meta.url), 'utf8'), { context: sandbox })
 await module.link(specifier => {
+  if (specifier === 'node:timers/promises') {
+    return new vm.SyntheticModule(['setTimeout'], function () {
+      this.setExport('setTimeout', delay)
+    }, { context: sandbox })
+  }
   if (specifier !== 'node:child_process') throw new Error(`unexpected import: ${specifier}`)
   return new vm.SyntheticModule(['spawn'], function () {
     this.setExport('spawn', (...args) => {
@@ -25,12 +31,13 @@ await module.link(specifier => {
 await module.evaluate()
 
 let emit
-let dispose = () => {}
+let dispose
 if (version === 'v1') {
   const hooks = await module.namespace.AetherStatus({
     client: { app: { log: async ({ body }) => { throw new Error(body.message) } } },
   })
   emit = (type, properties) => hooks.event({ event: { type, properties } })
+  dispose = hooks.dispose
 } else {
   const events = []
   let waiter
@@ -82,5 +89,5 @@ if (version === 'v2') {
   await end('root')
 }
 await checkpoint('idle')
-dispose()
+await dispose()
 console.log(JSON.stringify(checkpoints))

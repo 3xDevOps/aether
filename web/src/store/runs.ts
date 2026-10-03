@@ -71,10 +71,9 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   upsertRun: (run) =>
     set((s) => {
       const current = s.runs[run.id]
-      // Only hydration and run.input replace this independent stream state.
       // A late route/launch snapshot must not resurrect a resolved request.
       const next = toRecord(run, current)
-      next.pending_inputs = current?.pending_inputs ?? run.pending_inputs
+      next.pending_inputs = isTerminal(next.status) ? [] : current?.pending_inputs ?? run.pending_inputs
       return { runs: { ...s.runs, [run.id]: next } }
     }),
   removeRun: (runID) =>
@@ -92,14 +91,17 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (!current) return {}
       const next: RunRecord = { ...current, status: to, reason, stateChangedAt: time }
       if (to === 'running' && !next.started_at) next.started_at = time
-      if (isTerminal(to)) next.finished_at = time
+      if (isTerminal(to)) {
+        next.finished_at = time
+        next.pending_inputs = []
+      }
       return { runs: { ...s.runs, [runID]: next } }
     }),
 
   applyRunInput: (runID, requests) =>
     set((s) => {
       const current = s.runs[runID]
-      if (!current) return {}
+      if (!current || isTerminal(current.status)) return {}
       return { runs: { ...s.runs, [runID]: { ...current, pending_inputs: requests } } }
     }),
 

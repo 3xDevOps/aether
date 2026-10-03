@@ -50,7 +50,7 @@ func acceptedIntegrationPolicyFixture(t *testing.T) (*Service, *domain.Mission, 
 	t.Helper()
 	ctx := context.Background()
 	db, mission, _, submission, _, _ := setupSubmissionRegression(t)
-	if _, err := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "integration-policy-accept"); err != nil {
+	if _, err := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "integration-policy-accept", &store.SubmissionEvidenceValidation{Ref: submission.Ref, Evidence: submission.Evidence}); err != nil {
 		t.Fatalf("accept submission: %v", err)
 	}
 	mission, err := db.GetMission(ctx, mission.ID)

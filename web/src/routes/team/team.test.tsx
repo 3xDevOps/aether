@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { StatusBar } from '@/components/shell/status-bar'
 import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
-import { TeamStatus } from '@/routes/team'
+import { TeamStatus, TeamStatusDetails } from '@/routes/team'
 import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
 import { BudgetStatus } from '@/routes/team/budget'
 import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
@@ -20,6 +20,7 @@ import {
   workspace,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+import { atViewport } from '@/test/viewport'
 import { fire } from '@/test/wake'
 
 const watching: PresenceEntry = {
@@ -32,6 +33,7 @@ const watching: PresenceEntry = {
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] },
     activeWorkspace: workspace.id,
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: { run_1: toRecord(run()) },
@@ -52,6 +54,7 @@ function seed(extra: Partial<RootState> = {}) {
 
 describe('team status bar', () => {
   it('reads the roster, the queue and the budget, and renders all three', async () => {
+    atViewport(390)
     const client = fakeApi({
       presenceRoster: vi.fn(async () => [watching]),
       approvalList: vi.fn(async () => [approval()]),
@@ -63,7 +66,7 @@ describe('team status bar', () => {
       ),
     })
     seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
-    render(<TeamStatus client={client} />)
+    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
 
     expect(await screen.findByText('1 waiting')).toBeDefined()
     expect(screen.getByText('$0.50')).toBeDefined()
@@ -125,6 +128,7 @@ describe('team status bar', () => {
   })
 
   it('re-reads the queue and beats presence when the tab returns', async () => {
+    atViewport(390)
     const approvalList = vi.fn(async () => [approval()])
     const presenceHeartbeat = vi.fn(async () => 90)
     seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
@@ -202,7 +206,7 @@ describe('team status bar', () => {
         ),
       },
     })
-    render(<TeamStatus client={client} />)
+    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
 
     expect(await screen.findByText('past the cap')).toBeDefined()
     // $0.50 from the live workspace and $14 from the finished one.
@@ -245,6 +249,7 @@ describe('team status bar', () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
     render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
     expect(screen.queryByLabelText('Disk usage')).toBeNull()
 
     await act(async () => {
@@ -260,6 +265,7 @@ describe('team status bar', () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
     render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
 
     await act(async () => {
       await refreshTeam(useStore, client)
@@ -282,6 +288,7 @@ describe('team status bar', () => {
     const stale = await client.disk()
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
     render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
     expect(
       screen.getByLabelText('Disk usage').getAttribute('title'),
     ).not.toContain('Repos')
@@ -298,6 +305,7 @@ describe('team status bar', () => {
   // The readout itself can only fit "queue unreadable"; the server's own
   // refusal is what an operator needs, so the hint carries it verbatim.
   it('keeps the server refusal on the queue readout', async () => {
+    atViewport(390)
     seed({ inboxError: 'approval.list: database is locked' })
     render(<ApprovalStatus />)
 

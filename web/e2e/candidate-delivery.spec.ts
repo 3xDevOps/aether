@@ -45,7 +45,6 @@ type RunPacket = {
 
 
 type CandidateReviewSurface = {
-  room: Locator
   evidence: Locator
   review: Locator
 }
@@ -156,18 +155,17 @@ async function listCandidates(api: API, workspaceID: string): Promise<CandidateS
 }
 
 async function openCandidateReview(page: Page): Promise<CandidateReviewSurface> {
-  await page.getByRole('button', { name: 'Open Run Room' }).click()
-  const room = page.getByRole('complementary', { name: 'Run Room' })
-  await expect(room).toBeVisible()
-  const evidence = room.getByRole('region', { name: 'Run evidence' })
-  await evidence.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).click()
+  await page.getByRole('region', { name: 'Run evidence', exact: true })
+    .getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).click()
+  const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
+  await expect(evidence).toBeVisible()
   await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible({
     timeout: terminalTimeout,
   })
   await evidence.getByRole('button', { name: 'Candidate review', exact: true }).click()
   const review = evidence.getByRole('region', { name: 'Candidate review' })
   await expect(review).toBeVisible()
-  return { room, evidence, review }
+  return { evidence, review }
 }
 
 test('reviews two retained runs, verifies them in a real container, and lands the approved candidate', async ({

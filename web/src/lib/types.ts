@@ -273,6 +273,7 @@ export interface MissionSubmissionEvidence {
   kind: string
   ref: string
   available: boolean
+  truncated?: boolean
   detail?: string
 }
 

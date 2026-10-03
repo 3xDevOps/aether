@@ -13,7 +13,7 @@ export interface CardSlotProps {
 
 /** Every slot and the props its contributors receive. */
 export interface SlotPropsMap {
-  /** Compact markers on the card's title row: paused, protected, approvals. */
+  /** Compact state and policy markers. */
   'card:badges': CardSlotProps
   /** Compact warning controls kept outside the status metadata scroller. */
   'card:warnings': CardSlotProps
@@ -21,7 +21,6 @@ export interface SlotPropsMap {
   'card:chips': CardSlotProps
   /** The card's bottom row, right of the owner: watcher avatars. */
   'card:footer': CardSlotProps
-  /** The status bar, left of the theme toggle. */
   statusbar: Record<never, never>
 }
 

@@ -5,6 +5,7 @@ import type {
   MissionAttempt,
   MissionPlanReview,
   MissionQuestion,
+  MissionSubmission,
   MissionTask,
 } from '@/lib/types'
 import { MissionRoute } from '@/routes/missions'
@@ -53,13 +54,14 @@ function showing(
   planReviews: MissionPlanReview[] = [],
   tasks: MissionTask[] = [],
   attempts: MissionAttempt[] = [],
+  submissions: MissionSubmission[] = [],
 ): Api {
   return fakeApi({
     missionShow: vi.fn(async () => ({
       mission: mission(over),
       tasks,
       attempts,
-      submissions: [],
+      submissions,
       diagnostics: [],
       questions,
       plan_reviews: planReviews,
@@ -73,6 +75,161 @@ async function mount(client: Api): Promise<void> {
     await Promise.resolve()
   })
 }
+
+describe('accepted mission evidence', () => {
+  function submission(over: Partial<MissionSubmission> = {}): MissionSubmission {
+    return {
+      id: 'submission_1',
+      mission_id: 'mission_1',
+      task_id: 'task_1',
+      task_revision: 1,
+      attempt_id: 'attempt_1',
+      ref: {
+        workspace_id: workspace.id,
+        run_id: 'run_worker',
+        evidence_ref: 'evidence_1',
+        retained_revision: 'retained-revision-1',
+      },
+      evidence: [{ kind: 'transcript', ref: 'evidence_1', available: true, truncated: true }],
+      state: 'accepted',
+      proposed_by_run_id: 'run_worker',
+      integrator_generation: 1,
+      created_at: '2026-08-14T10:04:00Z',
+      ...over,
+    }
+  }
+
+  function clientWith(submissions: MissionSubmission[]): Api {
+    return showing({}, [], [], [missionTask({ status: 'done' })], [], submissions)
+  }
+
+  function taskCard() {
+    return within(within(screen.getByRole('region', { name: 'Mission tasks' })).getByRole('article'))
+  }
+
+  it('distinguishes partial retained evidence from complete sources in the accepted receipt', async () => {
+    seed()
+    const detail = 'Retained <bounded> output\nEarlier bytes & lines omitted.'
+    await mount(clientWith([submission({
+      evidence: [
+        { kind: 'transcript', ref: 'evidence_1', available: true, truncated: true, detail },
+        { kind: 'git', ref: 'evidence_1', available: true },
+      ],
+    })]))
+
+    const card = taskCard()
+    expect(card.getByText(/Accepted submission/)).toBeDefined()
+    const notes = within(card.getByRole('list', { name: 'Evidence exceptions at acceptance' }))
+    expect(notes.getByText(/transcript: Partial retained evidence/)).toBeDefined()
+    expect(notes.queryByText(/Unavailable at acceptance/)).toBeNull()
+    expect(notes.queryByText(/git:/)).toBeNull()
+    expect(card.getByText(/at acceptance, not a live availability check/)).toBeDefined()
+    const source = notes.getByRole('listitem')
+    expect(source.textContent).toContain(detail)
+    expect(source.querySelector('bounded')).toBeNull()
+  })
+
+  it.each([false, true])('shows unavailable evidence rather than partial evidence when truncated is %s', async (truncated) => {
+    seed()
+    await mount(clientWith([submission({
+      evidence: [{ kind: 'transcript', ref: 'evidence_1', available: false, truncated, detail: 'Artifact <expired> & removed.' }],
+    })]))
+
+    const card = taskCard()
+    expect(card.getByText(/Accepted submission/)).toBeDefined()
+    const notes = within(card.getByRole('list', { name: 'Evidence exceptions at acceptance' }))
+    const source = notes.getByRole('listitem')
+    expect(source.textContent).toContain('transcript: Unavailable at acceptance.')
+    expect(notes.queryByText(/Partial retained evidence/)).toBeNull()
+    expect(source.textContent).toContain('Artifact <expired> & removed.')
+    expect(source.querySelector('expired')).toBeNull()
+  })
+
+  it.each([undefined, false])('keeps complete accepted evidence quiet when truncated is %s', async (truncated) => {
+    seed()
+    await mount(clientWith([submission({
+      evidence: [{ kind: 'transcript', ref: 'evidence_1', available: true, truncated }],
+    })]))
+
+    const card = taskCard()
+    expect(card.getByText(/Accepted submission/)).toBeDefined()
+    expect(card.queryByRole('list', { name: 'Evidence exceptions at acceptance' })).toBeNull()
+    expect(card.queryByText(/Partial retained evidence|Unavailable at acceptance/)).toBeNull()
+  })
+
+  it.each([
+    ['stale revision', { task_revision: 0 }],
+    ['proposed submission', { state: 'proposed' }],
+    ['another task', { task_id: 'task_2' }],
+  ] satisfies [string, Partial<MissionSubmission>][])('does not present %s facts as accepted for this task', async (_, over) => {
+    seed()
+    await mount(clientWith([submission(over)]))
+
+    const card = taskCard()
+    expect(card.queryByText(/Accepted submission/)).toBeNull()
+    expect(card.queryByRole('list', { name: 'Evidence exceptions at acceptance' })).toBeNull()
+  })
+
+  it('uses only current accepted facts when stale and proposed submissions are also present', async () => {
+    seed()
+    await mount(clientWith([
+      submission({ id: 'stale', task_revision: 0 }),
+      submission({ id: 'proposed', state: 'proposed' }),
+      submission({ evidence: [{ kind: 'transcript', ref: 'evidence_1', available: true }] }),
+    ]))
+
+    const card = taskCard()
+    expect(card.getByText(/Accepted submission/)).toBeDefined()
+    expect(card.queryByRole('list', { name: 'Evidence exceptions at acceptance' })).toBeNull()
+  })
+
+  it('replaces proposed and older accepted observations with the current server receipt on refresh', async () => {
+    seed()
+    const old = submission({ id: 'old', task_revision: 0, evidence: [{ kind: 'git', ref: 'evidence_old', available: false }] })
+    const client = clientWith([old, submission({ state: 'proposed' })])
+    await mount(client)
+    expect(taskCard().queryByText(/Accepted submission/)).toBeNull()
+
+    const current = submission()
+    vi.mocked(client.missionShow).mockResolvedValue({
+      mission: mission(),
+      tasks: [missionTask({ status: 'done' })],
+      attempts: [],
+      submissions: [old, current],
+      diagnostics: [],
+      questions: [],
+      plan_reviews: [],
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    })
+
+    const card = taskCard()
+    expect(card.getByText(/Accepted submission/)).toBeDefined()
+    const notes = within(card.getByRole('list', { name: 'Evidence exceptions at acceptance' }))
+    expect(notes.getByText(/transcript: Partial retained evidence/)).toBeDefined()
+    expect(notes.queryByText(/git:|Unavailable at acceptance/)).toBeNull()
+
+    vi.mocked(client.missionShow).mockResolvedValue({
+      mission: mission(),
+      tasks: [missionTask({ status: 'done', current_revision: 2, revision: missionTaskRevision({ revision: 2 }) })],
+      attempts: [],
+      submissions: [
+        current,
+        submission({ id: 'next', task_revision: 2, evidence: [{ kind: 'transcript', ref: 'evidence_2', available: true }] }),
+      ],
+      diagnostics: [],
+      questions: [],
+      plan_reviews: [],
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    })
+
+    expect(taskCard().getByText(/Accepted submission · revision 2/)).toBeDefined()
+    expect(taskCard().queryByRole('list', { name: 'Evidence exceptions at acceptance' })).toBeNull()
+  })
+})
 
 describe('mission plan gate', () => {
   it('offers the answer form in planning to the accountable human', async () => {

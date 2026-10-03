@@ -18,6 +18,8 @@ export function TakeoverDialog({ open, requesterName, seconds, pending, error, o
   return (
     <AlertDialog open={open}>
       <AlertDialogContent
+        className="z-[100]"
+        overlayClassName="z-[90]"
         onOpenAutoFocus={() => {
           const target = document.activeElement
           interrupted.current = target instanceof HTMLElement && target !== document.body ? target : null

@@ -66,20 +66,25 @@ describe('run tab strip', () => {
     const tabs = screen.getAllByRole('tab')
     const last = tabs.at(-1)!
 
-    fireEvent.keyDown(tabs[1], { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(tabs[2])
-
-    fireEvent.keyDown(tabs[2], { key: 'ArrowLeft' })
+    tabs[0].focus()
+    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' })
     expect(document.activeElement).toBe(tabs[1])
 
-    fireEvent.keyDown(tabs[1], { key: 'Home' })
+    fireEvent.keyDown(tabs[1], { key: 'End' })
+    expect(document.activeElement).toBe(last)
+
+    fireEvent.keyDown(last, { key: 'ArrowRight' })
     expect(document.activeElement).toBe(tabs[0])
 
     fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' })
     expect(document.activeElement).toBe(last)
 
-    fireEvent.keyDown(tabs[0], { key: 'End' })
-    expect(document.activeElement).toBe(last)
+    fireEvent.keyDown(last, { key: 'Home' })
+    expect(document.activeElement).toBe(tabs[0])
+
+    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' })
+    fireEvent.keyDown(tabs[1], { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(tabs[0])
 
     // Arrowing past a tab must not open it: each one costs an attach socket
     // or a patch fetch to mount. A click on the same tab proves the strip was
@@ -102,15 +107,15 @@ describe('run tab strip', () => {
   it.each(['{Enter}', '[Space]'])(
     'carries focus into the strip the next route draws, on %s',
     async (key) => {
-      useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
+      useStore.setState({ route: { name: 'events', params: { runId: active.id } } })
       render(<AppShell />)
-      screen.getByRole('tab', { name: 'Overview' }).focus()
+      screen.getByRole('tab', { name: 'Events' }).focus()
 
       fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' })
       await userEvent.keyboard(key)
 
-      expect(useStore.getState().route.name).toBe('events')
-      expect(document.activeElement?.textContent).toBe('Events')
+      expect(useStore.getState().route.name).toBe('diff')
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Diff' }))
     },
   )
 
@@ -169,14 +174,15 @@ describe('run tab strip', () => {
   it('keeps one tab stop, on the tab focus is on', () => {
     const { rerender } = render(<RunTabs runID={active.id} active="terminal" />)
     const tabs = screen.getAllByRole('tab')
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs[1]])
+    const terminal = screen.getByRole('tab', { name: 'Terminal' })
+    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([terminal])
 
-    fireEvent.keyDown(tabs[1], { key: 'End' })
+    fireEvent.keyDown(terminal, { key: 'End' })
     expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs.at(-1)])
 
     // A run-to-run switch reuses this strip, so the stop has to come back.
     rerender(<RunTabs runID="run_2" active="terminal" />)
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs[1]])
+    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([terminal])
   })
 
   it('leaves a modifier chord to the browser', () => {

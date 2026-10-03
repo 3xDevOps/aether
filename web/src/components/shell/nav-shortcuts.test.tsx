@@ -120,9 +120,9 @@ describe('navigation shortcuts', () => {
   })
 
   it('leaves a run for the board on Escape, and does nothing elsewhere', () => {
-    // The Overview tab rather than the Terminal one: same run route family,
+    // The Events tab rather than the Terminal one: same run route family,
     // no xterm to stand up for a keyboard assertion.
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('Escape')
@@ -134,15 +134,15 @@ describe('navigation shortcuts', () => {
   })
 
   it('lets a pending chord swallow the Escape that cancels it', () => {
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('g')
-    press('Escape', screen.getByRole('tab', { name: 'Overview' }))
-    expect(useStore.getState().route.name).toBe('run')
+    press('Escape', screen.getByRole('tab', { name: 'Events' }))
+    expect(useStore.getState().route.name).toBe('events')
 
     // The same Escape with no chord pending is the one that leaves.
-    press('Escape', screen.getByRole('tab', { name: 'Overview' }))
+    press('Escape', screen.getByRole('tab', { name: 'Events' }))
     expect(useStore.getState().route.name).toBe('board')
   })
 
@@ -150,7 +150,7 @@ describe('navigation shortcuts', () => {
   // the event handled. React has already closed the overlay by the time this
   // listener runs, so the only thing left to read is the event itself.
   it('leaves an Escape another layer already acted on alone', () => {
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     const dismiss = (e: KeyboardEvent) => e.preventDefault()
@@ -158,9 +158,9 @@ describe('navigation shortcuts', () => {
 
     // Dispatched at an element so the document listener is on the path,
     // exactly as a real key press reaches Radix before the window.
-    const tab = screen.getByRole('tab', { name: 'Overview' })
+    const tab = screen.getByRole('tab', { name: 'Events' })
     press('Escape', tab)
-    expect(useStore.getState().route.name).toBe('run')
+    expect(useStore.getState().route.name).toBe('events')
 
     document.removeEventListener('keydown', dismiss, { capture: true })
     press('Escape', tab)
@@ -184,7 +184,7 @@ describe('navigation shortcuts', () => {
   // hears that one and the run stays open - one press to dismiss the tooltip,
   // and the next leaves, which is the whole cost of showing hints on focus.
   it('lets a tooltip take the first Escape and no more than that', async () => {
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
     const control = screen.getByRole('button', { name: 'Keyboard shortcuts' })
     await hintOn(control)
@@ -192,7 +192,7 @@ describe('navigation shortcuts', () => {
     await userEvent.keyboard('{Escape}')
 
     expect(screen.queryByRole('tooltip')).toBeNull()
-    expect(useStore.getState().route.name).toBe('run')
+    expect(useStore.getState().route.name).toBe('events')
 
     await userEvent.keyboard('{Escape}')
 
@@ -207,7 +207,7 @@ describe('navigation shortcuts', () => {
     ['list box', '<div role="listbox"><div role="option">one</div></div>'],
     ['confirm', '<div role="alertdialog"><button type="button">ok</button></div>'],
   ])('stands down while a %s has the keyboard', (_, markup) => {
-    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('n')
@@ -222,7 +222,7 @@ describe('navigation shortcuts', () => {
     press('l', target)
 
     expect(useStore.getState().paletteDialog).toBe(null)
-    expect(useStore.getState().route.name).toBe('run')
+    expect(useStore.getState().route.name).toBe('events')
   })
 
   it('stands down while a select has the keyboard', () => {
@@ -231,7 +231,7 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().paletteDialog).toBe('launch')
     act(() => useStore.setState({ paletteDialog: null }))
 
-    press('n', screen.getByLabelText('Workspace'))
+    press('n', screen.getByRole('combobox', { name: 'Workspace' }))
 
     expect(useStore.getState().paletteDialog).toBe(null)
   })

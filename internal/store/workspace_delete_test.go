@@ -37,7 +37,7 @@ func TestWorkspaceDeletionRetiresFinishedMissionReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept"); err != nil {
+	if _, err := db.AcceptSubmission(ctx, submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept", &SubmissionEvidenceValidation{Ref: submission.Ref, Evidence: submission.Evidence}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.UpdateAttemptState(ctx, attempt.ID, run.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "retained"); err != nil {

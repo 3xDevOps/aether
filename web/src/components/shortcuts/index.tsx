@@ -68,7 +68,8 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
           'Approvals, Activity, Members, Manage workspaces, Templates, Agents, Files',
           'Surfaces, when the gateway serves their methods',
         ],
-        ['Onboarding, Settings', 'Local gateway surfaces, when a link is configured'],
+        ['Onboarding', 'Local gateway setup, when a link is configured'],
+        ['Settings', 'Choose appearance; machine settings require local capabilities'],
       ],
     },
     {

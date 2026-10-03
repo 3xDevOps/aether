@@ -71,10 +71,10 @@ export function TerminalControlBorder({
     previousTakeoverProgress.current = takeoverProgress
   }, [takeoverProgress])
 
-  const left = 0.75
-  const right = Math.max(left, size.width - 0.75)
-  const top = 0.75
-  const bottom = Math.max(top, size.height - 0.75)
+  const left = 0.5
+  const right = Math.max(left, size.width - 0.5)
+  const top = 0.5
+  const bottom = Math.max(top, size.height - 0.5)
   const x = size.width / 2
   const y = size.height / 2
   const paths = (
