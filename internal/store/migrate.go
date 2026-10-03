@@ -1433,21 +1433,22 @@ var foreignKeysOffMigrations = map[int]bool{45: true, 47: true}
 // that the busy handler does not always cover. The wait is bounded by
 // progress, not by a fixed total: an opener keeps waiting while the
 // committed version advances, however many migrations a fresh database has
-// to run under load, and gives up after five seconds without any.
+// to run under load, and gives up after five seconds without any. The
+// version is read before the first attempt because one attempt can block
+// for the whole busy_timeout; what the writer committed meanwhile is
+// progress, not a stall. A lock nobody advances behind therefore fails
+// after busy_timeout plus the stall, not the stall alone.
 func migrate(db *sql.DB) error {
 	const stall = 5 * time.Second
+	last, _ := committedVersion(db)
 	progress := time.Now()
-	last := -1
 	for {
 		err := migrateOnce(db)
 		if err == nil || !isBusy(err) {
 			return err
 		}
-		if current, ok := committedVersion(db); ok {
-			if last >= 0 && current != last {
-				progress = time.Now()
-			}
-			last = current
+		if current, ok := committedVersion(db); ok && current > last {
+			last, progress = current, time.Now()
 		}
 		if time.Since(progress) > stall {
 			return err
