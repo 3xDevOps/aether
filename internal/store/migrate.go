@@ -1428,19 +1428,43 @@ var foreignKeysOffMigrations = map[int]bool{45: true, 47: true}
 // already-applied versions (tracked in schema_migrations) are skipped, so
 // it is safe on fresh and existing databases alike, and safe under
 // concurrent Open calls on the same file (each version's DDL runs at most
-// once; see applyMigration). SQLITE_BUSY is retried with a bounded backoff
-// because initial database creation (the journal-mode switch to WAL) takes
-// exclusive locks that the busy handler does not always cover.
+// once; see applyMigration). SQLITE_BUSY is retried because initial
+// database creation (the journal-mode switch to WAL) takes exclusive locks
+// that the busy handler does not always cover. The wait is bounded by
+// progress, not by a fixed total: an opener keeps waiting while the
+// committed version advances, however many migrations a fresh database has
+// to run under load, and gives up after five seconds without any. The
+// version is read before the first attempt because one attempt can block
+// for the whole busy_timeout; what the writer committed meanwhile is
+// progress, not a stall. A lock nobody advances behind therefore fails
+// after busy_timeout plus the stall, not the stall alone.
 func migrate(db *sql.DB) error {
-	const deadline = 5 * time.Second
-	start := time.Now()
+	const stall = 5 * time.Second
+	last, _ := committedVersion(db)
+	progress := time.Now()
 	for {
 		err := migrateOnce(db)
-		if err == nil || !isBusy(err) || time.Since(start) > deadline {
+		if err == nil || !isBusy(err) {
+			return err
+		}
+		if current, ok := committedVersion(db); ok && current > last {
+			last, progress = current, time.Now()
+		}
+		if time.Since(progress) > stall {
 			return err
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// committedVersion reads the latest applied migration, reporting false
+// while the table does not exist yet or the database is busy.
+func committedVersion(db *sql.DB) (int, bool) {
+	var current int
+	if err := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+		return 0, false
+	}
+	return current, true
 }
 
 // isBusy reports whether err is SQLITE_BUSY or one of its extended codes.
