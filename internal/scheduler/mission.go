@@ -173,7 +173,7 @@ func (s *Scheduler) CompleteMission(ctx context.Context, run domain.RunID, outco
 	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
 		return fmt.Errorf("%w: worker outcome must be completed or failed", ErrInvalidTransition)
 	}
-	if err := s.closeRun(ctx, run, "", outcome, true); err != nil {
+	if err := s.closeRun(ctx, run, missionClose(outcome)); err != nil {
 		return err
 	}
 	observed, err := s.ObserveMissionRun(ctx, run)

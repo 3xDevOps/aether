@@ -301,7 +301,9 @@ type supervised struct {
 	killActor     domain.MemberID
 	// agentReport is the last execution report only; input deltas are never
 	// retained or replayed. It is cleared when observed activity un-parks the
-	// run, and mirrored into the sidecar independently of pendingInputs.
+	// run, and mirrored into the sidecar independently of pendingInputs. The
+	// turn-end idle report that starts a reported finish is recorded without
+	// the park (see ReportAgentState).
 	agentReport agentstatus.Report
 	// pendingInputs is an immutable, sorted set for this execution lifetime.
 	pendingInputs []domain.RunInputRequest
@@ -372,6 +374,28 @@ type supervised struct {
 	// listing the steerers with writing the file, and the list left on
 	// disk would be whichever finished last, not the fuller one.
 	coAuthorMu sync.Mutex
+	// reported is the outcome the agent's terminal coord.report armed this
+	// run to finish with (completed or failed), empty when unarmed, and
+	// reportedAt when it was armed (reportFinishDeadline counts from it).
+	// reportFinishing is set while finishReported owns the finish.
+	reported        domain.RunStatus
+	reportedAt      time.Time
+	reportFinishing bool
+	// blockedReason is the agent's latest blocked report as a status
+	// reason, and blockedShown whether a park has shown it yet; the first
+	// resume after that park clears both (see ReportBlocked).
+	// blockedReportID is the last blocked report applied and
+	// blockedReportAt when it was finalized, kept after the reason clears
+	// so neither a replay of it nor an older report retried after it can
+	// bring a reason back.
+	blockedReason   string
+	blockedShown    bool
+	blockedReportID string
+	blockedReportAt time.Time
+	// relaunchedAt is when the last relaunch reopened the run, zero for a
+	// run never relaunched. A report finalized before it speaks for a
+	// launch that relaunch ended.
+	relaunchedAt time.Time
 }
 
 type pendingRun struct {
@@ -586,6 +610,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.finishOverdueReports()
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)

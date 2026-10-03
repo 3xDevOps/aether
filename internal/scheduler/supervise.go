@@ -157,9 +157,10 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 }
 
 // finalize implements the pinned exit handling (§6.6): stop the watches,
-// commit results ("aether:" on clean exit, "wip:" otherwise), publish the
-// run branch, and record the outcome. Mission containers are retained unless
-// killed; ordinary exits follow the immediate destruction path.
+// commit results ("aether:" on clean exit or a reported success, "wip:"
+// otherwise), publish the run branch, and record the outcome. Mission
+// containers are retained unless killed; ordinary exits follow the
+// immediate destruction path.
 // The caller has already released entry.lifecycleMu; the finalizing flag
 // keeps other destructive lifecycle operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
@@ -170,10 +171,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 	s.mu.Lock()
 	killed, killActor := entry.killRequested, entry.killActor
+	// The agent's terminal report outranks its exit code. A run a human
+	// already closed keeps that close.
+	reported := entry.reported
+	if entry.status.Terminal() && entry.status != reported {
+		reported = ""
+	}
 	s.mu.Unlock()
 
 	msg := "wip: "
-	if code == 0 && !killed {
+	if !killed && (reported == domain.RunCompleted || (reported == "" && code == 0)) {
 		msg = "aether: "
 	}
 	committed, commitErr := s.commitAll(ctx, entry.runID, msg+taskLine(entry.task))
@@ -190,23 +197,30 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// after the handoff so Close can relabel while runtime cleanup is pending.
 	entry.lifecycleMu.Lock()
 	var (
-		to     domain.RunStatus
-		reason string
-		actor  domain.MemberID
+		to       domain.RunStatus
+		reason   string
+		actor    domain.MemberID
+		byReport bool
 	)
 	switch {
 	case killed:
 		to, reason, actor = domain.RunAbandoned, "killed", killActor
+	case reported != "":
+		to, reason, byReport = reported, reportedClose(reported).reason, true
 	case code == 0:
-		to, reason = domain.RunCompleted, "agent exited; results committed"
+		to, reason = domain.RunCompleted, exitedCompletedReason
 	default:
-		to, reason = domain.RunFailed, fmt.Sprintf("agent exited %d", code)
+		to, reason = domain.RunFailed, fmt.Sprintf(exitedFailedReasonPrefix+"%d", code)
 	}
 	s.mu.Lock()
 	// A Kill accepted after the snapshot above still owns the outcome: the
-	// caller was told the kill succeeded.
-	if entry.killRequested {
-		to, reason, actor = domain.RunAbandoned, "killed", entry.killActor
+	// caller was told the kill succeeded. A report armed while the results
+	// were committing still outranks the exit code.
+	switch {
+	case entry.killRequested:
+		to, reason, actor, byReport = domain.RunAbandoned, "killed", entry.killActor, false
+	case reported == "" && entry.reported != "" && !entry.status.Terminal():
+		to, reason, byReport = entry.reported, reportedClose(entry.reported).reason, true
 	}
 	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0
 	if retain {
@@ -228,7 +242,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		entry.evidencePending = true
 		reason = retainedCompletionReason
 	}
-	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
+	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, byReport)
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
 		slog.Warn("scheduler: record exit status", "run", entry.runID, "error", err)
@@ -241,6 +255,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 	identity := ""
 	s.mu.Lock()
+	// The status the row ended with: a report handed off since the
+	// transition may have overridden the exit's (see overrideExitLocked).
+	to = entry.status
 	if s.runs[entry.runID] == entry {
 		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
 		entry.evidenceIdentity = identity
@@ -488,8 +505,8 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	var transitionErr error
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry && entry.retained {
-		if run.Status == domain.RunMerged || run.Status == domain.RunAbandoned {
-			transitionErr = s.transitionLocked(ctx, entry.runID, run.WorkspaceID, run.Status, run.Status, reason, "")
+		if released, ok := releasedReason(run.Status, run.Reason, reason); ok {
+			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, "")
 		}
 		entry.retained = false
 		entry.retainedUntil = nil
@@ -579,14 +596,30 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention,
-					fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second)), "")
+				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
+				// The stall is the turn end only on a harness that cannot
+				// report one; elsewhere the agent is quiet mid-turn and the
+				// blocked reason waits for its turn-end report.
+				showsBlocked := e.blockedReason != "" && e.reporter == harness.ReporterNone
+				if showsBlocked {
+					reason = e.blockedReason
+				}
+				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
+				if err == nil && showsBlocked && !e.blockedShown {
+					e.blockedShown = true
+					if serr := s.writeSidecar(e.sidecar()); serr != nil {
+						slog.Warn("scheduler: persist shown blocked reason", "run", e.runID, "error", serr)
+					}
+				}
 			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				e.agentReport = agentstatus.Report{}
 				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
+				if e.blockedShown {
+					e.blockedReason, e.blockedShown = "", false
+				}
 				if serr := s.writeSidecar(e.sidecar()); serr != nil {
 					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
 				}

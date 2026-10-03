@@ -80,6 +80,7 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
   'run.deleted': () => 'record removed',
   'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
   'run.archived': (p) => (p.archived_at ? 'archived' : 'restored'),
+  'run.outcome_seen': () => 'owner opened the finished run',
   'run.title': (p) => String(p.title ?? ''),
   'run.agent': (p) => join([p.kind, p.tool, p.detail]),
   'run.diff': (p) => suffix(fileCount(p.files), 'changed'),

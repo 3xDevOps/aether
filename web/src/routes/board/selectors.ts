@@ -2,7 +2,7 @@
 // input so the component can memoize on exactly what it reads.
 
 import { useMemo } from 'react'
-import { runState, type PresentationState } from '@/lib/status'
+import { runState, waitsOnHuman, type PresentationState } from '@/lib/status'
 import type { Member, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { isUnseen, type Ack } from '@/store/board'
@@ -47,7 +47,8 @@ export const bucketLabel: Record<Bucket, string> = {
 /**
  * Lifecycle to bucket. `needs-attention` covers turn-end idle and stalls;
  * outstanding requests are a separate indicator, never a bucket override.
- * A clean exit presents as `completed`, which lands in Done, not here.
+ * A clean exit presents as `completed`, which lands in Done, not here;
+ * `board()` lists one whose agent report awaits review here instead.
  */
 export function bucketOf(state: PresentationState): Bucket {
   switch (state) {
@@ -94,7 +95,7 @@ export function board(s: BoardInput): BoardData {
       archivedCards.push(card)
       continue
     }
-    columns[bucketOf(state)].push(card)
+    columns[waitsOnHuman(run, state) ? 'needs-you' : bucketOf(state)].push(card)
   }
 
   const newestFirst = (a: BoardCard, b: BoardCard) =>

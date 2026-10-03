@@ -185,6 +185,24 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 	}
 }
 
+// TestCLISkillOutcomesFollowTheRole: an ordinary run learns that a terminal
+// report finishes it; a mission role keeps the worker outcome text.
+func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
+	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": missionOutcomes} {
+		status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: []string{protocol.MethodCoordInbox}}
+		if role == "worker" {
+			status.Assignment = &protocol.CoordMissionAssignment{Role: role, MissionID: "mission-current"}
+		}
+		var out bytes.Buffer
+		if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
+			t.Fatalf("%s skill = %d, %v", role, code, err)
+		}
+		if raw := out.String(); !strings.Contains(raw, want) {
+			t.Fatalf("%s skill lacks its outcome guidance: %s", role, raw)
+		}
+	}
+}
+
 func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
 	var out bytes.Buffer
 	oldSocketPath := defaultSocketPath

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { awaitingReview, runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { mapCardHeight } from '@/routes/board/map-layout'
@@ -217,9 +217,18 @@ export function RunCard({
             </span>
             {unseen && <span id={unseenId} className="sr-only">Unseen</span>}
           </button>
-          {(input.count > 0 || state === 'needs-attention') && summary && (
+          {(input.count > 0 || state === 'needs-attention') && summary ? (
             <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
               {summary}
+            </p>
+          ) : awaitingReview(run) && (
+            <p
+              className={cn(
+                'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 text-muted-foreground coarse:line-clamp-1',
+                run.status === 'failed' ? 'border-state-failed/60' : 'border-state-done/60',
+              )}
+            >
+              The agent reported {run.status === 'failed' ? 'failure' : 'success'}; open the run to review it.
             </p>
           )}
           <div className="flex h-5 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

@@ -43,7 +43,10 @@ export interface RunsSlice {
     to: RunStatus,
     reason: string | undefined,
     time: string,
+    outcomeUnseen?: boolean,
   ) => void
+  /** Clears `outcome_unseen`: the owner has opened the run. */
+  applyOutcomeSeen: (runID: string) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
@@ -85,17 +88,29 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
       }
     }),
-  applyRunStatus: (runID, to, reason, time) =>
+  applyRunStatus: (runID, to, reason, time, outcomeUnseen = false) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
-      const next: RunRecord = { ...current, status: to, reason, stateChangedAt: time }
+      const next: RunRecord = {
+        ...current,
+        status: to,
+        reason,
+        stateChangedAt: time,
+        outcome_unseen: outcomeUnseen,
+      }
       if (to === 'running' && !next.started_at) next.started_at = time
       if (isTerminal(to)) {
         next.finished_at = time
         next.pending_inputs = []
       }
       return { runs: { ...s.runs, [runID]: next } }
+    }),
+  applyOutcomeSeen: (runID) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current?.outcome_unseen) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, outcome_unseen: false } } }
     }),
 
   applyRunInput: (runID, requests) =>

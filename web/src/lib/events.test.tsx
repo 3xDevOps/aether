@@ -33,6 +33,12 @@ describe('feed rows', () => {
     expect(row.getByRole('img', { name: alice.display_name })).toBeDefined()
   })
 
+  it('names the owner opening a reported run', () => {
+    const text = renderRow('run.outcome_seen', {}).textContent ?? ''
+    expect(text).toContain('Outcome seen')
+    expect(text).toContain('owner opened the finished run')
+  })
+
   it('falls back to the wire string for a type it has never heard of', () => {
     expect(typeLabel('run.telepathy')).toBe('run.telepathy')
     expect(renderRow('run.telepathy', {}).textContent).toContain('run.telepathy')

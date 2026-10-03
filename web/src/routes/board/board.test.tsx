@@ -613,6 +613,43 @@ describe('board', () => {
     expect(done.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
   })
 
+  it('deals an unreviewed agent outcome into Idle with its finished state, until it is seen', () => {
+    const success = run({
+      id: 'run_reported_success',
+      task: 'agent says done',
+      status: 'completed',
+      reason: 'agent reported success',
+      outcome_unseen: true,
+      finished_at: '2026-08-14T10:30:00Z',
+    })
+    const failure = run({
+      id: 'run_reported_failure',
+      task: 'agent says stuck',
+      status: 'failed',
+      reason: 'agent reported failure; retained container',
+      outcome_unseen: true,
+      finished_at: '2026-08-14T10:31:00Z',
+    })
+    seed([success, failure])
+    render(<Board />)
+
+    const idle = column('Idle')
+    expect(idle.getByText('The agent reported success; open the run to review it.')).toBeDefined()
+    expect(idle.getByText('The agent reported failure; open the run to review it.')).toBeDefined()
+    // The real state, not the amber needs-attention one.
+    expect(idle.getByLabelText('Done')).toBeDefined()
+    expect(idle.getByLabelText('Failed')).toBeDefined()
+    expect(idle.queryByLabelText('Idle')).toBeNull()
+    // A report to review is not a structured input request.
+    expect(idle.queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(column('Done').queryByText('agent says done')).toBeNull()
+
+    act(() => useStore.getState().applyOutcomeSeen(success.id))
+    expect(column('Done').getByText('agent says done')).toBeDefined()
+    expect(column('Done').queryByText(/open the run to review it/)).toBeNull()
+    expect(idle.getByText('agent says stuck')).toBeDefined()
+  })
+
   it('keeps the launch action in the empty-board notice only', () => {
     seedAs(alice, [working])
     render(<Board />)

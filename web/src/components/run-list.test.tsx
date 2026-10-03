@@ -9,7 +9,7 @@ describe('run list', () => {
   it('bounces a working row and opens it on the terminal', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
     const listed = toRecord(run())
-    const rows = [{ run: listed, state: runState(listed.status), owner: alice }]
+    const rows = [{ run: listed, state: runState(listed.status), waitsOnHuman: false, owner: alice }]
     const { container } = render(<RunList runs={rows} empty="No runs yet" />)
 
     expect(container.querySelector('.working-dots')).not.toBeNull()
@@ -53,7 +53,7 @@ describe('run list empty states', () => {
     const taskless = toRecord(run({ task: '' }))
     render(
       <RunList
-        runs={[{ run: taskless, state: runState(taskless.status), owner: alice }]}
+        runs={[{ run: taskless, state: runState(taskless.status), waitsOnHuman: false, owner: alice }]}
         empty="No runs yet"
       />,
     )

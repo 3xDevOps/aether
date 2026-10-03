@@ -253,6 +253,172 @@ func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
 	}
 }
 
+// TestCoordReportTerminalSlot pins the report slot: blocked reports never
+// use it, one terminal report holds it until a relaunch supersedes it, and a
+// superseded report's key is refused rather than replayed, since a replay
+// would tell the reopened agent its new report was accepted when nothing
+// finishes the run.
+func TestCoordReportTerminalSlot(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	report := func(outcome CoordOutcome, key string) *CoordReport {
+		return &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: outcome, Summary: string(outcome), IdempotencyKey: key}
+	}
+
+	for _, key := range []string{"blocked-1", "blocked-2"} {
+		if err := db.AppendCoordReport(ctx, report(CoordOutcomeBlocked, key)); err != nil {
+			t.Fatalf("blocked report %s: %v", key, err)
+		}
+	}
+	success := report(CoordOutcomeSuccess, "success-1")
+	if err := db.AppendCoordReport(ctx, success); err != nil {
+		t.Fatalf("success after blocked: %v", err)
+	}
+	replay := report(CoordOutcomeSuccess, "success-1")
+	if err := db.AppendCoordReport(ctx, replay); err != nil || replay.ID != success.ID {
+		t.Fatalf("same-key replay = %+v, %v; want report %s", replay, err, success.ID)
+	}
+	for _, next := range []*CoordReport{report(CoordOutcomeFailure, "failure-1"), report(CoordOutcomeBlocked, "blocked-3")} {
+		if err := db.AppendCoordReport(ctx, next); !errors.Is(err, ErrCoordReportConflict) {
+			t.Fatalf("%s report after success = %v, want ErrCoordReportConflict", next.Outcome, err)
+		}
+	}
+
+	if err := db.SupersedeCoordTerminalReport(ctx, run.ID); err != nil {
+		t.Fatalf("SupersedeCoordTerminalReport: %v", err)
+	}
+	superseded, err := db.GetCoordReport(ctx, success.ID)
+	if err != nil || superseded.SupersededAt == nil {
+		t.Fatalf("superseded report = %+v, %v; want superseded_at set", superseded, err)
+	}
+	if err := db.AppendCoordReport(ctx, report(CoordOutcomeSuccess, "success-1")); !errors.Is(err, ErrCoordReportSuperseded) {
+		t.Fatalf("replay of superseded report = %v, want ErrCoordReportSuperseded", err)
+	}
+	again := report(CoordOutcomeSuccess, "success-2")
+	if err := db.AppendCoordReport(ctx, again); err != nil {
+		t.Fatalf("success after supersede: %v", err)
+	}
+	if err := db.AppendCoordReport(ctx, report(CoordOutcomeSuccess, "success-3")); !errors.Is(err, ErrCoordReportConflict) {
+		t.Fatalf("second success after supersede = %v, want ErrCoordReportConflict", err)
+	}
+}
+
+// TestCoordReportSupersedeRetiresAPendingReservation: a reservation whose
+// evidence capture failed holds the terminal slot. A relaunch supersedes it
+// too, so the reopened agent can report under a new key, and a retry of the
+// old key gets the superseded-key conflict. A capture that finishes after
+// the relaunch cannot finalize the superseded reservation either.
+func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	pending := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1"}
+	if _, err := db.ReserveCoordReport(ctx, pending); err != nil {
+		t.Fatalf("ReserveCoordReport: %v", err)
+	}
+	blocked := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeBlocked, Summary: "stuck", IdempotencyKey: "blocked-1"}
+	if _, err := db.ReserveCoordReport(ctx, blocked); !errors.Is(err, ErrCoordReportConflict) {
+		t.Fatalf("new key while the reservation is pending = %v, want ErrCoordReportConflict", err)
+	}
+	if err := db.SupersedeCoordTerminalReport(ctx, run.ID); err != nil {
+		t.Fatalf("SupersedeCoordTerminalReport: %v", err)
+	}
+	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportPending || got.SupersededAt == nil {
+		t.Fatalf("pending report after supersede = %+v, %v; want it pending and superseded", got, err)
+	}
+	late := *pending
+	late.EvidenceRefs = []string{"evidence-late"}
+	if finalized, err := db.FinalizeCoordReport(ctx, &late); finalized || !errors.Is(err, ErrCoordReportSuperseded) {
+		t.Fatalf("finalize after supersede = %v, %v; want ErrCoordReportSuperseded", finalized, err)
+	}
+	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportPending || got.FinalizedAt != nil {
+		t.Fatalf("superseded reservation after a late finalize = %+v, %v; want it still pending", got, err)
+	}
+	if _, err := db.GetCoordReportPublication(ctx, pending.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("publication of the superseded reservation = %v, want ErrNotFound", err)
+	}
+	retry := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1"}
+	if _, err := db.ReserveCoordReport(ctx, retry); !errors.Is(err, ErrCoordReportSuperseded) {
+		t.Fatalf("retry of the superseded key = %v, want ErrCoordReportSuperseded", err)
+	}
+	for _, next := range []*CoordReport{
+		{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeBlocked, Summary: "stuck", IdempotencyKey: "blocked-2"},
+		{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done again", IdempotencyKey: "success-2"},
+	} {
+		if _, err := db.ReserveCoordReport(ctx, next); err != nil {
+			t.Fatalf("%s report under a new key after supersede: %v", next.Outcome, err)
+		}
+	}
+}
+
+// TestCoordReportSlotMigrationKeepsReportsAndPublications upgrades a
+// database from the version before the terminal-slot rebuild. The rebuild
+// drops coord_reports, which publications reference ON DELETE CASCADE, so
+// both rows must survive it.
+func TestCoordReportSlotMigrationKeepsReportsAndPublications(t *testing.T) {
+	const slotVersion = 47
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, execErr := raw.Exec(`CREATE TABLE schema_migrations (
+		version    INTEGER PRIMARY KEY,
+		applied_at INTEGER NOT NULL
+	)`); execErr != nil {
+		t.Fatalf("create schema_migrations: %v", execErr)
+	}
+	for v := 1; v < slotVersion; v++ {
+		if _, execErr := raw.Exec(migrations[v-1]); execErr != nil {
+			t.Fatalf("apply v%d: %v", v, execErr)
+		}
+		if _, execErr := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, v); execErr != nil {
+			t.Fatalf("record v%d: %v", v, execErr)
+		}
+	}
+	if _, execErr := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at)
+			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+			VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
+		INSERT INTO coord_reports (id, workspace_id, run_id, outcome, summary, idempotency_key, state, created_at, finalized_at)
+			VALUES ('rep1', 'w1', 'r1', 'success', 'done', 'k1', 'finalized', 1, 2);
+		INSERT INTO coord_report_publications (report_id, event_id, publication_state, created_at)
+			VALUES ('rep1', 'coord-report:rep1', 'pending', 2);
+	`, testKey(t, "")); execErr != nil {
+		t.Fatalf("seed rows: %v", execErr)
+	}
+	if closeErr := raw.Close(); closeErr != nil {
+		t.Fatalf("close raw: %v", closeErr)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (report slot migration): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	got, err := db.GetCoordReport(ctx, "rep1")
+	if err != nil || got.Outcome != CoordOutcomeSuccess || got.State != CoordReportFinalized || got.SupersededAt != nil {
+		t.Fatalf("migrated report = %+v, %v; want the finalized, active success", got, err)
+	}
+	pub, err := db.GetCoordReportPublication(ctx, "rep1")
+	if err != nil || pub.State != CoordReportPublicationPending {
+		t.Fatalf("migrated publication = %+v, %v; want the pending outbox row", pub, err)
+	}
+	conflict := &CoordReport{WorkspaceID: "w1", RunID: "r1", Outcome: CoordOutcomeBlocked, Summary: "late", IdempotencyKey: "k2"}
+	if err := db.AppendCoordReport(ctx, conflict); !errors.Is(err, ErrCoordReportConflict) {
+		t.Fatalf("report after migrated success = %v, want ErrCoordReportConflict", err)
+	}
+}
+
 // TestCoordMigrationUpgradesPreviousVersion builds a database one schema
 // version behind the mailbox slot, seeds rows, then opens it: the upgrade
 // must add run_messages without losing anything, and a delivery token

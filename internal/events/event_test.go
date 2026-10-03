@@ -18,6 +18,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunProtectedPayload{Protected: true},
 		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z"), DeletesAt: strPtr("2024-01-16T03:04:05Z")},
 		RunArchivedPayload{},
+		RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, Reason: "agent reported success", OutcomeUnseen: true},
+		RunOutcomeSeenPayload{},
 		RunCostPayload{InputTokens: 1200, OutputTokens: 340, CostUSD: 0.42, Metered: true},
 		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
 		PresencePayload{State: PresenceWatching},

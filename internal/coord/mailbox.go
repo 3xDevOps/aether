@@ -533,9 +533,10 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	return r, nil
 }
 
-// CoordReport persists one bounded outcome per run. A report slot is reserved
-// before capture so a second key cannot race it, and capture failure leaves
-// the pending reservation retryable by that same key.
+// CoordReport persists one bounded outcome. A run holds any number of
+// blocked reports and one active terminal report; the report is reserved
+// before capture so a second terminal key cannot race it, and capture failure
+// leaves the pending reservation retryable by that same key.
 func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.CoordReportParams) (protocol.CoordReportResult, *protocol.Error) {
 	const method = protocol.MethodCoordReport
 	if s.cfg.Disabled {
@@ -632,12 +633,17 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		WorkspaceID: self.WorkspaceID, RunID: run, Outcome: store.CoordOutcome(p.Outcome),
 		Summary: summary, NextAction: nextAction, EvidenceRefs: refs, IdempotencyKey: p.IdempotencyKey,
 	}
+	supersededMessage := fmt.Sprintf("%s: the report under idempotency_key %q was superseded when the run was relaunched; report again with a new idempotency key", method, p.IdempotencyKey)
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
-		errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
-		message := fmt.Sprintf("%s: run %s already has a report under another idempotency key", method, run)
-		if errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
+		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||
+		errors.Is(err, store.ErrCoordReportSuperseded) {
+		message := fmt.Sprintf("%s: run %s already reported success or failure under another idempotency key", method, run)
+		switch {
+		case errors.Is(err, store.ErrCoordReportIdempotencyConflict):
 			message = fmt.Sprintf("%s: idempotency_key %q was used with different report inputs", method, p.IdempotencyKey)
+		case errors.Is(err, store.ErrCoordReportSuperseded):
+			message = supersededMessage
 		}
 		return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: message}
 	}
@@ -678,7 +684,11 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		report.EvidenceRefs = append(report.EvidenceRefs, packet.ID)
 	}
 	if report.State == store.CoordReportPending {
-		if _, err = s.cfg.Mail.FinalizeCoordReport(ctx, report); err != nil {
+		_, err = s.cfg.Mail.FinalizeCoordReport(ctx, report)
+		if errors.Is(err, store.ErrCoordReportSuperseded) {
+			return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: supersededMessage}
+		}
+		if err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
 	}
@@ -868,6 +878,9 @@ func (s *Service) publishReportEvidence(ctx context.Context, report *store.Coord
 	})
 	if err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
 		return fmt.Errorf("publish evidence packet: %w", err)
+	}
+	if err := s.applyRunOutcome(ctx, report); err != nil {
+		return err
 	}
 	eventID := store.CoordReportEventID(report.ID)
 	if err := s.cfg.Mail.MarkCoordReportPublished(ctx, report.ID, eventID); err != nil {

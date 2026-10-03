@@ -607,16 +607,14 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
-	return s.closeRun(ctx, run, actor, outcome, false)
+	return s.closeRun(ctx, run, humanClose(outcome, actor))
 }
 
 // closeRun shares exact-container retention between human Close and accepted
 // mission outcomes. Mission completion never makes a worker relaunchable.
-func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus, mission bool) error {
-	closeReason := retainedCloseReason
-	if mission {
-		closeReason = retainedCompletionReason
-	}
+func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSpec) error {
+	outcome, actor, mission := spec.outcome, spec.actor, spec.mission
+	closeReason := spec.retained
 
 	s.mu.Lock()
 	if pending := s.pending[run]; pending != nil {
@@ -809,6 +807,20 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain
 		return err
 	}
 
+	return s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, alreadyPaused, assigned, spec)
+}
+
+// closeLiveLocked ends a live run's lifecycle with spec. A TUI or mission
+// run is detached, paused, committed, published, and retained in its exact
+// container; a headless run or a TUI pause failure takes the immediate
+// stop-and-destroy path. The caller holds entry.lifecycleMu and passes the
+// status, container, pause state and mission assignment it read under s.mu.
+func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, status domain.RunStatus, workspace domain.WorkspaceID, cid runtime.ID, mode domain.LaunchMode, alreadyPaused, assigned bool, spec closeSpec) error {
+	run, outcome, actor, mission := entry.runID, spec.outcome, spec.actor, spec.mission
+	closeReason := spec.retained
+	if assigned {
+		closeReason = retainedCompletionReason
+	}
 	if (mode == domain.LaunchTUI || mission || assigned) && !status.Terminal() {
 		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 			return err
@@ -854,7 +866,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain
 			deadline := time.Now().UTC().Add(ttl)
 			retentionReason := closeReason
 			if ttl < 0 {
-				retentionReason = "closed"
+				retentionReason = spec.reason
 			}
 			s.mu.Lock()
 			if s.runs[run] != entry {
@@ -887,7 +899,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, retentionReason, actor)
+			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, retentionReason, actor, spec.reported)
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
@@ -920,7 +932,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, actor domain
 	// terminal work before stopping the runtime; a failed capture retains the
 	// owner for the bounded retry sweep.
 	s.mu.Lock()
-	err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
+	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.reported)
 	if err == nil && entry != nil {
 		entry.evidenceIdentity = "none"
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {

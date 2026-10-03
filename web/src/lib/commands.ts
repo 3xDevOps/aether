@@ -389,8 +389,9 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   }
   if (
     run.mode === 'tui' &&
-    runState(run.status) === 'done' &&
-    run.reason === 'closed; retained container' &&
+    (run.reason === 'closed; retained container'
+      ? runState(run.status) === 'done'
+      : finished && agentReportRetained.has(run.reason ?? '')) &&
     cap.hasMethod('run.relaunch') &&
     maySteer
   ) {
@@ -422,6 +423,12 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   return list
 }
+
+/** An agent report finished a TUI run and kept its container to relaunch. */
+const agentReportRetained = new Set([
+  'agent reported success; retained container',
+  'agent reported failure; retained container',
+])
 
 /**
  * Whether the run has stopped for good. A pending approval only ever reads as

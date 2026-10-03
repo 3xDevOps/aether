@@ -10,6 +10,7 @@ export const eventLabel = {
   'run.deleted': 'Run deleted',
   'run.protected': 'Run protection',
   'run.archived': 'Run archive',
+  'run.outcome_seen': 'Outcome seen',
   'run.agent': 'Agent',
   'run.diff': 'Diff',
   'run.cost': 'Cost',

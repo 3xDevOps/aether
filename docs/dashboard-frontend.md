@@ -838,8 +838,12 @@ owns the primary New run action.
 the agent's turn ended or a run stalled; the reason strip retains that context.
 `queued`/`provisioning`/`running` is Working; `completed` and final statuses
 are Done. Outstanding requests do not override these buckets: a run can be
-**Working** and **Needs input** at the same time. Cards sort by last execution
-state change, newest first. The flat bordered
+**Working** and **Needs input** at the same time. A run awaiting review
+(below) is also in Idle; it does not raise **Needs input**. Every surface
+that lists runs waiting on a human - Cards, Map, the sidebar's Status
+grouping and sort, the palette - asks `waitsOnHuman(run, state)` in
+`src/lib/status.ts`. Cards sort by last execution state change, newest
+first. The flat bordered
 columns stack on narrow screens and sit side by side from the `lg`/1024px
 breakpoint, where subgrid keeps their column headers the same height.
 
@@ -907,7 +911,7 @@ Switching Cards to Map or back moves matching cards between their measured
 rectangles, including width and height, over 460ms. Reduced-motion preference
 skips this movement.
 
-Two things the buckets do not come from the run status alone:
+Three things the buckets do not come from the run status alone:
 
 - **Paused** is a badge, not a bucket. A paused run still reads `running` in
   the domain enum, so the wire `Run` carries a `paused` field the gateway
@@ -927,6 +931,22 @@ Two things the buckets do not come from the run status alone:
   and the board header marks everything at once. They last only as long as the
   tab - nothing is acknowledged when the page loads, so a fresh tab shows what
   is waiting rather than remembering that yesterday's you looked at it.
+- **Awaiting review** marks a run an agent finished with
+  `aether-internal report --outcome success|failure` (status `completed` or
+  `failed`) that its owner has not opened yet. The server owns the flag
+  (`outcome_unseen`, below); it is shared by every viewer and survives a
+  reload, unlike the tab-local Unseen ack. The card sits in Idle but
+  keeps its Done or Failed dot and chip, and its reason line reads "The agent
+  reported success; open the run to review it." (or failure) in the done or
+  failed tone. `runState` is unchanged, so Clear done, archive eligibility and
+  finished-run checks still treat the run as finished; Clear done only sees it
+  once it has moved to Done. `watchOutcomeSeen` (`src/store/outcome-seen.ts`)
+  calls `run.seen` when the owner reveals the run through `navigate()`, or is
+  already on it in a visible tab when the flag arrives. It makes one call per
+  reveal: a refusal shows the server's error and is not retried until the
+  owner opens the run again. The card moves to Done only when the
+  `run.outcome_seen` event or the method result clears the flag; a non-owner
+  opening the run changes nothing.
 
 **Archiving hides a finished run from Done without deleting it.** A run
 carries `archived_at`/`deletes_at` once archived. Every hide guard -
@@ -1003,6 +1023,15 @@ an older route, room or launch response cannot resurrect a closed request.
 A terminal run upsert clears native requests instead.
 Mission relationship refreshes replace only relationship fields. Input events
 for unknown runs follow the existing fetch-first and ordered-cursor rules.
+
+**Awaiting review is server state.** `Run.outcome_unseen` on `run.get` and
+`run.list` is true while an agent-reported outcome is unopened by the owner;
+absent (an older gateway) means false. Every `run.status` event sets the flag
+to its payload's `outcome_unseen`, the row's flag after that event - a
+same-status re-label such as retention expiry included - so a later close or
+relaunch clears it. A
+`run.outcome_seen` event, or the Run `run.seen` returns, clears it. `run.seen`
+is gated on `cap.hasMethod('run.seen')`, owner-only, and idempotent.
 
 **The paused badge hydrates from the same snapshot.** With `paused` on the
 wire (above), a reload shows the badge for a run paused earlier, and the
@@ -2888,8 +2917,11 @@ accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
 
 Run actions cover the retained-run contract: Close chooses merged or abandoned,
-while Relaunch appears only for an explicitly closed retained TUI Done run
-before its TTL expires; expired or unavailable runs have no Relaunch action.
+while Relaunch appears only for a retained TUI run before its TTL expires:
+one explicitly closed as Done (`closed; retained container`), or one an agent
+report finished (`agent reported success; retained container`,
+`agent reported failure; retained container`). Expired or unavailable runs
+have no Relaunch action.
 Sidebar tests cover Status and Member disclosure independently, with `Done`
 collapsed by default in Status and every Member group expanded.
 

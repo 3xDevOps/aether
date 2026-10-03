@@ -554,6 +554,21 @@ func (f *fakeRuns) SetArchived(_ context.Context, run domain.RunID, actor domain
 	}
 	return out, nil
 }
+
+// Seen returns a canned run with the flag cleared; the owner rule,
+// idempotency, and events are tested against the scheduler directly in
+// internal/scheduler/reported_test.go.
+func (f *fakeRuns) Seen(_ context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
+	if err := f.record(fmt.Sprintf("seen:%s:%s", run, actor)); err != nil {
+		return nil, err
+	}
+	return &domain.Run{
+		ID: run, WorkspaceID: "ws", MemberID: actor,
+		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
+		Status: domain.RunCompleted, CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (f *fakeRuns) Pause(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("pause:%s:%s", run, actor))
 }

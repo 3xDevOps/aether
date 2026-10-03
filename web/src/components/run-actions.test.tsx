@@ -251,11 +251,23 @@ test('a retained TUI close promotes Relaunch alongside Archive', async () => {
 })
 
 test.each([
+  { status: 'completed', reason: 'agent reported success; retained container' },
+  { status: 'failed', reason: 'agent reported failure; retained container' },
+] satisfies Partial<Run>[])('an agent report that kept its container offers Relaunch: %j', async (over) => {
+  const record = seed({ run: { ...over, mode: 'tui' } })
+  render(<RunActions run={record} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Relaunch' }))
+  await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith(record.id))
+})
+
+test.each([
   { status: 'running' },
   { status: 'failed', mode: 'tui', reason: 'closed; retained container' },
   { status: 'interrupted', mode: 'tui', reason: 'closed; retained container' },
   { status: 'merged', mode: 'tui', reason: 'retained container expired' },
   { status: 'merged', mode: 'headless', reason: 'closed; retained container' },
+  { status: 'completed', mode: 'tui', reason: 'agent reported success' },
+  { status: 'completed', mode: 'tui', reason: 'worker finished; retained container' },
 ] satisfies Partial<Run>[])('Relaunch is absent when ineligible: %j', async (over) => {
   render(<RunActions run={seed({ run: over })} />)
   expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()

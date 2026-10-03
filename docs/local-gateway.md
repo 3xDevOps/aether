@@ -455,6 +455,18 @@ after that date (see
 Both calls publish a `run.archived` event carrying the same two fields -
 null on both means the run was restored - and a matching timeline note.
 
+`run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. A run that
+an agent's `coord.report` finished (see
+[coordination.md](coordination.md)) has `run.outcome_unseen` set until its
+owner opens it; `run.seen` clears the flag. Only the run's current owner may
+call it; anyone else, admins included, gets `-32001`. Clearing publishes a
+`run.outcome_seen` event with an empty payload and a timeline note; calling
+it on a run whose flag is already clear returns the run and publishes
+nothing. Every `run.status` payload carries `outcome_unseen` as the run's
+flag after that event, including a same-status re-label such as retention
+expiry: `true` from the finish a report causes until the owner opens the run,
+`false` after a later status change such as a close or relaunch.
+
 `run.relaunch` is another proxied control-channel method:
 
 ```sh
@@ -463,9 +475,11 @@ aether relaunch <run-id>
 
 The equivalent gateway call is `POST /api/v1/run.relaunch` with
 `{"run_id":"run_..."}` and a `RunResult` response. It is eligible only for a
-TUI run in the **Done** state (`merged` or `abandoned`) whose `run.close`
-operation retained its container (`reason` is `closed; retained container`)
-and whose `--run-container-ttl` deadline has not passed. Relaunch resumes the
+TUI run that retained its container and whose `--run-container-ttl` deadline
+has not passed: `merged` or `abandoned` after `run.close` (`reason` is
+`closed; retained container`), `completed` after the agent reported success
+(`agent reported success; retained container`), or `failed` after it reported
+failure (`agent reported failure; retained container`). Relaunch resumes the
 same run row in the same container and checkout; it does not create a new run
 or container and does not perform a new launch or disk-floor admission.
 

@@ -110,8 +110,12 @@ type Store interface {
 	// column is always overwritten, empty clears it), plus started/finished
 	// timestamps when non-nil, leaving every other field untouched. This
 	// is the mutator lifecycle transitions should use so they cannot
-	// clobber concurrent writes to other fields.
+	// clobber concurrent writes to other fields. A status change clears
+	// outcome_unseen; a same-status write keeps it.
 	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// FinishRunReported is UpdateRunStatus that also sets outcome_unseen
+	// in the same write, for the transition an agent's report causes.
+	FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
@@ -124,6 +128,9 @@ type Store interface {
 	// SetRunArchived is the narrow, conditional archive/restore mutator;
 	// see its doc comment on the DB implementation for the exact rules.
 	SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error)
+	// ClearRunOutcomeUnseen clears outcome_unseen while owner owns the
+	// run, and reports whether this call changed it.
+	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering
 	// it, and reports whether this call was the one that added them.

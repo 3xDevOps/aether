@@ -70,6 +70,19 @@ describe('attention hooks', () => {
     expect(screen.getByLabelText('attention count').textContent).toBe('0')
   })
 
+  it('leaves an agent outcome awaiting review out of the Needs input count', () => {
+    // Review lists the run in Idle; only a structured request raises Needs input.
+    const success = run({ id: 'success', status: 'completed', outcome_unseen: true })
+    const failure = run({ id: 'failure', status: 'failed', outcome_unseen: true })
+    useStore.setState({
+      runs: Object.fromEntries([success, failure].map((r) => [r.id, toRecord(r)])),
+      members: { [alice.id]: alice },
+    })
+
+    render(<Probe />)
+    expect(screen.getByLabelText('attention count').textContent).toBe('0')
+  })
+
   it('treats a modern zero count as authoritative over stale room history', () => {
     const answered = run({ id: 'answered', status: 'running', unanswered_questions: 0 })
     useStore.setState({

@@ -122,7 +122,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions,
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -249,7 +249,9 @@ func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*d
 
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the
 // home a run's container mounts is fixed when the row is created, and a
-// stale or hand-built snapshot must not be able to change or clear it.
+// stale or hand-built snapshot must not be able to change or clear it. It
+// never writes archived_at or outcome_unseen either; a status change clears
+// outcome_unseen, as UpdateRunStatus does.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err
@@ -277,12 +279,13 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		     protected = ?, started_at = ?, finished_at = ?,
 		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?,
 		     harness_session_id = ?, base_commit = ?, base_branch = ?, base_source = ?,
-		     base_checked_at = ?
+		     base_checked_at = ?,
+		     outcome_unseen = CASE WHEN status = ? THEN outcome_unseen ELSE 0 END
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ID,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.Status, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -348,6 +351,20 @@ func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) err
 }
 
 func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false)
+}
+
+// FinishRunReported is UpdateRunStatus for the transition an agent's
+// terminal report causes: the same write sets outcome_unseen.
+func (d *DB) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, true)
+}
+
+// updateRunStatus sets outcome_unseen when unseen, keeps it on a
+// same-status write, and clears it on any other status change. SQLite
+// evaluates every SET expression against the row before the update, so
+// the CASE compares the old status.
+func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, unseen bool) error {
 	if !status.Valid() {
 		return fmt.Errorf("store: update run status: invalid status %q", status)
 	}
@@ -362,9 +379,10 @@ func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET status = ?, reason = ?,
 		     started_at = COALESCE(?, started_at),
-		     finished_at = COALESCE(?, finished_at)
+		     finished_at = COALESCE(?, finished_at),
+		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? THEN outcome_unseen ELSE 0 END
 		 WHERE id = ?`,
-		status, reason, started, finished, id))
+		status, reason, started, finished, unseen, status, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run status: %w", err)
 	}
@@ -429,6 +447,22 @@ func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time)
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("store: set run archived: %w", err)
+	}
+	return affected > 0, nil
+}
+
+// ClearRunOutcomeUnseen clears outcome_unseen when owner still owns the
+// run. The reported bool is whether this call changed the column; false
+// with a nil error also covers a run that does not exist.
+func (d *DB) ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error) {
+	result, err := d.db.ExecContext(ctx,
+		`UPDATE runs SET outcome_unseen = 0 WHERE id = ? AND member_id = ? AND outcome_unseen = 1`, id, owner)
+	if err != nil {
+		return false, fmt.Errorf("store: clear run outcome unseen: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: clear run outcome unseen: %w", err)
 	}
 	return affected > 0, nil
 }
