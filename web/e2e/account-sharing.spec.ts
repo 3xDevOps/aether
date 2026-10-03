@@ -131,15 +131,15 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(terminal).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
     await expect(terminal).toContainText(`login-seen:${ownerLogin}`)
 
-    await bobPage
-      .getByRole('tablist', { name: 'Run tabs' })
-      .getByRole('tab', { name: 'Overview' })
-      .click()
-    const metadata = bobPage.getByRole('region', { name: 'Run metadata' })
+    await bobPage.getByText('Task and details', { exact: true }).click()
+    const metadata = bobPage.getByRole('group').filter({
+      has: bobPage.getByText('Task and details', { exact: true }),
+    })
     const row = (term: string) =>
       metadata
-        .locator('div')
-        .filter({ has: bobPage.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }) })
+        .getByRole('term')
+        .filter({ hasText: new RegExp(`^${term}$`) })
+        .locator('..')
         .getByRole('definition')
     await expect(row('Owner')).toContainText(bobName)
     await expect(row('Agent account')).toContainText(aliceName)

@@ -181,6 +181,8 @@ done`)
   await expect(room.getByText(/Controller: /)).toBeVisible()
   await takeControlFromRawHolder(page, room)
   await room.getByRole('button', { name: 'Close Run Room' }).tap()
+  await expect(room).toBeHidden()
+  await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
   await expect(rows).toHaveCount(desktopRows)
@@ -388,6 +390,10 @@ done`)
     await expect(room.getByText(/Controller: /)).toBeVisible()
     await takeControlFromRawHolder(page, room)
     await room.getByRole('button', { name: 'Close Run Room' }).tap()
+    // CDP touch has no actionability check: the fading modal must stop covering
+    // the live screen before the first contact starts its continuous gesture.
+    await expect(room).toBeHidden()
+    await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {
       document.documentElement.dataset.phoneHistoryInputFocus = ''

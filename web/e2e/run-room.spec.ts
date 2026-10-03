@@ -173,7 +173,10 @@ test('two members share comments, moderated steering, and explicit control trans
       }
       const toolbar = viewerPage.getByRole('toolbar', { name: 'Terminal controls', exact: true })
       await expect(toolbar).toBeVisible()
-      for (const button of await toolbar.getByRole('button').all()) await expectHitTarget(button)
+      for (const button of await toolbar.getByRole('button').all()) {
+        await expect(button).toBeInViewport({ ratio: 1 })
+        if (await button.isEnabled()) await expectHitTarget(button)
+      }
       if (await tools.isVisible()) await viewerPage.keyboard.press('Escape')
     }
 

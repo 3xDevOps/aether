@@ -100,16 +100,32 @@ test('the phone status bar keeps every control inside the viewport', async ({
 
   const below = await popup.evaluate((element) => element.scrollHeight - element.clientHeight)
   expect(below).toBeGreaterThan(0)
+  const usage = footer.getByRole('button', { name: 'Usage', exact: true })
+  await expect(usage).not.toBeInViewport()
   const input = await page.context().newCDPSession(page)
-  await input.send('Input.synthesizeScrollGesture', {
-    x: shortBox.x + shortBox.width / 2,
-    y: shortBox.y + shortBox.height / 2,
-    yDistance: -1000,
-    gestureSourceType: 'touch',
-  })
-  await input.detach()
-  await expect.poll(() => popup.evaluate((element) => element.scrollTop)).toBe(below)
-  await expect(footer.getByRole('button', { name: 'Usage', exact: true })).toBeInViewport({ ratio: 1 })
+  // Dispatch real, frame-paced touch moves inside the resized popup. Chromium's
+  // synthesized touch scroll can deliver only touchstart/touchend under mobile
+  // emulation, leaving native scrolling unexercised.
+  const distance = shortBox.height - 32
+  try {
+    for (let swipe = 0; swipe < Math.ceil(below / (distance / 2)); swipe++) {
+      const x = shortBox.x + shortBox.width / 2
+      const y = shortBox.y + shortBox.height - 16
+      await input.send('Input.dispatchTouchEvent', {
+        type: 'touchStart', touchPoints: [{ x, y, id: 1 }],
+      })
+      for (let step = 1; step <= 10; step++) {
+        await input.send('Input.dispatchTouchEvent', {
+          type: 'touchMove', touchPoints: [{ x, y: y - distance * step / 10, id: 1 }],
+        })
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+      }
+      await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+  } finally {
+    await input.detach()
+  }
+  await expect(usage).toBeInViewport({ ratio: 1 })
   for (const name of controls) {
     await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 })
   }

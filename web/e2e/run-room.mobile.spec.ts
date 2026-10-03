@@ -188,13 +188,12 @@ test('a phone reads retained evidence in a full-width surface', async ({
   await expect(evidence).toBeVisible()
 
   const viewport = page.viewportSize()
-  const box = await evidence.boundingBox()
   expect(viewport).not.toBeNull()
-  expect(box).not.toBeNull()
-  expect(box?.x).toBe(0)
-  expect(box?.y).toBeGreaterThan(0)
-  expect(box?.width).toBe(viewport?.width)
-  expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(viewport?.height)
+  await expect.poll(async () => {
+    const box = await evidence.boundingBox()
+    return box && { x: box.x, width: box.width, bottom: Math.round(box.y + box.height) }
+  }).toEqual({ x: 0, width: viewport!.width, bottom: viewport!.height })
+  expect((await evidence.boundingBox())?.y).toBeGreaterThan(0)
   await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible()
   await expect(evidence.getByRole('heading', { name: 'Retained evidence' })).toBeVisible()
   await testInfo.attach('phone-retained-evidence', {
@@ -212,6 +211,7 @@ test('incoming control decisions stay usable over responsive Room and Evidence',
   const alice = await aether.member('Alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
+  const { member: aliceMember } = await alice.api.rpc<{ member: { display_name: string } }>('server.info')
   aether.installAgent(await memberID(alice), 'claude', 'sleep 600')
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
@@ -230,7 +230,7 @@ test('incoming control decisions stay usable over responsive Room and Evidence',
     await requester.goto(`${alice.url}&run=${run.id}`)
     await requester.getByRole('button', { name: 'Open Run Room' }).tap()
     const requestRoom = requester.getByRole('dialog', { name: 'Run Room' })
-    await expect(requestRoom.getByText('Controller: Alice', { exact: true })).toBeVisible()
+    await expect(requestRoom.getByText(`Controller: ${aliceMember.display_name}`, { exact: true })).toBeVisible()
     const takeControl = requestRoom.getByRole('button', { name: 'Take control', exact: true })
     const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
     const deny = takeover.getByRole('button', { name: 'Deny', exact: true })
