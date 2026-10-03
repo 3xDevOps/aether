@@ -81,9 +81,8 @@ export interface Command {
   /** A command can be shown but unavailable until its prerequisite exists. */
   disabled?: boolean
   /**
-   * Set on the verbs a member cannot take back. Buttons ask before running;
-   * the palette does not, because a palette item is already two deliberate
-   * steps (open, type, select) away from an accident.
+   * Set on the verbs a member cannot take back. Both action buttons and the
+   * command palette ask for explicit confirmation before running them.
    */
   confirm?: { title: string; body: string; action: string }
   perform: (deps: CommandDeps) => Promise<unknown> | void
@@ -288,7 +287,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     list.push({
       id: 'inject',
       label: 'Send a message to the agent...',
-      short: 'Send',
+      short: 'Message',
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
     })

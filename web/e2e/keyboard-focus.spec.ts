@@ -63,7 +63,8 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
   await expect(header).toContainText('Working')
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await header.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Close run...', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()

@@ -12,7 +12,7 @@ import { expect, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'
 
 /** The controls the bar always offers, wherever the layout puts them. */
-const controls = ['Commands', 'Keyboard shortcuts', 'Theme: system']
+const controls = ['Search runs and commands', 'Keyboard shortcuts', 'Theme: system']
 const unreachableNotice =
   'server unreachable over SSH - check the server and network; retrying'
 // Long enough to overflow the bar's left group, which is what took the

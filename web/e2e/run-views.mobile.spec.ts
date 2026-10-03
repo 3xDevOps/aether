@@ -1,9 +1,3 @@
-// Acting on a run and reading its diff from a phone. The run header's verbs
-// are the main way to steer a run from the Terminal, Diff, Events and
-// Overview tabs, and on a coarse pointer they are reachable only through the
-// one Actions menu - so a menu that did not open, or opened items too small
-// to hit, would leave a phone with no verbs at all.
-
 import type { Locator } from '@playwright/test'
 
 import { dockerReachable } from './harness/server'
@@ -12,7 +6,7 @@ import { expect, test } from './mobile'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a phone steers a run from the Actions menu and reads its diff', async ({
+test('a phone protects a run from More and reads its diff', async ({
   page,
   aether,
 }) => {
@@ -39,7 +33,7 @@ test('a phone steers a run from the Actions menu and reads its diff', async ({
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
 
-  const actions = page.getByRole('button', { name: 'Actions', exact: true })
+  const actions = page.getByRole('button', { name: 'More', exact: true })
   await expect(actions).toBeVisible()
   expect((await actions.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
   await actions.tap()

@@ -18,7 +18,7 @@ import { expect, test } from './fixtures'
 import { OnboardingWizard } from './pages/wizard'
 
 /** Controls that must stay reachable even when the left status readouts wrap. */
-const controls = ['Commands', 'Keyboard shortcuts', 'Theme: system', 'Usage']
+const controls = ['Search runs and commands', 'Keyboard shortcuts', 'Theme: system', 'Usage']
 
 const sizes = [
   // The floor desktop/main.js enforces.

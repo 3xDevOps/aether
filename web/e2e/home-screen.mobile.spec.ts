@@ -106,7 +106,7 @@ test('the title bar keeps its controls out from under a phone status bar', async
   await expect
     .poll(async () => (await bar.boundingBox())?.height)
     .toBe(bare + statusBar)
-  const trigger = page.getByRole('button', { name: 'Commands' })
+  const trigger = page.getByRole('button', { name: 'Search runs and commands' })
   expect((await trigger.boundingBox())?.y ?? -1).toBeGreaterThanOrEqual(statusBar)
 
   // Everything that hangs from the bar drops with it.

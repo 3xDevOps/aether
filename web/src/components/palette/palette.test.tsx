@@ -1,12 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useEffect, useRef } from 'react'
 import { CommandPalette, CommandPaletteTrigger } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
-import { hintOn } from '@/test/tooltip'
 import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
@@ -173,41 +173,6 @@ describe('command palette', () => {
     expect(useStore.getState().paletteOpen).toBe(true)
   })
 
-  it('names the modifier the reader actually has', () => {
-    // shortcutLabel prefers userAgentData; jsdom defines neither, so both
-    // have to be stubbed or the test stops testing what it claims.
-    const platform = (value: string) => {
-      Object.defineProperty(navigator, 'platform', { value, configurable: true })
-      Object.defineProperty(navigator, 'userAgentData', {
-        value: { platform: value },
-        configurable: true,
-      })
-    }
-    const original = navigator.platform
-    onTestFinished(() => {
-      platform(original)
-    })
-
-    platform('Linux x86_64')
-    const { unmount } = render(<CommandPaletteTrigger />)
-    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('Ctrl+Shift+P')
-    unmount()
-
-    platform('MacIntel')
-    render(<CommandPaletteTrigger />)
-    expect(screen.getByRole('button', { name: 'Commands' }).textContent).toContain('⌘Shift+P')
-  })
-
-  it('shows the command hint and lets Escape dismiss it', async () => {
-    render(<CommandPaletteTrigger />)
-    const trigger = screen.getByRole('button', { name: 'Commands' })
-
-    expect(await hintOn(trigger)).toBe('Command palette')
-    await userEvent.keyboard('{Escape}')
-
-    expect(screen.queryByRole('tooltip')).toBeNull()
-    expect(useStore.getState().paletteOpen).toBe(false)
-  })
   it('returns focus to the opener when Escape dismisses the palette', async () => {
     render(
       <>
@@ -215,7 +180,7 @@ describe('command palette', () => {
         <CommandPalette />
       </>,
     )
-    const trigger = screen.getByRole('button', { name: 'Commands' })
+    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
     trigger.focus()
     fireEvent.click(trigger)
     await screen.findByRole('dialog')
@@ -226,6 +191,167 @@ describe('command palette', () => {
     await waitFor(() => expect(useStore.getState().paletteOpen).toBe(false))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it('restores a terminal invoker on Escape without leaking the shortcut to xterm', async () => {
+    render(<CommandPalette />)
+    overlay('<div class="xterm"><textarea aria-label="Terminal input"></textarea></div>')
+    const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
+    terminal.focus()
+    fireEvent.keyDown(terminal, { key: 'k', ctrlKey: true })
+    const search = await screen.findByRole('combobox')
+    expect(document.activeElement).toBe(search)
+    fireEvent.keyDown(search, { key: 'Escape' })
+    await waitFor(() => expect(document.activeElement).toBe(terminal))
+  })
+
+  it('starts with navigation rather than a focused destructive command', async () => {
+    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    open()
+    const search = await screen.findByRole('combobox')
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Open the board' }).getAttribute('aria-selected')).toBe('true'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    expect(api.runKill).not.toHaveBeenCalled()
+    expect(api.runDelete).not.toHaveBeenCalled()
+  })
+
+  it('leaves focus with a navigation destination instead of returning it to the opener', async () => {
+    function Destination() {
+      const route = useStore((state) => state.route)
+      const input = useRef<HTMLInputElement>(null)
+      useEffect(() => {
+        if (route.name === 'terminal') input.current?.focus()
+      }, [route])
+      return route.name === 'terminal' ? <input ref={input} aria-label="Destination terminal" /> : null
+    }
+    render(<><CommandPaletteTrigger /><CommandPalette /><Destination /></>)
+    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByText(active.task))
+    const destination = await screen.findByRole('textbox', { name: 'Destination terminal' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.activeElement).toBe(destination)
+  })
+
+  it.each(['Kill run', 'Delete run'])('requires explicit confirmation before %s calls the gateway', async (label) => {
+    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    open()
+    fireEvent.click(await screen.findByRole('option', { name: label }))
+    const confirmation = await screen.findByRole('alertdialog')
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(useStore.getState().paletteOpen).toBe(false)
+    expect(api.runKill).not.toHaveBeenCalled()
+    expect(api.runDelete).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(within(confirmation).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(within(confirmation).getByRole('button', { name: label }))
+    await waitFor(() => expect(label === 'Kill run' ? api.runKill : api.runDelete).toHaveBeenCalledWith(active.id))
+    expect(label === 'Kill run' ? api.runDelete : api.runKill).not.toHaveBeenCalled()
+  })
+
+  it.each(['Cancel', 'Escape'])('cancels a destructive command with %s and returns to the terminal', async (dismiss) => {
+    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    render(<CommandPalette />)
+    overlay('<div class="xterm"><textarea aria-label="Terminal input"></textarea></div>')
+    const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
+    terminal.focus()
+    fireEvent.keyDown(terminal, { key: 'k', ctrlKey: true })
+    fireEvent.click(await screen.findByRole('option', { name: 'Kill run' }))
+    const confirmation = await screen.findByRole('alertdialog')
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    expect(useStore.getState().paletteOpen).toBe(false)
+    const cancel = within(confirmation).getByRole('button', { name: 'Cancel' })
+    if (dismiss === 'Cancel') fireEvent.click(cancel)
+    else fireEvent.keyDown(cancel, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(terminal))
+    expect(api.runKill).not.toHaveBeenCalled()
+    expect(api.runDelete).not.toHaveBeenCalled()
+  })
+
+  it('restores navigation order after clearing or backspacing a ranked search', async () => {
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'rewrite')
+    await waitFor(() => expect(screen.getByRole('option', { name: /rewrite the checkout flow/ }).getAttribute('aria-selected')).toBe('true'))
+    await userEvent.clear(search)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Open the board' }).getAttribute('aria-selected')).toBe('true'))
+    await userEvent.type(search, 'rewrite')
+    await userEvent.keyboard('{Backspace>7/}')
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Open the board' }).getAttribute('aria-selected')).toBe('true'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('keeps an updated title searchable and selects the updated run with Enter', async () => {
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'quasar')
+    expect(screen.queryAllByRole('option')).toEqual([])
+    act(() => useStore.getState().applyRunTitle(active.id, 'quasar migration'))
+    await waitFor(() => expect(screen.getByRole('option', { name: /quasar migration/ }).getAttribute('aria-selected')).toBe('true'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: active.id } })
+  })
+
+  it('drops archived results and selects the remaining match as live status changes arrive', async () => {
+    const second = run({ id: 'run_2', task: 'rewrite the billing flow' })
+    useStore.setState({ runs: { [active.id]: toRecord(active), [second.id]: toRecord(second) } })
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'rewrite')
+    const first = screen.getByRole('option', { name: /rewrite the checkout flow/ })
+    fireEvent.pointerMove(first)
+    act(() => {
+      useStore.getState().applyRunStatus(active.id, 'merged', undefined, '2026-10-02T10:00:00Z')
+      useStore.getState().applyRunArchived(active.id, '2026-10-02T10:01:00Z', null)
+    })
+    await waitFor(() => expect(screen.queryByRole('option', { name: /rewrite the checkout flow/ })).toBeNull())
+    await waitFor(() => expect(screen.getByRole('option', { name: /rewrite the billing flow/ }).getAttribute('aria-selected')).toBe('true'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(useStore.getState().route.params.runId).toBe(second.id)
+  })
+
+  it('does not execute a disabled match, then follows its live enablement', async () => {
+    useStore.setState({
+      route: { name: 'terminal', params: { runId: active.id } },
+      capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['pull'] },
+    })
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'Pull branch')
+    expect(screen.getByRole('option', { name: /Pull branch/ }).getAttribute('aria-disabled')).toBe('true')
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(api.localPull).not.toHaveBeenCalled()
+    act(() => useStore.getState().applyLastCommit(active.id, 'abc1234', '2026-10-02T10:00:00Z'))
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Pull branch' }).getAttribute('aria-selected')).toBe('true'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(active.id))
+  })
+
+  it('keeps long-task tails and later results reachable by keyboard without a result cap', async () => {
+    const runs = Array.from({ length: 120 }, (_, index) => run({
+      id: `run_${index}`,
+      task: `${'Preserve the current behavior. '.repeat(40)}quasar ${String(index).padStart(3, '0')}`,
+    }))
+    useStore.setState({ runs: Object.fromEntries(runs.map((value) => [value.id, toRecord(value)])) })
+    open()
+    const search = await screen.findByRole('combobox')
+    await userEvent.type(search, 'quasar 119')
+    await waitFor(() => expect(screen.getByRole('option', { selected: true }).getAttribute('data-value')).toContain('run_119'))
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(useStore.getState().route.params.runId).toBe('run_119')
+    act(() => useStore.setState({ paletteOpen: true }))
+    const reopened = await screen.findByRole('combobox')
+    await userEvent.type(reopened, 'quasar')
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(120))
+    fireEvent.keyDown(reopened, { key: 'End' })
+    const last = screen.getAllByRole('option').at(-1)!
+    await waitFor(() => expect(last.getAttribute('aria-selected')).toBe('true'))
+    const lastID = last.getAttribute('data-value')!.match(/run_\d+/)![0]
+    fireEvent.keyDown(reopened, { key: 'Enter' })
+    expect(useStore.getState().route.params.runId).toBe(lastID)
   })
 
   it('opens on the shortcut and jumps to a run', async () => {

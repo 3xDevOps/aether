@@ -33,14 +33,14 @@ describe('TitleBar', () => {
     render(<TitleBar />)
 
     expect(screen.getByLabelText('Aether')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Commands' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Search runs and commands' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull()
   })
 
   it('disables the command opener while the app shell is blocked', () => {
     render(<TitleBar commandPaletteDisabled />)
 
-    expect(screen.getByRole('button', { name: 'Commands' })).toHaveProperty(
+    expect(screen.getByRole('button', { name: 'Search runs and commands' })).toHaveProperty(
       'disabled',
       true,
     )
@@ -102,7 +102,7 @@ describe('TitleBar', () => {
 
     render(<TitleBar />)
 
-    expect(screen.getByRole('button', { name: 'Commands' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Search runs and commands' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull()
     expect(screen.getByLabelText('Aether').style.paddingInlineStart).toBe('78px')
   })

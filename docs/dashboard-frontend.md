@@ -617,17 +617,11 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   agent's last terminal title; a run without one is named by the first line
   of its prompt, cut at 120 characters. The heading clamps to two lines and
   keeps the full label in its `title`; the whole prompt is behind
-  **View full task**. The second section
-  holds only the run-detail tabs and actions. Desktop actions all appear from
-  a 512px header width, with icon labels expanding from 1024px; narrower
-  headers retain More. Metadata and tabs scroll inside their own regions
-  before either or the actions become unreachable.
-  On a coarse pointer the action group becomes one **Actions**
-  button and every verb moves into its menu, where each carries its full label
-  at finger size. Six 44px
-  buttons do not fit across a phone, and the mouse answer to a narrow row -
-  22px icons with the label in a hover tooltip - is six unnamed icons to a
-  finger. Hand off is in the same menu.
+  **View full task**. The second section holds the run-detail tabs and at most
+  two labeled state-dependent actions plus **More**, at every width and for
+  both pointer modes. Secondary actions live in More; Kill and Delete come
+  last, after a separator, and require confirmation. Metadata and tabs
+  scroll inside their own regions before the actions become unreachable.
 - **The board** offers Cards and Map layouts. Cards stacks its three status
   columns on narrow screens and places them side by side from the
   `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
@@ -998,24 +992,21 @@ have an older RPC response overwrite a newer event.
 Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
 `merged`, `abandoned`, `failed`, `interrupted`, never `completed`) plus the
 kill permission and the `run.archive` capability; neither confirms, since
-archiving is reversible. Both join `primaryCommands` in
-`src/components/run-actions.tsx`, so Archive sits on the header next to
-Delete. The palette resolves its focused run from the run map by
-`route.params.runId` rather than the attention list, so an archived run's
-own page still offers Restore even though attention has stopped listing it.
-- **The command palette** (`src/components/palette/`) is the cmdk palette:
-  `⌘K` on macOS and `Ctrl+K` elsewhere, anywhere in the app (see [Keyboard and
-  focus](#keyboard-and-focus)), or the command center in the titlebar. Both
-  entry points use the existing toggle action. The palette is mounted exactly
-  once by `AppShell`, independently of the status Slot, and its quick input is
-  top-centered directly under the 35px titlebar, max 600px, with compact
-  bounded rows before the dialog portals to the document.
-  It jumps to runs and workspaces - opening a workspace also makes it the
-  active scope, so the sidebar and the board follow - and opens a steer request
-  for **the run the center view is showing**, or any run-detail tab, since it
-  keys on `route.params.runId` rather than on a route name. From the board there
-  is none, so reveal a run first. Its "Go to" group is `src/lib/surfaces.ts`,
-  the same gated list the activity rail renders.
+archiving is reversible. Final runs offer Archive as a primary action;
+archived runs offer Restore. The palette resolves its focused run from the
+run map by `route.params.runId` rather than the attention list, so an
+archived run's own page still offers Restore.
+- **The command palette** (`src/components/palette/`) opens from **Search runs
+  and commands** in the titlebar, `⌘K` on macOS or `Ctrl+K` elsewhere;
+  `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`,
+  independently of the status Slot, directly below the titlebar.
+  Navigation comes before run actions, so opening the palette initially
+  selects **Open the board**, not a mutation. The **Runs** group searches
+  complete task text, title, branch, harness, workspace and run ID without
+  clipping the searchable text or limiting the result set.
+  Opening a workspace also makes it the active scope. Run actions apply to
+  the run named by `route.params.runId`, on any run-detail tab; the board has
+  no focused run. The "Go to" group uses the gated `src/lib/surfaces.ts` list.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
   New run in the sidebar header, in the board header and in the notice an
   empty board shows in place of its columns; every view in the sidebar nav;
@@ -1023,16 +1014,20 @@ own page still offers Restore even though attention has stopped listing it.
   every run-detail tab, which is where the run verbs live for a member who has
   not learned `⌘K` yet.
 
-Two things the buttons add. A `Command` carrying a `confirm` field - kill,
-delete and both close actions - opens a dialog naming the run before it runs;
-the palette does not ask, because a palette item is already several
-deliberate steps (open, type, select) away from an accident, where a button
-is one click. And the bar locks while a verb is in flight, showing a spinner
-on the one running, or on the **More** trigger while any verb is in flight: a pull shells out to `git fetch` over SSH and takes seconds, and a
-second click would race the first for the same ref. Buttons
-also take the command's `short` label and keep the full sentence as their
-tooltip, because the action bar is intentionally compact. The overflow menu
-has the room, so it prints the whole label instead.
+A `Command` carrying a `confirm` field—kill, delete and both close
+actions—opens the same run-naming confirmation dialog from the header or
+palette. Cancel is initially focused. The action bar locks while a verb is
+in flight, showing a spinner on the running primary action or on **More**.
+This also prevents a second click from racing a branch pull over SSH.
+Primary buttons use the command's `short` label and its full sentence as a
+tooltip; the overflow menu prints the full label.
+
+`src/lib/palette-filter.ts` preserves cmdk's fuzzy scores and ranking while
+avoiding recursive rescans of long task bodies. The pinned local cmdk patch
+in `patches/cmdk@1.1.1.patch` synchronizes initial accessible selection,
+avoids redundant scrolling and DOM reordering, and restores current browse
+order when a query is cleared. Filtering and live data updates keep the
+input focused and its active descendant tied to a visible enabled result.
 
 hand off and protect need the run's owner or an admin. Before hydration the
 caller's own record has not arrived, and the mirror answers yes rather than
