@@ -396,7 +396,7 @@ func (s *Service) List(ctx context.Context, actor Actor, p protocol.IntegrationL
 		return out, err
 	}
 	defer release()
-	rows, err := s.store.ListIntegrationCandidates(ctx, ws, limit)
+	rows, err := s.store.ListIntegrationCandidates(ctx, ws, domain.MissionID(p.MissionID), limit)
 	if err != nil {
 		return out, err
 	}

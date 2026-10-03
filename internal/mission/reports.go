@@ -23,10 +23,17 @@ type EvidenceReader interface {
 // ValidateReport performs the authority check before coord.report reserves a
 // fresh report. Ordinary runs, the current integrator, and current workers are
 // accepted, while a stale worker/coordinator fails closed through
-// resolveAssignment.
-func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
-	_, _, err := s.resolveAssignment(ctx, run)
-	return err
+// resolveAssignment. The integrator's success completes its mission, which is
+// only possible once the mission is active.
+func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome store.CoordOutcome) error {
+	m, attempt, err := s.resolveAssignment(ctx, run)
+	if err != nil {
+		return err
+	}
+	if m != nil && attempt == nil && outcome == store.CoordOutcomeSuccess && m.Phase == domain.MissionPhasePlanning {
+		return fmt.Errorf("%w: a success report completes the mission, and mission %s has not started; run mission start first", store.ErrMissionPhase, m.ID)
+	}
+	return nil
 }
 
 // ReconcileReport is called for every finalized report outbox row, including

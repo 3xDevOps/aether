@@ -93,7 +93,10 @@ func cancelSwarm(c *protocol.Client, w io.Writer, missionID, key string) error {
 	if err := c.Call(protocol.MethodMissionCancel, protocol.MissionCancelParams{MissionID: missionID, IdempotencyKey: key}, &res); err != nil {
 		return err
 	}
-	return printSwarmPhase(w, res.Mission)
+	if _, err := fmt.Fprintf(w, "swarm %s %s\n", res.Mission.ID, res.Mission.Phase); err != nil {
+		return fmt.Errorf("write swarm result: %w", err)
+	}
+	return nil
 }
 
 const swarmReplaceUsage = "usage: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
@@ -138,13 +141,6 @@ func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID, agent, a
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "swarm %s %s\nintegrator run %s\n", res.Mission.ID, res.Mission.Phase, res.RunID); err != nil {
-		return fmt.Errorf("write swarm result: %w", err)
-	}
-	return nil
-}
-
-func printSwarmPhase(w io.Writer, m protocol.Mission) error {
-	if _, err := fmt.Fprintf(w, "swarm %s %s\n", m.ID, m.Phase); err != nil {
 		return fmt.Errorf("write swarm result: %w", err)
 	}
 	return nil

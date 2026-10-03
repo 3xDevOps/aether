@@ -256,8 +256,9 @@ to completed (success) or failed (failure). Blocked moves it to Idle with
 the summary as the reason once your turn ends.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
-Mission integrator: success completes the mission and stops leftover workers;
-failure ends this run and leaves the mission active for Replace integrator.
+Mission integrator: success completes an active mission and stops leftover
+workers; failure ends this run and leaves the mission in its phase for Replace
+integrator.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
@@ -438,9 +439,11 @@ report, take no new work.
 `
 
 const integratorOutcomes = `Success and failure are terminal integrator outcomes. Report success only after
-the verified candidate is delivered: it completes the mission, stops leftover
-workers, and finishes this run. Report failure only if the mission cannot be
-finished: it ends this run and leaves the mission active for Replace integrator.
+the verified candidate is delivered, or, when the objective has nothing to
+deliver, once its findings are gathered: it completes the mission, stops
+leftover workers, and finishes this run. Success is refused before mission
+start. Report failure only if the mission cannot be finished: it ends this run
+and leaves the mission in its phase for Replace integrator.
 Blocked is a nonterminal durable observation, not a way to wait. Do not report
 while idle or waiting on workers. After a terminal report, take no new work.
 `
@@ -468,8 +471,10 @@ const integratorWorkflow = `When accepted submissions are ready for combined ver
   aether-internal integration prepare --help
 Prepare, show, verify, request-delivery, then deliver. A verified mission
 candidate needs no human decision: request-delivery returns an approved request.
-A conflicted candidate: revise the conflicting task so a worker rebases it,
-accept the new submission, then prepare again.
+A conflicted candidate: prepare and deliver an ordered subset of the accepted
+submissions that applies cleanly, then revise the conflicting task so a new
+worker redoes it from the advanced target, accept its submission, and prepare
+that submission.
 Each subcommand's --help lists its JSON fields; use --params-file with a file
 outside /run/aether or "-" for stdin. A human uses Replace integrator if this run stops.
 `

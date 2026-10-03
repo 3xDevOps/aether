@@ -605,7 +605,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			missionActive = assignment.MissionID != ""
 		}
 		if !existingFinalized {
-			if err := s.cfg.Mission.ValidateReport(ctx, run); err != nil {
+			if err := s.cfg.Mission.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
 				return protocol.CoordReportResult{}, missionRPCError(method, err)
 			}
 		}

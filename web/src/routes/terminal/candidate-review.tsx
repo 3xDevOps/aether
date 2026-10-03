@@ -18,6 +18,9 @@ import { useStore } from '@/store'
 const maxPatchBytes = 1 << 20
 const maxConflictResolutionBatch = 32
 const defaultArgv = '[\"go\", \"test\", \"./...\"]'
+// Integration changes publish no event, so a read-only view polls to follow
+// the integrator's prepare, verify, and deliver steps.
+const readOnlyPollMs = 5000
 
 type ResolutionDraft = { content: string; delete: boolean; selected: boolean }
 type MutationOperation =
@@ -82,6 +85,8 @@ export interface CandidateReviewProps {
   /** A mission's integrator prepares, verifies, and delivers on its own, so
    * the mission page shows its candidates without any control. */
   readOnly?: boolean
+  /** Lists only the candidates prepared for this mission. */
+  missionID?: string
   initialExpanded?: boolean
 }
 
@@ -96,6 +101,7 @@ export function useCandidateReview({
   currentRunID,
   client = api,
   readOnly = false,
+  missionID,
   initialExpanded = false,
 }: CandidateReviewProps, active = true) {
   const [expandedState, setExpanded] = useState(initialExpanded)
@@ -194,6 +200,15 @@ export function useCandidateReview({
     loadGeneration.current += 1
   }, [])
 
+  const fetchCandidates = useCallback(async () => {
+    const listed = await client.integrationList({ workspace_id: workspaceID, mission_id: missionID, limit: 50 })
+    const selectedCandidateID = candidateVersion.current?.id
+    const shown = selectedCandidateID
+      ? await client.integrationShow({ workspace_id: workspaceID, candidate_id: selectedCandidateID })
+      : null
+    return { summaries: listed.candidates, candidate: shown?.candidate }
+  }, [client, missionID, workspaceID])
+
   const loadWorkspacePackets = useCallback(async () => {
     if (!expanded) return
     const generation = ++loadGeneration.current
@@ -220,14 +235,10 @@ export function useCandidateReview({
       setPackets(Array.from(byID.values()))
       setTargetRef((value) => value || `refs/heads/${nextWorkspace.base_branch}`)
       setExpectedRevision((value) => value || targetRevision(allRuns, currentRunID))
-      const listedCandidates = await client.integrationList({ workspace_id: workspaceID, limit: 50 })
-      const selectedCandidateID = candidateVersion.current?.id
-      const refreshedCandidate = selectedCandidateID
-        ? await client.integrationShow({ workspace_id: workspaceID, candidate_id: selectedCandidateID })
-        : null
+      const fresh = await fetchCandidates()
       if (generation === loadGeneration.current) {
-        setSummaries(listedCandidates.candidates)
-        if (refreshedCandidate) applyCandidate(refreshedCandidate.candidate)
+        setSummaries(fresh.summaries)
+        if (fresh.candidate) applyCandidate(fresh.candidate)
         setAuthorityReady(true)
       }
     } catch (cause) {
@@ -238,7 +249,7 @@ export function useCandidateReview({
     } finally {
       if (generation === loadGeneration.current) setLoading(false)
     }
-  }, [applyCandidate, client, currentRunID, expanded, workspaceID])
+  }, [applyCandidate, client, currentRunID, expanded, fetchCandidates, workspaceID])
 
   useEffect(() => {
     if (!expanded) return
@@ -307,6 +318,33 @@ export function useCandidateReview({
       window.clearInterval(timer)
     }
   }, [applyCandidate, candidate, client, expanded, gatewayAvailable, hasRunningVerification, workspaceID])
+
+  useEffect(() => {
+    if (!readOnly || !expanded || !authorityReady || !gatewayAvailable) return
+    const generation = loadGeneration.current
+    let cancelled = false
+    let inFlight = false
+    const poll = async () => {
+      if (cancelled || inFlight || loadGeneration.current !== generation) return
+      inFlight = true
+      try {
+        const fresh = await fetchCandidates()
+        if (cancelled || loadGeneration.current !== generation) return
+        setSummaries(fresh.summaries)
+        if (fresh.candidate) applyCandidate(fresh.candidate)
+        setError(undefined)
+      } catch (cause) {
+        if (!cancelled && loadGeneration.current === generation) setError(message(cause))
+      } finally {
+        inFlight = false
+      }
+    }
+    const timer = window.setInterval(() => void poll(), readOnlyPollMs)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [applyCandidate, authorityReady, expanded, fetchCandidates, gatewayAvailable, readOnly])
 
   const selectPacket = (packet: EvidencePacket) => {
     if (!packetSelectable(packet)) return

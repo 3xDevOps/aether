@@ -578,7 +578,7 @@ func (m missionTransportStub) HandleAgent(context.Context, domain.RunID, string,
 	return nil, m.err
 }
 
-func (m missionTransportStub) ValidateReport(context.Context, domain.RunID) error {
+func (m missionTransportStub) ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error {
 	return nil
 }
 

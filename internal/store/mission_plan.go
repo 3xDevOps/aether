@@ -345,7 +345,7 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 	if m.Phase == domain.MissionPhaseCompleted {
 		return m, tx.Commit()
 	}
-	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhaseActive); phaseErr != nil {
 		return nil, phaseErr
 	}
 	now := missionNow(time.Time{})

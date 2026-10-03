@@ -236,7 +236,7 @@ func (d *DB) UpdateIntegrationCandidate(ctx context.Context, c *IntegrationCandi
 	return ErrIntegrationConflict
 }
 
-func (d *DB) ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, limit int) ([]*IntegrationCandidateSummary, error) {
+func (d *DB) ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID, limit int) ([]*IntegrationCandidateSummary, error) {
 	if workspace == "" {
 		return nil, errors.New("store: list integration candidates: workspace_id is required")
 	}
@@ -254,7 +254,8 @@ func (d *DB) ListIntegrationCandidates(ctx context.Context, workspace domain.Wor
 		json_extract(payload, '$.delivery_receipt'),
 		created_at, expires_at
 		FROM integration_candidates WHERE workspace_id = ?
-		ORDER BY created_at DESC, id DESC LIMIT ?`, workspace, limit)
+		AND (? = '' OR json_extract(payload, '$.mission_id') = ?)
+		ORDER BY created_at DESC, id DESC LIMIT ?`, workspace, mission, mission, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list integration candidates: %w", err)
 	}

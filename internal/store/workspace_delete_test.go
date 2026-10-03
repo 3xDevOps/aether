@@ -62,3 +62,18 @@ func TestWorkspaceDeletionRetiresFinishedMissionReferences(t *testing.T) {
 		t.Fatalf("submission remains: %v", err)
 	}
 }
+
+func TestWorkspaceDeletionIgnoresAnEndedMissionsUnlaunchedIntegrator(t *testing.T) {
+	t.Parallel()
+	db, mission, member := planningFixture(t)
+	ctx := t.Context()
+	if _, err := db.RecordIntegratorLaunch(ctx, mission.ID, mission.CurrentIntegratorRunID, "launch failed", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CancelMission(ctx, mission.ID, member, "cancel-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckWorkspaceDeletion(ctx, mission.WorkspaceID); err != nil {
+		t.Fatalf("cancelled mission blocks deletion: %v", err)
+	}
+}

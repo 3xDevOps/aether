@@ -10,7 +10,6 @@ import type {
   EvidencePacket,
   Member,
   Mission,
-  MissionAttempt,
   MissionQuestion,
   MissionTask,
   MissionTaskRevision,
@@ -136,26 +135,6 @@ export function missionTask(over: Partial<MissionTask> = {}): MissionTask {
     status: 'ready',
     created_at: '2026-08-14T10:02:00Z',
     updated_at: '2026-08-14T10:02:00Z',
-    ...over,
-  }
-}
-
-export function missionAttempt(over: Partial<MissionAttempt> = {}): MissionAttempt {
-  return {
-    id: 'attempt_1',
-    mission_id: 'mission_1',
-    task_id: 'task_1',
-    task_revision: 1,
-    number: 1,
-    dispatch_key: 'dispatch_1',
-    harness: 'claude',
-    mode: 'headless',
-    state: 'running',
-    run_id: 'run_worker',
-    authority_generation: 1,
-    integrator_generation: 1,
-    created_at: '2026-08-14T10:03:00Z',
-    reserved_at: '2026-08-14T10:03:00Z',
     ...over,
   }
 }

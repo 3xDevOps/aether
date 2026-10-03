@@ -105,7 +105,7 @@ func TestIntegrationCandidateSummaryAndCleanupTraversal(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	for _, candidate := range []*IntegrationCandidate{
 		integrationRecord("candidate-a", workspace, "preparing", now.Add(time.Hour), `{"candidate_id":"candidate-a","state":"preparing","verifications":[]}`),
-		integrationRecord("candidate-b", workspace, "frozen", now.Add(time.Hour), `{"candidate_id":"candidate-b","state":"frozen","candidate_revision":"rev-b","target_ref":"refs/heads/main","expected_target_revision":"base-b","verifications":[{"status":"running"}]}`),
+		integrationRecord("candidate-b", workspace, "frozen", now.Add(time.Hour), `{"candidate_id":"candidate-b","mission_id":"mission-b","state":"frozen","candidate_revision":"rev-b","target_ref":"refs/heads/main","expected_target_revision":"base-b","verifications":[{"status":"running"}]}`),
 		integrationRecord("candidate-c", workspace, "frozen", now.Add(time.Hour), `{"candidate_id":"candidate-c","state":"frozen","candidate_revision":"rev-c","target_ref":"refs/heads/main","expected_target_revision":"base-c","verifications":[]}`),
 		integrationRecord("candidate-d", workspace, "frozen", now.Add(-time.Hour), `{"candidate_id":"candidate-d","state":"frozen","verifications":[]}`),
 		integrationRecord("candidate-e", workspace, "expired", now.Add(time.Hour), `{"candidate_id":"candidate-e","state":"expired","verifications":[]}`),
@@ -114,9 +114,16 @@ func TestIntegrationCandidateSummaryAndCleanupTraversal(t *testing.T) {
 			t.Fatalf("create %s: %v", candidate.ID, err)
 		}
 	}
-	page, err := db.ListIntegrationCandidates(ctx, workspace, 10)
+	page, err := db.ListIntegrationCandidates(ctx, workspace, "", 10)
 	if err != nil {
 		t.Fatalf("list summaries: %v", err)
+	}
+	if len(page) != 5 {
+		t.Fatalf("workspace summaries = %d, want 5", len(page))
+	}
+	missionPage, err := db.ListIntegrationCandidates(ctx, workspace, "mission-b", 10)
+	if err != nil || len(missionPage) != 1 || missionPage[0].CandidateID != "candidate-b" {
+		t.Fatalf("mission summaries = %#v (err %v), want only candidate-b", missionPage, err)
 	}
 	var foundFrozen bool
 	for _, summary := range page {

@@ -163,6 +163,10 @@ test('launches a bounded mission, controls a worker, and shows its candidate wit
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
   const released = await inspectWorker()
   expect(released.takeover_active ?? false).toBe(false)
+  // The mission page stays open from here on: candidate progress must follow
+  // the integrator without a reload.
+  const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
+  await expect(candidateReview).toContainText('No candidate has been prepared yet.', { timeout: terminalTimeout })
 
   const workerContainerID = execFileSync(
     'docker',
@@ -236,12 +240,7 @@ test('launches a bounded mission, controls a worker, and shows its candidate wit
     retained_revision: submission.ref.retained_revision,
   }])
 
-  // The mission page shows the candidate read-only.
-  await page.goto(alice.url)
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
-  const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
-  await expect(candidateReview).toBeVisible({ timeout: terminalTimeout })
+  // The open mission page picks up the candidate, read-only.
   await expect(candidateReview).toContainText(prepared.candidate_id, { timeout: 30_000 })
   await candidateReview.getByRole('button', { name: 'Show full', exact: true }).click()
   await expect(candidateReview.getByRole('heading', { name: 'Candidate details', exact: true })).toBeVisible({ timeout: terminalTimeout })

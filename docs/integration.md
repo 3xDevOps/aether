@@ -93,7 +93,8 @@ The list response is `{"candidates":[...]}` of bounded `CandidateSummary`
 records; each contains `candidate_id`, `workspace_id`, `state`,
 `candidate_revision`, `target_ref`, `expected_target_revision`,
 `delivery_request`, `delivery_receipt`, `created_at`, and `expires_at`. It
-omits source snapshots, verification output, and mutation history.
+omits source snapshots, verification output, and mutation history. An optional
+`mission_id` in the list params returns only that mission's candidates.
 `integration.show` returns the complete `Candidate`; the patch response is
 `{"patch":"...","truncated":false}`. The verify/request/decide/deliver results
 also include their newly changed verification, request, or receipt inside that

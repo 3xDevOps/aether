@@ -3197,8 +3197,10 @@ shows the server's error inside the dialog.
 
 Outside `planning` the tasks render under **Tasks**, followed by **Candidate
 progress** - the read-only candidate panel described in [Candidate review in
-Run evidence](#candidate-review-in-run-evidence) - and the questions, if any,
-collapsed into **Planning questions**. A task carrying a `pending_revision`
+Run evidence](#candidate-review-in-run-evidence), listing only this mission's
+candidates (`integration.list` with `mission_id`) and polling every five
+seconds, because integration changes publish no event - and the questions, if
+any, collapsed into **Planning questions**. A task carrying a `pending_revision`
 shows a `Revision pending` chip and names the pending revision number and
 title under the task. A pending revision is never the task's current
 revision, so it cannot be dispatched until the integrator accepts it.

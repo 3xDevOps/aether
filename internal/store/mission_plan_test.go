@@ -382,6 +382,9 @@ func TestMissionCancelEndsAPlanningMission(t *testing.T) {
 func TestMissionCompleteIsTheCurrentIntegratorsAndTerminal(t *testing.T) {
 	db, mission, member := planningFixture(t)
 	ctx := context.Background()
+	if _, err := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID); !errors.Is(err, ErrMissionPhase) {
+		t.Fatalf("complete a planning mission = %v, want ErrMissionPhase", err)
+	}
 	task := mustStartedMission(t, db, mission, domain.TaskScope{})
 
 	if _, err := db.CompleteMission(ctx, mission.ID, "some-other-run"); !errors.Is(err, ErrMissionStale) {

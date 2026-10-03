@@ -512,6 +512,7 @@ function MissionDetailView({
                     <CandidateReview
                       workspaceID={mission.workspace_id}
                       currentRunID={integratorRunID}
+                      missionID={mission.id}
                       readOnly
                       initialExpanded
                       client={client}

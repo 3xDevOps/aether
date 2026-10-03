@@ -859,7 +859,11 @@ readiness signal: `running` does not prove that the model read its assignment.
 
 Worker completion and mission phase are separate: the mission stays `active`
 after every worker attempt finishes. It moves to `completed` only when the
-integrator reports success, which also stops any leftover workers. A read-only
+integrator reports success, which also stops any leftover workers. When a
+mission ends, a worker that already submitted is retained and its attempt
+recorded `completed`; every other live worker is killed and its attempt
+recorded `cancelled`. A success report before `mission start` is refused with
+code `-32002`. A read-only
 investigation with nothing to deliver reports success once its findings are
 gathered; do not submit a fake integration candidate just to change the phase.
 
@@ -929,8 +933,10 @@ aether-internal integration deliver --params-file /tmp/aether-deliver.json --jso
 ```
 
 After delivery, report success; that completes the mission. If `prepare`
-reports a conflicted candidate, revise the conflicting task so a worker
-rebases it onto the target, accept the new submission, and prepare again.
+reports a conflicted candidate, prepare and deliver an ordered subset of the
+accepted submissions that applies cleanly, then revise the conflicting task so
+a new worker redoes it from the advanced target, accept its submission, and
+prepare that submission.
 
 Other mission work may continue, but changing the accepted submission set
 invalidates an older candidate's mission binding. A replacement integrator
@@ -1018,11 +1024,12 @@ What a report does depends on the run:
   observation: it does not stop the worker or submit the task. A worker may
   file several blocked reports and still report success or failure after
   them.
-- **Mission integrator.** Success completes the mission and stops any
-  leftover workers. Failure leaves the mission `active`, so a human can
-  recover it with Replace integrator. Either way the integrator run then
-  finishes like an ordinary run once its turn ends. Report success only
-  after the verified candidate is delivered.
+- **Mission integrator.** Success completes an `active` mission and stops
+  any leftover workers; it is refused in `planning`. Failure leaves the
+  mission in its phase, so a human can recover it with Replace integrator.
+  Either way the integrator run then finishes like an ordinary run once its
+  turn ends. Report success only after the verified candidate is delivered,
+  or, with nothing to deliver, once the findings are gathered.
 
 Waiting on a peer uses ask/inbox, never report; waiting on a question's
 answer uses `mission plan show --wait`, not an outcome. Read the inbox once more before a

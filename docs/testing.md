@@ -470,13 +470,16 @@ attach. The daemon's mount view is checked alongside those observations.
 
 `TestIntegrationMissionCompositionInDocker` composes mission dispatch,
 proactive coordination, accepted retained submissions, combined verification,
-human approval, and exact delivery. It also checks failed verification,
-stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
-`omp` executables are scripted fixtures, not genuine vendor-agent runs.
-`web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
-control, and mission candidate preparation in a real browser. After a
-successful worker report, it checks that the same Docker container remains
-paused. It attaches a successful screenshot for visual inspection.
+a delivery request approved without a human decision, and exact delivery. It
+also checks failed verification, stale-target rejection, and integrator
+replacement. Its `claude`, `pi`, and `omp` executables are scripted fixtures,
+not genuine vendor-agent runs.
+`web/e2e/mission-candidate-review.spec.ts` drives launch, progress, and worker
+control in a real browser. After a successful worker report, it checks that the
+same Docker container remains paused. The integrator then prepares a candidate
+through its coordination CLI, and the already open mission page must show it
+read-only, without a reload. It attaches a successful screenshot for visual
+inspection.
 
 `web/e2e/run-room.spec.ts` sends structured request snapshots through the
 staged reporter in a real container. Both members' browsers must add and

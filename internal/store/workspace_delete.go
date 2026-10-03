@@ -18,7 +18,7 @@ func (d *DB) CheckWorkspaceDeletion(ctx context.Context, id domain.WorkspaceID) 
 		message string
 	}{
 		{`SELECT EXISTS (SELECT 1 FROM schedules s JOIN templates t ON t.id = s.template_id WHERE t.workspace_id = ?)`, "remove workspace schedules before deleting the workspace"},
-		{`SELECT EXISTS (SELECT 1 FROM missions WHERE workspace_id = ? AND phase != 'rejected' AND integrator_run_launched = 0)`, "workspace has a pending mission integrator launch"},
+		{`SELECT EXISTS (SELECT 1 FROM missions WHERE workspace_id = ? AND phase NOT IN ('completed', 'cancelled') AND integrator_run_launched = 0)`, "workspace has a pending mission integrator launch"},
 		{`SELECT EXISTS (SELECT 1 FROM mission_attempts a JOIN missions m ON m.id = a.mission_id WHERE m.workspace_id = ? AND a.state IN ('reserved', 'launching', 'running', 'unknown', 'submitted'))`, "workspace has active or queued mission attempts"},
 	}
 	for _, check := range checks {

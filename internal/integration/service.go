@@ -62,7 +62,7 @@ type Store interface {
 	GetIntegrationCandidate(context.Context, string) (*store.IntegrationCandidate, error)
 	GetIntegrationCandidateByKey(context.Context, domain.WorkspaceID, string, string) (*store.IntegrationCandidate, error)
 	UpdateIntegrationCandidate(context.Context, *store.IntegrationCandidate, int64) error
-	ListIntegrationCandidates(context.Context, domain.WorkspaceID, int) ([]*store.IntegrationCandidateSummary, error)
+	ListIntegrationCandidates(context.Context, domain.WorkspaceID, domain.MissionID, int) ([]*store.IntegrationCandidateSummary, error)
 	ListIntegrationCleanupCandidatesAfter(context.Context, time.Time, string, int) ([]*store.IntegrationCandidate, error)
 	ListIntegrationCandidateIDs(context.Context, domain.WorkspaceID) ([]string, error)
 	DeleteIntegrationCandidate(context.Context, string, int64) error
