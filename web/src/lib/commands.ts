@@ -21,6 +21,7 @@ import {
   Network,
   Pause,
   Play,
+  PackageX,
   RefreshCw,
   Rocket,
   Shield,
@@ -50,6 +51,7 @@ export interface CommandDeps {
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
   openClearDoneDialog: (plan: ClearDonePlan) => void
+  openReleaseFinishedDialog: (plan: ReleaseFinishedPlan) => void
   ackAll: () => void
   setTheme: (theme: Theme) => void
   /** Keeps a pull's git output for the diff tab to show. */
@@ -118,22 +120,21 @@ export interface BoardCommandContext {
   cap: Capability
   /** The caller's own id and role, null before hydration. */
   self: { id: string | null; role: Member['role'] | null }
-  /**
-   * The Done column's live cards in the caller's scope, so Clear done can
-   * weigh what it would archive.
-   */
-  doneCandidates: ClearDoneCandidate[]
+  /** The Done column's live cards in scope, for bulk archive. */
+  doneCandidates: RunActionCandidate[]
+  /** All runs in the selected workspace, including hidden archived runs. */
+  releaseCandidates: RunActionCandidate[]
 }
 
-/** One Done-column card, as much as Clear done needs to weigh it. */
-export interface ClearDoneCandidate {
+/** The run and workspace policy needed for Kill-gated bulk actions. */
+export interface RunActionCandidate {
   run: RunRecord
   /** The run's workspace, for the steer_others policy the kill permission reads. */
   workspace?: Workspace
 }
 
 export interface ClearDonePlan {
-  /** Runs Clear done would archive. */
+  /** Runs Archive closed runs would archive. */
   eligible: RunRecord[]
   /** Completed runs that have stopped but still await Close; archiving
    * cannot act on them until then. */
@@ -142,15 +143,52 @@ export interface ClearDonePlan {
   notAllowed: number
 }
 
+export interface ReleaseFinishedPlan {
+  eligible: RunRecord[]
+}
+
+/** The existing status and reason pair is the wire evidence of retention. */
+export function isRetainedRun(run: RunRecord): boolean {
+  if (!isFinished(run.status)) return false
+  switch (run.reason) {
+    case 'closed; retained container':
+      return run.status === 'merged' || run.status === 'abandoned'
+    case 'worker finished; retained container':
+      return true
+    case 'agent reported success; retained container':
+      return run.status === 'completed'
+    case 'agent reported failure; retained container':
+      return run.status === 'failed'
+    default:
+      return false
+  }
+}
+
+export function releaseFinishedPlan(
+  candidates: RunActionCandidate[],
+  cap: Capability,
+  self: { id: string | null; role: Member['role'] | null },
+): ReleaseFinishedPlan {
+  const plan: ReleaseFinishedPlan = { eligible: [] }
+  if (!cap.hasMethod('run.release')) return plan
+  for (const { run, workspace } of candidates) {
+    if (!isRetainedRun(run)) continue
+    if (!allowed('kill', self, {
+      owner: run.member_id, protected: run.protected, steerOthers: workspace?.steer_others,
+    })) continue
+    plan.eligible.push(run)
+  }
+  return plan
+}
+
 /**
- * What "Clear done" would archive out of the Done column's live cards:
+ * What Archive closed runs would archive out of the Done column's live cards:
  * every `isArchivable` run, not already archived, that this member may
- * kill, gated the same way the single Archive command is - see
- * "Archiving hides a finished run" in docs/dashboard-frontend.md. The rest
+ * kill, gated the same way as the single Archive command. Other candidates
  * stay for one of two reasons, counted separately for the confirm dialog.
  */
 export function clearDonePlan(
-  candidates: ClearDoneCandidate[],
+  candidates: RunActionCandidate[],
   cap: Capability,
   self: { id: string | null; role: Member['role'] | null },
 ): ClearDonePlan {
@@ -172,16 +210,15 @@ export function clearDonePlan(
   return plan
 }
 
-// internal/protocol.CodeNotFound: the run is already gone, which is the
-// outcome Clear done was trying to reach anyway.
+// internal/protocol.CodeNotFound: the run was already deleted, which is the
+// outcome bulk archive was trying to reach anyway.
 const codeRunNotFound = -32000
 
-// A full Done column must not open one gateway request per run: the server
-// serializes the writes, but only after every request holds a connection.
-const clearDoneConcurrency = 6
+// Both bulk actions bound gateway requests rather than opening one per run.
+const bulkRunConcurrency = 6
 
 /**
- * Archives every eligible run, `clearDoneConcurrency` calls at a time. Each
+ * Archives every eligible run, `bulkRunConcurrency` calls at a time. Each
  * call's own `run.archived` event moves the run in every connected
  * dashboard, this one included, so the count below comes from the settled
  * calls, not from re-applying what the RPC returned.
@@ -209,7 +246,7 @@ export async function runClearDone(
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(clearDoneConcurrency, eligible.length) }, worker),
+    Array.from({ length: Math.min(bulkRunConcurrency, eligible.length) }, worker),
   )
   const failures = errors.filter((error) => error !== undefined)
   const archived = eligible.length - failures.length
@@ -217,6 +254,35 @@ export async function runClearDone(
     toast.error(`Archived ${archived}, ${failures.length} failed: ${failures[0]}`)
   } else {
     toast.success(`Archived ${archived} ${archived === 1 ? 'run' : 'runs'}`)
+  }
+}
+
+/** Release is independent of archive and must not remove a run's history. */
+export async function runReleaseFinished(
+  eligible: RunRecord[],
+  deps: Pick<CommandDeps, 'api'>,
+): Promise<void> {
+  const errors = new Array<string | undefined>(eligible.length)
+  let next = 0
+  const worker = async () => {
+    while (next < eligible.length) {
+      const i = next++
+      try {
+        await deps.api.runRelease(eligible[i].id)
+      } catch (err) {
+        errors[i] = message(err)
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(bulkRunConcurrency, eligible.length) }, worker),
+  )
+  const failures = errors.filter((error) => error !== undefined)
+  const released = eligible.length - failures.length
+  if (failures.length > 0) {
+    toast.error(`Released ${released}, ${failures.length} failed: ${failures[0]}`)
+  } else {
+    toast.success(`Released resources for ${released} ${released === 1 ? 'run' : 'runs'}`)
   }
 }
 
@@ -352,6 +418,22 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         d.api.runDelete(id).then(() => {
           d.removeRun(id)
         }),
+    })
+  }
+
+  if (cap.hasMethod('run.release') && mayKill && isRetainedRun(run)) {
+    list.push({
+      id: 'release',
+      label: 'Release resources...',
+      short: 'Release',
+      Icon: PackageX,
+      done: 'Released resources',
+      confirm: {
+        title: 'Release this run’s resources?',
+        body: 'Its container is removed and cannot be relaunched. The run and its history remain visible; this does not archive it.',
+        action: 'Release resources',
+      },
+      perform: (d) => d.api.runRelease(id),
     })
   }
 
@@ -505,9 +587,18 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (plan.eligible.length > 0) {
     list.push({
       id: 'clear-done',
-      label: 'Clear done runs',
+      label: 'Archive closed runs...',
       Icon: Archive,
       perform: (d) => d.openClearDoneDialog(plan),
+    })
+  }
+  const releasePlan = releaseFinishedPlan(ctx.releaseCandidates, ctx.cap, ctx.self)
+  if (releasePlan.eligible.length > 0) {
+    list.push({
+      id: 'release-finished',
+      label: 'Release finished resources...',
+      Icon: PackageX,
+      perform: (d) => d.openReleaseFinishedDialog(releasePlan),
     })
   }
   list.push(
@@ -536,9 +627,9 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
 /**
  * Runs a command and reports the outcome the same way on every surface: the
  * gateway verbs toast their past-tense name or the server's refusal verbatim,
- * and the rest (navigation, the two forms) report nothing because the thing
- * they opened is the feedback. `onDone` is what the surface does first - the
- * palette closes itself; a button bar has nothing to close.
+ * and dialog openers report nothing because the surface they open provides
+ * feedback. `onDone` closes the palette before running a command; action
+ * buttons have nothing to close.
  */
 export function useCommandRunner(
   opts: { onDone?: () => void; onTemplates?: () => void } = {},
@@ -547,6 +638,7 @@ export function useCommandRunner(
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
   const openClearDoneDialog = useStore((s) => s.openClearDoneDialog)
+  const openReleaseFinishedDialog = useStore((s) => s.openReleaseFinishedDialog)
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
@@ -561,6 +653,7 @@ export function useCommandRunner(
         navigate,
         openDialog,
         openForwardDialog,
+        openReleaseFinishedDialog,
         openClearDoneDialog,
         ackAll,
         recordPull,
@@ -585,6 +678,7 @@ export function useCommandRunner(
       openDialog,
       openForwardDialog,
       openClearDoneDialog,
+      openReleaseFinishedDialog,
       recordPull,
       removeRun,
       setTheme,

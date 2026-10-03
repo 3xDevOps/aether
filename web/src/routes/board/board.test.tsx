@@ -55,7 +55,7 @@ function seed(runs: Run[], active = workspace.id) {
 
 const everyMethod: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
 
-/** `seed`, plus the capability and caller identity Clear done reads. */
+/** `seed`, plus the capability and caller identity bulk actions read. */
 function seedAs(self: typeof alice, runs: Run[]) {
   seed(runs)
   useStore.setState({ capabilities: everyMethod, info: { ...serverInfo, member: self } })
@@ -122,7 +122,7 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
 
 /**
  * One real run.archived event, through the same path the server publishes
- * it on - Clear done relies on this, not on the RPC response, to move a run
+ * it on. Bulk archive relies on this, not the RPC response, to move a run
  * in the store.
  */
 function archived(
@@ -788,17 +788,17 @@ describe('board', () => {
     useStore.setState({ boardView: 'map' })
     render(<Board />)
     const header = screen.getByRole('heading', { name: 'Runs' }).closest('header')!
-    expect(within(header).getByRole('button', { name: 'Clear done' })).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Archive closed runs...' })).toBeDefined()
     const toggle = within(header).getByRole('button', { name: 'Archived 1' })
     fireEvent.click(toggle)
     expect(screen.getByRole('button', { name: working.task })).toBeDefined()
     expect(screen.getByRole('button', { name: archivedMerged.task })).toBeDefined()
     expect(screen.queryByRole('button', { name: finished.task })).toBeNull()
-    expect(within(header).queryByRole('button', { name: 'Clear done' })).toBeNull()
+    expect(within(header).queryByRole('button', { name: 'Archive closed runs...' })).toBeNull()
     fireEvent.click(toggle)
     expect(screen.getByRole('button', { name: finished.task })).toBeDefined()
     expect(screen.queryByRole('button', { name: archivedMerged.task })).toBeNull()
-    expect(within(header).getByRole('button', { name: 'Clear done' })).toBeDefined()
+    expect(within(header).getByRole('button', { name: 'Archive closed runs...' })).toBeDefined()
   })
 
   it('resets the toggle once the last archived run is restored', () => {
@@ -871,7 +871,7 @@ describe('board', () => {
   })
 })
 
-describe('Clear done', () => {
+describe('archive closed runs', () => {
   it.each(['cards', 'map'] as const)('archives only eligible collaborator runs from %s, skipping completed and protected runs', async (view) => {
     const eligible = run({
       id: 'run_clear_eligible',
@@ -896,10 +896,9 @@ describe('Clear done', () => {
     useStore.setState({ boardView: view })
     render(<Board />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Archive closed runs...' }))
     const dialog = within(await screen.findByRole('dialog'))
 
-    expect(dialog.getByText('Archive 1 finished run?')).toBeDefined()
     expect(
       dialog.getByText(
         '1 run stays: completed but not yet closed - close them as merged or abandoned first.',
@@ -939,10 +938,9 @@ describe('Clear done', () => {
     seedAs(alice, [eligible, stillOpen, someoneElsesProtected])
     render(<Board />)
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     const dialog = within(await screen.findByRole('dialog'))
 
-    expect(dialog.getByText('Archive 2 finished runs?')).toBeDefined()
     expect(
       dialog.getByText(
         '1 run stays: completed but not yet closed - close them as merged or abandoned first.',
@@ -984,7 +982,7 @@ describe('Clear done', () => {
       })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 8' }),
     )
@@ -1034,7 +1032,7 @@ describe('Clear done', () => {
       return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1060,7 +1058,7 @@ describe('Clear done', () => {
       return run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1090,7 +1088,7 @@ describe('Clear done', () => {
       return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 3' }),
     )
@@ -1121,7 +1119,7 @@ describe('Clear done', () => {
       })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1149,7 +1147,7 @@ describe('Clear done', () => {
       new ApiError(404, 'run.archive: not found', -32000),
     )
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
     )
@@ -1174,7 +1172,7 @@ describe('Clear done', () => {
       return run({ id, status: 'merged' })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
     )
@@ -1216,7 +1214,7 @@ describe('Clear done', () => {
       return new Promise(() => {})
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1229,19 +1227,18 @@ describe('Clear done', () => {
     )
 
     const dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByText('Archive 2 finished runs?')).toBeDefined()
     expect(dialog.getByRole('button', { name: 'Archive 2' })).toBeDefined()
   })
 
-  it('renders no Clear done button when nothing in Done is eligible', () => {
+  it('renders no bulk archive button when nothing in Done is eligible', () => {
     const stillOpen = run({ id: 'run_none_eligible', status: 'completed' })
     seedAs(alice, [stillOpen])
     render(<Board />)
 
-    expect(screen.queryByRole('button', { name: 'Clear done' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Archive closed runs...' })).toBeNull()
   })
 
-  it('hides Clear done while the Done column is showing its archived runs', () => {
+  it('hides bulk archive while the Done column is showing archived runs', () => {
     const eligible = run({
       id: 'run_arch_view_eligible',
       status: 'merged',
@@ -1257,10 +1254,80 @@ describe('Clear done', () => {
     seedAs(alice, [eligible, archived])
     render(<Board />)
 
-    expect(column('Done').getByRole('button', { name: 'Clear done' })).toBeDefined()
+    expect(column('Done').getByRole('button', { name: 'Archive closed runs...' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
 
-    expect(column('Done').queryByRole('button', { name: 'Clear done' })).toBeNull()
+    expect(column('Done').queryByRole('button', { name: 'Archive closed runs...' })).toBeNull()
+  })
+})
+
+describe('release finished resources', () => {
+  it.each(['cards', 'map'] as const)('includes archived history in %s without releasing active or forbidden runs', async (view) => {
+    const done = run({ id: 'release_done', status: 'completed', reason: 'agent reported success; retained container' })
+    const archived = run({
+      id: 'release_archived', status: 'merged', reason: 'closed; retained container',
+      archived_at: '2026-08-14T10:00:00Z', deletes_at: '2026-08-28T10:00:00Z',
+    })
+    const blocked = run({
+      id: 'release_blocked', status: 'failed', reason: 'agent reported failure; retained container',
+      protected: true, member_id: alice.id,
+    })
+    const waiting = run({ id: 'release_waiting', status: 'needs-attention', reason: 'worker finished; retained container' })
+    const elsewhere = run({
+      id: 'release_elsewhere', status: 'merged', reason: 'closed; retained container',
+      workspace_id: otherWorkspace.id,
+    })
+    seedAs(bob, [done, archived, blocked, waiting, elsewhere])
+    useStore.setState({ boardView: view })
+    render(<Board />)
+    fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release finished resources...' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('button', { name: 'Release 2' })).toBeDefined()
+    fireEvent.click(dialog.getByRole('button', { name: 'Release 2' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Released resources for 2 runs'))
+    expect(api.runRelease).toHaveBeenCalledTimes(2)
+    expect(api.runRelease).toHaveBeenCalledWith(done.id)
+    expect(api.runRelease).toHaveBeenCalledWith(archived.id)
+    expect(useStore.getState().runs[archived.id]?.archived_at).toBeDefined()
+    expect(api.runArchive).not.toHaveBeenCalled()
+  })
+
+  it('bounds concurrency, continues after errors and reports the first real refusal', async () => {
+    const runs = Array.from({ length: 8 }, (_, i) => run({
+      id: `release_pool_${i}`, status: 'merged', reason: 'closed; retained container',
+    }))
+    seedAs(alice, runs)
+    render(<Board />)
+    const pending: Array<{ resolve: () => void; reject: (err: unknown) => void }> = []
+    vi.mocked(api.runRelease).mockImplementation(() => {
+      const { promise, resolve, reject } = Promise.withResolvers<Record<string, never>>()
+      pending.push({ resolve: () => resolve({}), reject })
+      return promise
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Release finished resources...' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Release 8' }))
+    await waitFor(() => expect(api.runRelease).toHaveBeenCalledTimes(6))
+    pending[1].reject(new ApiError(409, 'retained evidence unavailable', -32001))
+    await waitFor(() => expect(api.runRelease).toHaveBeenCalledTimes(7))
+    pending[6].reject(new ApiError(409, 'container gone', -32001))
+    await waitFor(() => expect(api.runRelease).toHaveBeenCalledTimes(8))
+    for (const job of pending) job.resolve()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Released 6, 2 failed: retained evidence unavailable'),
+    )
+    expect(useStore.getState().runs[runs[0].id]).toBeDefined()
+  })
+
+  it('is absent for released history or gateways without run.release', () => {
+    seedAs(alice, [run({ status: 'merged', reason: 'retained container unavailable' })])
+    const view = render(<Board />)
+    expect(screen.queryByRole('button', { name: 'Release finished resources...' })).toBeNull()
+    view.unmount()
+    seedAs(alice, [run({ status: 'merged', reason: 'closed; retained container' })])
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.archive'], ws: [] } })
+    render(<Board />)
+    expect(screen.queryByRole('button', { name: 'Release finished resources...' })).toBeNull()
   })
 })

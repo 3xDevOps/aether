@@ -940,10 +940,11 @@ Three things the buckets do not come from the run status alone:
   reload, unlike the tab-local Unseen ack. The card sits in Idle but
   keeps its Done or Failed dot and chip, and its reason line reads "The agent
   reported success; open the run to review it." (or failure) in the done or
-  failed tone. `runState` is unchanged, so Clear done, archive eligibility and
-  finished-run checks still treat the run as finished; Clear done only sees it
-  once it has moved to Done. `watchOutcomeSeen` (`src/store/outcome-seen.ts`)
-  calls `run.seen` when the owner reveals the run through `navigate()`, or is
+  failed tone. `runState` is unchanged, so Archive closed runs, archive
+  eligibility and finished-run checks still treat the run as finished;
+  Archive closed runs only sees it once it has moved to Done.
+  `watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when the
+  owner reveals the run through `navigate()`, or is
   already on it in a visible tab when the flag arrives. It makes one call per
   reveal: a refusal shows the server's error and is not retried until the
   owner opens the run again. The card moves to Done only when the
@@ -964,27 +965,34 @@ archived run leaves. Each archived card, and the run header for one, show
 "deleted today" under 24h (past due included), "deleted in 1 day" under
 48h, then "deleted in N days".
 
-**Clear done archives every eligible Done card at once.** The Done
-`ColumnHeader` in Cards and the Runs header in Map offer "Clear done"; the
-palette carries the same action as "Clear done runs". All open the one
-confirm dialog (`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`)
-over a plan `clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens.
-Eligible runs are `isArchivable`, not already archived, and killable by the
-caller. The
-dialog states what it will archive and, by count, what stays and why -
-still `completed` and awaiting Close, or not this caller's to kill. On
-confirm, `runClearDone()` archives the eligible runs newest first, at most
-six calls in flight at a time, starting the next as each one settles. The
-server serializes the writes behind the mutex in `SetArchived`
-(`internal/scheduler/archive.go`), so the client need not wait on each call;
-the cap keeps a full Done column from holding one gateway request per run
-while they queue there. A failure does not stop the rest. A `CodeNotFound`
-refusal counts as success (the run is already gone) and removes the run
-locally as soon as that call settles, instead of retrying. Once every call
-has settled it reports one
-toast: "Archived N runs", or "Archived N, M failed: " plus the message of
-the first failure in Done order (newest first), regardless of which call
-settled first.
+**Archive closed runs... hides every eligible Done card.** The Done
+`ColumnHeader` in Cards and the Runs header in Map offer this action; the
+palette carries the same command. All open `ClearDoneConfirm`
+(`src/routes/board/clear-done-dialog.tsx`) over the `clearDonePlan()`
+(`src/lib/commands.ts`) snapshot taken when opened. Eligible runs are
+`isArchivable`, not already archived, and killable by the caller. The dialog
+says archiving hides runs and schedules their deletion after retention, but
+does not free container memory. It counts completed runs awaiting Close and
+runs this caller cannot act on. `runClearDone()` archives at most six at once,
+newest first, starting another as each settles. A failure does not stop the
+rest. `CodeNotFound` counts as success and removes the vanished run locally.
+The final toast reports the archived and failed counts, with the first real
+error in Done order.
+
+**Release finished resources... frees retained containers without archiving.**
+The same Cards/Map header and the command palette offer workspace-scoped bulk
+release. Its `releaseFinishedPlan()` searches all runs in the active workspace,
+including archived runs behind the toggle and finished runs still awaiting
+review; it does not depend on visible Done cards. It requires `run.release`,
+the Kill permission and a finished status with an existing retained-container
+reason (explicit Close, agent report or mission worker). Active and
+needs-attention runs are excluded. The confirmation says resources are removed,
+relaunch becomes unavailable, and the run and history remain visible. The
+bulk executor reuses the six-call concurrency bound, continues after failures
+and reports successful and failed counts with the first server error. Unlike
+bulk archive, a release refusal is never reclassified as a success; no release
+removes or archives a run in the client. A same-status `run.status` event
+updates its reason so the action disappears once its container is released.
 
 ### Execution, input and paused on the wire
 
@@ -1044,20 +1052,14 @@ verb rather than offering the one the server would refuse.
 
 ## Commands: one list, two ways to reach it
 
-`src/lib/commands.ts` holds every verb the dashboard can perform - the run
-verbs (pause/resume, send a message to the agent, close as merged or abandoned
-at any stage that holds a record, kill, delete, archive/restore,
-protect/unprotect, relaunch, pull branch, hand off) and the board verbs (open
-the board or the list, launch, launch from a template, mark all seen, clear
-every eligible run out of Done) - as data: an id, a label, an icon, the
-capability gate, and the call itself.
-`useCommandRunner()` performs one and reports the outcome the same way
-everywhere: gateway verbs toast their past-tense name or the server's refusal
-verbatim. Deleting a run also removes it from the local run map after the
-server confirms deletion; archiving, restoring and protecting call the
-gateway and nothing else, leaving the store for the run's own `run.archived`
-or `run.protected` event to update - two clients racing the same run cannot
-have an older RPC response overwrite a newer event.
+`src/lib/commands.ts` holds run verbs (pause/resume, message, close,
+kill, release retained resources, delete, archive/restore, protect/unprotect,
+relaunch, pull branch, hand off) and board verbs (navigate, launch,
+mark all seen, archive closed runs, release finished resources) as data:
+an id, label, icon, capability gate and call. `useCommandRunner()` reports
+gateway success or its real refusal in both the action bar and palette.
+Deletion removes the confirmed run locally; archive, restore, protect and
+release do not overwrite the server's events with an RPC response.
 
 Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
 `merged`, `abandoned`, `failed`, `interrupted`, never `completed`) plus the
@@ -1066,6 +1068,13 @@ archiving is reversible. Final runs offer Archive as a primary action;
 archived runs offer Restore. The palette resolves its focused run from the
 run map by `route.params.runId` rather than the attention list, so an
 archived run's own page still offers Restore.
+
+Release resources requires confirmation, `run.release`, the Kill permission
+and a finished retained reason, regardless of archive visibility or whether
+the run is a relaunchable TUI session. Released/expired runs no longer offer
+Release, while history remains available. The server checks the lifecycle
+again if a run changed after the command was displayed.
+
 - **The command palette** (`src/components/palette/`) opens from **Search runs
   and commands** in the titlebar, `⌘K` on macOS or `Ctrl+K` elsewhere;
   `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`,
@@ -2967,11 +2976,9 @@ accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
 
 Run actions cover the retained-run contract: Close chooses merged or abandoned,
-while Relaunch appears only for a retained TUI run before its TTL expires:
-one explicitly closed as Done (`closed; retained container`), or one an agent
-report finished (`agent reported success; retained container`,
-`agent reported failure; retained container`). Expired or unavailable runs
-have no Relaunch action.
+while Relaunch appears only for eligible retained TUI runs. Release is also
+offered for finished retained mission workers; its confirmation and error path
+do not hide or delete history. Expired or unavailable runs offer no Release.
 Sidebar tests cover Status and Member disclosure independently, with `Done`
 collapsed by default in Status and every Member group expanded.
 

@@ -115,6 +115,50 @@ func TestConcurrentCloseAndKill(t *testing.T) {
 		t.Fatal("terminal run must have FinishedAt")
 	}
 }
+
+// Whichever lifecycle operation wins, release cannot destroy a relaunched
+// run. Both contend on the same retained container's lifecycle lock.
+func TestReleaseRacingRelaunchNeverDestroysActiveRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, container := e.launchFake(t, "release versus relaunch")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	start := make(chan struct{})
+	released := make(chan error, 1)
+	relaunched := make(chan error, 1)
+	go func() {
+		<-start
+		released <- e.sched.Release(ctx, run.ID, e.member.ID)
+	}()
+	go func() {
+		<-start
+		_, err := e.sched.Relaunch(ctx, run.ID, e.member.ID)
+		relaunched <- err
+	}()
+	close(start)
+	releaseErr, relaunchErr := <-released, <-relaunched
+	if releaseErr == nil {
+		if !errors.Is(relaunchErr, ErrInvalidTransition) {
+			t.Fatalf("release won but relaunch succeeded: %v", relaunchErr)
+		}
+		if e.rt.byName(string(run.ID)) != nil {
+			t.Fatal("released retained container survived")
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	} else {
+		if !errors.Is(releaseErr, ErrInvalidTransition) || relaunchErr != nil {
+			t.Fatalf("release = %v; relaunch = %v, want active release refusal", releaseErr, relaunchErr)
+		}
+		if e.rt.byName(string(run.ID)) != container || container.currentState() != "running" {
+			t.Fatal("release destroyed the relaunched container")
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	}
+}
+
 func TestKillSucceedsWhenContainerIsAlreadyGone(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

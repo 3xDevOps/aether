@@ -261,6 +261,58 @@ test.each([
 })
 
 test.each([
+  { status: 'merged', reason: 'closed; retained container', mode: 'tui' },
+  { status: 'completed', reason: 'worker finished; retained container', mode: 'headless' },
+  { status: 'failed', reason: 'agent reported failure; retained container', mode: 'tui' },
+] satisfies Partial<Run>[])('releases retained resources without archiving or removing a %j run', async (over) => {
+  const record = seed({ run: over })
+  render(<RunActions run={record} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+  const dialog = within(await screen.findByRole('alertdialog'))
+  expect(api.runRelease).not.toHaveBeenCalled()
+  fireEvent.click(dialog.getByRole('button', { name: 'Release resources' }))
+  await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(record.id))
+  expect(api.runArchive).not.toHaveBeenCalled()
+  expect(useStore.getState().runs[record.id]).toBeDefined()
+})
+
+test('release failure shows the real gateway error without changing the run', async () => {
+  vi.mocked(api.runRelease).mockRejectedValueOnce(new Error('evidence is still pending'))
+  const record = seed({ run: { status: 'merged', reason: 'closed; retained container' } })
+  render(<RunActions run={record} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Release resources' }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Released resources failed: evidence is still pending'))
+  expect(useStore.getState().runs[record.id].reason).toBe('closed; retained container')
+})
+
+test.each([
+  { status: 'needs-attention', reason: 'closed; retained container' },
+  { status: 'merged', reason: 'retained container expired' },
+  { status: 'merged', reason: 'retained container unavailable' },
+  { status: 'failed', reason: 'closed; retained container' },
+] satisfies Partial<Run>[])('release is absent without a finished retained resource: %j', async (over) => {
+  render(<RunActions run={seed({ run: over })} />)
+  expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
+  expect((await openMore()).queryByRole('menuitem', { name: 'Release resources...' })).toBeNull()
+})
+
+test('release requires Kill permission and the run.release capability', async () => {
+  const record = seed({
+    run: { status: 'merged', reason: 'closed; retained container', protected: true },
+    members: [alice, bob],
+    self: bob,
+  })
+  const view = render(<RunActions run={record} />)
+  expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
+  view.unmount()
+  const own = seed({ run: { status: 'merged', reason: 'closed; retained container' } })
+  useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.archive'], ws: [] } })
+  render(<RunActions run={own} />)
+  expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
+})
+
+test.each([
   { status: 'running' },
   { status: 'failed', mode: 'tui', reason: 'closed; retained container' },
   { status: 'interrupted', mode: 'tui', reason: 'closed; retained container' },

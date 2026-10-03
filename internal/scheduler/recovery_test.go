@@ -928,6 +928,64 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 	}
 }
 
+// A crash after the terminal row is recorded but before destruction leaves
+// the exited container and its non-retained sidecar for boot reconciliation.
+// Release must not report success before that cleanup actually happens.
+func TestReleaseBeforeRecoveryRejectsInterruptedTerminalCleanup(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, container := e.launchFake(t, "release during interrupted finish")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	container.exitNow(0)
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("readSidecar: %v", err)
+	}
+	sc.ExitObserved = true
+	sc.ExitCode = 0
+	if err := e.sched.writeSidecar(sc); err != nil {
+		t.Fatalf("writeSidecar: %v", err)
+	}
+	finished := time.Now().UTC()
+	if err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent exited; results committed", nil, &finished); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	if sc.ContainerID != string(container.id) || sc.Retained || sc.RetainedUntil != nil || sc.DestroyPending {
+		t.Fatalf("unexpected interrupted-finish sidecar ownership: %+v", sc)
+	}
+	if got := e.rt.byName(string(run.ID)); got != container {
+		t.Fatalf("container before recovery = %v, want original container", got)
+	}
+	if err := s2.Release(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("Release before recovery = %v, want ErrInvalidTransition while cleanup is pending", err)
+	}
+	if got := e.rt.byName(string(run.ID)); got != container {
+		t.Fatalf("Release changed container ownership: got %v, want original container", got)
+	}
+	if _, err := s2.readSidecar(run.ID); err != nil {
+		t.Fatalf("Release removed sidecar before cleanup: %v", err)
+	}
+
+	if err := s2.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	if got := e.rt.byName(string(run.ID)); got != nil {
+		t.Fatalf("container survived recovery cleanup: %v", got)
+	}
+	if _, err := s2.readSidecar(run.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sidecar after recovery cleanup: %v, want not exist", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if err := s2.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release after recovery cleanup: %v", err)
+	}
+}
+
 func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {

@@ -413,6 +413,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
+    runRelease: vi.fn(async () => ({})),
     runGitStatus: vi.fn<Api['runGitStatus']>(async () => ({
       ...gitStatus, changes: [], remotes: [], output: { ...gitStatus.output },
     })),

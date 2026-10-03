@@ -8,14 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import type { ClearDonePlan } from '@/lib/commands'
+import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 
-/**
- * The one Clear done confirm dialog, shared by the Done header's button and
- * the "Clear done runs" palette entry. `plan` is a snapshot taken when the
- * dialog opened, so a run leaving Done mid-archive cannot change what the
- * title, the counts, or the confirm button say while it is open.
- */
+/** The shared archive confirmation for Cards, Map and the palette. */
 export function ClearDoneConfirm({
   plan,
   running,
@@ -33,12 +28,12 @@ export function ClearDoneConfirm({
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
         <DialogHeader>
           <DialogTitle>
-            Archive {n} finished {n === 1 ? 'run' : 'runs'}?
+            Archive {n} closed {n === 1 ? 'run' : 'runs'}?
           </DialogTitle>
           <DialogDescription>
-            Archived runs leave the board. The server deletes them once
-            the retention period passes; until then, restore them from
-            the Archived toggle.
+            Archive hides these runs and schedules their deletion after the retention
+            period. It does not free container memory; release resources separately
+            before archiving if you want to free them now.
           </DialogDescription>
         </DialogHeader>
         {(plan.notClosed > 0 || plan.notAllowed > 0) && (
@@ -64,6 +59,41 @@ export function ClearDoneConfirm({
           <Button disabled={running} onClick={onConfirm}>
             {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
             Archive {n}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** The same confirmation surface for retained containers, archived or visible. */
+export function ReleaseFinishedConfirm({
+  plan,
+  running,
+  onConfirm,
+  onCancel,
+}: {
+  plan: ReleaseFinishedPlan
+  running: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const n = plan.eligible.length
+  return (
+    <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
+      <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
+        <DialogHeader>
+          <DialogTitle>Release resources for {n} finished {n === 1 ? 'run' : 'runs'}?</DialogTitle>
+          <DialogDescription>
+            Their retained containers will be removed and cannot be relaunched.
+            Run records and history remain visible; this does not archive or delete them.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" disabled={running} onClick={onCancel}>Cancel</Button>
+          <Button disabled={running} onClick={onConfirm}>
+            {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
+            Release {n}
           </Button>
         </DialogFooter>
       </DialogContent>

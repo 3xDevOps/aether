@@ -426,6 +426,44 @@ func TestFailedFinishCaptureRetainsResources(t *testing.T) {
 	}
 }
 
+func TestReleaseRejectsTerminalRunWhileFinishEvidenceIsPending(t *testing.T) {
+	e := newTestEnv(t, nil)
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.failures = 1
+	e.sched.UseEvidence(capture)
+	run, container := e.launchFake(t, "release during finish evidence")
+	sub := e.subscribe(t)
+
+	// The terminal status is published before finish evidence begins. Keep
+	// Capture blocked so the first Release sees a live, not-yet-retained owner.
+	func() {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		container.exitNow(1)
+		waitStatusEvent(t, sub, run.ID, domain.RunFailed)
+		if err := e.sched.Release(t.Context(), run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("Release during finish evidence = %v, want ErrInvalidTransition", err)
+		}
+		if e.rt.byName(string(run.ID)) == nil || !e.sched.RetainsContainer(t.Context(), run.ID) {
+			t.Fatal("Release discarded the run's container ownership during finish evidence")
+		}
+	}()
+
+	waitFor(t, "evidence-retained sidecar", func() bool {
+		sc, err := e.sched.readSidecar(run.ID)
+		return err == nil && sc.Retained && sc.EvidencePending
+	})
+	if err := e.sched.Release(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release after failed finish evidence: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil || e.sched.RetainsContainer(t.Context(), run.ID) {
+		t.Fatal("Release after successful evidence retry kept the container or its owner")
+	}
+	if got := capture.requestCount(); got != 2 {
+		t.Fatalf("finish capture requests = %d, want failed attempt and successful retry", got)
+	}
+}
+
 func TestRetainedEvidenceRetryThenCleanup(t *testing.T) {
 	e := newTestEnv(t, nil)
 	capture := newSchedulerEvidenceCapture(e.ws.ID)

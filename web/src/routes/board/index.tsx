@@ -1,4 +1,4 @@
-import { Archive, CheckCheck, Rocket } from 'lucide-react'
+import { Archive, CheckCheck, PackageX, Rocket } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
@@ -8,13 +8,15 @@ import { api } from '@/lib/api'
 import {
   canLaunch,
   clearDonePlan,
+  releaseFinishedPlan,
   runClearDone,
-  type ClearDoneCandidate,
+  runReleaseFinished,
   type ClearDonePlan,
+  type ReleaseFinishedPlan,
 } from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { registerRoute } from '@/routes/registry'
-import { ClearDoneConfirm } from '@/routes/board/clear-done-dialog'
+import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
 import { useBoard, type BoardColumn } from '@/routes/board/selectors'
@@ -52,12 +54,11 @@ export function Board() {
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
-  const doneCandidates: ClearDoneCandidate[] =
-    columns
-      .find((c) => c.key === 'done')
-      ?.cards.map((card) => ({ run: card.run, workspace: card.workspace })) ?? []
+  const doneCandidates = columns.find((c) => c.key === 'done')?.cards ?? []
   const donePlan = clearDonePlan(doneCandidates, caps, self)
   const runClear = (eligible: RunRecord[]) => runClearDone(eligible, { api, removeRun })
+  const releaseCandidates = [...columns.flatMap((column) => column.cards), ...archivedCards]
+  const releasePlan = releaseFinishedPlan(releaseCandidates, caps, self)
 
   const [showArchived, setShowArchived] = useState(false)
   // The toggle only exists while there is something behind it; once the
@@ -79,12 +80,17 @@ export function Board() {
     onToggle: setShowArchived,
   }
   const clearDone = showArchived ? undefined : { plan: donePlan, onRun: runClear }
+  const releaseFinished = {
+    plan: releasePlan,
+    onRun: (eligible: RunRecord[]) => runReleaseFinished(eligible, { api }),
+  }
   const mapHeader = (controls?: ReactNode) => (
     <ColumnHeader
       label={showArchived ? 'Runs · archived' : 'Runs'}
       count={visibleColumns.reduce((count, column) => count + column.cards.length, 0)}
       archived={archivedToggle}
       clearDone={clearDone}
+      releaseFinished={releaseFinished}
       controls={controls}
     />
   )
@@ -193,6 +199,7 @@ export function Board() {
                     placeholder={placeholder}
                     archived={archivedToggle}
                     clearDone={clearDone}
+                    releaseFinished={releaseFinished}
                   />
                 ) : (
                   <Column key={column.key} column={column} placeholder={placeholder} />
@@ -274,16 +281,23 @@ interface ClearDoneAction {
   onRun: (eligible: RunRecord[]) => Promise<void>
 }
 
+interface ReleaseFinishedAction {
+  plan: ReleaseFinishedPlan
+  onRun: (eligible: RunRecord[]) => Promise<void>
+}
+
 function Column({
   column,
   placeholder,
   archived,
   clearDone,
+  releaseFinished,
 }: {
   column: BoardColumn
   placeholder: 'skeleton' | 'empty' | 'none'
   archived?: ArchivedToggle
   clearDone?: ClearDoneAction
+  releaseFinished?: ReleaseFinishedAction
 }) {
   return (
     <section
@@ -295,6 +309,7 @@ function Column({
         count={column.cards.length}
         archived={archived}
         clearDone={clearDone}
+        releaseFinished={releaseFinished}
       />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
@@ -322,21 +337,19 @@ function ColumnHeader({
   archived,
   clearDone,
   controls,
+  releaseFinished,
 }: {
   label: string
   count: number
   archived?: ArchivedToggle
   clearDone?: ClearDoneAction
+  releaseFinished?: ReleaseFinishedAction
   controls?: ReactNode
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
   const actions = useRef<HTMLDivElement>(null)
-  // Radix returns focus to Clear done's own trigger on close, but that
-  // button stops rendering once nothing eligible is left - exactly what a
-  // fully successful clear leaves behind. Fall back to the Archived toggle
-  // if this header has one, otherwise the heading itself, the way
-  // `takesFocus` in run-dock.tsx claims a placeholder when a terminal's
-  // element disappears out from under the keyboard.
+  // A completed bulk action may remove its own button. Once Radix closes its
+  // dialog, restore focus to the Archived toggle or this header.
   const takeFocus = () => {
     if (document.activeElement !== document.body) return
     const toggle = actions.current?.querySelector<HTMLElement>('[aria-pressed]')
@@ -355,6 +368,7 @@ function ColumnHeader({
       {controls}
       <div ref={actions} className="flex max-w-full flex-wrap items-center gap-1.5">
         {clearDone && <ClearDoneButton {...clearDone} onClosed={takeFocus} />}
+        {releaseFinished && <ReleaseFinishedButton {...releaseFinished} onClosed={takeFocus} />}
         {archived && archived.count > 0 && (
           <Tooltip>
             <Tooltip.Trigger<'button'>
@@ -386,12 +400,8 @@ function ColumnHeader({
 }
 
 /**
- * Archives every eligible Done card at once, behind a confirm dialog that
- * states what it will archive and what stays - see "Clear done archives
- * every eligible Done card at once" in docs/dashboard-frontend.md. `plan`
- * tracks Done live while this button is idle; once the dialog opens, it
- * freezes to a snapshot, so an archive landing mid-confirm cannot change
- * the question being asked or unmount the dialog out from under itself.
+ * Archives eligible Done cards behind a snapshot confirmation. `plan` tracks
+ * Done while idle; the open dialog remains stable if runs change beneath it.
  */
 function ClearDoneButton({
   plan,
@@ -438,15 +448,75 @@ function ClearDoneButton({
                 onClick={openConfirm}
               >
                 <Archive className="size-3" aria-hidden />
-                Clear done
+                Archive closed runs...
               </Button>
             )}
           />
-          <Tooltip.Content>Archive every finished run you may act on</Tooltip.Content>
+          <Tooltip.Content>Archive hides runs and schedules deletion; it does not free memory</Tooltip.Content>
         </Tooltip>
       )}
       {open && snapshot && (
         <ClearDoneConfirm
+          plan={snapshot}
+          running={running}
+          onConfirm={() => void confirm()}
+          onCancel={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+/** Releases eligible retained containers without hiding their run records. */
+function ReleaseFinishedButton({
+  plan,
+  onRun,
+  onClosed,
+}: ReleaseFinishedAction & { onClosed: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [snapshot, setSnapshot] = useState<ReleaseFinishedPlan | null>(null)
+  const wasOpen = useRef(false)
+
+  useEffect(() => {
+    if (wasOpen.current && !open) onClosed()
+    wasOpen.current = open
+  }, [open, onClosed])
+
+  const confirm = async () => {
+    if (!snapshot) return
+    setRunning(true)
+    await onRun(snapshot.eligible)
+    setRunning(false)
+    setOpen(false)
+  }
+
+  return (
+    <>
+      {plan.eligible.length > 0 && (
+        <Tooltip>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <Button
+                {...triggerProps}
+                variant="ghost"
+                size="sm"
+                className="h-[22px] min-h-[22px] px-1.5 text-xs"
+                onClick={() => {
+                  setSnapshot(plan)
+                  setOpen(true)
+                }}
+              >
+                <PackageX className="size-3" aria-hidden />
+                Release finished resources...
+              </Button>
+            )}
+          />
+          <Tooltip.Content>Free retained containers without archiving run history</Tooltip.Content>
+        </Tooltip>
+      )}
+      {open && snapshot && (
+        <ReleaseFinishedConfirm
           plan={snapshot}
           running={running}
           onConfirm={() => void confirm()}

@@ -395,6 +395,144 @@ func TestKillUnsupervisedRetainedSidecar(t *testing.T) {
 		t.Fatalf("startup Kill left an in-memory owner: %+v", entry)
 	}
 }
+func TestReleaseRetainedRunPreservesRecordAndArchive(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "release archived run")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	archived, err := e.sched.SetArchived(ctx, run.ID, e.member.ID, true)
+	if err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+	sub := e.subscribe(t)
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("released container still exists")
+	}
+	fresh := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if fresh.Reason != retainedUnavailableReason || fresh.Worktree != archived.Worktree ||
+		fresh.Branch != archived.Branch || fresh.ArchivedAt == nil ||
+		!fresh.ArchivedAt.Equal(*archived.ArchivedAt) || fresh.FinishedAt == nil {
+		t.Fatalf("release changed retained record or archive: before %+v, after %+v", archived, fresh)
+	}
+	if _, err := os.Stat(fresh.Worktree); err != nil {
+		t.Fatalf("released run lost checkout: %v", err)
+	}
+	if _, err := os.Stat(e.sched.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("release kept sidecar: %v", err)
+	}
+	status := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged)
+	if status.From != domain.RunMerged || status.Reason != retainedUnavailableReason {
+		t.Fatalf("release event = %+v", status)
+	}
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("repeat Release: %v", err)
+	}
+	expectNoStatusEvent(t, sub, run.ID, "repeat release")
+}
+
+func TestReleaseRefusesActiveAndRelaunchedRuns(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, container := e.launchFake(t, "active then relaunched")
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("active Release = %v, want invalid transition", err)
+	}
+	if e.rt.byName(string(run.ID)) != container || container.currentState() != "running" {
+		t.Fatal("active release stopped the running container")
+	}
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("release after relaunch = %v, want invalid transition", err)
+	}
+	if e.rt.byName(string(run.ID)) != container || container.currentState() != "running" {
+		t.Fatal("release destroyed relaunched container")
+	}
+	if fresh := e.waitStoreStatus(t, run.ID, domain.RunRunning); fresh.Worktree != run.Worktree {
+		t.Fatalf("reopened checkout changed: %+v", fresh)
+	}
+}
+
+func TestReleaseRefusesUnsupervisedActiveRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, container := e.launchFake(t, "active before recovery")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	if err := recovered.Release(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("unsupervised active Release = %v, want invalid transition", err)
+	}
+	if e.rt.byName(string(run.ID)) != container || container.currentState() != "running" {
+		t.Fatal("unsupervised active release stopped container")
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+}
+
+func TestReleaseAdoptsUnsupervisedRetainedOwner(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "release before recovery")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release before recoverRuns: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil || recovered.RetainsContainer(ctx, run.ID) {
+		t.Fatal("unsupervised release kept runtime or durable ownership")
+	}
+	if fresh := e.waitStoreStatus(t, run.ID, domain.RunMerged); fresh.Reason != retainedUnavailableReason {
+		t.Fatalf("unsupervised release changed terminal status/reason: %+v", fresh)
+	}
+	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("repeat unsupervised release: %v", err)
+	}
+}
+
+func TestReleaseKeepsRetainedContainerOnEvidenceFailure(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, container := e.launchFake(t, "release requires evidence")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.failures = 1
+	e.sched.UseEvidence(capture)
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); err == nil || !strings.Contains(err.Error(), "evidence capture unavailable") {
+		t.Fatalf("Release evidence error = %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != container || !e.sched.RetainsContainer(ctx, run.ID) {
+		t.Fatal("failed evidence capture released retained container")
+	}
+	if err := e.sched.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("retry Release: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("successful evidence retry kept container")
+	}
+}
+
 func syntheticDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.Run {
 	t.Helper()
 	run, _ := e.launchFake(t, task)
@@ -413,6 +551,24 @@ func syntheticDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.R
 	}
 	return run
 }
+
+func TestReleaseRetriesTerminalCreationKeyCleanup(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run := syntheticDestroyPendingRun(t, e, "release pending cleanup")
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	if err := recovered.Release(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release destroy-pending run: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil || recovered.RetainsContainer(ctx, run.ID) {
+		t.Fatal("release left creation-key container or owner")
+	}
+	if fresh := e.waitStoreStatus(t, run.ID, domain.RunMerged); fresh.Worktree != run.Worktree {
+		t.Fatalf("cleanup changed terminal outcome or checkout: %+v", fresh)
+	}
+}
+
 func activeDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.Run {
 	t.Helper()
 	run, _ := e.launchFake(t, task)

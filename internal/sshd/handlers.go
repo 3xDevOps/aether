@@ -226,6 +226,10 @@ func (s *Server) runKill(ctx context.Context, member domain.MemberID, params jso
 	return s.runAct(ctx, member, params, s.cfg.Runs.Kill)
 }
 
+func (s *Server) runRelease(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	return s.runAct(ctx, member, params, s.cfg.Runs.Release)
+}
+
 func (s *Server) runDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	return s.runAct(ctx, member, params, s.cfg.Runs.DeleteRun)
 }
