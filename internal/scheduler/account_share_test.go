@@ -1002,3 +1002,81 @@ func TestSharedRunPinsLauncherProfile(t *testing.T) {
 		t.Fatalf("profile snapshot read for %v, want the launcher %s", pinned, e.member.ID)
 	}
 }
+
+// A borrowed Claude Code login starts signed in: the launcher's own
+// ~/.claude.json gets setup marked complete, keeping whatever it already
+// says, and is otherwise left to Claude Code. Nothing is written for a
+// launcher's own login, for a harness without such state, or over a file
+// that is not a JSON object.
+func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
+	t.Parallel()
+	read := func(t *testing.T, home string) (map[string]any, os.FileMode) {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+		if err != nil {
+			t.Fatalf("read ~/.claude.json: %v", err)
+		}
+		info, err := os.Stat(filepath.Join(home, ".claude.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state map[string]any
+		if err := json.Unmarshal(data, &state); err != nil {
+			t.Fatalf("~/.claude.json = %q: %v", data, err)
+		}
+		return state, info.Mode().Perm()
+	}
+
+	e := newShareEnv(t, nil)
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json", ".claude.json")
+	e.launchSpec(t, "claude")
+	state, mode := read(t, e.adaHome)
+	if len(state) != 1 || state["hasCompletedOnboarding"] != true || mode != 0o600 {
+		t.Fatalf("launcher ~/.claude.json = %v mode %o, want only hasCompletedOnboarding=true, mode 0600", state, mode)
+	}
+
+	f := newShareEnv(t, nil)
+	writeHomeFiles(t, f.ownerHome, ".claude/.credentials.json")
+	if err := os.WriteFile(filepath.Join(f.adaHome, ".claude.json"), []byte(`{"theme":"light","projects":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(filepath.Join(f.adaHome, ".claude.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.launchSpec(t, "claude")
+	state, _ = read(t, f.adaHome)
+	after, err := os.Stat(filepath.Join(f.adaHome, ".claude.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state["theme"] != "light" || state["hasCompletedOnboarding"] != true || len(state) != 3 {
+		t.Fatalf("launcher ~/.claude.json = %v, want the existing keys plus hasCompletedOnboarding", state)
+	}
+	if !os.SameFile(before, after) || before.Sys().(*syscall.Stat_t).Ino != after.Sys().(*syscall.Stat_t).Ino {
+		t.Fatal("~/.claude.json was replaced rather than rewritten in place")
+	}
+
+	g := newShareEnv(t, nil)
+	writeHomeFiles(t, g.ownerHome, ".claude/.credentials.json")
+	if err := os.WriteFile(filepath.Join(g.adaHome, ".claude.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.launchSpec(t, "claude")
+	if data, _ := os.ReadFile(filepath.Join(g.adaHome, ".claude.json")); string(data) != "[]" {
+		t.Fatalf("a non-object ~/.claude.json was rewritten to %q", data)
+	}
+
+	h := newShareEnv(t, nil)
+	writeHomeFiles(t, h.ownerHome, ".claude/.credentials.json", ".omp/agent/agent.db")
+	h.launchSpec(t, "omp")
+	if _, err := os.Lstat(filepath.Join(h.adaHome, ".claude.json")); !os.IsNotExist(err) {
+		t.Fatalf("omp launch touched ~/.claude.json: %v", err)
+	}
+	if _, err := h.sched.Launch(t.Context(), h.ws.ID, h.owner.ID, h.owner.ID, "own", "claude", domain.LaunchTUI); err != nil {
+		t.Fatalf("owner Launch: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(h.ownerHome, ".claude.json")); !os.IsNotExist(err) {
+		t.Fatalf("an own-account launch wrote ~/.claude.json: %v", err)
+	}
+}
