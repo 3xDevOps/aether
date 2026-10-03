@@ -2,11 +2,15 @@ package mission
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -155,5 +159,58 @@ func TestCompletingAMissionRetainsASubmittedWorker(t *testing.T) {
 	attempt, err := fix.db.GetAttempt(ctx, fix.attempt.ID)
 	if err != nil || attempt.State != domain.AttemptCompleted {
 		t.Fatalf("submitted worker after completion = %+v (err %v), want completed", attempt, err)
+	}
+}
+
+// TestIntegratorCannotReportSuccessWithAnApprovedUndeliveredCandidate: a
+// success report ends the mission for good, so coord.report refuses it while a
+// candidate's approved delivery has not run and can still run. Nothing to
+// deliver, or a request a later delivery to the same ref replaced, still
+// completes the mission.
+func TestIntegratorCannotReportSuccessWithAnApprovedUndeliveredCandidate(t *testing.T) {
+	ctx := context.Background()
+	svc, m, _, _ := acceptedIntegrationPolicyFixture(t)
+	db := svc.cfg.Missions.(*store.DB)
+	now := time.Now().UTC()
+	saveCandidate := func(id string, created time.Time, state protocol.DeliveryState, receipt bool) {
+		t.Helper()
+		c := protocol.Candidate{
+			CandidateID: id, WorkspaceID: string(m.WorkspaceID), MissionID: string(m.ID),
+			TargetRef: "refs/heads/main", ExpectedTargetRevision: "base", CandidateRevision: "revision-" + id,
+			State: protocol.CandidateFrozen, CreatedAt: created, ExpiresAt: created.Add(protocol.IntegrationCandidateLifetime),
+			DeliveryRequest: &protocol.DeliveryRequest{
+				RequestID: "request-" + id, RequestVersion: 1, TargetRef: "refs/heads/main", State: state,
+				CreatedAt: created, ExpiresAt: created.Add(protocol.IntegrationVerificationLifetime),
+			},
+		}
+		if receipt {
+			c.DeliveryReceipt = &protocol.DeliveryReceipt{ReceiptID: "request-" + id, RequestID: "request-" + id, TargetRef: "refs/heads/main"}
+		}
+		payload, err := json.Marshal(c)
+		if err != nil {
+			t.Fatalf("encode candidate: %v", err)
+		}
+		if err := db.CreateIntegrationCandidate(ctx, &store.IntegrationCandidate{
+			ID: id, WorkspaceID: m.WorkspaceID, ActorKey: "actor", IdempotencyKey: "key-" + id, Digest: "digest-" + id,
+			State: string(c.State), Version: 1, Payload: payload, CreatedAt: c.CreatedAt, ExpiresAt: c.ExpiresAt,
+		}); err != nil {
+			t.Fatalf("create candidate %s: %v", id, err)
+		}
+	}
+
+	if err := svc.ValidateReport(ctx, m.CurrentIntegratorRunID, store.CoordOutcomeSuccess); err != nil {
+		t.Fatalf("success report with nothing to deliver: %v", err)
+	}
+	saveCandidate("candidate-1", now.Add(-2*time.Minute), protocol.DeliveryApproved, false)
+	err := svc.ValidateReport(ctx, m.CurrentIntegratorRunID, store.CoordOutcomeSuccess)
+	if !errors.Is(err, store.ErrMissionPhase) || !strings.Contains(err.Error(), "integration deliver") {
+		t.Fatalf("success report with an approved, undelivered candidate = %v, want ErrMissionPhase naming integration deliver", err)
+	}
+	if err = svc.ValidateReport(ctx, m.CurrentIntegratorRunID, store.CoordOutcomeFailure); err != nil {
+		t.Fatalf("failure report with an approved, undelivered candidate: %v", err)
+	}
+	saveCandidate("candidate-2", now.Add(-time.Minute), protocol.DeliveryDelivered, true)
+	if err = svc.ValidateReport(ctx, m.CurrentIntegratorRunID, store.CoordOutcomeSuccess); err != nil {
+		t.Fatalf("success report after a later delivery to the same ref: %v", err)
 	}
 }

@@ -135,7 +135,8 @@ task accept, then dispatch it. Cancel or wait for a worker before revising its t
   aether-internal task abandon --help
 Never wait for a human. Once the combined result is verified and delivered,
 or the objective has nothing to deliver and its findings are gathered, report
-success; that completes the mission and stops leftover workers.
+success; that completes the mission and stops leftover workers. Success is
+refused while an approved delivery request has not run; deliver it first.
 `
 
 const completedFlow = `The mission is completed. Take no further action.

@@ -276,7 +276,7 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 		query += ` AND task_id = ?`
 		args = append(args, taskID)
 	}
-	query += ` ORDER BY created_at, id LIMIT 1025`
+	query += ` ORDER BY created_at, id`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -284,9 +284,6 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Attempt, 0, 32)
 	for rows.Next() {
-		if len(out) == 1024 {
-			return nil, ErrConflict
-		}
 		a, scanErr := scanAttempt(rows)
 		if scanErr != nil {
 			return nil, scanErr
@@ -426,7 +423,7 @@ func (d *DB) ListSubmissions(ctx context.Context, missionID domain.MissionID, ta
 		query += ` AND task_id=?`
 		args = append(args, taskID)
 	}
-	query += ` ORDER BY created_at, id LIMIT 1025`
+	query += ` ORDER BY created_at, id`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -434,9 +431,6 @@ func (d *DB) ListSubmissions(ctx context.Context, missionID domain.MissionID, ta
 	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Submission, 0, 32)
 	for rows.Next() {
-		if len(out) == 1024 {
-			return nil, ErrConflict
-		}
 		s, scanErr := scanSubmission(rows)
 		if scanErr != nil {
 			return nil, scanErr

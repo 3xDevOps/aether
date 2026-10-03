@@ -863,7 +863,9 @@ integrator reports success, which also stops any leftover workers. When a
 mission ends, a worker that already submitted is retained and its attempt
 recorded `completed`; every other live worker is killed and its attempt
 recorded `cancelled`. A success report before `mission start` is refused with
-code `-32002`. A read-only
+code `-32002`, and so is one while a mission candidate holds an approved
+delivery request that has not run, has not expired, and no later delivery to
+the same ref replaced; the error names the `integration deliver` parameters. A read-only
 investigation with nothing to deliver reports success once its findings are
 gathered; do not submit a fake integration candidate just to change the phase.
 

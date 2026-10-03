@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,6 +80,26 @@ func TestMissionAttemptReservationIsIdempotent(t *testing.T) {
 		IntegratorGeneration: mission.IntegratorGeneration,
 	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
 		t.Fatalf("semantic replay conflict = %v", reserveErr)
+	}
+}
+
+// TestListAttemptsHasNoCap: a mission's attempt count is the integrator's to
+// decide, and ending the mission lists every attempt to stop the live ones.
+func TestListAttemptsHasNoCap(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
+	task := mustCreateMissionTask(t, db, mission.ID, "worker")
+	const want = 1025
+	for i := range want {
+		if _, _, err := reserveMissionAttempt(t, db, mission, task, fmt.Sprintf("dispatch-%d", i)); err != nil {
+			t.Fatalf("reserve attempt %d: %v", i, err)
+		}
+	}
+	attempts, err := db.ListAttempts(context.Background(), mission.ID, "")
+	if err != nil || len(attempts) != want {
+		t.Fatalf("ListAttempts = %d attempts, %v, want %d", len(attempts), err, want)
 	}
 }
 

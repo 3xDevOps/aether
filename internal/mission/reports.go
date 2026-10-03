@@ -2,6 +2,7 @@ package mission
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,14 +25,43 @@ type EvidenceReader interface {
 // fresh report. Ordinary runs, the current integrator, and current workers are
 // accepted, while a stale worker/coordinator fails closed through
 // resolveAssignment. The integrator's success completes its mission, which is
-// only possible once the mission is active.
+// only possible once the mission is active and no approved delivery is left
+// undone: completion is terminal, so nobody could run it afterwards.
 func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome store.CoordOutcome) error {
 	m, attempt, err := s.resolveAssignment(ctx, run)
 	if err != nil {
 		return err
 	}
-	if m != nil && attempt == nil && outcome == store.CoordOutcomeSuccess && m.Phase == domain.MissionPhasePlanning {
+	if m == nil || attempt != nil || outcome != store.CoordOutcomeSuccess {
+		return nil
+	}
+	if m.Phase == domain.MissionPhasePlanning {
 		return fmt.Errorf("%w: a success report completes the mission, and mission %s has not started; run mission start first", store.ErrMissionPhase, m.ID)
+	}
+	// Any request that can still run is younger than the verification
+	// lifetime, so the newest page covers it.
+	candidates, err := s.cfg.Store.ListIntegrationCandidates(ctx, m.WorkspaceID, m.ID, protocol.IntegrationMaxPageSize)
+	if err != nil {
+		return err
+	}
+	now := s.cfg.Now()
+	delivered := map[string]bool{}
+	for _, c := range candidates {
+		var request protocol.DeliveryRequest
+		if len(c.DeliveryRequest) == 0 || json.Unmarshal(c.DeliveryRequest, &request) != nil {
+			continue
+		}
+		if len(c.DeliveryReceipt) > 0 {
+			delivered[c.TargetRef] = true
+			continue
+		}
+		// Newest first: a later delivery to the same ref replaced this request.
+		if delivered[c.TargetRef] || c.State != string(protocol.CandidateFrozen) || !now.Before(c.ExpiresAt) || !now.Before(request.ExpiresAt) ||
+			(request.State != protocol.DeliveryApproved && request.State != protocol.DeliveryDelivering) {
+			continue
+		}
+		return fmt.Errorf("%w: a success report completes the mission, and candidate %s has an approved delivery that has not run; run aether-internal integration deliver with candidate_id %s, request_id %s and request_version %d first; if it can no longer be delivered, deliver a replacement candidate to %s or report failure",
+			store.ErrMissionPhase, c.CandidateID, c.CandidateID, request.RequestID, request.RequestVersion, c.TargetRef)
 	}
 	return nil
 }
