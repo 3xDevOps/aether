@@ -16,46 +16,72 @@ import (
 // Installation returns whose ~/.local/bin/<executable> a launch by launcher
 // on account's account runs: launcher's own when their home has it, else
 // account's, else "". On another member's account the owner's installation
-// stands in for a missing one of the launcher's, but only when every link
-// it follows stays inside borrowRoots, the directories the run mounts from
-// the owner's home; a link into anything else would dangle in the run.
-func (m *Manager) Installation(launcher, account domain.MemberID, executable string, borrowRoots []string) (domain.MemberID, error) {
-	visited, err := m.executableInstalled(launcher, executable)
+// stands in for a missing one of the launcher's, but only when every link it
+// follows resolves in the run: the owner's ~/.local/bin and ~/.local/lib are
+// mounted together under another directory, so a relative link between them
+// works and an absolute one does not; installPaths are mounted at their own
+// path, so only an absolute link reaches them. A link anywhere else dangles.
+func (m *Manager) Installation(launcher, account domain.MemberID, executable string, installPaths []string) (domain.MemberID, error) {
+	hops, err := m.executableInstalled(launcher, executable)
 	if err != nil {
 		return "", err
 	}
-	if visited != nil {
+	if hops != nil {
 		return launcher, nil
 	}
 	if account == launcher {
 		return "", nil
 	}
-	visited, err = m.executableInstalled(account, executable)
+	hops, err = m.executableInstalled(account, executable)
 	if err != nil {
 		return "", err
 	}
-	if visited == nil {
+	if hops == nil {
 		return "", nil
 	}
-	for _, rel := range visited {
-		if !slices.ContainsFunc(borrowRoots, func(root string) bool { return rel == root || strings.HasPrefix(rel, root+"/") }) {
-			return "", nil
+	relocated := true
+	for _, hop := range hops {
+		switch {
+		case hop.absolute:
+			if !within(hop.target, installPaths) {
+				return "", nil
+			}
+			relocated = false
+		case relocated:
+			if !within(hop.target, []string{".local/bin", ".local/lib"}) {
+				return "", nil
+			}
+		default:
+			if !within(hop.target, installPaths) {
+				return "", nil
+			}
 		}
 	}
 	return account, nil
 }
 
+func within(rel string, roots []string) bool {
+	return slices.ContainsFunc(roots, func(root string) bool { return rel == root || strings.HasPrefix(rel, root+"/") })
+}
+
+// hop is one symlink met while resolving an installation: the home-relative
+// path it points at, and whether it was written as an absolute path.
+type hop struct {
+	target   string
+	absolute bool
+}
+
 // executableInstalled resolves ~/.local/bin/<executable> in member's home,
-// inside that home, to an executable regular file. It returns the
-// home-relative path each symlink on the way points at and the final file,
-// or nil when there is no such installation.
-func (m *Manager) executableInstalled(member domain.MemberID, executable string) ([]string, error) {
+// inside that home, to an executable regular file. It returns the symlinks
+// met on the way, an empty but non-nil list for a plain file, or nil when
+// there is no such installation.
+func (m *Manager) executableInstalled(member domain.MemberID, executable string) ([]hop, error) {
 	root, err := m.openHome(member)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	var visited []string
+	hops := []hop{}
 
 	// Vendor installers use absolute container-home symlinks. Resolve each
 	// component explicitly; os.Root confines even concurrent symlink swaps
@@ -93,12 +119,10 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 			if err != nil {
 				return nil, fmt.Errorf("memberhome: find %s in %q: %w", executable, member, err)
 			}
-			// Where the link points, as the run would resolve it: that path
-			// is what has to be mounted for the link to work there.
 			if path.IsAbs(target) {
-				visited = append(visited, harness.HomeRelative(target))
+				hops = append(hops, hop{target: harness.HomeRelative(target), absolute: true})
 			} else {
-				visited = append(visited, path.Join(filepath.ToSlash(filepath.Dir(candidate)), target))
+				hops = append(hops, hop{target: path.Join(filepath.ToSlash(filepath.Dir(candidate)), target)})
 			}
 			if path.IsAbs(target) {
 				// Strip only the home prefix: cleaning before resolving a
@@ -120,7 +144,7 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 			if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 				return nil, nil
 			}
-			return append(visited, filepath.ToSlash(candidate)), nil
+			return hops, nil
 		}
 		if !info.IsDir() {
 			return nil, nil

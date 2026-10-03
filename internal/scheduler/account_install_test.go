@@ -111,6 +111,23 @@ func TestSharedLaunchBorrowsTheOwnersInstallation(t *testing.T) {
 	if got := f.ownerMounts(spec)[1]; got != (runtime.Mount{HostPath: f.ownerHome, Subpath: ".local/bin", ContainerPath: "/root/.aether/account/bin", ReadOnly: true}) {
 		t.Fatalf("omp bin mount = %+v", got)
 	}
+
+	// An npm install links ~/.local/bin/codex relatively into ~/.local/lib,
+	// which resolves inside the relocated pair.
+	g := newShareEnv(t, func(cfg *Config) {
+		cfg.Harnesses["codex"] = HarnessSpec{TUIArgs: []string{"fake-codex", "{task}"}}
+	})
+	writeHomeFiles(t, g.ownerHome, ".codex/auth.json")
+	installAgent(t, g.ownerHome, "codex", ".local/lib/node_modules/@openai/codex/bin/codex.js", "../lib/node_modules/@openai/codex/bin/codex.js")
+	spec = g.launchSpec(t, "codex")
+	want = []runtime.Mount{
+		{HostPath: g.ownerHome, Subpath: ".codex/auth.json", ContainerPath: "/root/.codex/auth.json"},
+		{HostPath: g.ownerHome, Subpath: ".local/bin", ContainerPath: "/root/.aether/account/bin", ReadOnly: true},
+		{HostPath: g.ownerHome, Subpath: ".local/lib", ContainerPath: "/root/.aether/account/lib", ReadOnly: true},
+	}
+	if got := g.ownerMounts(spec); !slices.Equal(got, want) {
+		t.Fatalf("codex owner mounts = %+v, want %+v", got, want)
+	}
 }
 
 // A launcher who has the executable runs their own installation, and a launch
@@ -133,6 +150,17 @@ func TestSharedLaunchKeepsTheLaunchersInstallation(t *testing.T) {
 		},
 		"owner's relative link leaves the borrowed directories": func(t *testing.T, e *shareEnv) {
 			installAgent(t, e.ownerHome, "claude", "tools/claude", "../../tools/claude")
+		},
+		// ~/.local/bin and ~/.local/lib are mounted under ~/.aether/account,
+		// so an absolute link into them points at the launcher's own ~/.local
+		// in the run.
+		"owner's absolute link into .local/lib": func(t *testing.T, e *shareEnv) {
+			installAgent(t, e.ownerHome, "claude", ".local/lib/claude/bin/claude", "/root/.local/lib/claude/bin/claude")
+		},
+		// The install directory is mounted at its own path, so a relative
+		// link from the relocated bin would miss it.
+		"owner's relative link into the install directory": func(t *testing.T, e *shareEnv) {
+			installAgent(t, e.ownerHome, "claude", ".local/share/claude/versions/1/claude", "../share/claude/versions/1/claude")
 		},
 	}
 	for name, install := range cases {

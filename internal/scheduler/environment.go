@@ -218,7 +218,7 @@ func (s *Scheduler) installMounts(launcher, account domain.MemberID, profile har
 	if len(profile.TUIArgs) == 0 {
 		return nil, nil
 	}
-	installation, err := s.cfg.Homes.Installation(launcher, account, profile.TUIArgs[0], profile.BorrowRoots())
+	installation, err := s.cfg.Homes.Installation(launcher, account, profile.TUIArgs[0], profile.InstallPaths)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: find %s: %w", profile.TUIArgs[0], err)
 	}

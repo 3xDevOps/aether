@@ -78,8 +78,8 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
-	describe := func(name, source, executable, installScript string, borrowRoots []string) (protocol.AgentInfo, error) {
-		installed, err := s.agentInstalled(member, account, executable, borrowRoots)
+	describe := func(name, source, executable, installScript string, installPaths []string) (protocol.AgentInfo, error) {
+		installed, err := s.agentInstalled(member, account, executable, installPaths)
 		if err != nil {
 			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
 		}
@@ -104,7 +104,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.BorrowRoots())
+		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.InstallPaths)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -135,11 +135,12 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 
 // agentInstalled reports whether a launch by member on account finds
 // executable: in member's home, or on another member's account in that
-// owner's home, whose installation the launch then borrows from borrowRoots.
-func (s *Server) agentInstalled(member, account domain.MemberID, executable string, borrowRoots []string) (bool, error) {
+// owner's home, whose installation the launch then borrows (see
+// memberhome.Manager.Installation for which links installPaths let resolve).
+func (s *Server) agentInstalled(member, account domain.MemberID, executable string, installPaths []string) (bool, error) {
 	if s.cfg.Homes == nil {
 		return true, nil
 	}
-	installation, err := s.cfg.Homes.Installation(member, account, executable, borrowRoots)
+	installation, err := s.cfg.Homes.Installation(member, account, executable, installPaths)
 	return installation != "", err
 }
