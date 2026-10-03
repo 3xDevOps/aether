@@ -1020,6 +1020,10 @@ verification evidence, human decisions, and exact delivery.
 summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
+Terminal worker reports wait for concurrent mission operations to leave admission
+before returning the receipt; ordinary lock contention is not a report conflict.
+The receipt is not task acceptance: a success report without required user
+evidence leaves the task in **Review**.
 
 A worker's **success or failure** report is one-shot and terminal. Success
 submits the attempt and the server then pauses and retains that worker's exact
@@ -1060,14 +1064,6 @@ Transient failures remain eligible for service-lifetime retries; permanent
 event conflicts are quarantined with their error visible for operators. A
 caller may therefore receive an internal or unavailable error after capture
 while the finalized report remains retryable under its original idempotency key.
-
-If a finalized terminal report cannot acquire mission-transition authority
-because that boundary is busy, the direct `coord.report` call returns
-`CodeConflict` (`-32003`), not a successful reconciliation. The finalized
-report remains durably pending and the existing outbox retry revisits it.
-An explicit caller retry must reuse the same idempotency key and inputs;
-do not create another report or add a tight retry loop. This contention case
-is distinct from a conflict caused by reusing a key with different inputs.
 
 The shipped CLI and MCP bridge allow the full two-minute evidence-capture
 budget plus a small framing margin (and still honor an earlier caller

@@ -32,6 +32,7 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 // ordinary runs and historical mission identities. Only the current worker
 // assignment can create a mission submission. A failure report retains that
 // worker before releasing its attempt capacity; other identities remain no-ops.
+// Callers must release coordination run references before waiting for admission.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
 	if report == nil {
 		return errors.New("mission: report is required for worker reconciliation")
@@ -82,25 +83,6 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		changed = append(changed, fact.Path)
 	}
 	violations := scopeViolations(task.Revision.Scope, changed)
-	// Reconciliation is replayed both by coord.report retries and by the
-	// durable outbox. A submitted attempt is already the exact durable
-	// result; never create a second submission row for the same attempt.
-	submissions, listErr := s.cfg.Missions.ListSubmissions(ctx, m.ID, attempt.TaskID)
-	if listErr != nil {
-		return listErr
-	}
-	for _, prior := range submissions {
-		if prior == nil || prior.AttemptID != attempt.ID {
-			continue
-		}
-		if prior.Ref.WorkspaceID != report.WorkspaceID || prior.Ref.RunID != run || prior.Ref.EvidenceRef != packet.ID {
-			return errors.New("mission: existing submission identity does not match report")
-		}
-		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
-			return publishErr
-		}
-		return nil
-	}
 	switch report.Outcome {
 	case store.CoordOutcomeBlocked:
 		// The durable coord.report already exists; keep the worker running.
@@ -119,13 +101,26 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if len(evidence) == 0 {
 		return errors.New("mission: evidence packet has no durable facts")
 	}
-	// A direct coord.report still owns a run reference. Waiting for mission
-	// admission could deadlock cancellation's synchronous coord.Release.
-	// Leave the durable outbox pending on contention so it can retry.
-	if !s.cfg.AuthorizationMu.TryLock() {
-		return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
+	// Direct retries and the durable outbox must serialize their replay lookup
+	// with submission, not merely serialize the insert after a stale lookup.
+	s.cfg.AuthorizationMu.Lock()
+	submissions, err := s.cfg.Missions.ListSubmissions(ctx, m.ID, attempt.TaskID)
+	replayed := false
+	if err == nil {
+		for _, prior := range submissions {
+			if prior == nil || prior.AttemptID != attempt.ID {
+				continue
+			}
+			replayed = true
+			if prior.Ref.WorkspaceID != ref.WorkspaceID || prior.Ref.RunID != ref.RunID || prior.Ref.EvidenceRef != ref.EvidenceRef {
+				err = errors.New("mission: existing submission identity does not match report")
+			}
+			break
+		}
 	}
-	_, err = s.cfg.Missions.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, ref, evidence, violations)
+	if err == nil && !replayed {
+		_, err = s.cfg.Missions.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, ref, evidence, violations)
+	}
 	s.cfg.AuthorizationMu.Unlock()
 	if errors.Is(err, store.ErrMissionStale) {
 		// A retry raced a superseding attempt or coordinator state. It is no
@@ -185,19 +180,12 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 		return errors.New("mission: scheduler completion unavailable")
 	}
 	// Never release attempt capacity while the worker can still execute.
-	// Do not hold authorization during scheduler cleanup: report processing
-	// owns a coordination reference and cleanup can need that admission.
-	if !s.cfg.AuthorizationMu.TryLock() {
-		return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
-	}
-	s.cfg.AuthorizationMu.Unlock()
+	// Scheduler cleanup can need authorization; acquire it for the state write afterward.
 	if completeErr := s.cfg.Complete.CompleteMission(s.operationContext(ctx), attempt.RunID, domain.RunFailed); completeErr != nil {
 		return fmt.Errorf("mission: retain failed worker %s: %w", attempt.RunID, completeErr)
 	}
 	if attempt.State.HoldsConcurrency() {
-		if !s.cfg.AuthorizationMu.TryLock() {
-			return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
-		}
+		s.cfg.AuthorizationMu.Lock()
 		stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail)
 		s.cfg.AuthorizationMu.Unlock()
 		if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
