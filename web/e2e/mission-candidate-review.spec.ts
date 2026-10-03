@@ -36,7 +36,7 @@ async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
     .toBeTruthy()
 }
 
-test('launches a bounded mission, controls a worker, and shows its candidate without a human gate', async ({ page, aether }, testInfo) => {
+test('launches a mission, controls a worker, and shows its candidate without a human gate', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('mission-candidate-project')
   const expectedTargetRevision = await seedWorkspace(alice, aether.server.addr, repo, 'mission-candidate-project')

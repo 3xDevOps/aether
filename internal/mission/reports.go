@@ -39,7 +39,7 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome 
 // ReconcileReport is called for every finalized report outbox row, including
 // ordinary runs and historical mission identities. Only the current worker
 // assignment can create a mission submission. A failure report retains that
-// worker before releasing its attempt capacity. The current integrator's
+// worker before settling its attempt. The current integrator's
 // success report completes its mission; other identities remain no-ops.
 // Callers must release coordination run references before waiting for admission.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
@@ -211,7 +211,7 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 	if s.cfg.Complete == nil {
 		return errors.New("mission: scheduler completion unavailable")
 	}
-	// Never release attempt capacity while the worker can still execute.
+	// Never settle the attempt while the worker can still execute.
 	// Scheduler cleanup can need authorization; acquire it for the state write afterward.
 	if completeErr := s.cfg.Complete.CompleteMission(s.operationContext(ctx), attempt.RunID, domain.RunFailed); completeErr != nil {
 		return fmt.Errorf("mission: retain failed worker %s: %w", attempt.RunID, completeErr)

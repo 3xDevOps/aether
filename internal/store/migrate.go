@@ -1419,7 +1419,8 @@ CREATE UNIQUE INDEX idx_coord_reports_active_terminal
 ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
 `,
 	// v49: missions lose their human plan gate. The phases are planning,
-	// active, completed and cancelled; plan rounds and the material flag go.
+	// active, completed and cancelled; plan rounds, the material flag and the
+	// two attempt limits go.
 	// A mission waiting on a plan decision returns to planning with its
 	// proposals intact, so its integrator runs mission start; one waiting on
 	// an amendment is active with its proposals still acceptable; a rejected

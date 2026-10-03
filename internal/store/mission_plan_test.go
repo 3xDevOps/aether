@@ -462,6 +462,8 @@ func TestMissionDatabaseMigratesToTheNewPhases(t *testing.T) {
 			VALUES ('%[1]s', 'w1', 'ship it', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'run-%[1]s', 1, 0, 'key-%[1]s', 1, 1, '%[1]s', 1);`, old)
 	}
 	seed += `
+		INSERT INTO mission_create_receipts (workspace_id, idempotency_key, mission_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts, max_total_attempts, created_at)
+			VALUES ('w1', 'key-active', 'active', 'ship it', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 1);
 		INSERT INTO mission_tasks (id, mission_id, current_revision, created_at, updated_at)
 			VALUES ('t1', 'plan_review', 1, 1, 1);
 		INSERT INTO mission_task_revisions (task_id, revision, title, objective, status, material, created_at)
@@ -495,6 +497,15 @@ func TestMissionDatabaseMigratesToTheNewPhases(t *testing.T) {
 		var n int
 		if scanErr := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); scanErr != nil || n != 0 {
 			t.Fatalf("table %s after migration = %d, %v, want dropped", table, n, scanErr)
+		}
+	}
+	for _, table := range []string{"missions", "mission_create_receipts"} {
+		var limits, rows int
+		if scanErr := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name IN ('max_concurrent_attempts','max_total_attempts')`, table).Scan(&limits); scanErr != nil || limits != 0 {
+			t.Fatalf("limit columns on %s after migration = %d, %v, want dropped", table, limits, scanErr)
+		}
+		if scanErr := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&rows); scanErr != nil || rows == 0 {
+			t.Fatalf("rows in %s after migration = %d, %v, want kept", table, rows, scanErr)
 		}
 	}
 	var material int

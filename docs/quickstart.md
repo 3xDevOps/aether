@@ -763,7 +763,7 @@ cannot be relaunched. Kill and Delete remain immediate cleanup operations.
 
 Mission workers also retain their exact containers for the same default
 7 days after a success/failure report or container exit, without continuing
-work or holding attempt capacity after retention settles. Inspect their
+work. Inspect their
 transcript, diff, evidence and worker details normally. Unlike explicitly
 closed ordinary TUI runs, completed workers cannot be relaunched.
 

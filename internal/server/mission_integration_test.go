@@ -30,8 +30,7 @@ import (
 // real human and run sockets. The workers are deliberately named shell
 // fixtures, not vendor harness demonstrations: each fixture proactively
 // exchanges a coordination message before it waits for the test to release it.
-// The same scenario covers replay after a lost response, concurrency/total
-// attempt bounds, cancellation and retry, report reconciliation to Review,
+// The same scenario covers replay after a lost response, cancellation and retry, report reconciliation to Review,
 // and an integrator generation change rejecting the disconnected old client.
 func TestIntegrationMissionOrchestration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
@@ -597,7 +596,6 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 			{AccountMemberID: string(e.ada.id), Harness: "omp", Mode: string(domain.LaunchTUI)},
 			{AccountMemberID: string(e.bo.id), Harness: "claude", Mode: string(domain.LaunchTUI)},
 		},
-
 		IdempotencyKey: "docker-mission-create",
 	}, &created); err != nil {
 		t.Fatalf("mission.create: %v", err)

@@ -101,7 +101,6 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 				Harness:         "claude",
 				Mode:            domain.LaunchTUI,
 			},
-
 			IdempotencyKey: "takeover-regression",
 		}
 		if err := db.CreateMission(ctx, mission); err != nil {
