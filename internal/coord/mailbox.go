@@ -707,7 +707,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		}
 	}
 	if report.PublishedAt != nil {
-		if err := s.enqueueBlockedReport(ctx, report); err != nil {
+		if err := s.enqueueWorkerReport(ctx, report); err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
 	}
@@ -770,12 +770,13 @@ func (s *Service) rememberReportPacket(id string, packet protocol.EvidencePacket
 	s.reportPackets[id] = packet
 }
 
-// enqueueBlockedReport preserves a worker's blocked reason in the current
-// integrator's ordinary inbox. Unlike terminal notices, this retains the
-// actual author and requires explicit acknowledgement. The report outbox
-// retries inbox-cap/storage failures without spending a peer or rate slot.
-func (s *Service) enqueueBlockedReport(ctx context.Context, report *store.CoordReport) error {
-	if s.cfg.Mission == nil || report.Outcome != store.CoordOutcomeBlocked {
+// enqueueWorkerReport preserves a worker's report summary in the current
+// integrator's ordinary inbox, so the integrator learns of every outcome
+// through the mail it already watches. It retains the actual author and
+// requires explicit acknowledgement. The report outbox retries
+// inbox-cap/storage failures without spending a peer or rate slot.
+func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordReport) error {
+	if s.cfg.Mission == nil {
 		return nil
 	}
 	assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
@@ -785,26 +786,26 @@ func (s *Service) enqueueBlockedReport(ctx context.Context, report *store.CoordR
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("blocked report assignment: %w", err)
+		return fmt.Errorf("worker report assignment: %w", err)
 	}
 	if assignment.Role != "worker" || assignment.IntegratorRunID == "" {
 		return nil
 	}
 	target, err := s.cfg.Store.GetRun(ctx, domain.RunID(assignment.IntegratorRunID))
 	if err != nil {
-		return fmt.Errorf("blocked report integrator: %w", err)
+		return fmt.Errorf("worker report integrator: %w", err)
 	}
 	if target == nil || target.WorkspaceID != report.WorkspaceID || target.ID == report.RunID {
-		return errors.New("blocked report integrator is outside the reporting worker's workspace")
+		return errors.New("worker report integrator is outside the reporting worker's workspace")
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: report.WorkspaceID, FromRun: report.RunID, ToRun: target.ID,
 		Kind: store.RunMessageKindMessage, Body: report.Summary, CorrelationID: report.ID,
-		IdempotencyKey: "coord-report-blocked:" + report.ID + ":" + string(target.ID),
+		IdempotencyKey: "coord-report-" + string(report.Outcome) + ":" + report.ID + ":" + string(target.ID),
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
 	if err != nil {
-		return fmt.Errorf("enqueue blocked report: %w", err)
+		return fmt.Errorf("enqueue worker report: %w", err)
 	}
 	if created {
 		s.wakeInbox(target.ID)
@@ -812,11 +813,11 @@ func (s *Service) enqueueBlockedReport(ctx context.Context, report *store.CoordR
 	return nil
 }
 
-// publishReportEvidence persists any blocked-worker inbox message, then
+// publishReportEvidence persists any worker-report inbox message, then
 // appends deterministic projection events before marking the existing outbox
 // row published. A failed step is retried without duplicating prior commits.
 func (s *Service) publishReportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) error {
-	if err := s.enqueueBlockedReport(ctx, report); err != nil {
+	if err := s.enqueueWorkerReport(ctx, report); err != nil {
 		return err
 	}
 	workspaceID := domain.WorkspaceID(packet.WorkspaceID)

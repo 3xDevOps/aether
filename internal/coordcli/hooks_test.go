@@ -36,6 +36,7 @@ func hookRun(t *testing.T, mission coord.MissionService, files []string, unread 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("TMPDIR", dir)
 	db, err := store.Open(filepath.Join(dir, "mail.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -264,5 +265,76 @@ func TestHookStopRefreshesIntegratorWithEmptyInboxOnce(t *testing.T) {
 				t.Fatalf("empty mission inbox changed: count=%d err=%v", count, err)
 			}
 		})
+	}
+}
+
+func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
+	mission := &hookMission{assignment: protocol.CoordMissionAssignment{MissionID: "mission-current", Role: "integrator", Phase: "active"}}
+	_, _, socket, _ := hookRun(t, mission, []string{"shared.go"}, true)
+	hook := func(event, input string) string {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", "claude", event}, Config{Socket: socket, In: strings.NewReader(input), Out: &out})
+		if err != nil || code != ExitOK {
+			t.Fatalf("hook %s = %d, %v", event, code, err)
+		}
+		return out.String()
+	}
+	first := hook("PostToolBatch", "{}")
+	for _, want := range []string{"aether-internal inbox", "mission plan show", "overlapping edits"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("first hook lacks %q: %s", want, first)
+		}
+	}
+	if again := hook("PostToolBatch", "{}"); again != "" {
+		t.Fatalf("unchanged state was announced again: %s", again)
+	}
+	stop := hook("Stop", "{}")
+	if !strings.Contains(stop, `"decision":"block"`) || !strings.Contains(stop, "aether-internal inbox") || strings.Contains(stop, "mission plan show") {
+		t.Fatalf("Stop must block only for the unread mail: %s", stop)
+	}
+	mission.assignment.Phase = "integrating"
+	if changed := hook("PostToolBatch", "{}"); !strings.Contains(changed, "mission plan show") || strings.Contains(changed, "aether-internal inbox") {
+		t.Fatalf("a mission change must be announced alone: %s", changed)
+	}
+	var pi bytes.Buffer
+	if code, err := Run(t.Context(), []string{"hook", "pi", "context"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &pi}); err != nil || code != ExitOK || !strings.Contains(pi.String(), "aether-internal inbox") {
+		t.Fatalf("per-call context must keep repeating: %d, %v, %q", code, err, pi.String())
+	}
+}
+
+func TestAckAcknowledgesOnlyTheCurrentBatch(t *testing.T) {
+	service, db, socket, run := hookMailbox(t)
+	runAck := func(args ...string) (int, Envelope) {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := Run(t.Context(), append([]string{"ack"}, args...), Config{Socket: socket, Out: &out})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope Envelope
+		if decodeErr := json.Unmarshal(out.Bytes(), &envelope); decodeErr != nil {
+			t.Fatalf("ack output %q: %v", out.String(), decodeErr)
+		}
+		return code, envelope
+	}
+	batch, rpcErr := service.Inbox(t.Context(), run, protocol.CoordInboxParams{})
+	if rpcErr != nil || batch.AckToken == "" {
+		t.Fatalf("inbox = %+v, %v", batch, rpcErr)
+	}
+	if code, envelope := runAck("stale-token"); code != ExitDenied || envelope.OK || !strings.Contains(envelope.Error.Message, batch.AckToken) {
+		t.Fatalf("stale ack = %d, %+v; want a refusal naming the current batch", code, envelope)
+	}
+	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 1 {
+		t.Fatalf("refused ack changed the inbox: %d, %v", count, err)
+	}
+	if code, envelope := runAck(batch.AckToken); code != ExitOK || !envelope.OK {
+		t.Fatalf("ack = %d, %+v", code, envelope)
+	}
+	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 0 {
+		t.Fatalf("ack left mail unacknowledged: %d, %v", count, err)
+	}
+	if code, envelope := runAck(batch.AckToken); code != ExitDenied || envelope.OK {
+		t.Fatalf("repeated ack = %d, %+v; want nothing to acknowledge", code, envelope)
 	}
 }

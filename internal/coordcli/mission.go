@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -221,7 +222,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 	fs := newFlags("worker start")
 	missionID := fs.String("mission-id", "", "mission ID")
 	taskID := fs.String("task-id", "", "task ID")
-	taskRevision := fs.Int("task-revision", -1, "accepted task revision")
+	taskRevision := fs.Int("task-revision", 0, "accepted task revision")
 	dispatchKey := fs.String("dispatch-key", "", "stable identity for this worker start")
 	harness := fs.String("harness", "", "worker harness")
 	mode := fs.String("mode", "", "worker launch mode")
@@ -231,12 +232,60 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.WorkerStartResult{}, err
 	}
-	gen, err := requiredGeneration(*generation)
-	if err != nil {
-		return protocol.WorkerStartResult{}, err
+	if *taskID == "" && fs.NArg() == 1 {
+		*taskID = fs.Arg(0)
 	}
-	if *missionID == "" || *taskID == "" || *taskRevision < 0 || *dispatchKey == "" || *harness == "" || *mode == "" || *accountOwner == "" || *runOwner == "" || fs.NArg() != 0 {
-		return protocol.WorkerStartResult{}, usageError("worker start requires mission/task/revision, dispatch identity, harness, mode, owners, and expected generation")
+	if *taskID == "" || *taskRevision < 0 || fs.NArg() > 1 {
+		return protocol.WorkerStartResult{}, usageError("worker start requires --task-id <id>")
+	}
+	var gen uint64
+	if *generation != "" {
+		var err error
+		if gen, err = requiredGeneration(*generation); err != nil {
+			return protocol.WorkerStartResult{}, err
+		}
+	}
+	if *harness == "" || *mode == "" || *accountOwner == "" || *missionID == "" || *generation == "" {
+		var status protocol.CoordStatusResult
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+			return protocol.WorkerStartResult{}, err
+		}
+		assignment := status.Assignment
+		if assignment == nil || assignment.Role != "integrator" {
+			return protocol.WorkerStartResult{}, usageError("worker start: this run is not a mission integrator")
+		}
+		var matches []protocol.MissionExecutionChoice
+		for _, choice := range assignment.ExecutionChoices {
+			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
+				matches = append(matches, choice)
+			}
+		}
+		if len(matches) != 1 {
+			var listed []string
+			for _, choice := range assignment.ExecutionChoices {
+				listed = append(listed, fmt.Sprintf("--harness %s --mode %s --account-owner-id %s", choice.Harness, choice.Mode, choice.AccountMemberID))
+			}
+			return protocol.WorkerStartResult{}, usageError(fmt.Sprintf("worker start: %d approved execution choices match; select exactly one of: %s", len(matches), strings.Join(listed, "; ")))
+		}
+		*harness, *mode, *accountOwner = matches[0].Harness, matches[0].Mode, matches[0].AccountMemberID
+		if *missionID == "" {
+			*missionID = assignment.MissionID
+		}
+		if *generation == "" {
+			gen = assignment.IntegratorGeneration
+		}
+	}
+	if *taskRevision == 0 {
+		var shown protocol.TaskShowResult
+		if err := coordtransport.Call(ctx, socket, protocol.MethodTaskShow, protocol.TaskShowParams{TaskID: *taskID}, &shown); err != nil {
+			return protocol.WorkerStartResult{}, err
+		}
+		*taskRevision = shown.Task.CurrentRevision
+	}
+	if *dispatchKey == "" {
+		// Derived from the task revision, so retrying the same start replays
+		// it instead of launching a second worker.
+		*dispatchKey = fmt.Sprintf("%s-r%d", *taskID, *taskRevision)
 	}
 	p := protocol.WorkerStartParams{MissionID: *missionID, TaskID: *taskID, TaskRevision: *taskRevision, DispatchKey: *dispatchKey, Harness: *harness, Mode: *mode, AccountOwnerID: *accountOwner, RunOwnerID: *runOwner, ExpectedIntegratorGeneration: gen}
 	var out protocol.WorkerStartResult

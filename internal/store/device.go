@@ -171,7 +171,7 @@ func (d *DB) RegisterInvitationDevice(ctx context.Context, dev *domain.Device, n
 // insertDevice inserts dev when the condition cond, with args, holds, and
 // returns ErrNotFound when it does not.
 func insertDevice(ctx context.Context, q execer, dev *domain.Device, cond string, args ...any) error {
-	id, ts, err := prepareCreate(dev.CreatedAt)
+	id, ts, err := prepareCreate("dev", dev.CreatedAt)
 	if err != nil {
 		return err
 	}

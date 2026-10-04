@@ -63,8 +63,8 @@ func (d *DB) Close() error {
 
 // prepareCreate generates a fresh ID and defaults a zero createdAt to now,
 // returning the values to persist.
-func prepareCreate(createdAt time.Time) (id string, ts time.Time, err error) {
-	id, err = newID()
+func prepareCreate(kind string, createdAt time.Time) (id string, ts time.Time, err error) {
+	id, err = newID(kind)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -190,7 +190,7 @@ func (d *DB) CreateWorkspace(ctx context.Context, w *domain.Workspace) error {
 	if err := validateWorkspace(w, "create"); err != nil {
 		return err
 	}
-	id, ts, err := prepareCreate(w.CreatedAt)
+	id, ts, err := prepareCreate("ws", w.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -255,7 +255,7 @@ func (d *DB) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.W
 
 func (d *DB) ListWorkspaces(ctx context.Context) ([]*domain.Workspace, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+workspaceCols+` FROM workspaces ORDER BY id`)
+		`SELECT `+workspaceCols+` FROM workspaces ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list workspaces: %w", err)
 	}
@@ -544,7 +544,7 @@ func insertMember(ctx context.Context, q execer, m *domain.Member) error {
 	if err != nil {
 		return err
 	}
-	id, ts, err := prepareCreate(m.CreatedAt)
+	id, ts, err := prepareCreate("mem", m.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -667,7 +667,7 @@ func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image st
 
 func (d *DB) ListMembers(ctx context.Context) ([]*domain.Member, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+memberCols+` FROM members ORDER BY id`)
+		`SELECT `+memberCols+` FROM members ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list members: %w", err)
 	}

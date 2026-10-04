@@ -9,13 +9,11 @@ import (
 // maxSlugLen caps the task slug embedded in run branch names.
 const maxSlugLen = 32
 
-// shortIDLen is how much of the run ID the branch name carries. Run IDs are
-// 26-character ULIDs whose trailing characters are the random half, so a
-// short tail is what distinguishes two runs of the same task. Six base32
-// characters is 30 bits: enough that a collision is rare, not enough that
-// one is impossible, which is why uniqueRunBranch falls back to the full ID
-// rather than trusting the tail.
-const shortIDLen = 6
+// legacyShortIDLen is how much of a legacy run ID the branch name carries.
+// Those IDs are 26-character ULIDs whose trailing characters are the random
+// half; six base32 characters (30 bits) make a collision rare, not
+// impossible, which is why uniqueRunBranch falls back to the full ID.
+const legacyShortIDLen = 6
 
 // slugify turns a task prompt into a branch-safe slug: lowercased, runs of
 // [^a-z0-9] collapsed to "-", trimmed of leading/trailing "-", capped at
@@ -42,13 +40,17 @@ func slugify(task string) string {
 	return s
 }
 
-// shortID returns the trailing shortIDLen characters of a run ID, or the
-// whole ID when it is already that short (test fixtures use short IDs).
+// shortID returns the random part of a run ID (run-<random>), or the
+// trailing legacyShortIDLen characters of a legacy ID, or the whole ID when
+// it is already that short (test fixtures use short IDs).
 func shortID(run domain.RunID) string {
-	if len(run) <= shortIDLen {
+	if _, random, typed := strings.Cut(string(run), "-"); typed && random != "" {
+		return random
+	}
+	if len(run) <= legacyShortIDLen {
 		return string(run)
 	}
-	return string(run)[len(run)-shortIDLen:]
+	return string(run)[len(run)-legacyShortIDLen:]
 }
 
 // runBranch is the run branch name: aether/run-<slug>-<id>. The task leads

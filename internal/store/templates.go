@@ -77,7 +77,7 @@ func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
 	if t.WorkspaceID == "" || t.Name == "" || t.Task == "" || t.Harness == "" {
 		return errors.New("store: save template: workspace_id, name, task, and harness are required")
 	}
-	id, ts, err := prepareCreate(t.CreatedAt)
+	id, ts, err := prepareCreate("tpl", t.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (d *DB) SaveSchedule(ctx context.Context, s *Schedule) error {
 	if s.TemplateID == "" || s.Cron == "" || s.MemberID == "" {
 		return errors.New("store: save schedule: template_id, cron, and member_id are required")
 	}
-	id, ts, err := prepareCreate(s.CreatedAt)
+	id, ts, err := prepareCreate("sched", s.CreatedAt)
 	if err != nil {
 		return err
 	}

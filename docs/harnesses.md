@@ -201,7 +201,7 @@ Inside the run, inspect configuration and export the asset for **only the
 current harness**:
 
 ```sh
-aether-internal skill
+aether-internal skill --hooks
 aether-internal hook file
 aether-internal hook file claude.json
 ```

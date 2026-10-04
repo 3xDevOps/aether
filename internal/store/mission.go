@@ -228,11 +228,11 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	} else if !errors.Is(lookupErr, sql.ErrNoRows) {
 		return fmt.Errorf("store: create mission lookup: %w", lookupErr)
 	}
-	id, ts, err := prepareCreate(m.CreatedAt)
+	id, ts, err := prepareCreate("mis", m.CreatedAt)
 	if err != nil {
 		return err
 	}
-	runID, err := newID()
+	runID, err := newID("run")
 	if err != nil {
 		return err
 	}
@@ -333,10 +333,10 @@ func (d *DB) ListMissionsPage(ctx context.Context, workspaceID domain.WorkspaceI
 	query := `SELECT ` + missionColumns + ` FROM missions WHERE workspace_id = ?`
 	args := []any{workspaceID}
 	if before != "" {
-		query += ` AND id < ?`
+		query += ` AND (created_at, rowid) < (SELECT created_at, rowid FROM missions WHERE id = ?)`
 		args = append(args, before)
 	}
-	query += ` ORDER BY id DESC LIMIT ?`
+	query += ` ORDER BY created_at DESC, rowid DESC LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -426,7 +426,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	if expected != m.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: expected generation %d, current %d", ErrMissionStale, expected, m.IntegratorGeneration)
 	}
-	newRun, err := newID()
+	newRun, err := newID("run")
 	if err != nil {
 		return nil, err
 	}

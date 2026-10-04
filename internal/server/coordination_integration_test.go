@@ -222,7 +222,7 @@ func (e *coordEnv) seed(ctx context.Context, t *testing.T, disabled bool) *coord
 	requireBinary(t, "git")
 	if e.dataDir == "" {
 		// A coordination socket path is capped near 108 bytes and already
-		// carries a 26-character run ID, so a scenario whose name is long
+		// carries a run ID, so a scenario whose name is long
 		// enough to overflow t.TempDir() sets a short root of its own.
 		e.dataDir = filepath.Join(t.TempDir(), "data")
 	}

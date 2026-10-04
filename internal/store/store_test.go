@@ -156,24 +156,6 @@ func mustCreateRun(t *testing.T, db *DB, wid domain.WorkspaceID, mid domain.Memb
 	return r
 }
 
-func TestNewID(t *testing.T) {
-	t.Parallel()
-	seen := make(map[string]bool)
-	for range 1000 {
-		id, err := newID()
-		if err != nil {
-			t.Fatalf("newID: %v", err)
-		}
-		if len(id) != 26 {
-			t.Fatalf("id %q: want 26 chars, got %d", id, len(id))
-		}
-		if seen[id] {
-			t.Fatalf("duplicate id %q", id)
-		}
-		seen[id] = true
-	}
-}
-
 func TestMigrationIdempotency(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
 

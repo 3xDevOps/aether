@@ -64,7 +64,7 @@ func (d *DB) CreateEvidencePacket(ctx context.Context, p *EvidencePacket) error 
 	if err != nil {
 		return fmt.Errorf("store: create evidence packet captures: %w", err)
 	}
-	id, created, err := prepareCreate(p.CreatedAt)
+	id, created, err := prepareCreate("evid", p.CreatedAt)
 	if err != nil {
 		return err
 	}

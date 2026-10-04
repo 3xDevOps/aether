@@ -10,6 +10,7 @@ class DeepLinkTest {
     @Test
     fun runLinkOpensThatRunOnTheDashboard() {
         assertEquals("$BASE?run=01k4x7m2qc", deepLinkUrl(BASE, "aether://run/01k4x7m2qc"))
+        assertEquals("$BASE?run=run-7k2m9q4xbd", deepLinkUrl(BASE, "aether://run/run-7k2m9q4xbd"))
     }
 
     @Test

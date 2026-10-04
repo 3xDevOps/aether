@@ -545,9 +545,10 @@ human protection, takeover, and Stop. Claude Code, Codex, Copilot CLI,
 Gemini CLI, and Cursor CLI command hooks instead announce mail at their next
 supported lifecycle boundary. Neither path restarts an exited run.
 
-Inside a run, `aether-internal skill` checks configuration and prints setup
-instructions. **Configured is not loaded, trusted, or executed**: restart or
-reload as the harness requires and inspect its real hook/plugin errors.
+Inside a run, `aether-internal skill --hooks` checks configuration and prints
+setup instructions. **Configured is not loaded, trusted, or executed**:
+restart or reload as the harness requires and inspect its real hook/plugin
+errors.
 See [per-harness setup](harnesses.md#incoming-coordination-hooks) for managed
 loading, copyable files, versions, and disable controls; see
 [delivery and acknowledgement](coordination.md#delivery-acknowledgement-and-retries)
@@ -597,8 +598,15 @@ aether run "add a health check endpoint" --workspace myproject --agent claude
 The run gets its own container and checkout while using your persistent home.
 
 ```
-run 01m04mhf114eap4k85n2mgcped running
+run run-d6ay38tj8j running
 ```
+
+Every ID Aether generates names its kind, then ten random characters, such
+as `run-` for a run, `ws-` workspace, `mem-` member, `mis-` swarm, `task-`,
+`att-` worker attempt, `sub-` submission, `ques-` swarm question, `msg-`
+agent message, `ack-` inbox delivery token, `rpt-` agent report. Servers
+upgraded from earlier versions keep their older 26-character IDs, and both
+forms are accepted.
 
 `aether runs` lists your visible runs. Scoped commands can omit `--workspace`
 only when exactly one workspace exists; keep it explicit when adding projects.
@@ -742,18 +750,19 @@ If your checkout is already on the run branch, Aether fast-forwards it. If not,
 Aether creates or updates the local run branch without switching your checkout:
 
 ```
-Branch aether/run-add-a-health-check-endpoint-mgcped is ready. Switch with: git switch aether/run-add-a-health-check-endpoint-mgcped
+Branch aether/run-add-a-health-check-endpoint-d6ay38tj8j is ready. Switch with: git switch aether/run-add-a-health-check-endpoint-d6ay38tj8j
 ```
 
 The branch name is `aether/run-<slug>-<short-id>`: the task slugified, then the
-last six characters of the run ID. Aether never switches branches or merges
+random part of the run ID (the last six characters of an older 26-character
+ID). Aether never switches branches or merges
 the run into your base branch. These examples use `trunk`, as in the local
 clone setup above; substitute your workspace's actual base branch. Review
 and diff the run branch:
 
 ```sh
-git log --oneline aether/run-add-a-health-check-endpoint-mgcped
-git diff trunk...aether/run-add-a-health-check-endpoint-mgcped
+git log --oneline aether/run-add-a-health-check-endpoint-d6ay38tj8j
+git diff trunk...aether/run-add-a-health-check-endpoint-d6ay38tj8j
 ```
 
 If the local checkout has uncommitted changes, the pull still fetches the run
@@ -765,7 +774,7 @@ the reviewed base back to Aether:
 
 ```sh
 git switch trunk
-git merge aether/run-add-a-health-check-endpoint-mgcped
+git merge aether/run-add-a-health-check-endpoint-d6ay38tj8j
 git push --no-follow-tags aether trunk:trunk
 ```
 

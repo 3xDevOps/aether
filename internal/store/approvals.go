@@ -59,7 +59,7 @@ func (d *DB) CreateApproval(ctx context.Context, a *Approval) error {
 	if a.WorkspaceID == "" || a.RunID == "" || a.Action == "" {
 		return errors.New("store: create approval: workspace_id, run_id, and action are required")
 	}
-	id, ts, err := prepareCreate(a.CreatedAt)
+	id, ts, err := prepareCreate("appr", a.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (d *DB) ListApprovals(ctx context.Context, workspace domain.WorkspaceID, de
 		query += ` AND decision = ?`
 		args = append(args, decision)
 	}
-	rows, err := d.db.QueryContext(ctx, query+` ORDER BY id`, args...)
+	rows, err := d.db.QueryContext(ctx, query+` ORDER BY created_at, rowid`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list approvals: %w", err)
 	}

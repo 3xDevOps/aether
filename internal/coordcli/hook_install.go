@@ -89,6 +89,44 @@ func writeHookInstallation(out io.Writer) error {
 	return writeHookInstallationWithInputs(out, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv})
 }
 
+// writeHookSummary reports only the inbox integration for this run's harness,
+// named by AETHER_HARNESS; the full matrix stays behind skill --hooks.
+func writeHookSummary(out io.Writer) error {
+	harness := os.Getenv("AETHER_HARNESS")
+	home, homeErr := os.UserHomeDir()
+	cwd, cwdErr := os.Getwd()
+	if harness == "" || homeErr != nil || cwdErr != nil {
+		_, err := io.WriteString(out, "Inbox hooks: aether-internal skill --hooks checks and installs them for your harness.\n")
+		return err
+	}
+	return writeHookSummaryWithInputs(out, harness, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv})
+}
+
+func writeHookSummaryWithInputs(out io.Writer, harness string, in hookInstallInputs) error {
+	var text strings.Builder
+	for _, plan := range hookInstallationPlans(in) {
+		if plan.id != harness && strings.TrimSuffix(strings.TrimSuffix(plan.id, "-v1"), "-v2") != harness {
+			continue
+		}
+		result, err := inspectHookInstallation(plan)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&text, "Inbox hooks (%s): %s", plan.id, result.state)
+		if len(result.details) > 0 {
+			fmt.Fprintf(&text, " (%s)", strings.Join(result.details, "; "))
+		}
+		text.WriteString(".\n")
+	}
+	if text.Len() == 0 {
+		fmt.Fprintf(&text, "Inbox hooks: no packaged integration for harness %s; see aether-internal skill --hooks.\n", shellquote.Quote(harness))
+	} else {
+		text.WriteString("Install or inspect: aether-internal skill --hooks\n")
+	}
+	_, err := io.WriteString(out, text.String())
+	return err
+}
+
 func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 	root := func(key, fallback string) string {
 		if value := in.env(key); value != "" {

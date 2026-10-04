@@ -282,7 +282,7 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	if !m.Kind.Valid() {
 		return false, fmt.Errorf("store: append run message: invalid kind %q", m.Kind)
 	}
-	id, ts, err := prepareCreate(m.CreatedAt)
+	id, ts, err := prepareCreate("msg", m.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -355,7 +355,7 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 		`INSERT INTO run_messages (`+runMessageCols+`)
 		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL
 		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND acked_at IS NULL) < ?
-		 ON CONFLICT DO NOTHING`,
+		 ON CONFLICT (from_run, idempotency_key) WHERE idempotency_key <> '' DO NOTHING`,
 		id, m.WorkspaceID, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
 		m.IdempotencyKey, createdAt, m.ToRun, maxUnacked,
 	)
@@ -519,7 +519,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	if outstanding != "" {
 		msgs, rerr := readBatch(ctx, tx,
 			`SELECT `+runMessageCols+` FROM run_messages
-			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY id`, to, outstanding)
+			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY created_at, rowid`, to, outstanding)
 		if rerr != nil {
 			return nil, "", rerr
 		}
@@ -528,14 +528,14 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 
 	msgs, err := readBatch(ctx, tx,
 		`SELECT `+runMessageCols+` FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY id LIMIT ?`, to, limit)
+		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY created_at, rowid LIMIT ?`, to, limit)
 	if err != nil {
 		return nil, "", err
 	}
 	if len(msgs) == 0 {
 		return nil, "", commitBatch(tx)
 	}
-	token, err := newID()
+	token, err := newID("ack")
 	if err != nil {
 		return nil, "", err
 	}
@@ -588,7 +588,7 @@ func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string,
 	var token string
 	err := tx.QueryRowContext(ctx,
 		`SELECT delivery_token FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token <> '' ORDER BY id LIMIT 1`, to,
+		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token <> '' ORDER BY created_at, rowid LIMIT 1`, to,
 	).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -721,7 +721,7 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		return false, fmt.Errorf("store: reserve coord report input evidence refs: %w", err)
 	}
 	report.InputEvidenceRefs = inputRefs
-	id, ts, err := prepareCreate(report.CreatedAt)
+	id, ts, err := prepareCreate("rpt", report.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -739,7 +739,7 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		WHERE NOT EXISTS (
 			SELECT 1 FROM coord_reports
 			WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL)
-		ON CONFLICT DO NOTHING`,
+		ON CONFLICT (run_id, idempotency_key) DO NOTHING`,
 		id, report.WorkspaceID, report.RunID, report.Outcome, report.Summary,
 		report.NextAction, refs, inputRefsJSON, report.IdempotencyKey, CoordReportPending, createdAt,
 		report.RunID)

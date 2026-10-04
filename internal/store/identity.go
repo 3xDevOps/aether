@@ -303,7 +303,7 @@ func (d *DB) CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 	case inv.CreatedBy == "" || inv.ExpiresAt.IsZero():
 		return errors.New("store: create invitation: creator and expiry are required")
 	}
-	id, ts, err := prepareCreate(inv.CreatedAt)
+	id, ts, err := prepareCreate("inv", inv.CreatedAt)
 	if err != nil {
 		return err
 	}

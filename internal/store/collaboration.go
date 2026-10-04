@@ -374,7 +374,7 @@ func (d *DB) CreateRoomMessage(ctx context.Context, m *RoomMessage) error {
 	if err != nil {
 		return fmt.Errorf("store: create room message anchor: %w", err)
 	}
-	id, created, err := prepareCreate(m.CreatedAt)
+	id, created, err := prepareCreate("room", m.CreatedAt)
 	if err != nil {
 		return err
 	}

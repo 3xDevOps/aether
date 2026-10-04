@@ -383,9 +383,10 @@ function main() {
     // aether://run/<id> parses as host "run", pathname "/<id>".
     if (parsed.hostname !== 'run') return
     const id = parsed.pathname.replace(/^\//, '')
-    // Run IDs are lowercase ULIDs; refuse anything else rather than
-    // concatenating attacker-shaped text into the gateway URL.
-    if (!/^[0-9a-z]{10,32}$/.test(id)) return
+    // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd);
+    // refuse anything else rather than concatenating attacker-shaped text
+    // into the gateway URL.
+    if (!/^[0-9a-z-]{10,32}$/.test(id)) return
     if (!gatewayURL) {
       pendingRunId = id
       return
