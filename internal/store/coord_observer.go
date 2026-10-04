@@ -19,7 +19,7 @@ func (d *DB) ListUnackedRunMessageIDs(ctx context.Context, to domain.RunID, limi
 	if limit <= 0 {
 		return nil, errors.New("store: observe run messages: limit must be positive")
 	}
-	rows, err := d.db.QueryContext(ctx, `SELECT id FROM run_messages WHERE to_run=? AND acked_at IS NULL ORDER BY created_at,id LIMIT ?`, to, limit)
+	rows, err := d.db.QueryContext(ctx, `SELECT id FROM run_messages WHERE to_run=? AND acked_at IS NULL ORDER BY created_at, rowid LIMIT ?`, to, limit)
 	if err != nil {
 		return nil, err
 	}

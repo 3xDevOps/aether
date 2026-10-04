@@ -25,13 +25,13 @@ aether member list
 ```
 
 ```
-ID                          NAME      ROLE          PENDING
-01m04mfxyf0rhwegab83btsz2y  admin     admin
-01m04mqes1z7wsdk4s90tx0pgg  dana      collaborator  pending
+ID              NAME   ROLE          PENDING
+mem-50w1bcqm42  admin  admin
+mem-rbekp4h6fx  dana   collaborator  pending
 ```
 
 ```sh
-aether member approve 01m04mqes1z7wsdk4s90tx0pgg
+aether member approve mem-rbekp4h6fx
 ```
 
 Until then their commands fail with `membership pending admin approval`.
@@ -289,11 +289,11 @@ The first identity to link a fresh server becomes the admin and everyone who
 joins afterwards is a collaborator, but an admin can change that:
 
 ```sh
-aether member role 01m04mqes1z7wsdk4s90tx0pgg viewer
+aether member role mem-rbekp4h6fx viewer
 ```
 
 ```
-set 01m04mqes1z7wsdk4s90tx0pgg dana to viewer
+set mem-rbekp4h6fx dana to viewer
 ```
 
 `member list`, `member approve`, `member color`, `member git`, `member role`
@@ -970,8 +970,8 @@ aether swarm create "add a health check endpoint and document it" \
 ```
 
 ```
-swarm 01m3bnfkwbqx7y9m98m351mxq2 planning
-integrator run 01m3bnfkwbfdna6tbtq2vw5e62
+swarm mis-cxcteyzdh4 planning
+integrator run run-bfknxzhp9j
 ```
 
 If the server stored the mission but could not start the
@@ -984,32 +984,32 @@ aether swarm list
 ```
 
 ```
-ID                          PHASE   OBJECTIVE                                    INTEGRATOR                  UPDATED
-01m3bnfkwbqx7y9m98m351mxq2  active  add a health check endpoint and document it  01m3bnfkwbfdna6tbtq2vw5e62  2026-09-25T07:28:57Z
+ID              PHASE   OBJECTIVE                                    INTEGRATOR      UPDATED
+mis-cxcteyzdh4  active  add a health check endpoint and document it  run-bfknxzhp9j  2026-09-25T07:28:57Z
 ```
 
 ```sh
-aether swarm show 01m3bnfkwbqx7y9m98m351mxq2
+aether swarm show mis-cxcteyzdh4
 ```
 
 ```
-swarm 01m3bnfkwbqx7y9m98m351mxq2 active
+swarm mis-cxcteyzdh4 active
 objective: add a health check endpoint and document it
-accountable human: 01m3bkxq4d8bz9m7ngkn0w2hce
-integrator: run 01m3bnfkwbfdna6tbtq2vw5e62 generation 1 (claude tui, account 01m3bkxq4d8bz9m7ngkn0w2hce)
+accountable human: mem-h9zeh65yp9
+integrator: run run-bfknxzhp9j generation 1 (claude tui, account mem-h9zeh65yp9)
 
 questions (0 open):
-  01m3bnh2v6xk7g8p1q4r9s0t2u Which HTTP framework does the service use?
+  ques-17e8e78tzz Which HTTP framework does the service use?
     answer: net/http, no framework
 
 tasks:
-ID                          TITLE                  STATUS   BLOCKERS
-01m3bnyj66wskq3w2yn3s0e1rf  Add /healthz           working
-01m3bnyj67c4d5e6f7g8h9j0k1  Document the endpoint  ready    dependency 01m3bnyj66wskq3w2yn3s0e1rf
+ID               TITLE                  STATUS   BLOCKERS
+task-6jt9r5f3t3  Add /healthz           working
+task-0vstvmqcgn  Document the endpoint  ready    dependency task-6jt9r5f3t3
 
 attempts:
-ID                          TASK                        STATE    RUN
-01m3bqfh97ken3kkt49y6pmgkc  01m3bnyj66wskq3w2yn3s0e1rf  running  01m3bqfh97bptec3krrbzc2b6t
+ID              TASK             STATE    RUN
+att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
@@ -1022,14 +1022,14 @@ afterwards; `answer` prints the question ID. A server refusal is printed
 verbatim.
 
 ```sh
-aether swarm answer 01m3bnfkwbqx7y9m98m351mxq2 \
-  --question 01m3bnh2v6xk7g8p1q4r9s0t2u "net/http, no framework"
-aether swarm cancel 01m3bnfkwbqx7y9m98m351mxq2
-aether swarm replace-integrator 01m3bnfkwbqx7y9m98m351mxq2 --agent codex
+aether swarm answer mis-cxcteyzdh4 \
+  --question ques-17e8e78tzz "net/http, no framework"
+aether swarm cancel mis-cxcteyzdh4
+aether swarm replace-integrator mis-cxcteyzdh4 --agent codex
 ```
 
 ```
-swarm 01m3bnfkwbqx7y9m98m351mxq2 cancelled
+swarm mis-cxcteyzdh4 cancelled
 ```
 
 `answer` takes the answer as its last argument, or `-` to read it from stdin,

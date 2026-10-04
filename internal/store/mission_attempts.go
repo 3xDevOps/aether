@@ -82,7 +82,7 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 		return nil, false, err
 	}
 	if r.AssignedRunID == "" {
-		id, idErr := newID()
+		id, idErr := newID("run")
 		if idErr != nil {
 			return nil, false, idErr
 		}
@@ -120,7 +120,7 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {
 		return nil, false, numberErr
 	}
-	id, err := newID()
+	id, err := newID("att")
 	if err != nil {
 		return nil, false, err
 	}
@@ -385,7 +385,7 @@ func (d *DB) SubmitAttempt(ctx context.Context, id domain.AttemptID, authority, 
 	if missionWorkspace != ref.WorkspaceID {
 		return nil, ErrConflict
 	}
-	subID, err := newID()
+	subID, err := newID("sub")
 	if err != nil {
 		return nil, err
 	}

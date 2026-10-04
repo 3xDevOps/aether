@@ -923,6 +923,13 @@ type blockedReportMission struct {
 	integrator domain.RunID
 }
 
+func (m blockedReportMission) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
+	if run != m.worker {
+		return "", nil
+	}
+	return m.integrator, nil
+}
+
 func (m blockedReportMission) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
 	if run == m.worker {
 		return protocol.CoordMissionAssignment{
@@ -984,10 +991,32 @@ func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
 	if _, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
 		t.Fatalf("ack blocked message: %v", rpcErr)
 	}
-	if err := h.svc.enqueueBlockedReport(ctx, report); err != nil {
+	if err := h.svc.enqueueWorkerReport(ctx, report); err != nil {
 		t.Fatalf("replay blocked message: %v", err)
 	}
 	if unread, err := h.db.CountUnackedRunMessages(ctx, integrator); err != nil || unread != 0 {
 		t.Fatalf("replayed blocked unread = %d, %v; want zero after explicit ack", unread, err)
+	}
+}
+
+func TestWorkerSuccessAndFailureReportsReachTheIntegrator(t *testing.T) {
+	ctx := context.Background()
+	for _, outcome := range []string{protocol.CoordOutcomeSuccess, protocol.CoordOutcomeFailure} {
+		t.Run(outcome, func(t *testing.T) {
+			h := newHarness(t, 2, func(c *Config) { c.Evidence = &coordReportEvidenceCapture{id: outcome + "-packet"} })
+			worker, integrator := h.run(0), h.run(1)
+			h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
+			result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+				Outcome: outcome, Summary: outcome + " summary", IdempotencyKey: outcome,
+			})
+			if rpcErr != nil {
+				t.Fatalf("report %s: %v", outcome, rpcErr)
+			}
+			inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+			if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != outcome+" summary" ||
+				inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+				t.Fatalf("%s inbox = %+v, %v", outcome, inbox, rpcErr)
+			}
+		})
 	}
 }

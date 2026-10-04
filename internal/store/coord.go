@@ -218,7 +218,7 @@ type MessageStore interface {
 	// only when no batch is outstanding is a new one selected, stamped,
 	// and tokenized - all in one transaction. An empty inbox returns no
 	// messages and no token.
-	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, error)
+	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error)
 	// DeleteRunMessages retires a released run's inbound mailbox.
 	DeleteRunMessages(ctx context.Context, to domain.RunID) error
 	AppendCoordReport(ctx context.Context, report *CoordReport) error
@@ -282,7 +282,7 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	if !m.Kind.Valid() {
 		return false, fmt.Errorf("store: append run message: invalid kind %q", m.Kind)
 	}
-	id, ts, err := prepareCreate(m.CreatedAt)
+	id, ts, err := prepareCreate("msg", m.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -355,7 +355,7 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 		`INSERT INTO run_messages (`+runMessageCols+`)
 		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL
 		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND acked_at IS NULL) < ?
-		 ON CONFLICT DO NOTHING`,
+		 ON CONFLICT (from_run, idempotency_key) WHERE idempotency_key <> '' DO NOTHING`,
 		id, m.WorkspaceID, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
 		m.IdempotencyKey, createdAt, m.ToRun, maxUnacked,
 	)
@@ -487,57 +487,63 @@ func (d *DB) CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int,
 	return n, nil
 }
 
-func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, error) {
+func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error) {
 	if to == "" {
-		return nil, "", errors.New("store: deliver run messages: to_run is required")
+		return nil, "", false, errors.New("store: deliver run messages: to_run is required")
 	}
 	if limit <= 0 {
-		return nil, "", errors.New("store: deliver run messages: limit must be positive")
+		return nil, "", false, errors.New("store: deliver run messages: limit must be positive")
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return nil, "", fmt.Errorf("store: deliver run messages: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver run messages: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("store: deliver run messages: begin: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver run messages: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
-	if _, aerr := tx.ExecContext(ctx,
+	ack, aerr := tx.ExecContext(ctx,
 		`UPDATE run_messages SET acked_at = ?
 		 WHERE to_run = ? AND delivery_token <> '' AND delivery_token = ? AND acked_at IS NULL`,
 		now, to, ackToken,
-	); aerr != nil {
-		return nil, "", fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+	)
+	if aerr != nil {
+		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
 	}
+	ackedRows, aerr := ack.RowsAffected()
+	if aerr != nil {
+		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+	}
+	acked := ackedRows > 0
 
 	outstanding, err := outstandingToken(ctx, tx, to)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if outstanding != "" {
 		msgs, rerr := readBatch(ctx, tx,
 			`SELECT `+runMessageCols+` FROM run_messages
-			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY id`, to, outstanding)
+			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY created_at, rowid`, to, outstanding)
 		if rerr != nil {
-			return nil, "", rerr
+			return nil, "", false, rerr
 		}
-		return msgs, outstanding, commitBatch(tx)
+		return msgs, outstanding, acked, commitBatch(tx)
 	}
 
 	msgs, err := readBatch(ctx, tx,
 		`SELECT `+runMessageCols+` FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY id LIMIT ?`, to, limit)
+		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY created_at, rowid LIMIT ?`, to, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if len(msgs) == 0 {
-		return nil, "", commitBatch(tx)
+		return nil, "", acked, commitBatch(tx)
 	}
-	token, err := newID()
+	token, err := newID("ack")
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	args := make([]any, 0, len(msgs)+2)
 	args = append(args, token, now)
@@ -548,13 +554,13 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		`UPDATE run_messages SET delivery_token = ?, delivered_at = ?
 		 WHERE id IN (`+placeholders(len(msgs))+`)`, args...,
 	); uerr != nil {
-		return nil, "", fmt.Errorf("store: stamp run message delivery: %w", uerr)
+		return nil, "", false, fmt.Errorf("store: stamp run message delivery: %w", uerr)
 	}
 	delivered := decodeTime(now)
 	for _, m := range msgs {
 		m.DeliveryToken, m.DeliveredAt = token, &delivered
 	}
-	return msgs, token, commitBatch(tx)
+	return msgs, token, acked, commitBatch(tx)
 }
 
 func (d *DB) DeleteRunMessages(ctx context.Context, to domain.RunID) error {
@@ -588,7 +594,7 @@ func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string,
 	var token string
 	err := tx.QueryRowContext(ctx,
 		`SELECT delivery_token FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token <> '' ORDER BY id LIMIT 1`, to,
+		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token <> '' ORDER BY created_at, rowid LIMIT 1`, to,
 	).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -721,7 +727,7 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		return false, fmt.Errorf("store: reserve coord report input evidence refs: %w", err)
 	}
 	report.InputEvidenceRefs = inputRefs
-	id, ts, err := prepareCreate(report.CreatedAt)
+	id, ts, err := prepareCreate("rpt", report.CreatedAt)
 	if err != nil {
 		return false, err
 	}
@@ -739,7 +745,7 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		WHERE NOT EXISTS (
 			SELECT 1 FROM coord_reports
 			WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL)
-		ON CONFLICT DO NOTHING`,
+		ON CONFLICT (run_id, idempotency_key) DO NOTHING`,
 		id, report.WorkspaceID, report.RunID, report.Outcome, report.Summary,
 		report.NextAction, refs, inputRefsJSON, report.IdempotencyKey, CoordReportPending, createdAt,
 		report.RunID)

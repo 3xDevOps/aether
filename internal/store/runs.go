@@ -67,7 +67,7 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 			ts = time.Now().UTC()
 		}
 	} else {
-		id, ts, err = prepareCreate(r.CreatedAt)
+		id, ts, err = prepareCreate("run", r.CreatedAt)
 	}
 	if err != nil {
 		return err
@@ -190,7 +190,7 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 
 func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
-		runSnapshotQuery(`runs.workspace_id = ?`)+` ORDER BY runs.id`, id)
+		runSnapshotQuery(`runs.workspace_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs by workspace: %w", err)
 	}
@@ -199,7 +199,7 @@ func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]
 
 func (d *DB) ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
-		runSnapshotQuery(`runs.member_id = ?`)+` ORDER BY runs.id`, id)
+		runSnapshotQuery(`runs.member_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs by member: %w", err)
 	}
@@ -222,7 +222,7 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
 		runSnapshotQuery(`runs.status IN (`+
 			strings.Join(placeholders, ", ")+
-			`)`)+` ORDER BY runs.id`, args...)
+			`)`)+` ORDER BY runs.created_at, runs.rowid`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list active runs: %w", err)
 	}
@@ -240,7 +240,7 @@ func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*d
 		return nil, fmt.Errorf("store: list runs archived before: %w", err)
 	}
 	rows, err := d.db.QueryContext(ctx,
-		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?`)+` ORDER BY runs.id`, ts)
+		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?`)+` ORDER BY runs.created_at, runs.rowid`, ts)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs archived before: %w", err)
 	}

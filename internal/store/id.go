@@ -2,33 +2,28 @@ package store
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"fmt"
-	"time"
 )
 
-// crockford is the Crockford base32 alphabet (lowercased): sortable,
-// case-insensitive, no ambiguous characters.
+// crockford is the Crockford base32 alphabet (lowercased): case-insensitive,
+// no ambiguous characters.
 const crockford = "0123456789abcdefghjkmnpqrstvwxyz"
 
-// newID returns a 26-character ULID-style identifier: 48 bits of Unix
-// millisecond timestamp followed by 80 bits from crypto/rand, base32
-// encoded. IDs sort lexicographically by creation time.
-func newID() (string, error) {
-	var b [16]byte
-	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli())<<16)
-	if _, err := rand.Read(b[6:]); err != nil {
-		return "", fmt.Errorf("store: generate id: %w", err)
-	}
+// randomIDLen is 50 bits of crypto/rand. A collision is not overwritten: IDs
+// are primary keys, so the insert fails.
+const randomIDLen = 10
 
-	// Encode 128 bits as 26 base32 characters (msb-first, 2 leading zero bits).
-	var out [26]byte
-	hi := binary.BigEndian.Uint64(b[:8])
-	lo := binary.BigEndian.Uint64(b[8:])
-	for i := 25; i >= 0; i-- {
-		out[i] = crockford[lo&0x1f]
-		lo = lo>>5 | hi<<59
-		hi >>= 5
+// newID returns "<kind>-<random>", such as run-7k2m9q4xbd. IDs carry no
+// time: order rows by created_at, never by id. Rows from before this format
+// keep their 26-character time-first IDs.
+func newID(kind string) (string, error) {
+	var b [randomIDLen]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("store: generate %s id: %w", kind, err)
 	}
-	return string(out[:]), nil
+	for i := range b {
+		// 256 is a multiple of 32, so the low five bits stay uniform.
+		b[i] = crockford[b[i]&0x1f]
+	}
+	return kind + "-" + string(b[:]), nil
 }

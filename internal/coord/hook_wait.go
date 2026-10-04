@@ -57,6 +57,26 @@ func sameMessageIDs(current []string, seen map[string]struct{}) bool {
 	return true
 }
 
+// commandHookStatus adds the unread message IDs to status without waiting or
+// admitting a wake, so a command hook can tell new mail from mail it already
+// announced even when the unread count is unchanged.
+func (s *Service) commandHookStatus(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
+	status, rpcErr := s.Status(ctx, run)
+	if rpcErr != nil {
+		return status, rpcErr
+	}
+	mail, supported := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
+	if !supported || status.Unread == 0 {
+		return status, nil
+	}
+	ids, err := mail.ListUnackedRunMessageIDs(ctx, run, protocol.CoordMaxUnread)
+	if err != nil {
+		return status, internalError(protocol.MethodCoordHookStatus, err)
+	}
+	status.UnreadMessageIDs = ids
+	return status, nil
+}
+
 // observeHook is called with a run reference held through the eventual frame
 // write. Its waiter also stays registered through admission, so an Inbox
 // consumer that wins the append race cannot lose priority as it returns.

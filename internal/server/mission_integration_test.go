@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -394,6 +395,22 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if report.ReportID == "" || !strings.Contains(strings.ToLower(report.NextAction), "review") {
 		t.Fatalf("coord.report next action = %+v, want review", report)
+	}
+	// Earlier fixture mail may precede the report, so drain batch by batch.
+	var reportMail protocol.CoordInboxResult
+	for reported := false; !reported; {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: reportMail.AckToken}, &reportMail); err != nil {
+			t.Fatalf("integrator inbox after worker report: %v", err)
+		}
+		if len(reportMail.Messages) == 0 {
+			t.Fatal("integrator inbox has no message for the worker's success report")
+		}
+		reported = slices.ContainsFunc(reportMail.Messages, func(m protocol.CoordMessage) bool {
+			return m.FromRunID == string(retried.Attempt.RunID) && m.CorrelationID == report.ReportID && m.Body == "fixture completed without required user evidence"
+		})
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: reportMail.AckToken}, &reportMail); err != nil {
+		t.Fatalf("acknowledge worker report: %v", err)
 	}
 	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
 		t.Fatalf("mission.show after report: %v", err)

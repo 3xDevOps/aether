@@ -116,6 +116,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = send(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "inbox":
 		result, err = inbox(ctx, cfg.Socket, args[1:])
+	case "ack":
+		result, err = ack(ctx, cfg.Socket, args[1:])
 	case "ask":
 		result, err = ask(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "reply":
@@ -153,6 +155,7 @@ Commands:
   hook      run a native inbox hook or print a copyable integration file
   send      send a durable message to an authorized peer
   inbox     read the at-least-once inbox
+  ack       acknowledge the inbox batch you handled
   ask       ask an authorized peer a durable question
   reply     answer a durable question
   mission   ask the accountable human and start the mission
@@ -176,10 +179,12 @@ Print this run's identity, assignment, authorized peers, unread count, and capab
 in the v3 JSON envelope. --json is optional; output is always JSON.
 `,
 	"skill": `usage: aether-internal skill [terminal|browser|git]
+       aether-internal skill --hooks
 
-Print the live assignment, conditional development topics, and read-only hook
-installation checks with copyable integrations. Without a socket, print only
-short capability-neutral discovery; no tools or authority are implied.
+Print the live assignment, conditional development topics, and this run's
+inbox hook state. --hooks prints the read-only installation checks and steps
+for every harness. Without a socket, print only short capability-neutral
+discovery; no tools or authority are implied.
 `,
 	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
@@ -308,11 +313,20 @@ request after an uncertain outcome; do not invent another delivery request.
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
 	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
-	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
-	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
-	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
-	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
+	"worker start": `usage: aether-internal worker start --task-id <id> [--harness <name>] [--mode <mode>] [--account-owner-id <id>] [--task-revision <n>] [--dispatch-key <key>]
+
+Start a worker on an accepted task. Pick one approved execution choice with
+any of --harness, --mode, and --account-owner-id; with a single choice none
+is needed. The task revision defaults to the current one, and the dispatch
+key to <task-id>-r<revision>, so repeating the same start replays it.
+The mission, run owner, and integrator generation come from this run's
+assignment; --mission-id, --run-owner-id, and
+--expected-integrator-generation pin them explicitly.
+`,
+	"worker list":    "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
+	"worker inspect": "usage: aether-internal worker inspect --attempt-id <id>\n",
+	"worker cancel":  "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker retry":   "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
 }
 
 // The input fields below are the author-supplied subset of protocol.TaskRevision.
@@ -373,8 +387,18 @@ func status(ctx context.Context, socket string, args []string) (protocol.CoordSt
 
 func skill(ctx context.Context, socket string, args []string, out io.Writer) (int, error) {
 	fs := newFlags("skill")
+	hooks := fs.Bool("hooks", false, "print hook installation checks and steps for every harness")
 	if err := parseFlags(fs, args); err != nil {
 		return fail(out, protocol.CodeInvalidParams, err.Error())
+	}
+	if *hooks {
+		if fs.NArg() != 0 {
+			return fail(out, protocol.CodeInvalidParams, "skill --hooks takes no topic")
+		}
+		if err := writeHookInstallation(out); err != nil {
+			return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
+		}
+		return ExitOK, nil
 	}
 	if fs.NArg() > 1 {
 		return fail(out, protocol.CodeInvalidParams, "skill accepts at most one topic: terminal, browser, git")
@@ -421,9 +445,9 @@ Hooks announce pending inbox items at harness lifecycle boundaries; loaded
 native omp/pi/OpenCode integrations can also wake a live idle session.
 Check the inbox before waiting or reporting. Wait without reporting an outcome:
   aether-internal inbox --wait 30
-Process the batch before acknowledging it: on the next inbox call pass
---ack with that batch's ack_token. Until then the same frozen batch repeats;
-new steering waits behind it. Acknowledge processed batches before waiting.
+Handle the batch, then acknowledge it: aether-internal ack <ack_token>.
+Until then the same frozen batch repeats; new steering waits behind it.
+Acknowledge handled batches before waiting.
 Read the inbox once more before a terminal report:
   aether-internal report --help
 `
@@ -563,8 +587,8 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox or mission commands are implied by a run socket.\n"); err != nil {
 		return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
 	}
-	if err := writeHookInstallation(out); err != nil {
-		return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
+	if err := writeHookSummary(out); err != nil {
+		return ExitFailure, fmt.Errorf("write hook summary: %w", err)
 	}
 	return ExitOK, nil
 }
@@ -649,6 +673,33 @@ func inbox(ctx context.Context, socket string, args []string) (protocol.CoordInb
 		out.Messages = []protocol.CoordMessage{}
 	}
 	return out, nil
+}
+
+type ackResult struct {
+	Acked   string `json:"acked"`
+	Waiting int    `json:"waiting"`
+}
+
+func ack(ctx context.Context, socket string, args []string) (ackResult, error) {
+	fs := newFlags("ack")
+	if err := parseFlags(fs, args); err != nil {
+		return ackResult{}, err
+	}
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		return ackResult{}, usageError("ack requires the ack_token of the batch you handled")
+	}
+	token := fs.Arg(0)
+	var next protocol.CoordInboxResult
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: token}, &next); err != nil {
+		return ackResult{}, err
+	}
+	if !next.Acked {
+		if next.AckToken == "" {
+			return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch and no inbox batch is waiting", token)}
+		}
+		return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch; run inbox to read batch %s", token, next.AckToken)}
+	}
+	return ackResult{Acked: token, Waiting: len(next.Messages)}, nil
 }
 
 func ask(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordAskResult, error) {
@@ -843,6 +894,10 @@ func errorCode(err error) int {
 	}
 	if _, ok := err.(*CLIUsageError); ok {
 		return protocol.CodeInvalidParams
+	}
+	var local *protocol.Error
+	if errors.As(err, &local) {
+		return local.Code
 	}
 	if code := coordtransport.ErrorCode(err); code != 0 {
 		return code

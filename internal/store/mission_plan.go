@@ -111,7 +111,7 @@ func (d *DB) InsertMissionQuestion(ctx context.Context, missionID domain.Mission
 	if seqErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0)+1 FROM mission_questions WHERE mission_id=?`, missionID).Scan(&seq); seqErr != nil {
 		return nil, fmt.Errorf("store: next mission question seq: %w", seqErr)
 	}
-	id, ts, err := prepareCreate(time.Time{})
+	id, ts, err := prepareCreate("ques", time.Time{})
 	if err != nil {
 		return nil, err
 	}

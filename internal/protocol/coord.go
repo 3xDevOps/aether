@@ -225,6 +225,8 @@ type CoordMessage struct {
 type CoordInboxResult struct {
 	Messages []CoordMessage `json:"messages"`
 	AckToken string         `json:"ack_token,omitempty"`
+	// Acked reports that the request's ack_token acknowledged a batch.
+	Acked bool `json:"acked,omitempty"`
 }
 
 // CoordReportParams submits a durable worker outcome for the calling run.

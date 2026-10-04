@@ -179,6 +179,15 @@ func (l lazyMission) Assignment(ctx context.Context, run domain.RunID) (protocol
 	}
 	return authority.Assignment(ctx, run)
 }
+func (l lazyMission) ReportRecipient(ctx context.Context, run domain.RunID) (domain.RunID, error) {
+	s, err := l.service()
+	if err != nil {
+		return "", err
+	}
+	return s.(interface {
+		ReportRecipient(context.Context, domain.RunID) (domain.RunID, error)
+	}).ReportRecipient(ctx, run)
+}
 func (l lazyMission) Peers(ctx context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
 	s, err := l.service()
 	if err != nil {

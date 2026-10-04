@@ -84,6 +84,7 @@ type MissionService interface {
 	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
 	ValidateReport(context.Context, domain.RunID, store.CoordOutcome) error
 	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
+	ReportRecipient(context.Context, domain.RunID) (domain.RunID, error)
 }
 
 // DevelopmentService supplies only implemented run-scoped development methods.

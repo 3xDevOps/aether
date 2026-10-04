@@ -156,8 +156,9 @@ revision, generation, and current authority checks on the server.
 Delivery is at least once. An inbox read returns one oldest-first batch and an
 opaque `ack_token`. Omitting `ack_token` on the next read acknowledges nothing,
 so the same batch and token can be delivered again. Supplying the token on the
-next read acknowledges exactly that batch while fetching the next batch. An
-empty inbox has no token. Tokens are durable across server restarts while the
+next read acknowledges exactly that batch while fetching the next batch, and
+the result carries `"acked": true`; a stale or unknown token acknowledges
+nothing and omits `acked`. An empty inbox has no token. Tokens are durable across server restarts while the
 run's container and coordination data are retained.
 
 The batch is frozen until acknowledged. New arrivals can increase `status`
@@ -200,14 +201,23 @@ All integrations add only a trusted instruction to read the inbox. They
 never acknowledge a batch or promote a peer's body into system/developer
 instructions. The agent reads the original, attributed payload through `inbox`.
 
-Hooks also direct agents with overlapping edits to `status`. Integrators get
-instructions to refresh `mission plan show` for the phase and human answers,
-and `worker list` for worker attempts, before waiting or declaring completion.
-Those APIs remain authoritative; no terminal notice is required.
+Hooks also direct agents with overlapping edits to `status`. Integrators are
+told to refresh `mission plan show` and `worker list` when the mission phase,
+open-question count, or integrator generation changes. Those APIs remain
+authoritative; no terminal notice is required.
 
-A blocked mission-worker report is forwarded to the current integrator as an
-ordinary inbox message: `from_run_id` is the reporting worker, `body` is its
-complete report summary, and `correlation_id` is the report ID. This message
+Claude Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
+in the transcript, so their hooks announce each notice once per state: the
+unread message IDs, the mission state, and the overlapping files. A changed state is
+announced again; a Stop still blocks while mail is unread. The hook records
+what it announced in `$TMPDIR/aether-hook-<run>-<harness>.json`; a missing
+record repeats the notice. pi, OMP, and OpenCode add context per model call
+without keeping it, so their notices repeat.
+
+Every mission-worker report, whatever its outcome, is forwarded to the
+current integrator as an ordinary inbox message: `from_run_id` is the
+reporting worker, `body` is its complete report summary, and `correlation_id`
+is the report ID. This message
 uses the same durable delivery and explicit acknowledgement as peer messages.
 If the inbox is full, the existing report-publication retry retains the work.
 
@@ -369,10 +379,12 @@ need run state return `-32004` and exit with status 4 when the socket is not
 available. Message, question, reply, and report bodies read from flags, files,
 or standard input are capped at 4 KiB before a request is sent.
 
-`skill` also checks the standard hook configuration locations without changing
-them. It reports configured, missing, invalid, disabled, or unverified
-installations and prints the matching file-export command, destination, merge
-instructions, and reload/trust steps. Install only the current harness.
+`skill` prints one line with the inbox hook state for this run's harness,
+named by `AETHER_HARNESS`. `skill --hooks` checks the standard hook
+configuration locations for every harness without changing them. It reports
+configured, missing, invalid, disabled, or unverified installations and prints
+the matching file-export command, destination, merge instructions, and
+reload/trust steps. Install only the current harness.
 Configured on disk does not mean loaded or trusted. Explicit configuration
 paths, additional project ancestors, packages, and runtime overrides can be
 outside this bounded check.
@@ -625,11 +637,14 @@ provided as the positional text after the peer run ID.
 
 ```sh
 /usr/local/bin/aether-internal inbox --wait 30
-/usr/local/bin/aether-internal inbox --ack ack-example-1 --wait 30
+/usr/local/bin/aether-internal ack ack-example-1
 ```
 
-Use the `ack_token` returned by the first command as the value of `--ack` on
-the next command. `--wait` asks the server to wait once for up to 30 seconds
+After handling the batch, pass its `ack_token` to `ack`. `ack` refuses with
+exit 3 and names the current batch's token when the token is stale or
+mistyped, and returns `waiting`, the number of messages queued for the next
+read. `inbox --ack <token> --wait 30` acknowledges and reads the next batch in
+one call. `--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
@@ -707,12 +722,12 @@ superseded and the new one becomes current.
 In `active`, `task accept` accepts any proposed revision, so new or revised
 work needs no human step: propose or revise it, accept it, and dispatch it.
 
-An answer to a mission question and every worker report are also typed into
-the integrator's terminal as one `aether:` line naming the command to run
-next. A worker's line carries only the worker run, task,
-and attempt IDs, never the worker's summary. A worker whose run ends before
-it reports gets the same kind of line once reconcile marks its attempt
-failed; a worker the integrator cancelled gets none. The integrator is always
+Every worker report (success, failure, or blocked) reaches the integrator's
+inbox as an ordinary message: `from_run_id` is the worker, `body` is the
+report summary, and `correlation_id` is the report ID; `worker list` shows the
+outcome. A worker whose run ends without reporting sends nothing, so check
+`worker list` before declaring completion. The integrator's hooks announce a
+changed mission phase or open-question count once. The integrator is always
 interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and
@@ -843,9 +858,19 @@ above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
 `completed` or `cancelled`. `abandon` takes an optional
 `--revision <n>` that drops one pending revision instead of the task.
 
-Worker starts and retries require explicit `--dispatch-key` values. The
-dispatch key is also the idempotency key for that operation, so replaying the
-same command cannot create a second attempt. Worker cancellation requires its
+`worker start` needs only `--task-id`:
+
+```sh
+/usr/local/bin/aether-internal worker start --task-id task-example --harness claude
+```
+
+`--harness`, `--mode`, and `--account-owner-id` select one approved execution
+choice and may be omitted when only one choice matches; an ambiguous selection
+is refused with every choice listed. The mission, integrator generation, and
+current task revision are read from the assignment, and the dispatch key
+defaults to `<task-id>-r<revision>`. The dispatch key is also the idempotency
+key, so replaying the same start cannot create a second attempt. Worker
+retries require an explicit `--dispatch-key`. Worker cancellation requires its
 own `--idempotency-key` and the observed
 `--expected-integrator-generation`.
 

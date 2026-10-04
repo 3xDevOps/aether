@@ -49,7 +49,7 @@ func (d *DB) CreateTask(ctx context.Context, t *domain.Task) error {
 	if status == "" {
 		status = domain.TaskRevisionProposed
 	}
-	id, ts, err := prepareCreate(t.CreatedAt)
+	id, ts, err := prepareCreate("task", t.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 	if count >= domain.MaxMissionTasks {
 		return nil, false, ErrMissionLimit
 	}
-	id, ts, err := prepareCreate(t.CreatedAt)
+	id, ts, err := prepareCreate("task", t.CreatedAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -247,7 +247,7 @@ func scanTaskRevision(row interface{ Scan(...any) error }) (*domain.TaskRevision
 }
 
 func (d *DB) ListTasks(ctx context.Context, missionID domain.MissionID) ([]*domain.Task, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT `+taskColumns+` FROM mission_tasks WHERE mission_id = ? ORDER BY id LIMIT 1025`, missionID)
+	rows, err := d.db.QueryContext(ctx, `SELECT `+taskColumns+` FROM mission_tasks WHERE mission_id = ? ORDER BY created_at, rowid LIMIT 1025`, missionID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tasks: %w", err)
 	}

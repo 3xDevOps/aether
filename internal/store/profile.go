@@ -60,7 +60,7 @@ func (d *DB) saveProfileSnapshot(ctx context.Context, s *domain.ProfileSnapshot,
 		return err
 	}
 
-	id, ts, err := prepareCreate(s.CreatedAt)
+	id, ts, err := prepareCreate("snap", s.CreatedAt)
 	if err != nil {
 		return err
 	}

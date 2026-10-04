@@ -71,6 +71,13 @@ func (s *Service) resolveAssignment(ctx context.Context, run domain.RunID) (*dom
 }
 
 func (s *Service) resolveWorkerAssignment(ctx context.Context, run domain.RunID, m *domain.Mission) (*domain.Mission, *domain.Attempt, error) {
+	return s.resolveWorkerAttempt(ctx, run, m, true)
+}
+
+// resolveWorkerAttempt maps a worker run to its attempt when that attempt is
+// still the latest for the task's current revision. live also requires the
+// attempt to hold concurrency, which a reconciled report has already ended.
+func (s *Service) resolveWorkerAttempt(ctx context.Context, run domain.RunID, m *domain.Mission, live bool) (*domain.Mission, *domain.Attempt, error) {
 	if m == nil {
 		return nil, nil, errors.New("mission: assignment has no mission")
 	}
@@ -107,10 +114,34 @@ func (s *Service) resolveWorkerAssignment(ctx context.Context, run domain.RunID,
 			latest = candidate
 		}
 	}
-	if latest == nil || latest.ID != attempt.ID || !attempt.State.HoldsConcurrency() {
+	if latest == nil || latest.ID != attempt.ID || (live && !attempt.State.HoldsConcurrency()) {
 		return m, nil, fmt.Errorf("%w: worker attempt is no longer current", store.ErrMissionStale)
 	}
 	return m, attempt, nil
+}
+
+// ReportRecipient returns the integrator that receives a worker's report.
+// Reconciling a failure report ends the attempt before the report is
+// forwarded, so a finished attempt still has a recipient; a superseded one,
+// or a run that is not a worker, has none.
+func (s *Service) ReportRecipient(ctx context.Context, run domain.RunID) (domain.RunID, error) {
+	attempt, err := s.cfg.Missions.GetAttemptByRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	m, err := s.cfg.Missions.GetMission(ctx, attempt.MissionID)
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := s.resolveWorkerAttempt(ctx, run, m, false); errors.Is(err, store.ErrMissionStale) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	return m.CurrentIntegratorRunID, nil
 }
 
 // Assignment returns only server-derived mission authority.  Ordinary runs

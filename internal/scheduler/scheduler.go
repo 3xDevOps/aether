@@ -918,11 +918,12 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
 func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, persistSupervisor bool) runtime.Spec {
-	env := make(map[string]string, len(plan.Env)+7)
+	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
 	env["AETHER_RUN_ID"] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
+	env["AETHER_HARNESS"] = run.Harness
 	identity := member.GitIdentity()
 	env["GIT_AUTHOR_NAME"] = identity.Name
 	env["GIT_COMMITTER_NAME"] = identity.Name

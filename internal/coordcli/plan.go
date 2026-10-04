@@ -105,7 +105,7 @@ func missionPlanShow(ctx context.Context, socket string, args []string) (protoco
 	return out, nil
 }
 
-const integratorRole = "You are this mission's integrator: turn the objective into tasks for workers and coordinate them; do not implement the objective yourself. Workers reach you with send and ask; answer with reply. An aether: line in your terminal means a message or mission event is waiting and names the command that reads it.\n"
+const integratorRole = "You are this mission's integrator: turn the objective into tasks for workers and coordinate them; do not implement the objective yourself. Workers reach you with send and ask, and every worker report arrives in your inbox; answer questions with reply.\n"
 
 const planningFlow = `Next: plan the mission, then start it. No human approves the plan.
 Ask the accountable human only if the objective is genuinely ambiguous:
@@ -124,9 +124,10 @@ aether-internal skill. Do not report while planning.
 const activeFlow = `Next: dispatch accepted tasks and review their submissions.
   aether-internal worker start --help
   aether-internal task accept-submission --help
-When a worker reports, the server types an aether: line into this terminal
-naming the command to run next. While waiting for workers, wait with
-aether-internal inbox --wait 30 instead of polling worker list.
+Each worker report arrives in your inbox as a message from the worker run
+whose correlation_id is the report ID; worker list shows its outcome. While
+waiting for workers, wait with aether-internal inbox --wait 30 instead of
+polling worker list. A worker that exits without reporting sends nothing.
 Use current task revisions, integrator generation, accepted-set version, and
 execution choices from live results; never guess IDs or generations.
 New or revised work needs no approval: propose or revise it, accept it with

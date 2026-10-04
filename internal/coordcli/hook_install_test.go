@@ -149,3 +149,39 @@ func TestHookInstallationBoundsAndCustomSources(t *testing.T) {
 		t.Fatalf("directory = %+v, %v", result, err)
 	}
 }
+
+func TestHookSummaryReportsOnlyTheRunHarness(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	in := hookInstallInputs{home: home, cwd: project, env: func(string) string { return "" }}
+	destinations := map[string]string{
+		"claude":  filepath.Join(home, ".claude", "settings.json"),
+		"codex":   filepath.Join(home, ".codex", "hooks.json"),
+		"copilot": filepath.Join(home, ".copilot", "hooks", "aether.json"),
+		"gemini":  filepath.Join(home, ".gemini", "settings.json"),
+		"cursor":  filepath.Join(home, ".cursor", "hooks.json"),
+	}
+	for harness, destination := range destinations {
+		t.Run(harness, func(t *testing.T) {
+			var before strings.Builder
+			if err := writeHookSummaryWithInputs(&before, harness, in); err != nil || !strings.Contains(before.String(), "Inbox hooks ("+harness+"): missing") {
+				t.Fatalf("summary before install = %q, %v", before.String(), err)
+			}
+			var asset strings.Builder
+			if code, err := hookFile(&asset, []string{harness + ".json"}); err != nil || code != ExitOK {
+				t.Fatalf("export %s.json = %d, %v", harness, code, err)
+			}
+			hookInstallFixture(t, destination, asset.String())
+			var after strings.Builder
+			if err := writeHookSummaryWithInputs(&after, harness, in); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(after.String(), "Inbox hooks ("+harness+"): configured.\n") || strings.Count(after.String(), "Inbox hooks (") != 1 {
+				t.Fatalf("summary after install = %q", after.String())
+			}
+		})
+	}
+	var opencode strings.Builder
+	if err := writeHookSummaryWithInputs(&opencode, "opencode", in); err != nil || !strings.Contains(opencode.String(), "(opencode-v1)") || !strings.Contains(opencode.String(), "(opencode-v2)") {
+		t.Fatalf("opencode summary = %q, %v", opencode.String(), err)
+	}
+}

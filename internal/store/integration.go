@@ -134,7 +134,7 @@ func (d *DB) CreateIntegrationCandidate(ctx context.Context, c *IntegrationCandi
 		return errors.New("store: create integration candidate: record is nil")
 	}
 	if c.ID == "" {
-		id, err := newID()
+		id, err := newID("cand")
 		if err != nil {
 			return err
 		}
