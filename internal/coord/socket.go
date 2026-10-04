@@ -490,7 +490,7 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 		result, rpcErr = s.Status(ctx, run)
 	case protocol.MethodCoordHookStatus:
 		if !hookWaitRequest(req) {
-			result, rpcErr = s.Status(ctx, run)
+			result, rpcErr = s.commandHookStatus(ctx, run)
 			break
 		}
 		p, perr := decodeParams[protocol.CoordHookStatusParams](req.Method, req.Params)

@@ -228,6 +228,14 @@ func TestReconcileReportFailureRetainsBeforeReleasingAttempt(t *testing.T) {
 	if len(fix.canceller.runs) != 1 || fix.canceller.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", fix.canceller.runs, fix.attempt.RunID)
 	}
+	// The failed attempt is no longer an assignment, yet its report must
+	// still reach the integrator.
+	if _, err := fix.svc.Assignment(ctx, fix.attempt.RunID); !errors.Is(err, store.ErrMissionStale) {
+		t.Fatalf("assignment after failure err = %v, want stale", err)
+	}
+	if recipient, err := fix.svc.ReportRecipient(ctx, fix.attempt.RunID); err != nil || recipient != fix.mission.CurrentIntegratorRunID {
+		t.Fatalf("report recipient after failure = %q, %v; want integrator %q", recipient, err, fix.mission.CurrentIntegratorRunID)
+	}
 }
 
 func TestReconcileReportFailureKeepsCapacityOnRetentionError(t *testing.T) {

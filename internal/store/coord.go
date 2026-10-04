@@ -218,7 +218,7 @@ type MessageStore interface {
 	// only when no batch is outstanding is a new one selected, stamped,
 	// and tokenized - all in one transaction. An empty inbox returns no
 	// messages and no token.
-	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, error)
+	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error)
 	// DeleteRunMessages retires a released run's inbound mailbox.
 	DeleteRunMessages(ctx context.Context, to domain.RunID) error
 	AppendCoordReport(ctx context.Context, report *CoordReport) error
@@ -487,57 +487,63 @@ func (d *DB) CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int,
 	return n, nil
 }
 
-func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, error) {
+func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error) {
 	if to == "" {
-		return nil, "", errors.New("store: deliver run messages: to_run is required")
+		return nil, "", false, errors.New("store: deliver run messages: to_run is required")
 	}
 	if limit <= 0 {
-		return nil, "", errors.New("store: deliver run messages: limit must be positive")
+		return nil, "", false, errors.New("store: deliver run messages: limit must be positive")
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return nil, "", fmt.Errorf("store: deliver run messages: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver run messages: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("store: deliver run messages: begin: %w", err)
+		return nil, "", false, fmt.Errorf("store: deliver run messages: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
-	if _, aerr := tx.ExecContext(ctx,
+	ack, aerr := tx.ExecContext(ctx,
 		`UPDATE run_messages SET acked_at = ?
 		 WHERE to_run = ? AND delivery_token <> '' AND delivery_token = ? AND acked_at IS NULL`,
 		now, to, ackToken,
-	); aerr != nil {
-		return nil, "", fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+	)
+	if aerr != nil {
+		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
 	}
+	ackedRows, aerr := ack.RowsAffected()
+	if aerr != nil {
+		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
+	}
+	acked := ackedRows > 0
 
 	outstanding, err := outstandingToken(ctx, tx, to)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if outstanding != "" {
 		msgs, rerr := readBatch(ctx, tx,
 			`SELECT `+runMessageCols+` FROM run_messages
 			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY created_at, rowid`, to, outstanding)
 		if rerr != nil {
-			return nil, "", rerr
+			return nil, "", false, rerr
 		}
-		return msgs, outstanding, commitBatch(tx)
+		return msgs, outstanding, acked, commitBatch(tx)
 	}
 
 	msgs, err := readBatch(ctx, tx,
 		`SELECT `+runMessageCols+` FROM run_messages
 		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY created_at, rowid LIMIT ?`, to, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if len(msgs) == 0 {
-		return nil, "", commitBatch(tx)
+		return nil, "", acked, commitBatch(tx)
 	}
 	token, err := newID("ack")
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	args := make([]any, 0, len(msgs)+2)
 	args = append(args, token, now)
@@ -548,13 +554,13 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		`UPDATE run_messages SET delivery_token = ?, delivered_at = ?
 		 WHERE id IN (`+placeholders(len(msgs))+`)`, args...,
 	); uerr != nil {
-		return nil, "", fmt.Errorf("store: stamp run message delivery: %w", uerr)
+		return nil, "", false, fmt.Errorf("store: stamp run message delivery: %w", uerr)
 	}
 	delivered := decodeTime(now)
 	for _, m := range msgs {
 		m.DeliveryToken, m.DeliveredAt = token, &delivered
 	}
-	return msgs, token, commitBatch(tx)
+	return msgs, token, acked, commitBatch(tx)
 }
 
 func (d *DB) DeleteRunMessages(ctx context.Context, to domain.RunID) error {

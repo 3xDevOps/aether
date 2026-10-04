@@ -42,7 +42,7 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 		t.Fatalf("unacked = %d (err %v), want 1", n, err)
 	}
 
-	batch, token, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
+	batch, token, _, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
 	if err != nil {
 		t.Fatalf("DeliverRunMessages: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 	if aerr := db.AppendRunMessage(ctx, second, 100); aerr != nil {
 		t.Fatalf("AppendRunMessage (second): %v", aerr)
 	}
-	retry, retryToken, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
+	retry, retryToken, _, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
 	if err != nil {
 		t.Fatalf("DeliverRunMessages (retry): %v", err)
 	}
@@ -66,28 +66,28 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 	}
 
 	// An unknown token and another run's token acknowledge nothing.
-	if again, _, berr := db.DeliverRunMessages(ctx, to.ID, "not-a-token", 100); berr != nil || len(again) != 1 {
+	if again, _, acked, berr := db.DeliverRunMessages(ctx, to.ID, "not-a-token", 100); berr != nil || len(again) != 1 || acked {
 		t.Fatalf("read with a bogus token = %+v (err %v), want the batch still outstanding", again, berr)
 	}
-	if _, _, ferr := db.DeliverRunMessages(ctx, from.ID, token, 100); ferr != nil {
+	if _, _, _, ferr := db.DeliverRunMessages(ctx, from.ID, token, 100); ferr != nil {
 		t.Fatalf("DeliverRunMessages (other run): %v", ferr)
 	}
 	if n, cerr := db.CountUnackedRunMessages(ctx, to.ID); cerr != nil || n != 2 {
 		t.Fatalf("unacked after foreign ack = %d (err %v), want 2", n, cerr)
 	}
 
-	next, nextToken, err := db.DeliverRunMessages(ctx, to.ID, token, 100)
+	next, nextToken, acked, err := db.DeliverRunMessages(ctx, to.ID, token, 100)
 	if err != nil {
 		t.Fatalf("DeliverRunMessages (ack): %v", err)
 	}
-	if len(next) != 1 || next[0].ID != second.ID || nextToken == "" || nextToken == token {
-		t.Fatalf("after ack = %+v token %q, want the second message under a fresh token", next, nextToken)
+	if !acked || len(next) != 1 || next[0].ID != second.ID || nextToken == "" || nextToken == token {
+		t.Fatalf("after ack = acked %v, %+v token %q, want an acknowledgement and the second message under a fresh token", acked, next, nextToken)
 	}
 	// Acknowledging the same token twice is a no-op, not a second ack.
-	if drained, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100); err != nil || len(drained) != 1 || drained[0].ID != second.ID {
+	if drained, _, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100); err != nil || len(drained) != 1 || drained[0].ID != second.ID {
 		t.Fatalf("replayed ack = %+v (err %v), want the outstanding batch untouched", drained, err)
 	}
-	if _, finalToken, err := db.DeliverRunMessages(ctx, to.ID, nextToken, 100); err != nil || finalToken != "" {
+	if _, finalToken, _, err := db.DeliverRunMessages(ctx, to.ID, nextToken, 100); err != nil || finalToken != "" {
 		t.Fatalf("drained inbox token = %q (err %v), want none", finalToken, err)
 	}
 	if n, err := db.CountUnackedRunMessages(ctx, to.ID); err != nil || n != 0 {
@@ -117,11 +117,11 @@ func TestRunMailboxInboxCap(t *testing.T) {
 		t.Fatalf("AppendRunMessage past the cap = %v, want ErrInboxFull", err)
 	}
 
-	_, token, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
+	_, token, _, err := db.DeliverRunMessages(ctx, to.ID, "", 100)
 	if err != nil {
 		t.Fatalf("DeliverRunMessages: %v", err)
 	}
-	if _, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100); err != nil {
+	if _, _, _, err := db.DeliverRunMessages(ctx, to.ID, token, 100); err != nil {
 		t.Fatalf("DeliverRunMessages (ack): %v", err)
 	}
 	if err := db.AppendRunMessage(ctx, over, 3); err != nil {
@@ -504,7 +504,7 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	if aerr := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: "w1", FromRun: "r1", ToRun: "r2", Body: "hi"}, 100); aerr != nil {
 		t.Fatalf("AppendRunMessage after migration: %v", aerr)
 	}
-	_, token, err := db.DeliverRunMessages(ctx, "r2", "", 100)
+	_, token, _, err := db.DeliverRunMessages(ctx, "r2", "", 100)
 	if err != nil || token == "" {
 		t.Fatalf("DeliverRunMessages after migration: token %q, err %v", token, err)
 	}
@@ -519,7 +519,7 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = reopened.Close() }()
-	if _, _, err := reopened.DeliverRunMessages(ctx, "r2", token, 100); err != nil {
+	if _, _, _, err := reopened.DeliverRunMessages(ctx, "r2", token, 100); err != nil {
 		t.Fatalf("DeliverRunMessages after reopen: %v", err)
 	}
 	if n, err := reopened.CountUnackedRunMessages(ctx, "r2"); err != nil || n != 0 {
@@ -592,7 +592,7 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 
 	token := ""
 	for i := range messages {
-		batch, next, derr := reader.DeliverRunMessages(ctx, to.ID, token, 1)
+		batch, next, _, derr := reader.DeliverRunMessages(ctx, to.ID, token, 1)
 		if derr != nil {
 			t.Fatalf("DeliverRunMessages under concurrent commits (call %d): %v", i, derr)
 		}
@@ -627,11 +627,11 @@ func TestDeleteRunMessagesRetiresOnlyTheRecipientInbox(t *testing.T) {
 		t.Fatalf("AppendRunMessage(outbound): %v", err)
 	}
 	// Deliver and acknowledge the first batch so acked rows exist too.
-	_, token, err := db.DeliverRunMessages(ctx, to.ID, "", 1)
+	_, token, _, err := db.DeliverRunMessages(ctx, to.ID, "", 1)
 	if err != nil {
 		t.Fatalf("DeliverRunMessages: %v", err)
 	}
-	if _, _, err := db.DeliverRunMessages(ctx, to.ID, token, 1); err != nil {
+	if _, _, _, err := db.DeliverRunMessages(ctx, to.ID, token, 1); err != nil {
 		t.Fatalf("DeliverRunMessages (ack): %v", err)
 	}
 

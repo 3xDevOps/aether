@@ -156,8 +156,9 @@ revision, generation, and current authority checks on the server.
 Delivery is at least once. An inbox read returns one oldest-first batch and an
 opaque `ack_token`. Omitting `ack_token` on the next read acknowledges nothing,
 so the same batch and token can be delivered again. Supplying the token on the
-next read acknowledges exactly that batch while fetching the next batch. An
-empty inbox has no token. Tokens are durable across server restarts while the
+next read acknowledges exactly that batch while fetching the next batch, and
+the result carries `"acked": true`; a stale or unknown token acknowledges
+nothing and omits `acked`. An empty inbox has no token. Tokens are durable across server restarts while the
 run's container and coordination data are retained.
 
 The batch is frozen until acknowledged. New arrivals can increase `status`
@@ -207,7 +208,7 @@ authoritative; no terminal notice is required.
 
 Claude Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
 in the transcript, so their hooks announce each notice once per state: the
-unread count, the mission state, and the overlapping files. A changed state is
+unread message IDs, the mission state, and the overlapping files. A changed state is
 announced again; a Stop still blocks while mail is unread. The hook records
 what it announced in `$TMPDIR/aether-hook-<run>-<harness>.json`; a missing
 record repeats the notice. pi, OMP, and OpenCode add context per model call

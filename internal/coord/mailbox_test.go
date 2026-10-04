@@ -923,6 +923,13 @@ type blockedReportMission struct {
 	integrator domain.RunID
 }
 
+func (m blockedReportMission) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
+	if run != m.worker {
+		return "", nil
+	}
+	return m.integrator, nil
+}
+
 func (m blockedReportMission) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
 	if run == m.worker {
 		return protocol.CoordMissionAssignment{

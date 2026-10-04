@@ -689,21 +689,15 @@ func ack(ctx context.Context, socket string, args []string) (ackResult, error) {
 		return ackResult{}, usageError("ack requires the ack_token of the batch you handled")
 	}
 	token := fs.Arg(0)
-	// Reading first is what proves the token names the current batch: a
-	// stale or mistyped token would otherwise be ignored silently.
-	var current protocol.CoordInboxResult
-	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{}, &current); err != nil {
-		return ackResult{}, err
-	}
-	if current.AckToken != token {
-		if current.AckToken == "" {
-			return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: "ack: no inbox batch is waiting for acknowledgement"}
-		}
-		return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch; run inbox to read batch %s", token, current.AckToken)}
-	}
 	var next protocol.CoordInboxResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: token}, &next); err != nil {
 		return ackResult{}, err
+	}
+	if !next.Acked {
+		if next.AckToken == "" {
+			return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch and no inbox batch is waiting", token)}
+		}
+		return ackResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("ack: %s is not the current batch; run inbox to read batch %s", token, next.AckToken)}
 	}
 	return ackResult{Acked: token, Waiting: len(next.Messages)}, nil
 }

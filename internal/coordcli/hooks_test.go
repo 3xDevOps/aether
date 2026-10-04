@@ -338,3 +338,35 @@ func TestAckAcknowledgesOnlyTheCurrentBatch(t *testing.T) {
 		t.Fatalf("repeated ack = %d, %+v; want nothing to acknowledge", code, envelope)
 	}
 }
+
+func TestCommandHooksAnnounceNewMailAtTheSameUnreadCount(t *testing.T) {
+	service, _, socket, run := hookMailbox(t)
+	hook := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if code, err := Run(t.Context(), []string{"hook", "claude", "PostToolBatch"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out}); err != nil || code != ExitOK {
+			t.Fatalf("hook = %d, %v", code, err)
+		}
+		return out.String()
+	}
+	if first := hook(); !strings.Contains(first, "aether-internal inbox") {
+		t.Fatalf("first message was not announced: %q", first)
+	}
+	batch, rpcErr := service.Inbox(t.Context(), run, protocol.CoordInboxParams{})
+	if rpcErr != nil || len(batch.Messages) != 1 {
+		t.Fatalf("inbox = %+v, %v", batch, rpcErr)
+	}
+	if _, rpcErr = service.Inbox(t.Context(), run, protocol.CoordInboxParams{AckToken: batch.AckToken}); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	sender := domain.RunID(batch.Messages[0].FromRunID)
+	if _, rpcErr = service.Send(t.Context(), sender, protocol.CoordSendParams{ToRunID: string(run), Body: "second", IdempotencyKey: "hook-second"}); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if second := hook(); !strings.Contains(second, "aether-internal inbox") {
+		t.Fatalf("new mail at the same unread count was not announced: %q", second)
+	}
+	if again := hook(); again != "" {
+		t.Fatalf("announced mail was repeated: %q", again)
+	}
+}

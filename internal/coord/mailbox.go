@@ -471,14 +471,14 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 		waiter = s.waiter(run)
 		defer s.releaseWaiter(run, waiter)
 	}
-	msgs, token, err := s.cfg.Mail.DeliverRunMessages(ctx, run, p.AckToken, protocol.CoordMaxUnread)
+	msgs, token, acked, err := s.cfg.Mail.DeliverRunMessages(ctx, run, p.AckToken, protocol.CoordMaxUnread)
 	if err != nil {
 		return protocol.CoordInboxResult{}, internalError(method, err)
 	}
 	if len(msgs) == 0 && waiter != nil {
 		// Close the race between the first read and waiter registration by
 		// reading once more before sleeping.
-		msgs, token, err = s.cfg.Mail.DeliverRunMessages(ctx, run, "", protocol.CoordMaxUnread)
+		msgs, token, _, err = s.cfg.Mail.DeliverRunMessages(ctx, run, "", protocol.CoordMaxUnread)
 		if err != nil {
 			return protocol.CoordInboxResult{}, internalError(method, err)
 		}
@@ -497,7 +497,7 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 				}
 			}
 			if ctx.Err() == nil && s.serveCtx.Err() == nil {
-				msgs, token, err = s.cfg.Mail.DeliverRunMessages(ctx, run, "", protocol.CoordMaxUnread)
+				msgs, token, _, err = s.cfg.Mail.DeliverRunMessages(ctx, run, "", protocol.CoordMaxUnread)
 				if err != nil {
 					return protocol.CoordInboxResult{}, internalError(method, err)
 				}
@@ -515,7 +515,7 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 			CreatedAt:     m.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return protocol.CoordInboxResult{Messages: out, AckToken: token}, nil
+	return protocol.CoordInboxResult{Messages: out, AckToken: token, Acked: acked}, nil
 }
 
 // resolveRun loads a run, mapping the unknown case to CodeNotFound.
@@ -779,19 +779,14 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 	if s.cfg.Mission == nil {
 		return nil
 	}
-	assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
-	if errors.Is(err, store.ErrMissionStale) {
-		// A superseded attempt is no longer actionable; its terminal state
-		// remains discoverable through the mission's worker list.
-		return nil
-	}
+	recipient, err := s.cfg.Mission.ReportRecipient(ctx, report.RunID)
 	if err != nil {
-		return fmt.Errorf("worker report assignment: %w", err)
+		return fmt.Errorf("worker report recipient: %w", err)
 	}
-	if assignment.Role != "worker" || assignment.IntegratorRunID == "" {
+	if recipient == "" {
 		return nil
 	}
-	target, err := s.cfg.Store.GetRun(ctx, domain.RunID(assignment.IntegratorRunID))
+	target, err := s.cfg.Store.GetRun(ctx, recipient)
 	if err != nil {
 		return fmt.Errorf("worker report integrator: %w", err)
 	}

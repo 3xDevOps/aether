@@ -27,7 +27,7 @@ func TestUnackedMessageIDsRespectRecipientLimitAndAcknowledgement(t *testing.T) 
 	if err != nil || first.ToRun != to.ID || first.DeliveryToken != "" || first.DeliveredAt != nil || first.AckedAt != nil {
 		t.Fatalf("observation mutated or crossed recipient: %+v, %v", first, err)
 	}
-	batch, token, err := db.DeliverRunMessages(ctx, to.ID, "", 1)
+	batch, token, _, err := db.DeliverRunMessages(ctx, to.ID, "", 1)
 	if err != nil || len(batch) != 1 || batch[0].ID != ids[0] || token == "" {
 		t.Fatalf("delivery = %+v, %q, %v", batch, token, err)
 	}
@@ -35,7 +35,7 @@ func TestUnackedMessageIDsRespectRecipientLimitAndAcknowledgement(t *testing.T) 
 	if err != nil || len(stillUnread) != 2 || stillUnread[0] != ids[0] {
 		t.Fatalf("unacked delivered batch disappeared: %v, %v", stillUnread, err)
 	}
-	if _, _, ackErr := db.DeliverRunMessages(ctx, to.ID, token, 1); ackErr != nil {
+	if _, _, _, ackErr := db.DeliverRunMessages(ctx, to.ID, token, 1); ackErr != nil {
 		t.Fatal(ackErr)
 	}
 	afterAck, err := db.ListUnackedRunMessageIDs(ctx, to.ID, 100)

@@ -88,7 +88,7 @@ func TestInboxDeliversInCreationOrderAcrossIDFormats(t *testing.T) {
 	var got []string
 	ack := ""
 	for {
-		batch, token, err := db.DeliverRunMessages(ctx, to.ID, ack, 2)
+		batch, token, _, err := db.DeliverRunMessages(ctx, to.ID, ack, 2)
 		if err != nil {
 			t.Fatalf("DeliverRunMessages: %v", err)
 		}

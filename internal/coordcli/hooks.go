@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -99,7 +100,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		path := hookNoticePath(status.RunID, harness)
 		seen := readHookNotices(path)
 		announced := notices
-		if !stopping && notices.Unread == seen.Unread {
+		if !stopping && !hasNewMail(notices, seen.Mail) {
 			notices.Unread = 0
 		}
 		if notices.Mission == seen.Mission {
@@ -126,13 +127,14 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 // hookNotices is the state a hook announced last: unread count, mission
 // phase/questions/generation for an integrator, and overlapping peer files.
 type hookNotices struct {
-	Unread  int    `json:"unread"`
-	Mission string `json:"mission"`
-	Overlap string `json:"overlap"`
+	Unread  int      `json:"-"`
+	Mail    []string `json:"mail"`
+	Mission string   `json:"mission"`
+	Overlap string   `json:"overlap"`
 }
 
 func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
-	n := hookNotices{Unread: status.Unread}
+	n := hookNotices{Unread: status.Unread, Mail: status.UnreadMessageIDs}
 	if a := status.Assignment; a != nil && a.Role == "integrator" {
 		n.Mission = fmt.Sprintf("%s|%s|%d|%d", a.MissionID, a.Phase, a.OpenQuestions, a.IntegratorGeneration)
 	}
@@ -145,6 +147,23 @@ func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
 	sort.Strings(overlap)
 	n.Overlap = strings.Join(overlap, "\n")
 	return n
+}
+
+// hasNewMail reports unread mail the hook has not announced. Without unread
+// IDs from the server, any unread mail counts as new.
+func hasNewMail(current hookNotices, announced []string) bool {
+	if current.Unread == 0 {
+		return false
+	}
+	if len(current.Mail) == 0 {
+		return true
+	}
+	for _, id := range current.Mail {
+		if !slices.Contains(announced, id) {
+			return true
+		}
+	}
+	return false
 }
 
 func commandHarness(harness string) bool {

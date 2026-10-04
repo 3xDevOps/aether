@@ -586,6 +586,13 @@ func (m missionTransportStub) ReconcileReport(context.Context, domain.RunID, *st
 	return nil
 }
 
+func (m missionTransportStub) ReportRecipient(_ context.Context, run domain.RunID) (domain.RunID, error) {
+	if !slices.Contains(m.mission, run) || run == m.integrator {
+		return "", nil
+	}
+	return m.integrator, nil
+}
+
 func TestMissionTransportMapsMissionErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cause    error

@@ -608,3 +608,18 @@ func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
 		t.Fatalf("ambiguous worker start = code %d, envelope %s", code, raw)
 	}
 }
+
+func TestCLIAckSpendsOneInboxRead(t *testing.T) {
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		if req.Method != protocol.MethodCoordInbox {
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+		}
+		return protocol.Response{Result: json.RawMessage(`{"messages":[],"acked":true}`)}
+	})
+	if code, raw := runCLI(t, s.path, []string{"ack", "ack-1"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+		t.Fatalf("ack = code %d, envelope %s", code, raw)
+	}
+	if reads := len(s.requests()); reads != 1 {
+		t.Fatalf("ack made %d inbox reads, want 1", reads)
+	}
+}
