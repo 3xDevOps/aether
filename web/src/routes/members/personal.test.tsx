@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ProfileDialog } from '@/routes/members/personal'
 import { useStore, type RootState } from '@/store'
+import type { Member } from '@/lib/types'
 import { initialEnvTerminal } from '@/store/env-terminal'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
 
@@ -71,6 +72,30 @@ describe('profile dialog', () => {
     expect(useStore.getState().info?.member.display_name).toBe('Alicia')
     expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
     expect(useStore.getState().members[bob.id]).toEqual(bob)
+  })
+
+  it('ignores a roster refresh that answers after a newer name was saved', async () => {
+    const first = { ...alice, display_name: 'Alicia' }
+    const second = { ...alice, display_name: 'Alice B' }
+    let releaseFirst = () => {}
+    const firstList = new Promise<Member[]>((resolve) => { releaseFirst = () => resolve([first, bob]) })
+    const client = fakeApi({
+      memberRename: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second),
+      memberList: vi.fn().mockReturnValueOnce(firstList).mockResolvedValueOnce([second, bob]),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alicia' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(useStore.getState().members[alice.id].display_name).toBe('Alicia'))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alice B' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(useStore.getState().members[alice.id].display_name).toBe('Alice B'))
+    releaseFirst()
+    await act(async () => { await firstList })
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alice B')
   })
 
   it('edits the git identity your agents commit as', () => {
