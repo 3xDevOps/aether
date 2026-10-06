@@ -31,6 +31,10 @@ func (b backend) Attach(ctx context.Context, req protocol.AttachRequest) (webgat
 	return term, ack, err
 }
 
+func (b backend) ACP(ctx context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+	return b.local.ACP(ctx, req)
+}
+
 func (b backend) Terminal(ctx context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	term, ack, err := b.local.Terminal(ctx, req)
 	if term == nil {
@@ -47,4 +51,7 @@ func (b backend) Artifact(ctx context.Context, req protocol.DevArtifactDownloadR
 	return b.local.Artifact(ctx, req)
 }
 
-var _ webgate.DevelopmentBackend = backend{}
+var (
+	_ webgate.DevelopmentBackend = backend{}
+	_ webgate.ACPBackend         = backend{}
+)

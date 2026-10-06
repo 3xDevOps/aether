@@ -367,6 +367,7 @@ type fakeRuns struct {
 	// the refusal it reports with the same key.
 	sharedLaunches map[string]scheduler.SharedLaunch
 	sharedRefusals map[string]string
+	acpStream      scheduler.ACPStream
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -602,6 +603,19 @@ func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 
 func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool) (string, error) {
 	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
+}
+
+func (f *fakeRuns) ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error) {
+	if err := f.record(fmt.Sprintf("acp.subscribe:%s:%d", run, afterSeq)); err != nil {
+		return scheduler.ACPStream{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stream := f.acpStream
+	if stream.Cancel == nil {
+		stream.Cancel = func() {}
+	}
+	return stream, nil
 }
 
 func (f *fakeRuns) RecordHandoff(_ context.Context, run domain.RunID, from domain.MemberID) {

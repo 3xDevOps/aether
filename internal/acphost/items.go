@@ -291,3 +291,32 @@ func capRaw(v any, n int) (json.RawMessage, bool) {
 	s, _ := json.Marshal(cut)
 	return s, true
 }
+
+// Wire encodes the item for a viewer within limit bytes. A larger item is cut
+// to its identity fields, which clients upsert by, and reports truncated.
+func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
+	if b, err = json.Marshal(it); err != nil || len(b) <= limit {
+		return b, false, err
+	}
+	var cut Item
+	if err = json.Unmarshal(b, &cut); err != nil {
+		return nil, false, err
+	}
+	cut.shrink()
+	if b, err = json.Marshal(cut); err != nil || len(b) <= limit {
+		return b, true, err
+	}
+	brief := Item{Seq: it.Seq, Epoch: it.Epoch, Time: it.Time, Turn: it.Turn, Kind: it.Kind, Truncated: true,
+		Mode: cut.Mode, StopReason: cut.StopReason}
+	if m := cut.Message; m != nil {
+		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, Complete: m.Complete}
+	}
+	if tc := cut.ToolCall; tc != nil {
+		brief.ToolCall = &ToolCall{ID: tc.ID, ToolKind: tc.ToolKind, Status: tc.Status, ExitCode: tc.ExitCode}
+	}
+	if r := cut.Request; r != nil {
+		brief.Request = &Request{ID: r.ID, Kind: r.Kind, ToolCallID: r.ToolCallID, Status: r.Status, Answer: r.Answer}
+	}
+	b, err = json.Marshal(brief)
+	return b, true, err
+}

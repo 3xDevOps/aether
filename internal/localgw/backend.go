@@ -283,6 +283,21 @@ func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webg
 	return out.term, out.ack, err
 }
 
+func (b *sshBackend) ACP(_ context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+	type acpResult struct {
+		stream io.ReadWriteCloser
+		ack    protocol.ACPStreamResponse
+	}
+	out, err := stream(b, func(c *cli.Conn) (acpResult, error) {
+		s, ack, err := c.ACPStream(req)
+		if s == nil {
+			return acpResult{ack: ack}, err
+		}
+		return acpResult{stream: s, ack: ack}, err
+	})
+	return out.stream, out.ack, err
+}
+
 func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	type terminalResult struct {
 		term webgate.Terminal
@@ -324,4 +339,7 @@ func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownl
 	return out.stream, out.artifact, err
 }
 
-var _ webgate.DevelopmentBackend = (*sshBackend)(nil)
+var (
+	_ webgate.DevelopmentBackend = (*sshBackend)(nil)
+	_ webgate.ACPBackend         = (*sshBackend)(nil)
+)

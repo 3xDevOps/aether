@@ -207,6 +207,8 @@ type Server struct {
 	controlAttaches map[string]map[string]controlAttach
 	controlAttachID atomic.Uint64
 	takeovers       takeoverCoordinator
+	acpViewersMu    sync.Mutex
+	acpViewers      map[domain.RunID]int
 }
 
 // New builds a server, loading (or generating) the host key.

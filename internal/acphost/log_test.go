@@ -149,3 +149,18 @@ func TestItemCap(t *testing.T) {
 		t.Fatalf("after the cap: %+v", tail)
 	}
 }
+
+func TestWireCutsLargeItems(t *testing.T) {
+	small := Item{Seq: 1, Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m", Text: "hi"}}
+	if b, cut, err := small.Wire(1 << 10); err != nil || cut || !strings.Contains(string(b), `"hi"`) {
+		t.Fatalf("small item: %s %v %v", b, cut, err)
+	}
+	big := Item{Seq: 2, Kind: KindToolCall, ToolCall: &ToolCall{ID: "t1", Status: "completed", Output: strings.Repeat("x", 100<<10)}}
+	b, cut, err := big.Wire(32 << 10)
+	if err != nil || !cut || len(b) > 32<<10 || !strings.Contains(string(b), `"id":"t1"`) {
+		t.Fatalf("large item: %d bytes, cut %v, %v", len(b), cut, err)
+	}
+	if big.ToolCall.Output == "" {
+		t.Fatal("Wire changed the item")
+	}
+}

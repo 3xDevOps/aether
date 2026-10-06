@@ -80,6 +80,9 @@ type RunController interface {
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
+	// ACPSubscribe opens an enhanced run's session item stream after
+	// afterSeq.
+	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// SetArchived hides a Final run from the board (archived true) or

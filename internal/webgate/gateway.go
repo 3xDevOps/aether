@@ -118,6 +118,7 @@ func New(cfg Config) (*Gateway, error) {
 	g.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	g.HandleFunc("GET /ws/events", g.handleEvents)
 	g.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
+	g.HandleFunc("GET /ws/acp/{run}", g.handleACP)
 	g.HandleFunc("GET /ws/terminal", g.handleTerminal)
 	g.HandleFunc("GET /ws/dev/browser/{run}", g.handleDevelopmentBrowser)
 	g.HandleFunc("GET /api/v1/dev/{run}/artifacts/{artifact}", g.handleDevelopmentArtifact)

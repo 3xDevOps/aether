@@ -86,6 +86,24 @@ func (l *Local) Attach(ctx context.Context, req protocol.AttachRequest) (*LocalT
 	return &LocalTerminal{localStream: stream, st: st}, ack, nil
 }
 
+// ACP opens an enhanced run's session stream: one protocol.ACPFrame or
+// control frame per line after the ack; control frames written to it go to
+// the server. A refused ack is returned with the error.
+func (l *Local) ACP(ctx context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+	var ack protocol.ACPStreamResponse
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
+		l.s.serveACP(ctx, l.member, ch)
+	})
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = stream.Close()
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+	}
+	return stream, ack, nil
+}
+
 // Terminal opens the member's persistent environment terminal. Framed
 // requests receive geometry records in the same stream as output.
 func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*LocalTerminal, protocol.TerminalResponse, error) {
