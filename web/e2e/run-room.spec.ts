@@ -143,7 +143,7 @@ test('two members share comments, moderated steering, and explicit control trans
     const closedColumns = terminalSizes.at(-1)!.cols
     const terminalInput = page.locator('.xterm-helper-textarea:not([data-aether-frozen-view] *)')
     await terminalInput.focus()
-    await page.keyboard.press('Control+Shift+M')
+    await page.keyboard.press('ControlOrMeta+Shift+M')
     const aliceRoom = page.getByRole('complementary', { name: 'Run Room' })
     const composer = aliceRoom.getByRole('textbox', { name: 'Run Room message' })
     await expect(composer).toBeFocused()
@@ -182,11 +182,11 @@ test('two members share comments, moderated steering, and explicit control trans
     }
 
     await composer.fill('keep this keyboard draft')
-    await page.keyboard.press('Control+Shift+M')
+    await page.keyboard.press('ControlOrMeta+Shift+M')
     await expect(aliceRoom).toBeHidden()
     await expect(terminalInput).toBeFocused()
     await expect.poll(() => terminalSizes.at(-1)?.cols ?? openColumns).toBeGreaterThan(openColumns)
-    await page.keyboard.press('Control+Shift+M')
+    await page.keyboard.press('ControlOrMeta+Shift+M')
     await expect(composer).toBeFocused()
     await expect(composer).toHaveValue('keep this keyboard draft')
     await expect.poll(() => terminalSizes.at(-1)?.cols ?? closedColumns).toBeLessThan(closedColumns)

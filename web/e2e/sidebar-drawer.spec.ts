@@ -26,22 +26,22 @@ test('the drawer answers the key that opened it and gives the rest back', async 
   await expect(page.getByRole('navigation', { name: 'Surfaces' })).toBeHidden()
   await opener.focus()
 
-  await page.keyboard.press('Control+b')
+  await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeVisible()
   await expect(drawer.getByRole('navigation', { name: 'Surfaces' })).toBeVisible()
-  await page.keyboard.press('Control+b')
+  await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeHidden()
   await expect(opener).toBeFocused()
 
-  await page.keyboard.press('Control+b')
+  await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeVisible()
   // Every other shell key belongs to the drawer while it is open.
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press('ControlOrMeta+k')
   await expect(palette).toHaveCount(0)
 
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
   await expect(opener).toBeFocused()
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press('ControlOrMeta+k')
   await expect(palette).toHaveCount(1)
 })
