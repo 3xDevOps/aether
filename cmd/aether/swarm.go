@@ -85,7 +85,7 @@ func swarmCreate(args []string, stdin io.Reader) error {
 func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fs := flag.NewFlagSet("swarm create", flag.ExitOnError)
 	agent := fs.String("agent", "", "integrator agent name")
-	mode := fs.String("mode", "standard", "integrator mode: standard (tui) or enhanced (acp)")
+	mode := fs.String("mode", "standard", "integrator mode: standard or enhanced")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	var workers stringList
@@ -271,7 +271,7 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	fmt.Fprintf(&b, "objective: %s\n", m.Objective)
 	fmt.Fprintf(&b, "accountable human: %s\n", m.AccountableHumanID)
 	fmt.Fprintf(&b, "integrator: run %s generation %d (%s %s, account %s)\n",
-		m.CurrentIntegratorRunID, m.IntegratorGeneration, m.Integrator.Harness, m.Integrator.Mode, m.Integrator.AccountMemberID)
+		m.CurrentIntegratorRunID, m.IntegratorGeneration, m.Integrator.Harness, modeName(m.Integrator.Mode), m.Integrator.AccountMemberID)
 	if m.IntegratorLaunchError != "" {
 		fmt.Fprintf(&b, "launch error: %s (since %s)\n", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
 	}

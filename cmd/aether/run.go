@@ -98,7 +98,7 @@ func cachedBaseLaunchError(err error, task, agent, mode, workspace, account stri
 	command := strings.Join([]string{
 		"aether", "run",
 		"--agent", shellquote.Quote(agent),
-		"--mode", shellquote.Quote(mode),
+		"--mode", modeName(mode),
 		"--workspace", shellquote.Quote(workspace),
 		"--account", shellquote.Quote(account),
 		"--cached-base", shellquote.Quote(failure.AcceptedCommit),

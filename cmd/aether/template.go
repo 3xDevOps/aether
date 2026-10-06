@@ -67,7 +67,7 @@ func runTemplate(args []string) error {
 				budget = fmt.Sprintf("$%.2f", t.BudgetUSD)
 			}
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				t.Name, t.Harness, t.Mode, formatParams(t.Params), budget, firstLine(t.Task))
+				t.Name, t.Harness, modeName(t.Mode), formatParams(t.Params), budget, firstLine(t.Task))
 		}
 		return tw.Flush()
 	})
@@ -108,7 +108,7 @@ func templateSave(args []string) error {
 		}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("template %s (%s, %s)\n", res.Template.Name, res.Template.Harness, res.Template.Mode)
+		fmt.Printf("template %s (%s, %s)\n", res.Template.Name, res.Template.Harness, modeName(res.Template.Mode))
 		return nil
 	})
 }

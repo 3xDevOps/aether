@@ -63,12 +63,12 @@ the adapter in the same `agent.install` call. The **Agents** page keeps a
 aether run "fix the flaky login test" --agent codex --mode enhanced
 ```
 
-`--mode` takes `standard`, `enhanced` or `background` (wire names `tui`,
-`acp`, `headless`) on `aether run` and `aether template save`. On
-`aether swarm create`, `--mode standard|enhanced` sets the integrator and
-`--worker codex:enhanced` allows enhanced workers; a worker's report wakes
-an enhanced integrator like any other mail ([Mail](#mail)). The task, when
-given, is the session's first prompt. An agent with no ACP command is refused:
+`--mode` takes `standard`, `enhanced` or `background` on `aether run` and
+`aether template save`. On `aether swarm create`, `--mode standard|enhanced`
+sets the integrator and `--worker codex:enhanced` allows enhanced workers;
+a worker's report wakes an enhanced integrator like any other mail
+([Mail](#mail)). The task, when given, is the session's first prompt.
+An agent with no ACP command is refused:
 
 ```
 scheduler: harness "custom" has no command for mode "acp"

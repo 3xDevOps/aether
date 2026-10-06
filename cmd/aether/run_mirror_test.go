@@ -49,7 +49,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 		Data:    data,
 	}, "-fix API's cache", "claude", "headless", "ws 1", "mem_2")
 	want := "base capture failed: mirror offline\nretry from cached " + accepted + " with:\n" +
-		"  aether run --agent claude --mode headless --workspace 'ws 1' --account mem_2 --cached-base " + accepted + " -- " +
+		"  aether run --agent claude --mode background --workspace 'ws 1' --account mem_2 --cached-base " + accepted + " -- " +
 		`'-fix API'\''s cache'`
 	if got == nil || got.Error() != want {
 		t.Fatalf("retry error = %v, want %q", got, want)

@@ -1025,7 +1025,7 @@ aether swarm show mis-cxcteyzdh4
 swarm mis-cxcteyzdh4 active
 objective: add a health check endpoint and document it
 accountable human: mem-h9zeh65yp9
-integrator: run run-bfknxzhp9j generation 1 (claude tui, account mem-h9zeh65yp9)
+integrator: run run-bfknxzhp9j generation 1 (claude standard, account mem-h9zeh65yp9)
 
 questions (0 open):
   ques-17e8e78tzz Which HTTP framework does the service use?
