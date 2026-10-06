@@ -383,13 +383,17 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
 	}
 	for name, want := range map[string]protocol.AgentInfo{
-		"claude": {Name: "claude", Source: "shipped", Installed: true, LoginMissing: true},
-		"codex":  {Name: "codex", Source: "shipped", Installed: true},
-		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
-		"omp":    {Name: "omp", Source: "shipped", Installed: false, Unavailable: refusal},
+		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true,
+			Enhanced: "adapter", DefaultMode: "tui", LoginMissing: true},
+		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true,
+			Enhanced: "adapter", DefaultMode: "tui"},
+		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true,
+			Enhanced: "none", DefaultMode: "tui", OwnAccountOnly: true},
+		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false,
+			Enhanced: "native", DefaultMode: "tui", Unavailable: refusal},
 	} {
 		got := agents[name]
-		got.InstallScript = ""
+		got.InstallScript, got.EnhancedInstallScript = "", ""
 		if got != want {
 			t.Fatalf("shared %s = %+v, want %+v", name, got, want)
 		}

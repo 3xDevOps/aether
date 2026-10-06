@@ -630,18 +630,21 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       roots: [
         {
           harness: 'claude',
+          display_name: 'Claude Code',
           path: '~/.claude',
           runtime_ignores: ['projects/'],
           credential_names: ['.credentials.json', 'credentials.json', 'credentials', '.claude.json', 'auth.json', 'keychain', 'token.json', 'tokens.json', 'oauth.json', 'agent.db', 'agent.db-wal', 'agent.db-shm'],
         },
         {
           harness: 'codex',
+          display_name: 'Codex',
           path: '~/.codex',
           runtime_ignores: ['tmp/'],
           credential_names: ['auth.json', 'keychain', 'token.json'],
         },
         {
           harness: 'pi',
+          display_name: 'pi',
           path: '~/.pi',
           runtime_ignores: ['agent/sessions/'],
           credential_names: ['auth.json', 'oauth.json'],
@@ -660,7 +663,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       harness, files: files.length, bytes: 0, excluded: [],
     })),
     agentList: vi.fn(async () => [
-      agentInfo(),
+      agentInfo({ display_name: 'Claude Code' }),
       agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
     ]),
     agentRegister: vi.fn(async () => ({})),

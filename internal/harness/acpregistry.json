@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "agents": [
+    {
+      "id": "claude-acp",
+      "name": "Claude Agent",
+      "version": "0.86.0",
+      "repository": "https://github.com/agentclientprotocol/claude-agent-acp",
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@agentclientprotocol/claude-agent-acp@0.86.0"
+        }
+      }
+    },
+    {
+      "id": "codex-acp",
+      "name": "Codex",
+      "version": "2.1.1",
+      "repository": "https://github.com/agentclientprotocol/codex-acp",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "@agentclientprotocol/codex-acp@2.1.1"
+        }
+      }
+    },
+    {
+      "id": "pi-acp",
+      "name": "pi ACP",
+      "version": "0.0.34",
+      "repository": "https://github.com/svkozak/pi-acp",
+      "license": "MIT",
+      "distribution": {
+        "npx": {
+          "package": "pi-acp@0.0.34"
+        }
+      }
+    }
+  ]
+}

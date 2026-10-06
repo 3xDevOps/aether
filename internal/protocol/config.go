@@ -13,6 +13,7 @@ const (
 // ~/.claude; requests use paths relative to that root.
 type ConfigRoot struct {
 	Harness         string   `json:"harness"`
+	DisplayName     string   `json:"display_name"`
 	Path            string   `json:"path"`
 	RuntimeIgnores  []string `json:"runtime_ignores"`
 	CredentialNames []string `json:"credential_names"`

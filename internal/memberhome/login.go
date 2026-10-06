@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/rootfs"
@@ -203,4 +204,29 @@ func writeInPlace(root *os.Root, name string, data []byte) error {
 		return err
 	}
 	return f.Close()
+}
+
+// LoginFound reports whether any of the home-relative login paths rels
+// exists in member's home as a directory or a non-empty file. An empty file
+// is a mountpoint Aether created, not a login. Only presence is checked: a
+// file that is there may still hold an expired login.
+func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error) {
+	home, err := m.openHome(member)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = home.Close() }()
+	for _, rel := range rels {
+		info, err := home.Stat(rel)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("memberhome: login path %s in %q: %w", rel, member, err)
+		}
+		if info.IsDir() || info.Size() > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

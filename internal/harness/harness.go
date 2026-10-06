@@ -104,9 +104,13 @@ func (r *Reporter) UnmarshalText(text []byte) error {
 // Paths are absolute container paths so the server never has to infer where
 // credentials live from an executable name.
 type Definition struct {
-	Name            string
-	TUIArgs         []string
-	HeadlessArgs    []string
+	Name         string
+	TUIArgs      []string
+	HeadlessArgs []string
+	// ACPArgs is the optional argv of the process that serves the Agent
+	// Client Protocol for this agent; its first value may name a separate
+	// adapter executable.
+	ACPArgs         []string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -129,6 +133,14 @@ func (d Definition) Validate() error {
 	}
 	if err := validateArgv(d.HeadlessArgs, d.Executable); err != nil {
 		return fmt.Errorf("harness: headless argv: %w", err)
+	}
+	if len(d.ACPArgs) > 0 {
+		if err := validateExecutable(d.ACPArgs[0]); err != nil {
+			return fmt.Errorf("harness: acp argv: %w", err)
+		}
+		if err := validateArgv(d.ACPArgs, d.ACPArgs[0]); err != nil {
+			return fmt.Errorf("harness: acp argv: %w", err)
+		}
 	}
 	if d.ProfileRoot != "" {
 		if err := validateContainerPath(d.ProfileRoot); err != nil {
@@ -230,6 +242,7 @@ func (d Definition) Profile() Profile {
 		Name:            d.Name,
 		TUIArgs:         append([]string(nil), d.TUIArgs...),
 		HeadlessArgs:    append([]string(nil), d.HeadlessArgs...),
+		ACPArgs:         append([]string(nil), d.ACPArgs...),
 		CredentialPaths: append([]string(nil), d.CredentialPaths...),
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
@@ -245,10 +258,30 @@ func (d Definition) Profile() Profile {
 type Profile struct {
 	// Name is the harness name runs reference (domain.Run.Harness).
 	Name string
+	// DisplayName is the vendor's product name; see Label.
+	DisplayName string
 	// TUIArgs and HeadlessArgs are argv templates for the two launch
 	// modes; TaskPlaceholder is substituted with the task prompt.
 	TUIArgs      []string
 	HeadlessArgs []string
+	// ACPArgs is the argv of the process that serves the Agent Client
+	// Protocol over stdio: the agent's own CLI, or ACPInstall's adapter.
+	// It takes no task; prompts travel over the protocol.
+	ACPArgs []string
+	// ACPInstall is the adapter package ACPArgs runs, for an agent whose
+	// CLI does not serve ACP itself. Nil for a native or unsupported agent.
+	ACPInstall *ACPInstall
+	// ACPSessionShared means the ACP server and the TUI keep one session
+	// store, so a session started in one resumes in the other.
+	ACPSessionShared bool
+	// ACPDefault makes an enhanced run the agent's default once its ACP
+	// server is installed. Claude stays on its terminal by default: its
+	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
+	ACPDefault bool
+	// ResumeArgs is the TUI argv that reopens a stored agent session;
+	// SessionPlaceholder is substituted with its id. Empty when the CLI
+	// cannot be pointed at one session.
+	ResumeArgs []string
 	// EnvPassthrough names environment variables copied from the server
 	// process into run containers when set (plain API-key harnesses;
 	// keys are never baked into images).
@@ -388,12 +421,16 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 // credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:    "claude",
-		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:        "claude",
+		DisplayName: "Claude Code",
+		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses "--print --output-format stream-json" without
 		// --verbose. The flag only adds records to the stream; the envelope
 		// the adapter parses is unchanged.
 		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		ACPArgs:        []string{claudeACP.Binary},
+		ACPInstall:     claudeACP,
+		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
 		// Runs execute as root on the standard image, and Claude Code
 		// refuses --dangerously-skip-permissions as root unless the
@@ -421,12 +458,17 @@ var profiles = map[string]Profile{
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
-		UpdateScript:  "claude update",
+		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
 		Name:            "codex",
+		DisplayName:     "Codex",
 		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:         []string{codexACP.Binary},
+		ACPInstall:      codexACP,
+		ACPDefault:      true,
+		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
 		LocalRoot:       ".codex",
@@ -447,12 +489,15 @@ var profiles = map[string]Profile{
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
 		// Not "codex update": it installs into the image's global npm
 		// prefix, outside the home.
-		UpdateScript: npmUpdateScript("@openai/codex", "codex", `*" $latest"`),
+		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
 	},
 	"pi": {
 		Name:         "pi",
+		DisplayName:  "pi",
 		TUIArgs:      []string{"pi", TaskPlaceholder},
 		HeadlessArgs: []string{"pi", "-p", TaskPlaceholder},
+		ACPArgs:      []string{piACP.Binary},
+		ACPInstall:   piACP,
 		// pi has no permission prompt, so there is no bypass flag to apply.
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".pi/agent/auth.json"},
@@ -470,15 +515,21 @@ var profiles = map[string]Profile{
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
 		// Not "pi update --self": it replaces files in place, under a
 		// running or starting pi.
-		UpdateScript: npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"),
+		UpdateScript: withAdapterUpdate(npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"), piACP),
 	},
 	// omp is a fork of pi and takes the same extension. It has a
 	// permission prompt of its own, which --auto-approve bypasses.
 	"omp": {
-		Name:           "omp",
-		TUIArgs:        []string{"omp", "--auto-approve", TaskPlaceholder},
-		HeadlessArgs:   []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		Name:         "omp",
+		DisplayName:  "oh-my-pi",
+		TUIArgs:      []string{"omp", "--auto-approve", TaskPlaceholder},
+		HeadlessArgs: []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
+		ACPArgs:      []string{"omp", "acp"},
+		// omp acp and the TUI read and write one session store.
+		ACPSessionShared: true,
+		ACPDefault:       true,
+		ResumeArgs:       []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
+		EnvPassthrough:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
 		CredentialPaths: []string{".omp/agent"},
@@ -496,8 +547,12 @@ var profiles = map[string]Profile{
 	},
 	"opencode": {
 		Name:            "opencode",
+		DisplayName:     "OpenCode",
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
+		ACPArgs:         []string{"opencode", "acp"},
+		ACPDefault:      true,
+		ResumeArgs:      []string{"opencode", "--session=" + SessionPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".config/opencode",

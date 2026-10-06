@@ -46,6 +46,7 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		Name:            p.Definition.Name,
 		TUIArgs:         p.Definition.TUIArgs,
 		HeadlessArgs:    p.Definition.HeadlessArgs,
+		ACPArgs:         p.Definition.ACPArgs,
 		Executable:      p.Definition.Executable,
 		ProfileRoot:     p.Definition.ProfileRoot,
 		CredentialPaths: p.Definition.CredentialPaths,
@@ -78,16 +79,15 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
-	describe := func(name, source, executable, installScript string, installPaths []string) (protocol.AgentInfo, error) {
-		installed, err := s.agentInstalled(member, account, executable, installPaths)
+	describe := func(profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
+		info, err := s.describeAgent(member, account, profile, source, executable)
 		if err != nil {
-			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
+			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", profile.Name, err)
 		}
-		info := protocol.AgentInfo{Name: name, Source: source, Installed: installed, InstallScript: installScript}
 		if account != member {
-			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
+			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, profile.Name)
 			if err != nil {
-				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", name, err)
+				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", profile.Name, err)
 			}
 			info.LoginMissing = shared == scheduler.SharedLoginMissing
 			info.OwnAccountOnly = shared == scheduler.SharedOwnDefinitionOnly
@@ -104,7 +104,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.InstallPaths)
+		info, err := describe(p, "shipped", p.TUIArgs[0])
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -119,9 +119,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
 		}
-		// A member's own definition runs only on their own account, so there
-		// is no installation to borrow for it.
-		info, err := describe(row.Name, "member", def.Executable, "", nil)
+		info, err := describe(def.Profile(), "member", def.Executable)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -131,6 +129,52 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	// view must be sorted by name across both sources.
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
 	return protocol.AgentListResult{Agents: agents}, nil
+}
+
+// describeAgent reports, for a launch by member on account, what profile
+// installs, whether its CLI and its ACP server resolve, and whether a login
+// file is there. A member's own definition runs only on their own account,
+// so there is no installation to borrow for it and no install command.
+func (s *Server) describeAgent(member, account domain.MemberID, profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
+	info := protocol.AgentInfo{
+		Name:        profile.Name,
+		DisplayName: profile.Label(),
+		Glyph:       profile.Name,
+		Source:      source,
+		Enhanced:    string(profile.EnhancedSupport()),
+		DefaultMode: string(domain.LaunchTUI),
+	}
+	if source == "member" {
+		info.Glyph = "custom"
+	} else {
+		info.InstallScript = profile.InstallScript
+		if profile.ACPInstall != nil {
+			info.EnhancedInstallScript = profile.InstallCommand(true)
+		}
+	}
+	var err error
+	if info.Installed, err = s.agentInstalled(member, account, executable, profile.InstallPaths); err != nil {
+		return protocol.AgentInfo{}, err
+	}
+	if len(profile.ACPArgs) > 0 {
+		if info.EnhancedInstalled, err = s.agentInstalled(member, account, profile.ACPArgs[0], profile.InstallPaths); err != nil {
+			return protocol.AgentInfo{}, err
+		}
+	}
+	if profile.ACPDefault && info.EnhancedInstalled {
+		// The wire name of the enhanced launch mode.
+		info.DefaultMode = "acp"
+	}
+	// A definition whose login path is the whole home has no login file to
+	// look for; a launch on a shared account refuses it with that reason.
+	if logins, pathErr := profile.LoginPaths(); s.cfg.Homes != nil && pathErr == nil {
+		// A launch on another member's account signs in with the owner's
+		// login, so that is the home to look in.
+		if info.LoginFound, err = s.cfg.Homes.LoginFound(account, logins); err != nil {
+			return protocol.AgentInfo{}, err
+		}
+	}
+	return info, nil
 }
 
 // agentInstalled reports whether a launch by member on account finds

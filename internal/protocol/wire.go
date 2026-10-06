@@ -718,6 +718,7 @@ type AgentDefinition struct {
 	Executable      string   `json:"executable"`
 	TUIArgs         []string `json:"tui_args"`
 	HeadlessArgs    []string `json:"headless_args"`
+	ACPArgs         []string `json:"acp_args,omitempty"`
 	ProfileRoot     string   `json:"profile_root,omitempty"`
 	CredentialPaths []string `json:"credential_paths,omitempty"`
 	DenyNames       []string `json:"deny_names,omitempty"`
@@ -747,12 +748,34 @@ type AgentListParams struct {
 
 // AgentInfo is one entry of agent.list; Source is "shipped" or "member".
 type AgentInfo struct {
-	Name      string `json:"name"`
+	Name string `json:"name"`
+	// DisplayName is the vendor's product name for a shipped agent, the
+	// registered name otherwise.
+	DisplayName string `json:"display_name"`
+	// Glyph is the shipped agent's name, or "custom" for a member's own.
+	Glyph     string `json:"glyph"`
 	Source    string `json:"source"`
 	Installed bool   `json:"installed"`
+	// Enhanced is how the agent serves the Agent Client Protocol: "native",
+	// "adapter" or "none". EnhancedInstalled reports that the program
+	// serving it resolves for this launch: the adapter, or the agent's own
+	// CLI for a native agent.
+	Enhanced          string `json:"enhanced"`
+	EnhancedInstalled bool   `json:"enhanced_installed"`
+	// LoginFound reports that one of the agent's login files exists in the
+	// home the launch uses: the account owner's on a shared account. It
+	// checks for files, not for a working session.
+	LoginFound bool `json:"login_found"`
+	// DefaultMode is the launch mode the agent starts in unless asked
+	// otherwise: "acp" for an agent whose enhanced mode is installed and
+	// preferred, "tui" for every other.
+	DefaultMode string `json:"default_mode"`
 	// InstallScript is the shipped harness's vendor install command. It is
 	// empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
+	// EnhancedInstallScript is InstallScript followed by the pinned
+	// adapter's install, for an agent that serves ACP through one.
+	EnhancedInstallScript string `json:"enhanced_install_script,omitempty"`
 	// LoginMissing is true when a launch of this agent on the listed shared
 	// account would be refused because the account owner has no login for
 	// it. OwnAccountOnly is true when it would be refused because the agent

@@ -842,9 +842,21 @@ export interface WorkspaceSelector {
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
+  /** The vendor's product name for a shipped agent, the name otherwise. */
+  display_name?: string
+  /** The shipped agent's name, or 'custom' for a member's own definition. */
+  glyph?: string
   source: 'shipped' | 'member'
   /** Whether the caller's persistent environment contains the executable. */
   installed?: boolean
+  /** How the agent serves the Agent Client Protocol an enhanced run uses. */
+  enhanced?: 'native' | 'adapter' | 'none'
+  /** Whether the adapter, or the native CLI, resolves for this launch. */
+  enhanced_installed?: boolean
+  /** Whether a login file exists in the home the launch signs in with. */
+  login_found?: boolean
+  /** The launch mode the agent starts in unless asked otherwise. */
+  default_mode?: 'tui' | 'acp'
   /** For a shared account: a launch on that account is refused because its
    * owner has no login for this agent. */
   login_missing?: boolean
@@ -858,6 +870,8 @@ export interface AgentInfo {
   unavailable?: string
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string
+  /** install_script followed by the pinned enhanced-mode adapter's install. */
+  enhanced_install_script?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
@@ -866,6 +880,7 @@ export interface AgentDefinition {
   executable?: string
   tui_args?: string[]
   headless_args?: string[]
+  acp_args?: string[]
   profile_root?: string
   credential_paths?: string[]
   deny_names?: string[]
@@ -873,6 +888,7 @@ export interface AgentDefinition {
 
 export interface ConfigRoot {
   harness: string
+  display_name?: string
   path: string
   runtime_ignores: string[]
   credential_names: string[]

@@ -191,3 +191,31 @@ func TestMarkBorrowedStateConcurrentCreate(t *testing.T) {
 		t.Fatalf("state = %q, %v", data, err)
 	}
 }
+
+func TestLoginFound(t *testing.T) {
+	manager, owner, _ := newLoginHomes(t)
+	if err := os.WriteFile(filepath.Join(owner, ".codex"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(owner, ".pi", "agent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(owner, ".pi", "agent", "auth.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		rels []string
+		want bool
+	}{
+		{[]string{".claude/.credentials.json"}, true},
+		{[]string{".omp/agent"}, true},
+		{[]string{".codex/auth.json", ".claude/missing"}, false},
+		// An empty file is a mountpoint Aether created, not a login.
+		{[]string{".pi/agent/auth.json"}, false},
+		{[]string{".claude/missing", ".claude/.credentials.json"}, true},
+	} {
+		if got, err := manager.LoginFound("owner", tc.rels); err != nil || got != tc.want {
+			t.Errorf("LoginFound(%v) = %v, %v; want %v", tc.rels, got, err, tc.want)
+		}
+	}
+}

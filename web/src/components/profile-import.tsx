@@ -8,7 +8,7 @@ import type { ChangeEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
-import { friendly, formatBytes, message } from '@/lib/format'
+import { formatBytes, message } from '@/lib/format'
 import type {
   ConfigExclusion,
   ConfigFile,
@@ -373,6 +373,8 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     ? roots.filter((root) => rootName(root.path) === basename)
     : []
   const destinationRoots = roots ?? []
+  const agentLabel = (harness: string) =>
+    destinationRoots.find((root) => root.harness === harness)?.display_name ?? harness
   const destination = destinationRoots.find(
     (root) => root.harness === selectedHarness,
   )
@@ -603,7 +605,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
               <option value="">Select an agent</option>
               {destinationRoots.map((root) => (
                 <option key={root.harness} value={root.harness}>
-                  {friendly[root.harness] ?? root.harness} ({root.path})
+                  {root.display_name ?? root.harness} ({root.path})
                 </option>
               ))}
           </select>
@@ -719,7 +721,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                   <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
                     <p>
                       Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
-                      {friendly[result.harness] ?? result.harness}.
+                      {agentLabel(result.harness)}.
                     </p>
                     <p>{result.error}</p>
                     <p>Copied files remain. Review failed or unattempted files below to continue.</p>
@@ -754,7 +756,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
               ) : (
                 <div className="border-l-2 border-border bg-muted/20 px-3 py-2 text-sm" role="status">
                   <p>Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
-                    {friendly[result.harness] ?? result.harness}.</p>
+                    {agentLabel(result.harness)}.</p>
                   {status.excluded.length + result.excluded.length > 0 && (
                     <p>Import finished with omissions: {status.excluded.length + result.excluded.length} files were not imported. Review every exclusion below.</p>
                   )}

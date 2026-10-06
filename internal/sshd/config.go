@@ -101,7 +101,7 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 		}
 		seen[p.Name] = struct{}{}
 		out = append(out, protocol.ConfigRoot{
-			Harness: p.Name, Path: displayRoot(p.LocalRoot),
+			Harness: p.Name, DisplayName: p.Label(), Path: displayRoot(p.LocalRoot),
 			RuntimeIgnores:  configRuntimeIgnores(p.Name),
 			CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 		})
@@ -125,7 +125,7 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 			}
 			seen[row.Name] = struct{}{}
 			out = append(out, protocol.ConfigRoot{
-				Harness: row.Name, Path: displayRoot(p.LocalRoot),
+				Harness: row.Name, DisplayName: p.Label(), Path: displayRoot(p.LocalRoot),
 				RuntimeIgnores:  configRuntimeIgnores(row.Name),
 				CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 			})

@@ -154,6 +154,7 @@ const DefaultServerBinary = "/proc/self/exe"
 type HarnessSpec struct {
 	TUIArgs         []string
 	HeadlessArgs    []string
+	ACPArgs         []string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -708,6 +709,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 		Name:            name,
 		TUIArgs:         spec.TUIArgs,
 		HeadlessArgs:    spec.HeadlessArgs,
+		ACPArgs:         spec.ACPArgs,
 		Executable:      spec.Executable,
 		ProfileRoot:     spec.ProfileRoot,
 		CredentialPaths: spec.CredentialPaths,
@@ -781,6 +783,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 				Name:            harnessName,
 				TUIArgs:         spec.TUIArgs,
 				HeadlessArgs:    spec.HeadlessArgs,
+				ACPArgs:         spec.ACPArgs,
 				Executable:      spec.Executable,
 				ProfileRoot:     spec.ProfileRoot,
 				CredentialPaths: spec.CredentialPaths,
@@ -914,6 +917,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 	return HarnessSpec{
 		TUIArgs:         def.TUIArgs,
 		HeadlessArgs:    def.HeadlessArgs,
+		ACPArgs:         def.ACPArgs,
 		Executable:      def.Executable,
 		ProfileRoot:     def.ProfileRoot,
 		CredentialPaths: def.CredentialPaths,

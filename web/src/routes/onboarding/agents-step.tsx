@@ -1,6 +1,6 @@
 
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
-import { friendly, message } from '@/lib/format'
+import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
@@ -156,7 +156,7 @@ export function AgentsStep({
         {agents && agents.length > 0 && (
           <ul className="min-w-0 border-y border-border/70 bg-card">
             {agents.map((h) => {
-              const label = friendly[h.name] ?? h.name
+              const label = h.display_name ?? h.name
               return (
                 <li
                   key={h.name}

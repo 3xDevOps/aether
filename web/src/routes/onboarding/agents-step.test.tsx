@@ -104,6 +104,7 @@ function bufferedFile(path: string, bytes: ArrayBuffer): File {
 function policyRoot(overrides: Partial<ConfigRoot> = {}): ConfigRoot {
   return {
     harness: 'claude',
+    display_name: 'Claude Code',
     path: '~/.claude',
     runtime_ignores: [],
     credential_names: ['.credentials.json', 'credentials.json', 'credentials', '.claude.json', 'auth.json', 'keychain', 'token.json', 'tokens.json', 'oauth.json', 'agent.db', 'agent.db-wal', 'agent.db-shm'],
