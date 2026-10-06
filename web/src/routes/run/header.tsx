@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { Camera, Lock, PanelRight, ScrollText } from '@/components/icons'
 import { RunActions } from '@/components/run-actions'
 import { ConnectionLine } from '@/components/shell/connection'
@@ -9,13 +8,12 @@ import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { useClock } from '@/lib/clock'
-import { message } from '@/lib/format'
-import { needsYou } from '@/lib/needs-you'
+import { needsYou, openAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { requestCardID } from '@/routes/run/requests'
@@ -40,61 +38,58 @@ export interface RunNavigation {
   focusComposer: () => void
 }
 
-interface PrimaryAction {
+interface FrameAction {
   label: string
   act: () => void
 }
 
-function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, nav: RunNavigation): PrimaryAction | null {
+/** The needs-you table names the action; the frame performs it in place. */
+function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, nav: RunNavigation): FrameAction | null {
   const now = useClock()
-  const condition = useStore((s) => needsYou(run, stateContextOf(s, now))?.id)
+  const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const room = useStore((s) => s.roomMessages[run.id])
   const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
   const [busy, setBusy] = useState(false)
+  if (!condition) return null
 
-  const openTerminal: PrimaryAction | null = !agent.hasAgentTerminal
-    ? null
-    : view === 'terminal'
+  const action = condition.action(run, approval)
+  const openTerminal = (): FrameAction | null =>
+    !agent.hasAgentTerminal || view === 'terminal'
       ? null
       : { label: 'Open terminal', act: () => { nav.go('terminal'); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
+  const label = action.label === openAction.label ? 'Review' : action.label
 
-  switch (condition) {
-    case 'permission':
-      if (approval) {
-        return {
-          label: 'Approve',
-          act: () => {
-            if (busy) return
-            setBusy(true)
-            api.approvalDecide(run.id, approval.id, true).then(
-              (decided) => useStore.getState().decideApproval(decided.workspace_id, decided.id, decided.decision, decided.decided_by ?? '', decided.decided_at ?? ''),
-              (err) => toast.error(`Approve failed: ${message(err)}`),
-            ).finally(() => setBusy(false))
-          },
-        }
-      }
-      return run.mode === 'acp' ? { label: 'Review', act: () => nav.reveal(requestCardID.input(run.pending_inputs?.[0]?.id ?? '')) } : openTerminal
-    case 'question':
-      return run.mode === 'acp' ? { label: 'Reply', act: nav.focusComposer } : openTerminal
-    case 'queued-message': {
-      const queued = queuedSteers(room ?? []).find((m) => m.actor_id !== selfID)
-      return { label: 'Approve', act: () => nav.reveal(queued ? requestCardID.steer(queued.id) : 'details-needs-you') }
+  if (action.kind === 'approve' && approval) {
+    return {
+      label: action.label,
+      act: () => {
+        if (busy) return
+        setBusy(true)
+        void approveRequest(run.id, approval).finally(() => setBusy(false))
+      },
     }
-    case 'room-question': {
+  }
+  if (action.kind === 'reply') return { label: action.label, act: nav.focusComposer }
+  switch (condition.target) {
+    case 'changes':
+      return view === 'changes' ? null : { label: action.label, act: () => nav.go('changes') }
+    case 'swarm':
+      return run.mission_id ? { label: action.label, act: () => navigate('missions', { missionId: run.mission_id! }) } : null
+    case 'notes': {
       const question = unansweredQuestions(room ?? []).find((m) => m.actor_id !== run.member_id)
-      return { label: 'Reply', act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }
+      return { label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }
     }
-    case 'unreviewed-finish':
-      return view === 'changes' ? null : { label: 'Review changes', act: () => nav.go('changes') }
-    case 'swarm-question':
-    case 'integrator-down':
-      return run.mission_id ? { label: 'Open swarm', act: () => navigate('missions', { missionId: run.mission_id! }) } : null
-    case undefined:
-      return null
-    default:
-      return openTerminal
+    case 'request': {
+      if (action.label === 'Open terminal') return openTerminal()
+      const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
+      const input = run.pending_inputs?.[0]
+      const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
+      return { label, act: () => nav.reveal(card) }
+    }
+    case 'run':
+      return openTerminal()
   }
 }
 

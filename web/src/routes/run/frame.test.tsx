@@ -111,7 +111,7 @@ describe('the header primary action', () => {
 
   it('reviews an unseen finish on Changes', () => {
     open({ status: 'completed', outcome_unseen: true })
-    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route.params.view).toBe('changes')
   })
 
@@ -119,7 +119,7 @@ describe('the header primary action', () => {
     const question = roomMessage({ id: 'q_1', kind: 'question', actor_id: bob.id, body: 'keep the prefix?' })
     vi.mocked(api.runRoomList).mockResolvedValue({ messages: [question] })
     open({ unanswered_questions: 1 })
-    fireEvent.click(await screen.findByRole('button', { name: 'Reply' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Answer' }))
     const details = await screen.findByRole('dialog', { name: 'Run details' })
     const card = within(details).getByText('Bob asked').closest('[data-slot=request-card]') as HTMLElement
     await userEvent.type(within(card).getByRole('textbox'), 'yes, keep it')

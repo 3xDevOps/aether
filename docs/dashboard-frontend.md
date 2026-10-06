@@ -1447,13 +1447,17 @@ shaped dot, the reason, "Claude Code · Standard" (`agent.list` display names,
 `run.mode`), the branch (click copies it) and the owner. A container query
 drops the branch and owner, then the agent, as the column narrows. Actions:
 the state's one primary action, a **Details** toggle and **More**. The primary
-action follows the Needs you condition: a Standard permission or question
-gives **Open terminal** (switches to Terminal and asks for the lease), an
-Aether approval gives **Approve** in place, a queued message from a teammate
-gives **Approve** (reveals its card), a teammate question **Reply** (reveals
-its card with the reply field focused), an unreviewed finish **Review
-changes**, a swarm condition **Open swarm**. On the Terminal view there is no
-terminal action in the header; the toolbar has **Take control**. **More**
+action is the one the condition names in `lib/needs-you.ts`, the same label
+the board card and sidebar row show, performed inside the frame: **Approve**
+resolves the approval in place, **Reply** focuses the Session composer,
+**Open terminal** switches to Terminal and asks for the lease, **Answer**
+reveals the question's card in Details with its reply field focused,
+**Review** opens Changes for a finish, or reveals the request's card in
+Details where the board would just open the run, and a swarm condition opens
+the swarm page. A held run with no request offers **Open terminal**. On the
+Terminal view there is no terminal action in the header; the toolbar has
+**Take control**. It is the only filled button on the frame: Session rows and
+Details cards that send the member elsewhere use secondary buttons. **More**
 (`components/run-actions.tsx`) lists every verb from `lib/commands.ts` except
 the old Message dialog, plus **Captures…** and **Raw events…**. The view
 switch is a segmented `tablist` with manual activation; below 720px of column
