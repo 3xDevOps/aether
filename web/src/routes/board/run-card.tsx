@@ -60,11 +60,9 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
               </span>
             )}
             {card.workspaceName && <span className="min-w-0 truncate">{card.workspaceName}</span>}
-            {!card.swarm && (
-              <CardControls className="empty:hidden">
-                <Slot name="card:meta" run={run} />
-              </CardControls>
-            )}
+            <CardControls className="empty:hidden">
+              <Slot name="card:meta" run={run} />
+            </CardControls>
             {action && (
               <CardControls className="invisible ml-auto group-focus-within/card:visible group-hover/card:visible coarse:visible">
                 <CardActionButton card={card} action={action} approval={approval} onReply={() => setReplying(true)} />

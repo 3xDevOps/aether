@@ -821,27 +821,14 @@ function MissionCancel({
   )
 }
 
-function useMissionConflictDiagnostics(runID: string) {
-  const detailRecords = useStore((state) => state.missionDetails)
-  return useMemo(
-    () => Object.values(detailRecords)
-      .flatMap((detail) => detail.diagnostics ?? [])
-      .filter((diagnostic) => diagnostic.run_id === runID || diagnostic.peer_run_id === runID),
-    [detailRecords, runID],
-  )
+function useSwarmConflictDiagnostics(missionID: string | undefined) {
+  return useStore((state) => (missionID ? state.missionDetails[missionID]?.diagnostics : undefined)) ?? []
 }
 
-function MissionConflictDiagnostics({
-  run,
-  showDetails = false,
-}: CardSlotProps & { showDetails?: boolean }) {
-  const diagnostics = useMissionConflictDiagnostics(run.id)
+function MissionConflictDiagnostics({ run }: CardSlotProps) {
+  const diagnostics = useSwarmConflictDiagnostics(run.mission_id)
   const navigate = useStore((state) => state.navigate)
   return diagnostics.map((diagnostic, index) => {
-    const target =
-      diagnostic.peer_run_id && diagnostic.peer_run_id !== run.id
-        ? diagnostic.peer_run_id
-        : diagnostic.run_id
     const label = diagnostic.kind.replaceAll('_', ' ')
     const detail = diagnostic.unavailable
       ? diagnostic.unavailable_why || diagnostic.detail || 'snapshot or evidence is unavailable'
@@ -854,24 +841,21 @@ function MissionConflictDiagnostics({
           size="sm"
           className="h-[22px] min-h-[22px] border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[11px]"
           title={detail}
-          disabled={!target}
-          onClick={() => target && navigate('terminal', { runId: target })}
+          onClick={() => navigate('terminal', { runId: diagnostic.run_id })}
         >
           {label}{diagnostic.unavailable ? ' · unavailable' : ''}
           {!diagnostic.unavailable && diagnostic.paths.length
             ? ` · ${diagnostic.paths.length} path${diagnostic.paths.length === 1 ? '' : 's'}`
             : ''}
         </Button>
-        {showDetails && (
-          <p className="min-w-0 basis-full whitespace-pre-wrap break-words text-xs text-muted-foreground">{detail}</p>
-        )}
+        <p className="min-w-0 basis-full whitespace-pre-wrap break-words text-xs text-muted-foreground">{detail}</p>
       </Fragment>
     )
   })
 }
 
 function MissionConflictWarning({ run }: CardSlotProps) {
-  const diagnostics = useMissionConflictDiagnostics(run.id)
+  const diagnostics = useSwarmConflictDiagnostics(run.mission_id)
   if (!diagnostics.length) return null
   const label = `Swarm conflict warnings: ${diagnostics.length}`
   return (
@@ -885,18 +869,12 @@ function MissionConflictWarning({ run }: CardSlotProps) {
       <PopoverContent aria-label="Swarm conflict warnings">
         <p className="mb-2 font-medium">Swarm conflicts</p>
         <div className="flex flex-wrap items-center gap-2">
-          <MissionConflictDiagnostics run={run} showDetails />
+          <MissionConflictDiagnostics run={run} />
         </div>
       </PopoverContent>
     </Popover>
   )
 }
 
-function SwarmRole({ run }: CardSlotProps) {
-  if (!run.mission_role) return null
-  return <span>{run.mission_role === 'integrator' ? 'Integrator' : 'Worker'}</span>
-}
-
-registerSlot('card:meta', 'swarm-role', SwarmRole)
 registerSlot('card:meta', 'mission-diagnostics', MissionConflictWarning)
 registerRoute('missions', MissionRoute)
