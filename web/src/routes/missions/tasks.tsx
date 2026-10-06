@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { modeLabel } from '@/components/launch/modes'
+import { swarmHandle } from '@/components/messages/handles'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -34,7 +35,7 @@ const statusTone: Record<MissionTask['status'], Tone> = {
   blocked: 'failed',
 }
 
-const columns = 'md:grid md:grid-cols-[minmax(0,1fr)_7rem_6rem_10rem] md:items-center md:gap-3'
+const columns = 'md:grid md:grid-cols-[minmax(0,1fr)_7rem_6rem_13rem] md:items-center md:gap-3'
 
 function scopeFacts(scope: MissionTaskScope): string[] {
   return [
@@ -154,7 +155,7 @@ function TaskRow({ task, detail, agents, showProposalBlocker, canRelease, client
                 onClick={() => navigate('run', { runId: attempt.run_id })}
               >
                 <AgentGlyph agent={attempt.harness} />
-                <span className="truncate">{agent}</span>
+                <span className="truncate">{swarmHandle(detail, attempt.run_id)?.name ?? 'Worker'} · {agent}</span>
               </Button>
             ) : (
               <span className="text-ui-sm text-muted">No worker yet</span>

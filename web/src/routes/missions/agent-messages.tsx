@@ -1,13 +1,12 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { MessageSquare } from '@/components/icons'
-import { MessageRow, Participants, type ParticipantLabel } from '@/components/messages/message-row'
+import { MessageRow, Participants } from '@/components/messages/message-row'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import type { Api } from '@/lib/api'
-import { participantLabel } from '@/routes/missions/swarm'
 import { useStore } from '@/store'
 import {
   groupMessages,
@@ -22,14 +21,14 @@ import type { MissionDetail } from '@/store/missions'
 const collapsedGroups = 6
 const noIDs: string[] = []
 
-function MessageRun({ group, label }: { group: Extract<MessageGroup, { kind: 'run' }>; label: ParticipantLabel }) {
+function MessageRun({ group }: { group: Extract<MessageGroup, { kind: 'run' }> }) {
   const [open, setOpen] = useState(false)
   const last = group.messages.at(-1)!
   return (
     <div className="flex min-w-0 flex-col">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 px-4 py-1.5 text-ui-sm text-muted">
         <MessageSquare aria-hidden className="size-3.5 shrink-0" />
-        <Participants from={group.from} to={group.to} label={label} />
+        <Participants from={group.from} to={group.to} />
         <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {group.messages.length} messages
         </Button>
@@ -37,26 +36,26 @@ function MessageRun({ group, label }: { group: Extract<MessageGroup, { kind: 'ru
       </div>
       {open && (
         <div className="ml-1.5 border-l border-seam pl-3">
-          {group.messages.map((m) => <MessageRow key={m.id} message={m} label={label} />)}
+          {group.messages.map((m) => <MessageRow key={m.id} message={m} />)}
         </div>
       )}
     </div>
   )
 }
 
-function Group({ group, label }: { group: MessageGroup; label: ParticipantLabel }) {
+function Group({ group }: { group: MessageGroup }) {
   switch (group.kind) {
     case 'run':
-      return <MessageRun group={group} label={label} />
+      return <MessageRun group={group} />
     case 'single':
-      return <MessageRow message={group.message} label={label} />
+      return <MessageRow message={group.message} />
     case 'thread':
       return (
         <div className="flex min-w-0 flex-col">
-          <MessageRow message={group.question} label={label} />
+          <MessageRow message={group.question} />
           {group.replies.length > 0 && (
             <div className="ml-1.5 border-l border-seam pl-3">
-              {group.replies.map((m) => <MessageRow key={m.id} message={m} label={label} />)}
+              {group.replies.map((m) => <MessageRow key={m.id} message={m} />)}
             </div>
           )}
         </div>
@@ -87,7 +86,6 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
   const loaded = useStore((s) => s.messageLists[key] !== undefined)
   const hasOlder = useStore((s) => Boolean(s.messageLists[key]?.nextBefore))
   const error = useStore((s) => s.messageErrors[key])
-  const label = useCallback<ParticipantLabel>((runID, run) => participantLabel(runID, detail, run), [detail])
   const [showAll, setShowAll] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -120,7 +118,7 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
       <ol className="flex flex-col divide-y divide-seam">
         {shown.map((group) => (
           <li key={groupKey(group)} className="[contain-intrinsic-size:auto_3rem] [content-visibility:auto]">
-            <Group group={group} label={label} />
+            <Group group={group} />
           </li>
         ))}
       </ol>

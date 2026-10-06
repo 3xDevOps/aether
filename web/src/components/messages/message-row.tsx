@@ -1,14 +1,16 @@
 import { memo, useState } from 'react'
 import { ArrowRight, CircleHelp, ClipboardCheck, type LucideIcon, MessageSquare, Reply } from '@/components/icons'
+import { useRunHandle } from '@/components/messages/handles'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { runLabel } from '@/lib/status'
+import { plainReason, runLabel } from '@/lib/status'
 import type { RunMessage, RunMessageKind } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
-export type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string
+/** Overrides a participant's handle; undefined keeps it. */
+export type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string | undefined
 
 const kinds: Record<RunMessageKind, { icon: LucideIcon; word: string }> = {
   message: { icon: MessageSquare, word: 'Message' },
@@ -33,11 +35,13 @@ function Participant({ runID, label }: { runID: string; label?: ParticipantLabel
   const run = useStore((s) => s.runs[runID])
   const navigate = useStore((s) => s.navigate)
   const open = useStore((s) => s.route.name === 'run' && s.route.params.runId === runID)
-  const name = label ? label(runID, run) : run && runLabel(run)
-  if (!name) return <span className="font-code text-ui-sm text-muted">{runID}</span>
-  if (open) return <span className="max-w-64 min-w-0 shrink truncate text-ui text-muted">{name}</span>
+  const handle = useRunHandle(runID, run)
+  const name = label?.(runID, run) ?? handle?.name ?? (run && runLabel(run))
+  const title = handle?.task ? `${handle.name}: ${handle.task}` : run ? runLabel(run) : name
+  if (!name) return <span className="text-ui text-muted">Unknown run</span>
+  if (open) return <span className="max-w-64 min-w-0 shrink truncate text-ui text-muted" title={title}>{name}</span>
   return (
-    <Button variant="quiet" className="max-w-64 min-w-0 shrink" title={name} onClick={() => navigate('run', { runId: runID })}>
+    <Button variant="quiet" className="max-w-64 min-w-0 shrink" title={title} onClick={() => navigate('run', { runId: runID })}>
       <span className="truncate">{name}</span>
     </Button>
   )
@@ -67,14 +71,14 @@ export const MessageRow = memo(function MessageRow({
   const [expanded, setExpanded] = useState(false)
   const long = message.body.split('\n').length > 3 || message.body.length > 280
   const thread = message.correlation_id || (message.kind === 'question' || message.kind === 'report' ? message.id : '')
-  const report = message.kind === 'report' ? [['Outcome', message.outcome], ['Summary', message.summary === message.body ? '' : message.summary], ['Next', message.next_action]].filter(([, value]) => value) : []
+  const report = message.kind === 'report' ? [['Outcome', message.outcome], ['Summary', message.summary === message.body ? '' : message.summary], ['Next', message.next_action && plainReason(message.next_action)]].filter(([, value]) => value) : []
   return (
     <article aria-label={`${kinds[message.kind]?.word ?? 'Message'} ${message.id}`} className={cn('grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui', !flush && 'px-4 py-2')}>
       <span className="flex h-5 items-center">
         <MessageKindGlyph kind={message.kind} />
       </span>
       <header className="flex min-w-0 flex-wrap items-center gap-x-3">
-        <span className="min-w-0 flex-1">
+        <span className="max-w-full min-w-0 flex-[1_0_auto]">
           <Participants from={message.from_run_id} to={message.to_run_id} label={label} />
         </span>
         <span className="flex shrink-0 items-center gap-1.5 text-ui-sm text-muted tabular-nums max-sm:basis-full">

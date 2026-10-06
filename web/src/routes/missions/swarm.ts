@@ -3,11 +3,8 @@ import { modeLabel } from '@/components/launch/modes'
 import type { Tone } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import type { StateContext } from '@/lib/needs-you'
-import { runLabel } from '@/lib/status'
 import type { AgentInfo, Mission, MissionPhase } from '@/lib/types'
 import { useStore } from '@/store'
-import type { MissionDetail } from '@/store/missions'
-import type { RunRecord } from '@/store/runs'
 import { runRows, stateContextOf } from '@/store/selectors'
 
 export const phaseWord: Record<MissionPhase, string> = {
@@ -96,13 +93,4 @@ export function useSwarmLines(): Record<string, SwarmLine> {
   const now = useClock()
   const key = useStore((s) => JSON.stringify(swarmLines(stateContextOf(s, now))))
   return useMemo(() => JSON.parse(key) as Record<string, SwarmLine>, [key])
-}
-
-export function participantLabel(runID: string, detail: MissionDetail, run: RunRecord | undefined): string {
-  if (detail.mission.current_integrator_run_id === runID) return 'Integrator'
-  const attempt = detail.attempts.find((item) => item.run_id === runID)
-  const task = attempt && detail.tasks.find((item) => item.id === attempt.task_id)
-  if (task?.revision?.title) return task.revision.title
-  if (run?.mission_role === 'integrator') return 'Integrator'
-  return run ? runLabel(run) : runID
 }
