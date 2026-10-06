@@ -54,7 +54,8 @@ test('a phone protects a run from More and reads its changes', async ({
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
-  for (const name of ['Browser', 'Session', 'Changes']) {
+  await expect(page.getByRole('tab', { name: 'Browser', exact: true })).toHaveCount(0)
+  for (const name of ['Session', 'Changes']) {
     const tab = page.getByRole('tab', { name, exact: true })
     await tab.tap()
     await expect(tab).toHaveAttribute('aria-selected', 'true')
