@@ -121,26 +121,48 @@ describe('agent message events', () => {
     expect(await applyEvent(store, messageEvent(8, payload), client)).toBe(true)
     expect(list.mock.calls.map(([params]) => params.mission_id ?? params.run_id).sort()).toEqual(['mission-1', 'run_1'])
     expect(ids(scopeMessages(store.getState(), runScope))).toEqual(['msg-2'])
-    expect(store.getState().runs.run_1.unacked_messages).toBe(1)
+    await vi.waitFor(() => expect(store.getState().runs.run_1.unacked_messages).toBe(1))
 
     runGet.mockResolvedValueOnce(run({ unacked_messages: 0 }))
     const acked = { message_id: 'msg-2', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
     expect(await applyEvent(store, messageEvent(9, acked, 'coord.message.acked'), client)).toBe(true)
     expect(store.getState().runMessages['msg-2'].acked_at).toBe('2026-10-05T10:01:00Z')
-    expect(store.getState().runs.run_1.unacked_messages).toBe(0)
+    await vi.waitFor(() => expect(store.getState().runs.run_1.unacked_messages).toBe(0))
   })
 
-  it('leaves the event unresolved when the recipient count cannot be read', async () => {
+  it('applies the event without waiting for the recipient count', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
-    const client = fakeApi({
-      runGet: vi.fn(async () => {
-        throw new Error('run snapshot unavailable')
-      }),
-    })
+    const client = fakeApi({ runGet: vi.fn(() => new Promise<never>(() => {})) })
     const payload = { message_id: 'msg-3', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
-    expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(false)
-    expect(store.getState().lastSeq).toBe(0)
+    expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(true)
+    expect(store.getState().lastSeq).toBe(8)
+  })
+
+  it('takes only the count from the recipient read', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().applyRunTitle('run_1', 'renamed after the read')
+    const client = fakeApi({ runGet: vi.fn(async () => run({ title: 'stale', unacked_messages: 2 })) })
+    const payload = { message_id: 'msg-3', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
+    expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(true)
+    await vi.waitFor(() => expect(store.getState().runs.run_1.unacked_messages).toBe(2))
+    expect(store.getState().runs.run_1.title).toBe('renamed after the read')
+  })
+
+  it('drops a failed recipient count read without marking the server unreachable', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const runGet = vi.fn(async () => {
+      throw new ApiError(503, 'server unreachable: connection refused')
+    })
+    const client = fakeApi({ runGet })
+    const payload = { message_id: 'msg-3', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
+    expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(true)
+    await vi.waitFor(() => expect(runGet).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(store.getState().unreachable).toBeNull()
+    expect(store.getState().lastSeq).toBe(8)
   })
 
   it('applies the event when the recipient run is already deleted', async () => {

@@ -567,13 +567,13 @@ export async function applyEvent(
         .map((list) => list.scope)
         .filter((scope) => inMessageScope(scope, p))
       await Promise.all(scopes.map((scope) => loadMessagePage(store, client, scope)))
-      if (!(await refreshUnacked(store, client, p.to_run_id))) return false
+      refreshUnacked(store, client, p.to_run_id)
       break
     }
     case 'coord.message.acked': {
       const p = ev.payload as CoordMessageAckedPayload
       store.getState().applyMessageAcked(p.message_id, p.acked_at)
-      if (!(await refreshUnacked(store, client, p.to_run_id))) return false
+      refreshUnacked(store, client, p.to_run_id)
       break
     }
     case 'workspace.evidence_packet': {
@@ -598,17 +598,18 @@ export async function applyEvent(
   return true
 }
 
-/** False means the server could not be reached; a deleted run is not an error. */
-async function refreshUnacked(store: RootStore, client: Api, runID: string): Promise<boolean> {
-  if (!store.getState().runs[runID]) return true
-  try {
-    store.getState().upsertRun(await client.runGet(runID))
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return true
-    store.getState().setUnreachable(classifyUnreachable(err, store))
-    return false
-  }
-  return true
+/**
+ * Off the event queue, and only the count: a full snapshot landing late
+ * would undo run events applied after it was read. A failed read is dropped.
+ */
+function refreshUnacked(store: RootStore, client: Api, runID: string): void {
+  if (!store.getState().runs[runID]) return
+  coalesce(store, `unacked:${runID}`, () =>
+    client
+      .runGet(runID)
+      .then((run) => store.getState().applyUnackedMessages(runID, run.unacked_messages))
+      .catch(ignore),
+  )
 }
 
 /** Null means "nothing special: open the stream". */
