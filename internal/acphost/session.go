@@ -78,6 +78,8 @@ type State struct {
 	ConfigOptions json.RawMessage `json:"config_options,omitempty"`
 	Commands      json.RawMessage `json:"commands,omitempty"`
 	Auth          json.RawMessage `json:"auth,omitempty"`
+	Steering      bool            `json:"steering,omitempty"`
+	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
 }
 
 // promptAcceptGrace is how long a prompt that starts a turn waits for the
@@ -482,6 +484,8 @@ func (s *Session) State() State {
 	st.Queued = len(s.queue)
 	st.Pending = s.conn.pendingRequests()
 	st.LastActivity = s.conn.LastActivity()
+	info := s.conn.Info()
+	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
 	return st
 }
 

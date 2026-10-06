@@ -1764,7 +1764,9 @@ does not run its agent over ACP`. Every frame is JSON text.
    holds once the `replay` frames that follow are applied; `live` says
    whether a session is running; `state` is its snapshot (turn in flight,
    queued prompts, pending requests with their options, mode, config
-   options, commands). A refusal carries `code` and `error` and closes 1008.
+   options, commands, the agent's `auth` status and `auth_methods`, and
+   `steering`: whether `run.inject` with `steer: true` can join a running
+   turn). A refusal carries `code` and `error` and closes 1008.
 
    The replay is at most 200 items. When `after_seq` is 0, past the end of
    the log, or more than 200 items behind, the server sends the newest 200

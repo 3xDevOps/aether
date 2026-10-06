@@ -52,7 +52,7 @@ func TestReplayRecordedAgents(t *testing.T) {
 				}
 			}
 			st := s.State()
-			if st.Mode == "" || len(st.ConfigOptions) == 0 || st.TurnInFlight {
+			if st.Mode == "" || len(st.ConfigOptions) == 0 || st.TurnInFlight || !st.Steering || len(st.AuthMethods) == 0 {
 				t.Fatalf("state %+v", st)
 			}
 		})
