@@ -731,7 +731,8 @@ changed mission phase or open-question count once. The integrator is always
 interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and
-cannot be asked or told`. `mission.create` needs the integrator's exact
+cannot be asked or told`, or, for `acp`, `integrator mode must be tui: an
+enhanced integrator is not woken when a worker reports`. `mission.create` needs the integrator's exact
 account, harness, and `tui` mode among the execution choices;
 `mission.replace-integrator` accepts any listed account and harness in `tui`,
 so a swarm whose choices are all headless can still get an interactive

@@ -36,10 +36,12 @@ aether run "fix the flaky login test" --agent codex --mode enhanced
 ```
 
 `--mode` takes `standard`, `enhanced` or `background` (wire names `tui`,
-`acp`, `headless`) on `aether run`, `aether template save`, and
-`aether swarm create`, whose `--mode` sets the integrator and whose
-`--worker codex:enhanced` sets a worker. The task, when given, is the
-session's first prompt. An agent with no ACP command is refused:
+`acp`, `headless`) on `aether run` and `aether template save`;
+`aether swarm create --worker codex:enhanced` allows enhanced workers. A
+swarm's integrator stays `tui`: nothing wakes an enhanced integrator when a
+worker reports, so `mission.create` refuses one with `integrator mode must
+be tui: an enhanced integrator is not woken when a worker reports`. The
+task, when given, is the session's first prompt. An agent with no ACP command is refused:
 
 ```
 scheduler: harness "custom" has no command for mode "acp"
