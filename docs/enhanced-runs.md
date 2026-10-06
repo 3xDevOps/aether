@@ -218,7 +218,9 @@ the login shell and runs that command in its place. The command must still
 be running 3 seconds later.
 
 **To Enhanced.** The supervisor ends the agent's terminal (SIGTERM, SIGKILL
-10 seconds later) and starts a login shell; the server then starts the ACP
+10 seconds later; the SIGKILL reaches only the agent's own process, so
+anything it started that outlives it, such as a dev server, keeps running)
+and starts a login shell; the server then starts the ACP
 server and restores the session with `session/resume` or `session/load`. A
 session the agent cannot restore fails the switch rather than starting a new
 one. The session starts in the last mode the log recorded, or the agent's
