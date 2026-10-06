@@ -1089,7 +1089,11 @@ The unit runs the server as root and creates `/var/lib/aether` through
 root-equivalent on the host, and member images with a non-root user make the
 server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
-give up.
+give up: every environment image must keep a root user. Git works in those
+runs - the checkout stays owned by the server's user, and every run container
+sets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`, so neither the
+agent's git nor the dashboard's Git panel stops at `detected dubious
+ownership`.
 
 Browser support also needs permission to assign its private control directory
 to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch

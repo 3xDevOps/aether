@@ -20,6 +20,12 @@ second sandbox inside it.
   can reach.** Security comes from what the container is given, not from
   restrictions applied inside it: the mount policy, the network it can see, and
   the credentials mounted into it.
+- **Git trusts the checkout regardless of owner.** Every container with a run
+  checkout gets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`,
+  `GIT_CONFIG_KEY_n` and `GIT_CONFIG_VALUE_n`, appended after any of the
+  workspace's own entries. An unprivileged server owns the checkout on the
+  host while the agent runs as root; git's ownership check guards against
+  another user's repository on a shared machine, which the container is not.
 
 Each member's persistent home is mounted as `$HOME` only into that member's
 own containers: their environment and the runs they launch. An
