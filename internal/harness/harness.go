@@ -486,7 +486,7 @@ var profiles = map[string]Profile{
 		// Codex ships via npm; --prefix keeps the install inside the
 		// member's persistent home. Without npm in the image the member
 		// installs manually, as before.
-		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @openai/codex; else echo \"npm is not in this environment's PATH, and codex installs through npm\" >&2; false; fi",
 		// Not "codex update": it installs into the image's global npm
 		// prefix, outside the home.
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
@@ -512,7 +512,7 @@ var profiles = map[string]Profile{
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
-		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent; else echo \"npm is not in this environment's PATH, and pi installs through npm\" >&2; false; fi",
 		// Not "pi update --self": it replaces files in place, under a
 		// running or starting pi.
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"), piACP),
