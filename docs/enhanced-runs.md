@@ -282,7 +282,11 @@ The server method is `run.mode.switch` with `mode` `acp` or `tui`
 can switch; the CLI holds none, so it switches only a run nobody controls.
 In the dashboard the run header's **Standard | Enhanced** control does the
 same with the tab's lease; it appears only for a `switchable` agent, and
-the state line names the mode otherwise.
+the state line names the mode otherwise. A Background run never switches:
+
+```
+scheduler: invalid run state transition: a background run cannot switch modes
+```
 
 **Which agents.** `agent.list` reports `switchable`. Claude Code and
 oh-my-pi switch: their ACP server and terminal share one session store, and

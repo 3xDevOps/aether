@@ -336,8 +336,8 @@ top to bottom:
    Templates, then under a hairline Members (admins only) and Settings. The
    current one carries `aria-current="page"`. Gates come from
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
-   `palette` entries (Approvals, Agent config files, Devices, Manage
-   workspaces, Onboarding) are reached from the palette only.
+   `palette` entries (Approvals, Devices, Manage workspaces, Onboarding) are
+   reached from the palette only; "config files" finds Agents.
 5. **One update notice row** when a CLI, server or desktop update exists, for
    example "Aether 0.5.3 is available · Update"; see
    [Update prompts](#update-prompts).
@@ -882,7 +882,7 @@ both show:
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
 | Agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
-| Native permission or question on an Enhanced run, Run Room or swarm question | **Answer** |
+| Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Teammate's message waiting for the controller | **Review message** |
 | Integrator down | **Open swarm** |
 | Unreviewed finish | **Review** |
@@ -1591,12 +1591,13 @@ bottom sheet, each a `dialog "Run details"` that returns focus to whatever
 opened it. Sections: **Needs you** (`RequestCard`s for pending inputs, Aether
 approvals with **Approve**/**Deny**, teammate messages awaiting the controller
 with **Approve**/**Deny** through `run.room.decide`, teammate questions with a
-reply field), **Agent messages** (the run-scoped coordination mail, until the
-Wave 4 surface), **Notes** (`comment` room messages and a one-line composer)
+reply field; with none of these, one card with the needs-you reason and the
+header's action), **Agent messages** (the run-scoped coordination mail, which
+the Session view also shows inline), **Notes** (`comment` room messages and a one-line composer)
 and the run record (task, owner, account, agent and mode, branch, times, last
 commit, who controls, who is watching, container state).
 
-**Captures…** opens `routes/run/captures.tsx`, the former evidence drawer, as a
+**Captures…** opens `routes/run/captures.tsx` as a
 dialog (a bottom sheet on phones): transient captures, retained packets and
 candidate review. **Answer** on a packet's unresolved fact closes it and puts
 the fact in the Notes field. **Raw events…** opens the run's slice of the
@@ -1615,9 +1616,9 @@ selected packet** adds another exact source; the preparation action remains
 **Prepare candidate**. **Refresh candidates** re-reads the list and
 **Show candidate** loads the selected aggregate.
 
-The evidence drawer uses viewport-fixed positioning on desktop and phone so
-its controls are not clipped by the room or terminal's scroll containers.
-Its body scrolls within the available viewport height.
+The Captures dialog uses viewport-fixed positioning on desktop and phone so
+its controls are not clipped by the run view's scroll containers. Its body
+scrolls within the available viewport height.
 
 The review shows the exact ordered inputs, their observation snapshots, target
 and expected revision, candidate revision/state, conflicts and file
@@ -2487,8 +2488,8 @@ under `approved-devices` its device waits until approved with its code.
 **Devices** (`src/routes/devices/`) lists the computers members reach the
 server with through an edge: the member's own, or every member's for an
 admin, with status **Approved**, **Pending**, **Registered** (admitted by
-signing in under `edge-access account`) or **Revoked**. The key fingerprint
-is the row's tooltip. It approves a pending or registered device only by the
+signing in under `edge-access account`) or **Revoked**, and the key
+fingerprint. It approves a pending or registered device only by the
 code typed in from that device, which no row shows: **Review** looks the code
 up with `member.device.lookup`, and a dialog shows the device, its account,
 its fingerprint, and the member and role approving admits it as, before

@@ -247,7 +247,7 @@ separate:
 
 In **Onboarding → Repository** or **Manage workspaces**:
 
-1. Choose **Import repository** under **Public or private remote repository**.
+1. Choose **Import repository** under **Import a remote repository**.
 2. Fill **Workspace name**, a credential-free HTTPS **Source URL**, and the
    actual **Source / base branch**. Set **Checkout Origin (optional)**
    separately if runs should publish upstream.
@@ -499,8 +499,8 @@ whole path with a scripted stand-in.
 ### Import configuration
 
 Configuration import is separate from installing an agent or logging in.
-Open **Agent config files** under **Onboarding → Agent** or the **Agents**
-page, or **Agent config files** from the command palette.
+Open **Agent config files** under **Onboarding → Agent** or on the
+**Agents** page; the command palette finds Agents for "config files".
 It works through either gateway, without a workspace, for members with
 launch permission.
 

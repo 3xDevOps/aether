@@ -124,8 +124,8 @@ Use compact workbench geometry rather than landing-page ornament:
 - One sidebar, 260px by default and resizable from 220px to 400px; under
   768px a 48px top bar and the sidebar as a side sheet. The desktop window
   bar is 35px.
-- 44px view headers (`PaneHeader`) and 35px section headers; the run detail's combined tab and action
-  strip stays 36px, while dock headers use a `min-h-9` strip whose
+- 44px view headers (`PaneHeader`), 56px for a run's two-line header, and
+  35px section headers; dock headers use a `min-h-9` strip whose
   actions can wrap to another row; 28px list rows (44px coarse).
 - 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
