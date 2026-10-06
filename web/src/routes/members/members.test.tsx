@@ -109,6 +109,20 @@ describe('members page', () => {
     expect(client.memberInvite).toHaveBeenCalled()
   })
 
+  it('returns focus to Invite… when the dialog closes', async () => {
+    seed()
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+
+    const invite = screen.getByRole('button', { name: 'Invite…' })
+    invite.focus()
+    await userEvent.keyboard('{Enter}')
+    await screen.findByRole('dialog', { name: 'Invite a member' })
+    await userEvent.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(invite))
+  })
+
   it('lets an admin change another member role from the row menu', async () => {
     const bobAdmin: Member = { ...bob, role: 'admin' }
     const memberList = vi.fn().mockResolvedValueOnce([alice, bob]).mockResolvedValue([alice, bobAdmin])
@@ -151,6 +165,18 @@ describe('members page', () => {
 
     expect(await dialog.findByText('member has running runs')).toBeDefined()
     expect(client.memberRemove).toHaveBeenCalledWith(bob.id)
+  })
+
+  it('returns focus to the row menu trigger when a confirm opened from it closes', async () => {
+    seed()
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+
+    await pickMenu('Actions for Bob', 'Remove…')
+    await screen.findByRole('alertdialog', { name: 'Remove Bob?' })
+    await userEvent.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Actions for Bob' })))
   })
 
   it('confirms before an admin gives up their own admin role, and holds the confirm until the server answers', async () => {

@@ -66,3 +66,23 @@ export function useMediaQuery(query: string): boolean {
     () => window.matchMedia?.(query).matches ?? false,
   )
 }
+
+/** Focus handlers for a dialog that has no Radix trigger, so closing it returns focus to whatever opened it. */
+export function useReturnFocus() {
+  const opener = useRef<HTMLElement | null>(null)
+  return {
+    onOpenAutoFocus: () => {
+      const menu = document.activeElement?.closest('[role="menu"]')
+      // A menu item is gone once its dialog closes; its menu's trigger is still there.
+      const target = menu
+        ? [...document.querySelectorAll('[aria-controls]')].find((el) => el.getAttribute('aria-controls') === menu.id)
+        : document.activeElement
+      opener.current = target instanceof HTMLElement ? target : null
+    },
+    onCloseAutoFocus: (event: Event) => {
+      if (!opener.current?.isConnected) return
+      event.preventDefault()
+      opener.current.focus()
+    },
+  }
+}

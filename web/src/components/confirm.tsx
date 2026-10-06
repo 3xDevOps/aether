@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Callout } from '@/components/ui/callout'
 import { message } from '@/lib/format'
+import { useReturnFocus } from '@/lib/hooks'
 
 /** Holds open until the server answers, and keeps its refusal on screen. */
 export function Confirm({
@@ -32,6 +33,7 @@ export function Confirm({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const returnFocus = useReturnFocus()
   const confirm = async () => {
     setBusy(true)
     setError(null)
@@ -46,7 +48,7 @@ export function Confirm({
   }
   return (
     <AlertDialog open onOpenChange={() => !busy && onClose()}>
-      <AlertDialogContent>
+      <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

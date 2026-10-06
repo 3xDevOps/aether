@@ -15,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
+import { useReturnFocus } from '@/lib/hooks'
 
 export function BudgetDialog({
   workspaceID,
@@ -29,6 +30,7 @@ export function BudgetDialog({
   const [warn, setWarn] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const returnFocus = useReturnFocus()
 
   const save = async (clear: boolean) => {
     setBusy(true)
@@ -55,7 +57,7 @@ export function BudgetDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Workspace budget</DialogTitle>
           <DialogDescription>

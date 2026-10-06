@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Api } from '@/lib/api'
 import { message, providerName, timeAgo } from '@/lib/format'
+import { useReturnFocus } from '@/lib/hooks'
 import type { Invitation, Member } from '@/lib/types'
 import { roleLabel, roles } from '@/routes/members/roster'
 import { useStore } from '@/store'
@@ -96,9 +97,10 @@ export function InviteDialog({ client, onClose, onInvited }: { client: Api; onCl
   const byAccount = caps.hasMethod('member.invitation.create')
   const byCode = caps.hasMethod('member.invite')
   const [tab, setTab] = useState(byAccount ? 'account' : 'code')
+  const returnFocus = useReturnFocus()
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Invite a member</DialogTitle>
           <DialogDescription>

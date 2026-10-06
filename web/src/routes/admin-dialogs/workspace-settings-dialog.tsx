@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { api, type Api } from '@/lib/api'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 /** The permissive default's form value; see the Styleguide in docs/dashboard-frontend.md. */
@@ -42,6 +43,7 @@ export function WorkspaceSettingsDialog({
   const [steerOthers, setSteerOthers] = useState(workspace?.steer_others ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const returnFocus = useReturnFocus()
 
   const save = async () => {
     setBusy(true)
@@ -62,7 +64,7 @@ export function WorkspaceSettingsDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Workspace settings</DialogTitle>
           <DialogDescription>
