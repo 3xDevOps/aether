@@ -295,3 +295,41 @@ func TestArchivedSwarmIsSweptAfterTheRetentionPeriod(t *testing.T) {
 		t.Fatalf("mission.changed events = %+v, want a final deleted one", got)
 	}
 }
+
+func TestSwarmOperationsRefuseAnotherMembersProtectedRun(t *testing.T) {
+	ctx := context.Background()
+	f := newArchiveFixture(t)
+	if _, err := f.db.CancelMission(ctx, f.mission.ID, f.human, "protected-cancel"); err != nil {
+		t.Fatalf("cancel mission: %v", err)
+	}
+	f.runsAre(t, domain.RunAbandoned)
+	owner := regressionMember(t, f.db, "owner")
+	worker, err := f.db.GetRun(ctx, f.worker)
+	if err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	worker.MemberID = owner.ID
+	if err := f.db.UpdateRun(ctx, worker); err != nil {
+		t.Fatalf("hand worker off: %v", err)
+	}
+	if err := f.db.SetRunProtected(ctx, f.worker, true); err != nil {
+		t.Fatalf("protect worker: %v", err)
+	}
+	want := "run " + string(f.worker) + ": permission denied: run is protected"
+	if _, err := f.svc.Archive(ctx, f.human, f.params()); !errors.Is(err, permissions.ErrDenied) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("archive over a protected run = %v, want ErrDenied containing %q", err, want)
+	}
+	if err := f.svc.Delete(ctx, f.human, f.params()); !errors.Is(err, permissions.ErrDenied) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("delete over a protected run = %v, want ErrDenied containing %q", err, want)
+	}
+	if len(f.retire.deleted) != 0 || f.reload(t).ArchivedAt != nil {
+		t.Fatalf("a refused operation deleted %v or archived the swarm", f.retire.deleted)
+	}
+	owner.Role = domain.RoleAdmin
+	if err := f.db.UpdateMember(ctx, owner); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if err := f.svc.Delete(ctx, owner.ID, f.params()); err != nil {
+		t.Fatalf("admin delete: %v", err)
+	}
+}

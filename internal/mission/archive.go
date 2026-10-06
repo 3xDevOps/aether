@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -37,7 +38,7 @@ func (s *Service) Archive(ctx context.Context, actor domain.MemberID, p protocol
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
-	runs, err := s.stoppedMissionRuns(ctx, m, "mission.archive")
+	runs, err := s.retirableRuns(ctx, m, actor, "mission.archive")
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
@@ -74,13 +75,13 @@ func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protoc
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
-	ids, err := s.cfg.Missions.ListMissionRunIDs(ctx, m.ID)
+	runs, err := s.retirableRuns(ctx, m, actor, "mission.unarchive")
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
-	for _, id := range ids {
-		if _, err := retire.SetArchived(ctx, id, actor, false); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return protocol.MissionArchiveResult{}, fmt.Errorf("mission.unarchive: restore run %s: %w", id, err)
+	for _, run := range runs {
+		if _, err := retire.SetArchived(ctx, run.ID, actor, false); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return protocol.MissionArchiveResult{}, fmt.Errorf("mission.unarchive: restore run %s: %w", run.ID, err)
 		}
 	}
 	return s.setArchived(ctx, m.ID, nil)
@@ -97,7 +98,7 @@ func (s *Service) Delete(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return err
 	}
-	runs, err := s.stoppedMissionRuns(ctx, m, "mission.delete")
+	runs, err := s.retirableRuns(ctx, m, actor, "mission.delete")
 	if err != nil {
 		return err
 	}
@@ -169,11 +170,21 @@ func (s *Service) retirer() (RunRetirer, error) {
 	return s.cfg.Retire, nil
 }
 
-func (s *Service) stoppedMissionRuns(ctx context.Context, m *domain.Mission, operation string) ([]*domain.Run, error) {
+// retirableRuns applies run.delete's Kill check to each run.
+func (s *Service) retirableRuns(ctx context.Context, m *domain.Mission, actor domain.MemberID, operation string) ([]*domain.Run, error) {
 	ids, err := s.cfg.Missions.ListMissionRunIDs(ctx, m.ID)
 	if err != nil {
 		return nil, err
 	}
+	member, err := s.cfg.Store.GetMember(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	ws, err := s.cfg.Store.GetWorkspace(ctx, m.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	killer := permissions.Actor{ID: member.ID, Role: member.Role}
 	var runs []*domain.Run
 	var live []string
 	for _, id := range ids {
@@ -183,6 +194,10 @@ func (s *Service) stoppedMissionRuns(ctx context.Context, m *domain.Mission, ope
 		}
 		if err != nil {
 			return nil, err
+		}
+		target := permissions.Target{Workspace: run.WorkspaceID, Owner: run.MemberID, Protected: run.Protected, SteerOthers: ws.SteerOthers}
+		if err := permissions.Check(permissions.Kill, killer, target); err != nil {
+			return nil, fmt.Errorf("%s: run %s: %w", operation, run.ID, err)
 		}
 		if !run.Status.Terminal() {
 			live = append(live, fmt.Sprintf("%s is %s", run.ID, run.Status))
