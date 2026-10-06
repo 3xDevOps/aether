@@ -75,7 +75,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                   ) {
                     return
                   }
-                  navigate('terminal', { runId: run.id })
+                  navigate('run', { runId: run.id })
                 }}
                 style={{ borderLeftColor: owner?.color }}
                 className={cn(
@@ -91,7 +91,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                       aria-label={runLabel(run)}
                       onClick={(event) => {
                         event.stopPropagation()
-                        navigate('terminal', { runId: run.id })
+                        navigate('run', { runId: run.id })
                       }}
                       className={cn(
                         focusRing,

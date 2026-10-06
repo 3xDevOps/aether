@@ -135,7 +135,7 @@ export function LaunchDialog() {
     rememberLaunch(harness, mode)
     upsertRun(run)
     close()
-    navigate('terminal', { runId: run.id })
+    navigate('run', { runId: run.id })
     toast.success('Run launched')
   }
 

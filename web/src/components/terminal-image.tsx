@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { ImageUp, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import {
@@ -318,23 +318,6 @@ export function useTerminalImage({
   )
 
   return { canUpload, openPicker, pasteImages, pasteClipboard: pasteClipboardImages, dialog }
-}
-
-export function TerminalImageAction({ controller }: { controller: TerminalImageController }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
-      label="Upload image to terminal"
-      disabled={!controller.canUpload}
-      onClick={controller.openPicker}
-    >
-      <ImageUp />
-      <span className="hidden group-data-[expanded=true]/terminal-tools:inline">Upload image to terminal</span>
-    </Button>
-  )
 }
 
 export function validateTerminalImage(file: File): string | null {

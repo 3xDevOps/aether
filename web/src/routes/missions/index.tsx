@@ -398,7 +398,7 @@ function MissionDetailView({
           canRelease={canRelease}
           onRelease={releaseTakeover}
           releasingAttemptID={releasingAttemptID}
-          onRun={(runID) => navigate('terminal', { runId: runID })}
+          onRun={(runID) => navigate('run', { runId: runID })}
         />
       ))}
     </>
@@ -459,7 +459,7 @@ function MissionDetailView({
                         <RunInputIndicator run={integratorRun} />
                         {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
                       </span>
-                      <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRun.id })}>
+                      <Button size="sm" onClick={() => navigate('run', { runId: integratorRun.id })}>
                         Open integrator run
                       </Button>
                     </>
@@ -841,7 +841,7 @@ function MissionConflictDiagnostics({ run }: CardSlotProps) {
           size="sm"
           className="h-[22px] min-h-[22px] border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[11px]"
           title={detail}
-          onClick={() => navigate('terminal', { runId: diagnostic.run_id })}
+          onClick={() => navigate('run', { runId: diagnostic.run_id })}
         >
           {label}{diagnostic.unavailable ? ' · unavailable' : ''}
           {!diagnostic.unavailable && diagnostic.paths.length

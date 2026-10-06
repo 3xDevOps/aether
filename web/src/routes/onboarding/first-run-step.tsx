@@ -108,7 +108,7 @@ export function FirstRunStep({
       rememberLaunch(harness, mode)
       upsertRun(run)
       setOnboarded(true)
-      navigate('terminal', { runId: run.id })
+      navigate('run', { runId: run.id })
     } catch (err) {
       setError(message(err))
     } finally {

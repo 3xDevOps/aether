@@ -174,7 +174,7 @@ function Row({
         {run && (
           <button
             type="button"
-            onClick={() => navigate('terminal', { runId: run.id })}
+            onClick={() => navigate('run', { runId: run.id })}
             title={runLabel(run)}
             className={cn(
               focusRing,

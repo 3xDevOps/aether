@@ -1,6 +1,7 @@
+import { isRunView, runRoute } from '@/routes/run/views'
 import type { Route } from '@/store/ui'
 
-const runViews = ['terminal', 'browser', 'diff', 'events']
+const renamedViews: Record<string, string> = { diff: 'changes' }
 
 const pageIDs: Record<string, string> = {
   missions: 'missionId',
@@ -13,10 +14,10 @@ const boardRoute: Route = { name: 'board', params: {} }
 
 export function routeQuery(route: Route): URLSearchParams {
   const query = new URLSearchParams()
-  const { runId } = route.params
-  if (runId && runViews.includes(route.name)) {
+  const { runId, view } = route.params
+  if (route.name === 'run' && runId) {
     query.set('run', runId)
-    if (route.name !== 'terminal') query.set('view', route.name)
+    if (view) query.set('view', view)
     return query
   }
   if (route.name === 'board') return query
@@ -29,8 +30,9 @@ export function routeQuery(route: Route): URLSearchParams {
 export function routeFromQuery(query: URLSearchParams): Route {
   const run = query.get('run')
   if (run) {
-    const view = query.get('view') ?? 'terminal'
-    return { name: runViews.includes(view) ? view : 'terminal', params: { runId: run } }
+    const asked = query.get('view') ?? ''
+    const view = renamedViews[asked] ?? asked
+    return runRoute(run, isRunView(view) ? view : undefined)
   }
   const page = query.get('page')
   if (!page) return boardRoute

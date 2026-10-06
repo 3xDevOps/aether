@@ -1,6 +1,7 @@
 import { clampDockHeight } from '@/components/dock'
 import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import { initialRoute } from '@/lib/url-state'
+import { isRunView, type RunView } from '@/routes/run/views'
 import type {
   ConfigExclusion,
   ConfigImportResult,
@@ -90,7 +91,6 @@ export interface UiSlice {
   sidebarCollapsed: boolean
   sidebarDrawerOpen: boolean
   terminalDockHeight: number
-  runDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
   /** Off makes character shortcuts (`n`, `?`, `g b`) inert, for speech
@@ -117,6 +117,9 @@ export interface UiSlice {
   /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
   launchDefaults: Record<string, { mode: LaunchMode; at: number }>
   route: Route
+  /** The view each run was last shown in during this visit; never persisted. */
+  runViewMemory: Record<string, RunView>
+  detailsOpen: boolean
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
   updatesOpen: boolean
@@ -125,7 +128,6 @@ export interface UiSlice {
   setSidebarWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
   setTerminalDockHeight: (height: number) => void
-  setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
   setSingleKeyShortcuts: (on: boolean) => void
   setDiffWrap: (wrap: boolean) => void
@@ -145,6 +147,7 @@ export interface UiSlice {
   clearDismissedUpdates: () => void
   setUpdatesOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
+  setDetailsOpen: (open: boolean) => void
 }
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
@@ -153,7 +156,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
   terminalDockHeight: 280,
-  runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
   singleKeyShortcuts: true,
   diffWrap: null,
@@ -170,6 +172,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   mineOnly: false,
   launchDefaults: {},
   route: initialRoute(),
+  runViewMemory: {},
+  detailsOpen: true,
   dismissedUpdates: { cli: '', server: '', shell: '' },
   updatesOpen: false,
   shortcutsOpen: false,
@@ -179,7 +183,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
-  setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
   setSingleKeyShortcuts: (singleKeyShortcuts) => set({ singleKeyShortcuts }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
@@ -220,6 +223,9 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },
+      ...(name === 'run' && params.runId && isRunView(params.view)
+        ? { runViewMemory: { ...s.runViewMemory, [params.runId]: params.view } }
+        : {}),
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
         ? { onboarded: true, ...wizardReset }
         : {}),
@@ -234,4 +240,5 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
 })

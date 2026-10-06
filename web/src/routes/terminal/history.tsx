@@ -561,7 +561,7 @@ export function TerminalHistory({
   if (restoring) {
     if (restoreError) {
       return (
-        <div role="alert" aria-label="Saved terminal view unavailable" className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+        <div role="alert" aria-label="Saved terminal view unavailable" className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background text-ui text-muted-foreground">
           {restoreError}
           <Button size="sm" variant="ghost" onClick={() => {
             setRestoreError(null)
@@ -570,7 +570,7 @@ export function TerminalHistory({
         </div>
       )
     }
-    return <div role="status" aria-label="Restoring saved terminal view" className="absolute inset-0 z-10 flex items-center justify-center bg-background text-sm text-muted-foreground">Restoring saved terminal view</div>
+    return <div role="status" aria-label="Restoring saved terminal view" className="absolute inset-0 z-10 flex items-center justify-center bg-background text-ui text-muted-foreground">Restoring saved terminal view</div>
   }
   if (!frozen) return null
 
@@ -680,7 +680,7 @@ export function TerminalHistory({
         })}
       </div>
       {(snapshot.loading || snapshot.error || readError) && (
-        <div role="status" className="sticky left-0 -mt-6 h-6 w-fit max-w-full bg-background/95 px-2 text-xs text-muted-foreground" style={{ bottom: 0 }}>
+        <div role="status" className="sticky left-0 -mt-6 h-6 w-fit max-w-full bg-background/95 px-2 text-ui-sm text-muted-foreground" style={{ bottom: 0 }}>
           {snapshot.error ?? readError ?? 'Loading older recorded output…'}
           {(snapshot.error || readError) && <Button size="sm" variant="ghost" onClick={() => {
             if (!episodeReady) startArchive()

@@ -5,8 +5,6 @@ import { lookupRoute } from '@/routes'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-const terminalRouteName = 'terminal'
-
 export function focusView() {
   const main = document.getElementById('main')
   ;(main?.querySelector<HTMLElement>('h1[tabindex]') ?? main)?.focus({ preventScroll: true })
@@ -21,7 +19,7 @@ export function CenterView() {
   const View = lookupRoute(route.name)
   const unavailable = !View || (hydrated && withheld(route.name, cap))
   const viewKey =
-    route.name === terminalRouteName
+    route.name === 'run'
       ? JSON.stringify([
           route.name,
           identityKey,

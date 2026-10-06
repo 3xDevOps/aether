@@ -355,9 +355,9 @@ function PRFeedback({ run, feedback, client }: { run: Run; feedback: RunPRFeedba
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-sans text-xs">{entry.body}</pre>
       {entry.url && <a className="text-xs underline" href={entry.url} target="_blank" rel="noreferrer">Open on GitHub</a>}
     </article>)}
-    <p className="text-xs text-muted-foreground">Only checked feedback is sent. The existing Run Room applies steering permission, moderation and delivery state; this does not type directly into the agent.</p>
-    <Button size="sm" disabled={busy || !chosen.length} onClick={() => void send()}>Send selected feedback to Run Room</Button>
-    {receipt && <p role="status">Run Room delivery: {receipt}. <button className="underline" onClick={() => useStore.getState().navigate('terminal', { runId: run.id })}>Open the run terminal and Run Room</button></p>}
+    <p className="text-xs text-muted-foreground">Only checked feedback is sent. It goes to the agent as a message, with the same permission, approval and delivery rules as the Session composer; this does not type directly into the agent.</p>
+    <Button size="sm" disabled={busy || !chosen.length} onClick={() => void send()}>Send selected feedback to the agent</Button>
+    {receipt && <p role="status">Delivery: {receipt}. <button className="underline" onClick={() => useStore.getState().navigate('run', { runId: run.id, view: 'session' })}>Open the session</button></p>}
     {error && <p role="alert" className="text-state-failed">{error}</p>}
   </section>
 }

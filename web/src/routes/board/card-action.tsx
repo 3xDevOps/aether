@@ -18,20 +18,11 @@ export function cardAction(card: BoardCard, approval: Approval | undefined): Pri
   return conditionOf(card)?.action(card.run, approval) ?? openAction
 }
 
-// The Run Room lives in the run view, so a notes target opens the run.
-const routeOf: Record<NeedsYouTarget, 'terminal' | 'diff' | 'missions'> = {
-  request: 'terminal',
-  run: 'terminal',
-  notes: 'terminal',
-  changes: 'diff',
-  swarm: 'missions',
-}
-
 export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
   const { run } = card
-  const route = routeOf[conditionOf(card)?.target ?? (card.swarm ? 'swarm' : 'run')]
-  if (route === 'missions' && run.mission_id) navigate('missions', { missionId: run.mission_id })
-  else navigate(route === 'diff' ? 'diff' : 'terminal', { runId: run.id })
+  const target: NeedsYouTarget = conditionOf(card)?.target ?? (card.swarm ? 'swarm' : 'run')
+  if (target === 'swarm' && run.mission_id) navigate('missions', { missionId: run.mission_id })
+  else navigate('run', target === 'changes' ? { runId: run.id, view: 'changes' } : { runId: run.id })
 }
 
 export async function approveRequest(runID: string, approval: Approval) {

@@ -22,7 +22,7 @@ export const eventLabel = {
   'git.branch': 'Branch',
   'sync.conflict': 'Sync conflict',
   'server.update': 'Server update',
-  'workspace.room_message': 'Run Room message',
+  'workspace.room_message': 'Run message',
   'workspace.evidence_packet': 'Evidence packet',
   'coord.message': 'Agent message',
   'coord.message.acked': 'Agent message acknowledged',

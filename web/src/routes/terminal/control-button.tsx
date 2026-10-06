@@ -82,7 +82,7 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
       variant={ownsControl ? 'primary' : 'secondary'}
       aria-label={label}
       aria-disabled={unavailable || !ownsControl && takeover?.phase === 'review'}
-      className="terminal-control-button shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
+      className="terminal-control-button shrink-0"
       onPointerDown={(event) => {
         if (event.button !== 0 || !event.isPrimary || unavailable) return
         begin({ pointer: event.pointerId })

@@ -9,7 +9,7 @@ import { needsYou, type StateContext } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
-import { isRunRoute } from '@/routes/terminal/tabs'
+import { isRunRoute, runRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useRun, useSidebarGroups, useStateContext } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -20,9 +20,9 @@ export const runRowSelector = '#sidebar-runs [data-run-row]'
 
 export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
   const condition = needsYou(run, ctx)
-  if (condition?.target === 'changes') return { name: 'diff', params: { runId: run.id } }
+  if (condition?.target === 'changes') return runRoute(run.id, 'changes')
   if (condition?.target === 'swarm' && run.mission_id) return { name: 'missions', params: { missionId: run.mission_id } }
-  return { name: 'terminal', params: { runId: run.id } }
+  return runRoute(run.id)
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {
@@ -215,7 +215,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
       navigate(route.name, route.params)
     } else if (swarm && run.mission_id) navigate('missions', { missionId: run.mission_id })
-    else navigate('terminal', { runId: run.id })
+    else navigate('run', { runId: run.id })
   }
   const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
   const label = [stateLabel[state], workspaceName, title, swarm ? counts : reason].filter(Boolean).join(' · ')

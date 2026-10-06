@@ -27,7 +27,7 @@ export function ConflictChips({ run }: CardSlotProps) {
           <button
             type="button"
             onClick={() => {
-              navigate('terminal', { runId: peer.run_id })
+              navigate('run', { runId: peer.run_id })
             }}
             aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
             className={cn(

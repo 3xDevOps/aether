@@ -55,7 +55,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
       // Seed the store so the terminal view attaches without a refetch.
       upsertRun(run)
       onClose()
-      navigate('terminal', { runId: run.id })
+      navigate('run', { runId: run.id })
       toast.success('Run launched')
     } catch (err) {
       setLaunching(false)

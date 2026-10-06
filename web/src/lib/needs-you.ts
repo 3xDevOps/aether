@@ -261,7 +261,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     action: () => ({ kind: 'open', label: 'Answer' }),
     reason: (run, ctx) => {
       const question = openRoomQuestions(run, ctx)[0]
-      if (!question) return 'Open question in the Run Room'
+      if (!question) return 'A teammate asked a question'
       return `${question.actor_display_name ?? memberName(question.actor_id, ctx)} asked you: ${question.body}`
     },
     since: (run, ctx) => openRoomQuestions(run, ctx)[0]?.created_at,

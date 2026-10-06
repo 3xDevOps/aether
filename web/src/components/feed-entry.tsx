@@ -40,7 +40,7 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
           {run && (
             <button
               type="button"
-              onClick={() => navigate('terminal', { runId: run.id })}
+              onClick={() => navigate('run', { runId: run.id })}
               aria-label={runLabel(run)}
               title={runLabel(run)}
               className={cn(
@@ -101,7 +101,7 @@ function RunName({ id }: { id: unknown }) {
   return (
     <button
       type="button"
-      onClick={() => navigate('terminal', { runId: run.id })}
+      onClick={() => navigate('run', { runId: run.id })}
       className={cn(focusRing, 'hover:underline')}
     >
       {runLabel(run)}

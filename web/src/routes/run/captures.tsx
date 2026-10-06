@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useIsMobile } from '@/lib/breakpoints'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import type { DevArtifact, EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
 import { useCandidateReview } from '@/routes/terminal/candidate-review'
@@ -27,15 +24,17 @@ export interface EvidenceDrawerProps {
   runID: string
   workspaceID: string
   client?: Api
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onAnswer?: (fact: string) => void
-  deferLayout?: boolean
+  returnTo?: HTMLElement | null
 }
 
-export function EvidenceDrawer(props: EvidenceDrawerProps) {
-  return <EvidenceDrawerSession key={`${props.workspaceID}:${props.runID}`} {...props} />
+export function CapturesDialog(props: EvidenceDrawerProps) {
+  return <CapturesSession key={`${props.workspaceID}:${props.runID}`} {...props} />
 }
 
-function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, deferLayout = false }: EvidenceDrawerProps) {
+function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange: setOpen, onAnswer, returnTo }: EvidenceDrawerProps) {
   const packets = useStore((state) => state.evidencePackets[runID] ?? emptyPackets)
   const nextBefore = useStore((state) => state.evidenceNextBefore[runID])
   const pagination = useStore((state) => state.evidencePagination[runID])
@@ -47,11 +46,6 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
   const setPage = useStore((state) => state.setEvidencePage)
   const select = useStore((state) => state.selectEvidence)
   const selectedID = useStore((state) => state.selectedEvidence[runID])
-  const [open, setOpen] = useState(false)
-  const viewportNarrow = useIsMobile()
-  const [narrow, setNarrow] = useState(viewportNarrow)
-  if (!deferLayout && narrow !== viewportNarrow) setNarrow(viewportNarrow)
-  const trigger = useRef<HTMLButtonElement>(null)
   const answering = useRef(false)
   const [packet, setPacket] = useState<EvidencePacket | null>(null)
   const [patch, setPatch] = useState<EvidencePatchResult | null>(null)
@@ -186,60 +180,51 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
   }
 
   const onCloseAutoFocus = (event: Event) => {
-    if (!answering.current) return
+    if (!answering.current) {
+      if (!returnTo?.isConnected) return
+      event.preventDefault()
+      returnTo.focus()
+      return
+    }
     answering.current = false
     event.preventDefault()
   }
-  const evidenceTrigger = (
-    <Button ref={trigger} type="button" variant="secondary" size="sm">
-      Evidence{packets.length ? ` (${packets.length})` : ''}
-    </Button>
-  )
   const content = (
     <>
-          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-            <div className="min-w-0">
-              {narrow
-                ? <DialogTitle className="truncate text-[13px] font-semibold">Retained evidence</DialogTitle>
-                : <h2 className="truncate text-[13px] font-semibold">Retained evidence</h2>}
-              {narrow
-                ? <DialogDescription className="text-[11px] text-muted-foreground">Recorded observations, not verification</DialogDescription>
-                : <p className="text-[11px] text-muted-foreground">Recorded observations, not verification</p>}
-            </div>
-            <Button type="button" size="icon" variant="ghost" label="Close evidence" onClick={() => setOpen(false)}><X className="size-4" aria-hidden /></Button>
-          </header>
+          <DialogHeader>
+            <DialogTitle>Captures</DialogTitle>
+            <DialogDescription>Screenshots and retained evidence for this run. They record what was seen, not that it was verified.</DialogDescription>
+          </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-3">
               {candidateReview}
             </div>
-            <div className="border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="border-b border-border px-3 py-2 text-ui-xs text-muted-foreground">
               Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
               Retained copies use evidence access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
             </div>
             {captureRetention}
-            {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry evidence</Button>}</div>}
+            {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-ui-sm text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry evidence</Button>}</div>}
             {!selectedID ? (
               <div className="p-3">
-                {loading && <p className="text-[12px] text-muted-foreground">Loading evidence…</p>}
-                {!loading && !packets.length && <p className="text-[12px] text-muted-foreground">No retained packets for this run.</p>}
+                {loading && <p className="text-ui-sm text-muted-foreground">Loading evidence…</p>}
+                {!loading && !packets.length && <p className="text-ui-sm text-muted-foreground">No retained packets for this run.</p>}
                 <div className="divide-y divide-border">
                   {packets.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="block w-full py-2 text-left hover:bg-toolbar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => openPacket(item.id)}
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[12px] font-medium">{item.trigger} capture</span>
-                        <time className="text-[11px] text-muted-foreground">{when(item.captured_at)}</time>
+                    <div key={item.id} className="flex items-start gap-2 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-ui-sm font-medium">{item.trigger} capture</span>
+                          <time className="text-ui-xs text-muted">{when(item.captured_at)}</time>
+                        </div>
+                        <p className="truncate text-ui-sm text-muted">{item.objective || 'Objective not recorded'}</p>
+                        <p className="text-ui-xs text-muted">{item.changed_files?.length ?? 0} changed files · {sourceSummary(item)}</p>
                       </div>
-                      <p className="truncate text-[12px] text-muted-foreground">{item.objective || 'Objective not recorded'}</p>
-                      <p className="text-[11px] text-muted-foreground">{item.changed_files?.length ?? 0} changed files · {sourceSummary(item)}</p>
-                    </button>
+                      <Button size="sm" variant="secondary" aria-label={`Open ${item.trigger} capture`} onClick={() => openPacket(item.id)}>Open</Button>
+                    </div>
                   ))}
                 </div>
-                {canLoadOlder && <Button type="button" variant="ghost" size="sm" className="mt-2" disabled={loading} onClick={() => void loadList(nextBefore)}>Load older</Button>}
+                {canLoadOlder && <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => void loadList(nextBefore)}>Load older</Button>}
               </div>
             ) : (
               <div className="p-3">
@@ -248,19 +233,19 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
                   <>
                     <div className="mt-2 border-b border-border pb-2">
                       <div className="flex items-baseline justify-between gap-2">
-                        <h3 className="text-[13px] font-semibold">{packet.trigger} capture</h3>
-                        <time className="text-[11px] text-muted-foreground">{when(packet.captured_at)}</time>
+                        <h3 className="text-ui font-semibold">{packet.trigger} capture</h3>
+                        <time className="text-ui-xs text-muted-foreground">{when(packet.captured_at)}</time>
                       </div>
-                      <p className="mt-1 text-[12px]">{packet.objective || 'Objective not recorded'}</p>
-                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                      <p className="mt-1 text-ui-sm">{packet.objective || 'Objective not recorded'}</p>
+                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-xs text-muted-foreground">
                         <div><dt className="inline font-medium">Base: </dt><dd className="inline break-all">{packet.base_revision || 'Unavailable'}</dd></div>
                         <div><dt className="inline font-medium">Packet-retain revision: </dt><dd className="inline break-all">{packet.retained_revision || 'Unavailable'}</dd></div>
                         <div><dt className="inline font-medium">Boundary: </dt><dd className="inline">{packet.event_boundary}</dd></div>
                         <div><dt className="inline font-medium">Sources: </dt><dd className="inline">{sourceSummary(packet)}</dd></div>
                       </dl>
-                      <p className="mt-1 text-[11px] text-muted-foreground">The packet-retain revision is a later snapshot, not the Git boundary of an earlier capture.</p>
-                      {packet.expires_at && <p className="mt-1 text-[11px] text-muted-foreground">Evidence expires {when(packet.expires_at)}.</p>}
-                      {packet.availability === 'expired' && <p role="status" className="mt-1 text-[12px] text-state-failed">This packet has expired. Retained bytes are no longer available.</p>}
+                      <p className="mt-1 text-ui-xs text-muted-foreground">The packet-retain revision is a later snapshot, not the Git boundary of an earlier capture.</p>
+                      {packet.expires_at && <p className="mt-1 text-ui-xs text-muted-foreground">Evidence expires {when(packet.expires_at)}.</p>}
+                      {packet.availability === 'expired' && <p role="status" className="mt-1 text-ui-sm text-state-failed">This packet has expired. Retained bytes are no longer available.</p>}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Evidence views">
                       <Button type="button" size="sm" variant={view === 'summary' ? 'secondary' : 'ghost'} role="tab" aria-selected={view === 'summary'} onClick={() => setView('summary')}>Summary</Button>
@@ -276,7 +261,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
                     {view === 'patch' && <EvidenceText value={patch?.packet.id === packet.id ? patch.patch : undefined} truncated={patch?.packet.id === packet.id ? patch.truncated : undefined} empty="Patch unavailable" />}
                     {view === 'transcript' && <EvidenceText value={transcript?.packet.id === packet.id ? decodeTranscript(transcript.data_base64) : undefined} truncated={transcript?.packet.id === packet.id ? transcript.truncated : undefined} empty="Transcript unavailable" />}
                   </>
-                ) : <p className="mt-2 text-[12px] text-muted-foreground">Loading packet…</p>}
+                ) : <p className="mt-2 text-ui-sm text-muted-foreground">Loading packet…</p>}
               </div>
             )}
           </div>
@@ -284,41 +269,17 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
   )
 
   return (
-    <section className="min-w-0" aria-label="Run evidence">
-      {narrow ? (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>{evidenceTrigger}</DialogTrigger>
-          <DialogContent
-            variant="bottom"
-            showCloseButton={false}
-            onCloseAutoFocus={onCloseAutoFocus}
-            className="top-[calc(var(--top-bar-height)+var(--safe-top))] z-[80] flex min-h-0 max-h-none flex-col gap-0 overflow-hidden rounded-none bg-background p-0"
-          >
-            {content}
-          </DialogContent>
-        </Dialog>
-      ) : (
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>{evidenceTrigger}</PopoverTrigger>
-          <PopoverContent
-            aria-label="Retained evidence"
-            side="top"
-            align="end"
-            collisionBoundary={trigger.current?.closest('[role="tabpanel"]')}
-            onCloseAutoFocus={onCloseAutoFocus}
-            className="flex min-h-0 max-h-[min(38rem,var(--radix-popover-content-available-height))] w-[min(38rem,var(--radix-popover-content-available-width))] flex-col overflow-hidden bg-background p-0"
-          >
-            {content}
-          </PopoverContent>
-        </Popover>
-      )}
-    </section>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus} className="flex max-w-2xl flex-col">
+        {content}
+      </DialogContent>
+    </Dialog>
   )
 }
 
 function EvidenceSummary({ packet, onAnswer }: { packet: EvidencePacket; onAnswer?: (fact: string) => void }) {
   return (
-    <div className="mt-3 space-y-3 text-[12px]">
+    <div className="mt-3 space-y-3 text-ui-sm">
       <div>
         <h4 className="font-medium">Changed files</h4>
         {packet.changed_files?.length ? <ul className="mt-1 space-y-1 text-muted-foreground">{packet.changed_files.map((file) => <li key={file.path} className="flex justify-between gap-2"><code className="truncate">{file.path}</code><span className="shrink-0">{file.status || 'changed'} {file.additions !== undefined || file.deletions !== undefined ? `+${file.additions ?? 0}/-${file.deletions ?? 0}` : ''}</span></li>)}</ul> : <p className="mt-1 text-muted-foreground">No changed files retained.</p>}
@@ -335,7 +296,7 @@ function EvidenceSummary({ packet, onAnswer }: { packet: EvidencePacket; onAnswe
 }
 
 function EvidenceText({ value, truncated, empty }: { value?: string; truncated?: boolean; empty: string }) {
-  return <div className="mt-3"><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/20 p-2 font-mono text-[11px]">{value || empty}</pre>{truncated && <p className="mt-1 text-[11px] text-muted-foreground">This source was truncated by the server.</p>}</div>
+  return <div className="mt-3"><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/20 p-2 font-mono text-ui-xs">{value || empty}</pre>{truncated && <p className="mt-1 text-ui-xs text-muted-foreground">This source was truncated by the server.</p>}</div>
 }
 
 function decodeTranscript(value: string): string {
@@ -458,38 +419,38 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
 
   return (
     <details open={expanded} className="border-b border-border px-3 py-2">
-      <summary onClick={(event) => { event.preventDefault(); setExpanded((value) => !value) }} className="cursor-pointer text-[12px] font-medium">Select transient captures to retain</summary>
-      <p className="mt-2 text-[11px] text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not durable evidence.</p>
+      <summary onClick={(event) => { event.preventDefault(); setExpanded((value) => !value) }} className="cursor-pointer text-ui-sm font-medium">Select transient captures to retain</summary>
+      <p className="mt-2 text-ui-xs text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not durable evidence.</p>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">{selected.length}/64 selected</span>
+        <span className="text-ui-xs text-muted-foreground">{selected.length}/64 selected</span>
         <Button type="button" size="sm" variant="ghost" disabled={loading || retaining} onClick={() => void loadCaptures()}>Refresh captures</Button>
       </div>
-      {loading && <p role="status" className="text-[12px] text-muted-foreground">Loading transient captures…</p>}
-      {listError && <p role="alert" className="my-2 break-words text-[12px] text-state-failed">{listError}</p>}
-      {!loading && !listError && !captures.length && <p className="text-[12px] text-muted-foreground">No transient captures available.</p>}
+      {loading && <p role="status" className="text-ui-sm text-muted-foreground">Loading transient captures…</p>}
+      {listError && <p role="alert" className="my-2 break-words text-ui-sm text-state-failed">{listError}</p>}
+      {!loading && !listError && !captures.length && <p className="text-ui-sm text-muted-foreground">No transient captures available.</p>}
       <div className="max-h-80 space-y-2 overflow-y-auto">
         {captures.map((capture) => (
           <div key={capture.id} className="rounded border border-border p-2">
-            <label className="flex items-center gap-2 text-[12px]">
+            <label className="flex items-center gap-2 text-ui-sm">
               <input
                 type="checkbox"
                 checked={selected.includes(capture.id)}
                 disabled={retaining || (!selected.includes(capture.id) && selected.length >= 64)}
                 onChange={(event) => setSelected((current) => event.target.checked ? [...current, capture.id] : current.filter((id) => id !== capture.id))}
               />
-              Select {capture.source} capture <span className="break-all font-mono text-[10px]">{capture.id}</span>
+              Select {capture.source} capture <span className="break-all font-mono text-ui-xs">{capture.id}</span>
             </label>
             <CaptureMetadata capture={capture} />
             <CaptureImage capture={capture} client={client} />
           </div>
         ))}
       </div>
-      {truncated && <p className="mt-2 text-[11px] text-muted-foreground">The capture list is truncated; only the listed captures can be selected here.</p>}
+      {truncated && <p className="mt-2 text-ui-xs text-muted-foreground">The capture list is truncated; only the listed captures can be selected here.</p>}
       {next && <Button type="button" size="sm" variant="ghost" disabled={loading || retaining} onClick={() => void loadCaptures(next)}>Load more captures</Button>}
-      <label className="mt-3 block text-[12px]">
+      <label className="mt-3 block text-ui-sm">
         Verification notes
         <textarea
-          className="mt-1 min-h-20 w-full rounded border border-input bg-background px-2 py-1 text-[12px]"
+          className="mt-1 min-h-20 w-full rounded border border-input bg-background px-2 py-1 text-ui-sm"
           value={notes}
           disabled={retaining}
           maxLength={4096}
@@ -497,11 +458,11 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
           placeholder="What you actually checked, the result, and any limits or missing observations."
         />
       </label>
-      <p className={`text-[11px] ${noteBytes > 4096 ? 'text-state-failed' : 'text-muted-foreground'}`}>{noteBytes}/4096 UTF-8 bytes. Notes are observations, not an automatic verification claim.</p>
+      <p className={`text-ui-xs ${noteBytes > 4096 ? 'text-state-failed' : 'text-muted-foreground'}`}>{noteBytes}/4096 UTF-8 bytes. Notes are observations, not an automatic verification claim.</p>
       <Button type="button" size="sm" className="mt-2" disabled={retaining || !selected.length || noteBytes > 4096} onClick={() => void retain()}>{retaining ? 'Retaining…' : 'Retain selected captures'}</Button>
-      {idempotencyKey && <p className="mt-2 break-all text-[10px] text-muted-foreground">Idempotency key: {idempotencyKey}</p>}
-      {retainError && <div role="alert" className="mt-2 text-[12px] text-state-failed"><p className="break-words">{retainError}</p><p>No automatic retry was made. Retrying the unchanged selection and notes reuses this key; inspect retained evidence if the outcome is uncertain.</p></div>}
-      {retainedID && <p role="status" className="mt-2 break-words text-[12px]">Retained packet <code>{retainedID}</code>. Use this packet ID with the existing report <code>--evidence-ref</code>; retaining does not report an outcome.</p>}
+      {idempotencyKey && <p className="mt-2 break-all text-ui-xs text-muted-foreground">Idempotency key: {idempotencyKey}</p>}
+      {retainError && <div role="alert" className="mt-2 text-ui-sm text-state-failed"><p className="break-words">{retainError}</p><p>No automatic retry was made. Retrying the unchanged selection and notes reuses this key; inspect retained evidence if the outcome is uncertain.</p></div>}
+      {retainedID && <p role="status" className="mt-2 break-words text-ui-sm">Retained packet <code>{retainedID}</code>. Use this packet ID with the existing report <code>--evidence-ref</code>; retaining does not report an outcome.</p>}
     </details>
   )
 }
@@ -509,7 +470,7 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
 function RetainedCaptures({ packet, client }: { packet: EvidencePacket; client: Api }) {
   const expired = packet.availability === 'expired' || Boolean(packet.expires_at && Date.parse(packet.expires_at) <= Date.now())
   return (
-    <div className="mt-3 space-y-2 text-[12px]">
+    <div className="mt-3 space-y-2 text-ui-sm">
       {packet.verification_notes && <div><h4 className="font-medium">Verification notes</h4><p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{packet.verification_notes}</p></div>}
       <h4 className="font-medium">Retained captures</h4>
       {!packet.captures?.length && <p className="text-muted-foreground">{expired ? 'Capture bytes are expired; no retained capture metadata is available.' : 'No captures were retained in this packet.'}</p>}
@@ -525,7 +486,7 @@ function RetainedCaptures({ packet, client }: { packet: EvidencePacket; client: 
 
 function CaptureMetadata({ capture }: { capture: DevArtifact }) {
   return (
-    <dl className="mt-2 space-y-1 break-words text-[11px] text-muted-foreground">
+    <dl className="mt-2 space-y-1 break-words text-ui-xs text-muted-foreground">
       <div><dt className="inline font-medium">Original source: </dt><dd className="inline">{capture.source} · {capture.id}</dd></div>
       <div><dt className="inline font-medium">Captured: </dt><dd className="inline">{when(capture.captured_at)}</dd></div>
       <div><dt className="inline font-medium">Session / incarnation: </dt><dd className="inline break-all">{capture.incarnation || 'Not recorded'}</dd></div>
@@ -533,8 +494,8 @@ function CaptureMetadata({ capture }: { capture: DevArtifact }) {
       {capture.page_id && <div><dt className="inline font-medium">Page: </dt><dd className="inline">{capture.page_id} · revision {capture.page_revision ?? 'unknown'}</dd></div>}
       <div><dt className="inline font-medium">Original geometry: </dt><dd className="inline">{capture.width} × {capture.height} pixels{capture.cols !== undefined && capture.rows !== undefined ? ` · ${capture.cols} × ${capture.rows} cells` : ''} · geometry revision {capture.geometry_revision ?? 'unknown'}{capture.viewport_id ? ` · viewport ${capture.viewport_id}` : ''}</dd></div>
       {capture.url && <div><dt className="inline font-medium">Original URL: </dt><dd className="inline break-all">{capture.url}</dd></div>}
-      <div><dt className="inline font-medium">Capture Git HEAD: </dt><dd className="inline break-all">{capture.git_head || 'Unknown — not observed at capture time'}</dd></div>
-      <div><dt className="inline font-medium">Capture checkout: </dt><dd className="inline">{capture.dirty === undefined ? 'Unknown — cleanliness was not observed' : capture.dirty ? 'Observed dirty' : 'Observed clean'}</dd></div>
+      <div><dt className="inline font-medium">Capture Git HEAD: </dt><dd className="inline break-all">{capture.git_head || 'Unknown - not observed at capture time'}</dd></div>
+      <div><dt className="inline font-medium">Capture checkout: </dt><dd className="inline">{capture.dirty === undefined ? 'Unknown - cleanliness was not observed' : capture.dirty ? 'Observed dirty' : 'Observed clean'}</dd></div>
       <div><dt className="inline font-medium">Bytes: </dt><dd className="inline">{capture.bytes} · {capture.content_type}</dd></div>
       {capture.truncated && <div className="text-state-failed"><dt className="inline font-medium">Truncated: </dt><dd className="inline">This capture omits some source content.</dd></div>}
     </dl>
@@ -594,10 +555,10 @@ function CaptureImage({ capture, client, packetID, unavailable }: CaptureImagePr
 
   return (
     <div className="mt-2 space-y-2">
-      {unavailable ? <p role="status" className="text-[12px] text-state-failed">{unavailable}</p> : (
+      {unavailable ? <p role="status" className="text-ui-sm text-state-failed">{unavailable}</p> : (
         <Button type="button" size="sm" variant="secondary" disabled={loading} onClick={() => void loadImage()}>{loading ? 'Loading image…' : url ? 'Reload image' : 'Load image / download'}</Button>
       )}
-      {error && <p role="alert" className="break-words text-[12px] text-state-failed">Image unavailable (it may be missing, expired, or access may have changed): {error}</p>}
+      {error && <p role="alert" className="break-words text-ui-sm text-state-failed">Image unavailable (it may be missing, expired, or access may have changed): {error}</p>}
       {url && !unavailable && (
         <>
           {capture.content_type === 'image/png' && (
@@ -606,7 +567,7 @@ function CaptureImage({ capture, client, packetID, unavailable }: CaptureImagePr
             // eslint-disable-next-line @next/next/no-img-element
             <img src={url} alt={`${packetID ? 'Retained' : 'Transient'} ${capture.source} capture from ${when(capture.captured_at)}`} className="h-auto max-w-full rounded border border-border" onError={() => setError('The downloaded capture could not be decoded as an image.')} />
           )}
-          <a href={url} download={`${capture.id}.png`} className="inline-block text-[12px] underline">Download original PNG</a>
+          <a href={url} download={`${capture.id}.png`} className="inline-block text-ui-sm underline">Download original PNG</a>
         </>
       )}
     </div>

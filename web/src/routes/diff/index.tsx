@@ -1,7 +1,6 @@
 import { RefreshCw, WrapText } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
-import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -21,8 +20,6 @@ import { parsePatch } from '@/routes/diff/parse'
 import { NativeChanges } from '@/routes/diff/native-changes'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { ReviewCommands } from '@/routes/diff/review-commands'
-import { registerRoute, type RouteProps } from '@/routes/registry'
-import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import {
@@ -35,9 +32,8 @@ import {
 
 /** A snapshot shows the diff between its parent tree and its tree, not a filter
  * over the current diff; a snapshot with no recorded tree is not selectable. */
-function DiffView({ params }: RouteProps) {
+export function ChangesView({ runID }: { runID: string }) {
   const caps = useCapability()
-  const runID = params.runId
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
   // Keyed on the snapshot's time, not its index: new snapshots are prepended,
@@ -72,9 +68,7 @@ function DiffView({ params }: RouteProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <RunHeader run={run} subtitle={run.branch} active="diff" />
-      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden')}>
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto md:overflow-hidden">
         <Land run={run} />
         {caps.hasMethod('run.git.status') && <NativeChanges key={runID} run={run} wrap={wrap} />}
 
@@ -185,7 +179,6 @@ function DiffView({ params }: RouteProps) {
             </div>
           </div>
         </div>
-      </div>
     </div>
   )
 }
@@ -383,4 +376,3 @@ function useInterval(
   return entry
 }
 
-registerRoute('diff', DiffView)

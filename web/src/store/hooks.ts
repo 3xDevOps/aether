@@ -86,12 +86,12 @@ export function useRunInput(run: Run) {
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
   if (approvals > 0) parts.push(`${approvals} approval${approvals === 1 ? '' : 's'} in Approvals`)
-  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in Run Room`)
+  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)
   return {
     count: native + approvals + questions,
     questions,
     summary: parts.join('; '),
-    destination: native === 0 && approvals > 0 ? 'approvals' : 'terminal',
+    destination: native === 0 && approvals > 0 ? 'approvals' : 'run',
   }
 }
 

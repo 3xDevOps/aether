@@ -413,10 +413,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   ) {
     list.push({
       id: 'relaunch',
-      label: 'Relaunch run',
-      short: 'Relaunch',
+      label: 'Reopen run',
+      short: 'Reopen',
       Icon: RefreshCw,
-      done: 'Relaunched',
+      done: 'Reopened',
       perform: (d) => d.api.runRelaunch(id),
     })
   }

@@ -41,6 +41,13 @@ const toolVerbs: Record<string, [string, string]> = {
 
 const delegating: [string, string] = ['Delegating', 'Delegated']
 
+export function toolTenses(payload: AgentPayload): [string, string] {
+  if (payload.kind === 'subagent') return delegating
+  if (payload.verb) return [payload.verb, payload.verb]
+  const tool = payload.tool ?? ''
+  return toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`, `Used ${tool || 'a tool'}`]
+}
+
 /** The activity after one agent event, or `previous` when it changes nothing shown. */
 export function nextActivity(
   previous: RunActivity | undefined,
@@ -50,15 +57,10 @@ export function nextActivity(
   switch (payload.kind) {
     case 'tool_call':
     case 'subagent': {
-      const tool = payload.tool ?? ''
-      const call: ToolCall = payload.kind === 'subagent'
-        ? { tenses: delegating, target: payload.detail || tool }
-        : payload.verb
-          ? { tenses: [payload.verb, payload.verb], target: payload.detail ?? '' }
-          : {
-              tenses: toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`, `Used ${tool || 'a tool'}`],
-              target: payload.detail || tool,
-            }
+      const call: ToolCall = {
+        tenses: toolTenses(payload),
+        target: payload.kind !== 'subagent' && payload.verb ? payload.detail ?? '' : payload.detail || payload.tool || '',
+      }
       const running = payload.tool_use_id
         ? { ...previous?.running, [payload.tool_use_id]: call }
         : previous?.running

@@ -94,7 +94,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
       const result = await client.templateLaunch(workspaceID, template.name)
       // Seed the store so the terminal view attaches without a refetch.
       upsertRun(result.run)
-      navigate('terminal', { runId: result.run.id })
+      navigate('run', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {
       toast.error(message(err))

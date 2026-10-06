@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Ellipsis } from 'lucide-react'
-import { Dock } from '@/components/dock'
+import type * as React from 'react'
+import { Ellipsis } from '@/components/icons'
 import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
-import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/types'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
-import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
+import { api } from '@/lib/api'
+import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/types'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
-import { cn, focusRing } from '@/lib/utils'
 import { type ConnectionState } from '@/lib/stream'
+import type { RunShells } from '@/routes/run/shells'
 import {
   type AttachDataKind,
   type Attachment,
@@ -25,14 +24,12 @@ import { useStore } from '@/store'
 import {
   emitShellSocketData,
   getShellSocket,
-  initialRunShellDock,
   registerShellSocket,
   subscribeShellSocket,
   unregisterShellSocket,
 } from '@/store/terminal'
 
-const maxShellTabs = 4
-const statusPollMs = 10_000
+const ownerPollMs = 10_000
 const shellRefusal = 'You can view this run but not open a shell in it'
 const emptyReplay = new Uint8Array()
 
@@ -49,21 +46,15 @@ interface StructuralReplayState {
   revision: number
 }
 
-export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
-  runID: string
-  onEvidenceAnswer: (fact: string) => void
-  deferLayout?: boolean
+export function ShellTerminal({ shells, tabs, onCaptures }: {
+  shells: RunShells
+  tabs: React.ReactNode
+  onCaptures: (returnTo: HTMLElement | null) => void
 }) {
-  const run = useStore((s) => s.runs[runID])
-  const dock = useStore((s) => s.shellDocks[runID] ?? initialRunShellDock)
-  const runDockHeight = useStore((s) => s.runDockHeight)
-  const syncShellTerminals = useStore((s) => s.syncShellTerminals)
+  const { runID, dock } = shells
   const closeShellTab = useStore((s) => s.closeShellTab)
-  const selectShellTab = useStore((s) => s.selectShellTab)
-  const setDockCollapsed = useStore((s) => s.setDockCollapsed)
-  const setRunDockHeight = useStore((s) => s.setRunDockHeight)
   const setShellRefused = useStore((s) => s.setShellRefused)
-
+  const members = useStore((s) => s.members)
   const activeTab = dock.activeTab
   const activeProcess = dock.terminals.find((item) => item.terminal_id === activeTab)
   const incarnation = activeProcess?.incarnation
@@ -77,12 +68,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
   const confirmationTrigger = useRef<HTMLButtonElement | null>(null)
   const menuFocusTarget = useRef<'dialog' | 'terminal' | null>(null)
   const takeoverGeneration = useRef(0)
-  const refreshRevision = useRef(0)
-  const refresh = useCallback(async () => {
-    const revision = ++refreshRevision.current
-    const result = await api.devTerminalList({ run_id: runID })
-    if (refreshRevision.current === revision) syncShellTerminals(runID, result.terminals)
-  }, [runID, syncShellTerminals])
+  const refresh = shells.refresh
   const reportError = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : String(cause))
   }, [])
@@ -104,29 +90,13 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     readOwner().catch(reportError)
     return () => { ownerTarget.current = { runID: '', tab: '' } }
   }, [runID, activeTab, incarnation, readOwner, reportError])
-  // The shell list goes first: it can change the tab whose owner is read.
   useEffect(() => {
-    let cancelled = false
-    let timer: number | undefined
-    const poll = async (owner: boolean) => {
-      if (document.visibilityState === 'visible') {
-        for (const read of owner ? [refresh, readOwner] : [refresh]) {
-          try {
-            await read()
-          } catch (cause) { if (!cancelled) reportError(cause) }
-        }
-      }
-      if (!cancelled) timer = window.setTimeout(() => void poll(true), statusPollMs)
-    }
-    void poll(false)
-    return () => { cancelled = true; refreshRevision.current++; clearTimeout(timer) }
-  }, [refresh, readOwner, reportError])
-  const paused = useStore((s) => s.pausedRuns[runID] ?? run?.paused)
-  const pauseKnown = paused !== undefined
-  const canOpenShell =
-    pauseKnown &&
-    (run?.status === 'running' || run?.status === 'needs-attention') &&
-    paused === false
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') readOwner().catch(reportError)
+    }, ownerPollMs)
+    return () => clearInterval(timer)
+  }, [readOwner, reportError])
+  const canOpenShell = shells.canOpen
   const [attachedIdentity, setAttachedIdentity] = useState<ShellAttachmentIdentity | null>(null)
   const [replaying, setReplaying] = useState(false)
   const currentAttachmentRef = useRef<ShellAttachmentIdentity | null>(null)
@@ -222,22 +192,6 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
       },
     ),
   )
-  // Whatever replaces a terminal that may have held the keyboard takes it too:
-  // disposing it leaves focus on <body>, where keystrokes reach the shell's shortcuts.
-  const showing = !canOpenShell
-    ? 'unavailable'
-    : dock.refusedMessage !== null
-      ? 'refused'
-      : activeTab === null
-        ? 'closed'
-        : 'terminal'
-  const placeholder = useRef<HTMLDivElement>(null)
-  const takesFocus = { ref: placeholder, tabIndex: -1 }
-  useEffect(() => {
-    if (showing === 'terminal') return
-    if (document.activeElement === document.body) placeholder.current?.focus()
-  }, [showing])
-
   // A shell tab is one session shared by everyone on that tab, so a phone
   // follows it for the same reason it follows the agent's terminal.
   const phone = useMediaQuery(phoneScreen)
@@ -246,7 +200,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
       canOpenShell &&
       activeTab !== null &&
       processRunning &&
-      !dock.collapsed &&
+      dock.shellShown &&
       dock.refusedMessage === null,
     follow: phone || !activeHasControl,
     onData: (data) => {
@@ -316,7 +270,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     activeTab !== null &&
     incarnation !== undefined &&
     processRunning &&
-    !dock.collapsed &&
+    dock.shellShown &&
     dock.refusedMessage === null &&
     terminal
       ? { runID, tab: activeTab, incarnation }
@@ -333,10 +287,11 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
   const focusTerminal = controller.focusTerminal
   useEffect(() => {
     setFindOpen(false)
-  }, [activeTab, setFindOpen])
+    focusTerminal()
+  }, [activeTab, setFindOpen, focusTerminal])
 
   useEffect(() => {
-    if (!canOpenShell || !activeTab || !incarnation || !processRunning || !terminal || dock.collapsed || dock.refusedMessage !== null) return
+    if (!canOpenShell || !activeTab || !incarnation || !processRunning || !terminal || !dock.shellShown || dock.refusedMessage !== null) return
 
     const socketKey = activeTab
     const identity: ShellAttachmentIdentity = { runID, tab: socketKey, incarnation }
@@ -495,7 +450,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     activeTab,
     incarnation,
     processRunning,
-    dock.collapsed,
+    dock.shellShown,
     geometry,
     setGeometry,
     canOpenShell,
@@ -508,26 +463,6 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     terminal,
   ])
 
-  const tabs = canOpenShell ? dock.tabs.map((tab) => {
-    const item = dock.terminals.find((item) => item.terminal_id === tab)!
-    return { id: tab, label: `${item.name || tab} · ${item.process.state}` }
-  }) : []
-  // The header strip stays live while the dock is collapsed, so a tab control
-  // must open the dock or it would add a tab with no terminal to attach.
-  const open = async () => {
-    setDockCollapsed(runID, false)
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await api.devTerminalStart({ run_id: runID })
-      // Invalidate an older in-flight list before publishing the created process.
-      refreshRevision.current++
-      const current = useStore.getState().shellDocks[runID]?.terminals ?? []
-      syncShellTerminals(runID, [...current.filter((item) => item.terminal_id !== result.terminal.terminal_id), result.terminal])
-      selectShellTab(runID, result.terminal.terminal_id)
-      focusTerminal()
-    } catch (cause) { reportError(cause) } finally { setBusy(false) }
-  }
   const takeShellControl = () => {
     if (!activeTab || !processRunning) return
     setError(null)
@@ -574,149 +509,102 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     setError(null)
     try {
       const result = await api.devTerminalScreenshot({ run_id: runID, terminal_id: activeTab, incarnation })
-      setCaptureMessage(`Captured ${result.artifact.id}. Open Evidence to select and retain it.`)
+      setCaptureMessage(`Captured ${result.artifact.id}. Open Captures to keep it.`)
     } catch (cause) { reportError(cause) } finally { setBusy(false) }
   }
-  const controllerName = owner?.kind === 'run_agent' ? `Run agent ${owner.run_id}` : owner?.member_id ?? 'Nobody'
+  const controllerName = owner?.kind === 'run_agent' ? 'The agent' : owner?.member_id ? members[owner.member_id]?.display_name ?? owner.member_id : null
+  const shellActions = (
+    <>
+      {processRunning && !activeHasControl && controllerName && (
+        <span className="min-w-0 truncate px-1 text-ui-sm text-muted">{controllerName} controls</span>
+      )}
+      {processRunning && activeHasControl && <span className="px-1 text-ui-sm text-text">You control</span>}
+      {processRunning && (activeHasControl
+        ? <Button size="sm" variant="primary" disabled={busy} onClick={() => void releaseShellControl()}>Release</Button>
+        : <Button size="sm" variant="secondary" disabled={busy || attachedIdentity === null} onClick={(event) => {
+          confirmationTrigger.current = event.currentTarget
+          if (owner) setConfirmation('take')
+          else takeShellControl()
+        }}>Take control</Button>)}
+      <Menu>
+        <MenuTrigger asChild>
+          <Button ref={moreTrigger} size="icon-sm" variant="ghost" label="Shell actions"><Ellipsis /></Button>
+        </MenuTrigger>
+        <MenuContent align="end" onCloseAutoFocus={(event) => {
+          const target = menuFocusTarget.current
+          menuFocusTarget.current = null
+          if (!target) return
+          event.preventDefault()
+          if (target !== 'terminal') return
+          const next = useStore.getState().shellDocks[runID]
+          const shown = next?.terminals.find((item) => item.terminal_id === next.activeTab)
+          if (next?.shellShown && shown?.process.state === 'running') controllerRef.current?.focusTerminal()
+          else moreTrigger.current?.focus()
+        }}>
+          <MenuItem disabled={busy || !incarnation} onSelect={() => void screenshot()}>Take a screenshot</MenuItem>
+          <MenuItem onSelect={() => {
+            menuFocusTarget.current = 'terminal'
+            if (activeTab) closeShellTab(runID, activeTab)
+          }}>Hide this shell</MenuItem>
+          <MenuSeparator />
+          <MenuItem tone="danger" disabled={busy || !activeHasControl || !processRunning} onSelect={() => {
+            menuFocusTarget.current = 'dialog'
+            confirmationTrigger.current = moreTrigger.current
+            setConfirmation('stop')
+          }}>Stop this shell</MenuItem>
+        </MenuContent>
+      </Menu>
+    </>
+  )
+  const notice = dock.refusedMessage ?? error ?? captureMessage ??
+    (activeProcess && !processRunning
+      ? `This shell ${activeProcess.process.state}. ${activeProcess.process.reason ?? ''} Showing it never reruns it; open a new shell instead.`
+      : null)
 
   return (
     <>
-    <Dock
-      tabs={tabs}
-      activeTab={canOpenShell ? activeTab ?? '' : ''}
-      onSelectTab={(tab) => {
-        setDockCollapsed(runID, false)
-        selectShellTab(runID, tab)
-        focusTerminal()
-      }}
-      onAddTab={canOpenShell && !busy && dock.terminals.filter((item) => item.process.state === 'running').length < maxShellTabs ? () => void open() : undefined}
-      maxTabs={maxShellTabs}
-      onCloseTab={(tab) => closeShellTab(runID, tab)}
-      height={runDockHeight}
-      onHeightChange={setRunDockHeight}
-      collapsed={dock.collapsed}
-      onToggleCollapse={() => {
-        const expanding = dock.collapsed
-        setDockCollapsed(runID, !dock.collapsed)
-        if (expanding && canOpenShell) focusTerminal()
-      }}
-      containment="parent"
-      persistentActions={run && <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} onAnswer={onEvidenceAnswer} deferLayout={deferLayout} />}
-      actions={canOpenShell && dock.tabs.length >= maxShellTabs && dock.terminals.some((item) => item.process.state !== 'running') &&
-        <Button size="sm" disabled={busy} onClick={() => void open()}>New terminal</Button>}
-    >
-      {error && <div role="alert" className="px-3 py-1 text-sm text-state-failed">{error}</div>}
-      {captureMessage && <p role="status" className="px-3 py-1 text-xs">{captureMessage}</p>}
-      {dock.hidden.length > 0 && (
-        <div className="flex flex-wrap gap-1 px-3 py-1">
-          {dock.terminals.filter((item) => !dock.tabs.includes(item.terminal_id)).map((item) => (
-            <Button key={item.terminal_id} size="sm" variant="secondary" onClick={() => {
-              selectShellTab(runID, item.terminal_id); setDockCollapsed(runID, false)
-            }}>Show {item.name || item.terminal_id} · {item.process.state}</Button>
-          ))}
-        </div>
-      )}
-      {showing === 'unavailable' ? (
-        <div
-          {...takesFocus}
-          className={cn(focusRing, 'bg-background px-3 py-2 text-[13px] leading-5 text-muted-foreground')}
-        >
-          {pauseKnown
-            ? 'Run shell unavailable: this run has no live container. The Terminal tab replays its recorded output.'
-            : 'Run shell unavailable: waiting for the run pause state.'}
-        </div>
-      ) : showing === 'refused' ? (
-        <div
-          {...takesFocus}
-          className={cn(
-            focusRing,
-            'h-full min-h-0 min-w-0 break-words whitespace-pre-wrap overflow-y-auto bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed',
-          )}
-        >
-          {dock.refusedMessage}
-        </div>
-      ) : showing === 'closed' ? (
-        <div {...takesFocus} className={cn(focusRing, 'flex items-center bg-background px-3 py-2')}>
-          <Button type="button" size="sm" disabled={busy || dock.terminals.filter((item) => item.process.state === 'running').length >= maxShellTabs} onClick={() => void open()}>
-            Open shell
-          </Button>
-        </div>
-      ) : (
-        <div className="flex h-full min-h-0 flex-1 flex-col">
-          <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-toolbar px-3 py-1.5 text-xs text-muted-foreground">
-            <span role="status" className="min-w-0 flex-1 truncate" title={`${activeProcess?.name} · ${activeProcess?.process.state}${activeProcess?.process.exit_code !== undefined ? ` (${activeProcess.process.exit_code})` : ''} · Controller: ${activeHasControl ? 'You (this terminal)' : controllerName}`}>{activeProcess?.name} · {activeProcess?.process.state}{activeProcess?.process.exit_code !== undefined ? ` (${activeProcess.process.exit_code})` : ''} · Controller: {activeHasControl ? 'You (this terminal)' : controllerName}</span>
-            {processRunning && (activeHasControl
-              ? <Button size="sm" variant="secondary" className="shrink-0" disabled={busy} onClick={() => void releaseShellControl()}>Release shell control</Button>
-              : <Button size="sm" variant="secondary" className="shrink-0" disabled={busy || attachedIdentity === null} onClick={(event) => {
-                confirmationTrigger.current = event.currentTarget
-                if (owner) setConfirmation('take')
-                else takeShellControl()
-              }}>Take shell control</Button>)}
-            <Menu>
-              <MenuTrigger asChild>
-                <Button ref={moreTrigger} size="sm" variant="secondary" className="shrink-0" aria-label="More terminal actions"><Ellipsis className="size-3" aria-hidden />More</Button>
-              </MenuTrigger>
-              <MenuContent align="end" onCloseAutoFocus={(event) => {
-                const target = menuFocusTarget.current
-                menuFocusTarget.current = null
-                if (!target) return
-                event.preventDefault()
-                if (target === 'terminal') {
-                  if (placeholder.current) placeholder.current.focus()
-                  else if (processRunning) controllerRef.current?.focusTerminal()
-                  else moreTrigger.current?.focus()
-                }
-              }}>
-                <MenuItem disabled={busy || !incarnation} onSelect={() => void screenshot()}>Screenshot</MenuItem>
-                <MenuItem onSelect={() => {
-                  menuFocusTarget.current = 'terminal'
-                  if (activeTab) closeShellTab(runID, activeTab)
-                }}>Hide terminal</MenuItem>
-                <MenuSeparator />
-                <MenuItem className="text-destructive" disabled={busy || !activeHasControl || !processRunning} onSelect={() => {
-                  menuFocusTarget.current = 'dialog'
-                  confirmationTrigger.current = moreTrigger.current
-                  setConfirmation('stop')
-                }}>Stop terminal</MenuItem>
-              </MenuContent>
-            </Menu>
-          </div>
-          {!processRunning && <p className="p-3 text-sm">This process {activeProcess?.process.state}. {activeProcess?.process.reason} Opening or showing it never reruns it. Use + to start a new terminal.</p>}
-          <TerminalPane
-            controller={controller}
-            writable={activeHasControl && processRunning}
-            replaying={replaying}
-            className="min-h-0 flex-1 overflow-auto"
-            imageTarget={runID}
-            imageTargetKey={activeControlKey}
-            imageUploadEnabled={
-              activeHasControl &&
-              attachedIdentity !== null &&
-              attachedIdentity.runID === runID &&
-              attachedIdentity.tab === activeTab &&
-              activeTab !== null
-            }
-          />
-        </div>
-      )}
-    </Dock>
-    <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null) }}>
-      <DialogContent onCloseAutoFocus={(event) => {
-        event.preventDefault()
-        confirmationTrigger.current?.focus()
-      }}>
-        <DialogHeader>
-          <DialogTitle>{confirmation === 'take' ? 'Take shell control?' : 'Stop this terminal process?'}</DialogTitle>
-          <DialogDescription>{confirmation === 'take'
-            ? `${controllerName} controls this terminal. Taking over fences that writer, not other terminals or the primary harness. Shell control is scoped to this terminal. Releasing it does not clear durable mission holds.`
-            : 'Stop ends this exact terminal incarnation. Hiding or detaching instead leaves it running.'}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setConfirmation(null)}>Cancel</Button>
-          <Button variant={confirmation === 'stop' ? 'danger' : 'primary'} disabled={busy} onClick={() => confirmation === 'take' ? takeShellControl() : void stopTerminal()}>{confirmation === 'take' ? 'Confirm takeover' : 'Confirm stop'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <TerminalPane
+        controller={controller}
+        tabs={tabs}
+        toolbarEnd={shellActions}
+        onCaptures={onCaptures}
+        notice={notice && (
+          <p role={dock.refusedMessage || error ? 'alert' : 'status'} className="shrink-0 border-b border-seam px-3 py-1 text-ui-sm text-muted">
+            {notice}
+          </p>
+        )}
+        writable={activeHasControl && processRunning}
+        replaying={replaying}
+        className="min-h-0 flex-1 overflow-auto"
+        imageTarget={runID}
+        imageTargetKey={activeControlKey}
+        imageUploadEnabled={
+          activeHasControl &&
+          attachedIdentity !== null &&
+          attachedIdentity.runID === runID &&
+          attachedIdentity.tab === activeTab &&
+          activeTab !== null
+        }
+      />
+      <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null) }}>
+        <DialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          confirmationTrigger.current?.focus()
+        }}>
+          <DialogHeader>
+            <DialogTitle>{confirmation === 'take' ? 'Take control of this shell?' : 'Stop this shell?'}</DialogTitle>
+            <DialogDescription>{confirmation === 'take'
+              ? `${controllerName ?? 'Someone'} controls this shell. Taking control stops their typing here; other terminals are not affected.`
+              : 'Stop ends this shell process. Hiding it instead leaves it running.'}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setConfirmation(null)}>Cancel</Button>
+            <Button variant={confirmation === 'stop' ? 'danger' : 'primary'} disabled={busy} onClick={() => confirmation === 'take' ? takeShellControl() : void stopTerminal()}>
+              {confirmation === 'take' ? 'Take control' : 'Stop shell'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

@@ -15,6 +15,7 @@ import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
 import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
+import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
@@ -63,6 +64,7 @@ export type RootState = ServerSlice &
   LocalSlice &
   MissionsSlice &
   MessagesSlice &
+  SessionsSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -71,7 +73,7 @@ const persistedUi = (s: RootState) => ({
   sidebarWidth: s.sidebarWidth,
   sidebarCollapsed: s.sidebarCollapsed,
   terminalDockHeight: s.terminalDockHeight,
-  runDockHeight: s.runDockHeight,
+  detailsOpen: s.detailsOpen,
   terminalFontSize: s.terminalFontSize,
   singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,
@@ -113,6 +115,7 @@ export function createRootStore() {
         ...createLocalSlice(...a),
         ...createMissionsSlice(...a),
         ...createMessagesSlice(...a),
+        ...createSessionsSlice(...a),
         ...createUiSlice(...a),
       }),
       {
@@ -123,7 +126,8 @@ export function createRootStore() {
         // index. Before 4 there is no furthest step, so the resume point
         // stands in, or the header would turn every later step inert. Before 6
         // the stored width sized the old run pane, not the sidebar. Before 8
-        // the step names are the six-step wizard's.
+        // the step names are the six-step wizard's and the run dock height is
+        // still stored.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -153,6 +157,7 @@ export function createRootStore() {
             const walk = state as { onboardingStep?: string; onboardingFurthest?: string }
             state.onboardingStep = v7OnboardingSteps[walk.onboardingStep ?? ''] ?? onboardingSteps[0]
             state.onboardingFurthest = v7OnboardingSteps[walk.onboardingFurthest ?? ''] ?? state.onboardingStep
+            delete (state as { runDockHeight?: unknown }).runDockHeight
           }
           return state
         },

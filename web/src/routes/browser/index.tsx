@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
-import { RunHeader } from '@/components/run-header'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,9 +8,6 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { DevBrowserCloseParams, DevBrowserNavigateParams, DevBrowserPage, DevBrowserResetParams, DevBrowserStatusResult, DevController, DevControlFence, DevSurface } from '@/lib/types'
 import { cn, field } from '@/lib/utils'
-import { registerRoute, type RouteProps } from '@/routes/registry'
-import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
-import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { BrowserSurface } from './surface'
 
@@ -23,9 +19,9 @@ type BrowserConfirmation =
   | { action: 'close'; target: DevBrowserCloseParams }
   | { action: 'reset'; target: DevBrowserResetParams }
 
-function BrowserView({ params }: RouteProps) {
+export function BrowserView({ runID }: { runID: string }) {
   const identity = useStore((state) => state.identityKey)
-  return <BrowserRoute key={`${identity}:${params.runId}`} runID={params.runId} />
+  return <BrowserRoute key={`${identity}:${runID}`} runID={runID} />
 }
 
 function BrowserRoute({ runID }: { runID: string }) {
@@ -228,8 +224,7 @@ function BrowserRoute({ runID }: { runID: string }) {
   const controllerName = controller ? controller.kind === 'run_agent' ? `Agent · ${controller.run_id}` : `Member · ${members[controller.member_id ?? '']?.display_name ?? controller.member_id}` : 'Nobody'
 
   return <div className="flex h-full min-h-0 min-w-0 flex-col">
-    <div hidden={expanded} className="shrink-0"><RunHeader run={run} active="browser" /></div>
-    <section {...runTabPanel('browser', 'flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3')}>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-3 text-[13px]">
         <div className="min-w-0 flex-1 basis-80 space-y-1">
           <p role="status" hidden={expanded} className="break-words">
@@ -308,9 +303,8 @@ function BrowserRoute({ runID }: { runID: string }) {
         </div>}
           </PopoverContent>
         </Popover>
-        <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} />
       </div>
-      {capture && <p role="status" hidden={expanded} className="break-words text-xs text-muted-foreground">Captured {capture}. Open Evidence and explicitly select captures to retain; nothing has been published.</p>}
+      {capture && <p role="status" hidden={expanded} className="break-words text-xs text-muted-foreground">Captured {capture}. Open Captures from More to keep it; nothing has been published.</p>}
       {selectedPage ? <BrowserSurface key={`${selectedPage.session_id}:${selectedPage.page_id}`} runID={runID} page={selectedPage} control={!busy && !blocked ? fence : null} connection={connection}
         expanded={expanded} onExpandedChange={setEnlarged} onPage={updatePage} onError={(text) => { setError(text); setBlocked(true); void release() }} /> : <p className="p-4 text-sm text-muted-foreground">Opening this pane only observes existing state. Use Open browser to start a page. Hiding the pane does not stop the app or clear its login.</p>}
     </section>
@@ -333,4 +327,3 @@ function BrowserRoute({ runID }: { runID: string }) {
   </div>
 }
 
-registerRoute('browser', BrowserView)

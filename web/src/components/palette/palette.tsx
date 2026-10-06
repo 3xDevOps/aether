@@ -165,7 +165,7 @@ export function PaletteBody({
             <CommandItem
               key={run.id}
               value={value}
-              onSelect={() => go('terminal', { runId: run.id })}
+              onSelect={() => go('run', { runId: run.id })}
               className="items-start py-1"
             >
               <StateDot state={state} decorative className="mx-1 mt-1 shrink-0" />

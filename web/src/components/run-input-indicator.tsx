@@ -21,11 +21,11 @@ export function RunInputIndicator({ run, compact = false }: { run: Run; compact?
     )
   }
   return (
-    <Tooltip content={<>{description}. Open {input.destination === 'terminal' ? 'Terminal' : 'Approvals'} to respond.</>}>
+    <Tooltip content={<>{description}. Open {input.destination === 'run' ? 'the run' : 'Approvals'} to respond.</>}>
       <button
         type="button"
         aria-label={description}
-        onClick={() => navigate(input.destination, input.destination === 'terminal' ? { runId: run.id } : {})}
+        onClick={() => navigate(input.destination, input.destination === 'run' ? { runId: run.id } : {})}
         className={`${focusRing} inline-flex shrink-0 items-center rounded-sm coarse:min-h-11`}
       >
         <Badge tone="needs-you">

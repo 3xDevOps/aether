@@ -53,6 +53,16 @@ import {
   User as LucideUser,
   Minus as LucideMinus,
   ArrowUpCircle as LucideArrowUpCircle,
+  RotateCcw as LucideRotateCcw,
+  ClipboardCopy as LucideClipboardCopy,
+  ClipboardPaste as LucideClipboardPaste,
+  ScanText as LucideScanText,
+  ImageUp as LucideImageUp,
+  Camera as LucideCamera,
+  ScrollText as LucideScrollText,
+  PanelRight as LucidePanelRight,
+  CircleCheck as LucideCircleCheck,
+  CircleX as LucideCircleX,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -122,3 +132,13 @@ export const ChevronsUpDown = icon(LucideChevronsUpDown)
 export const User = icon(LucideUser)
 export const Minus = icon(LucideMinus)
 export const ArrowUpCircle = icon(LucideArrowUpCircle)
+export const RotateCcw = icon(LucideRotateCcw)
+export const ClipboardCopy = icon(LucideClipboardCopy)
+export const ClipboardPaste = icon(LucideClipboardPaste)
+export const ScanText = icon(LucideScanText)
+export const ImageUp = icon(LucideImageUp)
+export const Camera = icon(LucideCamera)
+export const ScrollText = icon(LucideScrollText)
+export const PanelRight = icon(LucidePanelRight)
+export const CircleCheck = icon(LucideCircleCheck)
+export const CircleX = icon(LucideCircleX)
