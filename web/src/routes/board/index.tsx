@@ -77,6 +77,7 @@ export function Board() {
           placeholder={placeholder}
           agentNames={agentNames}
           collapsed={stacked ? true : undefined}
+          actions={!showArchived && <FinishedMenu />}
           footer={
             <FinishedFooter
               archived={archivedCards.length}
@@ -118,6 +119,17 @@ function FinishedFooter({
   showingArchived: boolean
   onToggleArchived: () => void
 }) {
+  if (archived === 0 && !showingArchived) return null
+  return (
+    <div className="flex min-h-7 items-center px-1">
+      <Button variant="link" size="sm" aria-pressed={showingArchived} onClick={onToggleArchived}>
+        {showingArchived ? 'Back to Finished' : `Archived (${archived})`}
+      </Button>
+    </div>
+  )
+}
+
+function FinishedMenu() {
   const ctx = useStateContext()
   const caps = useCapability()
   const self = useSelf()
@@ -126,29 +138,20 @@ function FinishedFooter({
   const openDialog = useStore((s) => s.openPaletteDialog)
   const canArchive = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self).eligible.length > 0
   const canFree = admin && releaseFinishedPlan(workspaceRuns(activeWorkspace, ctx), caps, self).eligible.length > 0
-  if (archived === 0 && !showingArchived && !canArchive && !canFree) return null
+  if (!canArchive && !canFree) return null
 
   return (
-    <div className="flex min-h-7 items-center justify-between gap-2 px-1">
-      {(archived > 0 || showingArchived) && (
-        <Button variant="link" size="sm" aria-pressed={showingArchived} onClick={onToggleArchived}>
-          {showingArchived ? 'Back to Finished' : `Archived (${archived})`}
+    <Menu>
+      <MenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" label="More finished-run actions">
+          <Ellipsis />
         </Button>
-      )}
-      {!showingArchived && (canArchive || canFree) && (
-        <Menu>
-          <MenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" label="More finished-run actions" className="ml-auto">
-              <Ellipsis />
-            </Button>
-          </MenuTrigger>
-          <MenuContent align="end">
-            {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive closed runs…</MenuItem>}
-            {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained containers…</MenuItem>}
-          </MenuContent>
-        </Menu>
-      )}
-    </div>
+      </MenuTrigger>
+      <MenuContent align="end">
+        {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive closed runs…</MenuItem>}
+        {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained containers…</MenuItem>}
+      </MenuContent>
+    </Menu>
   )
 }
 

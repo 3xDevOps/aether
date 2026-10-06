@@ -491,6 +491,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     await screen.findByText('Your environment starts on first open')
+    expect(screen.queryByRole('button', { name: 'Add terminal tab' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save environment' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Environment actions' })).toBeNull()
   })

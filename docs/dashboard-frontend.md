@@ -829,8 +829,9 @@ the card. A failed send keeps the draft and shows the server's error.
 
 **Finished footer.** **Archived (n)** swaps Finished for archived runs in
 scope (Mine applies), each with `deletesInLabel(deletes_at)`; **Back to
-Finished** returns. **More finished-run actions** holds **Archive closed
-runs…** and, for admins, **Free retained containers…**. Both open the
+Finished** returns. **More finished-run actions** (`…`, in the Finished
+heading, only when it has an item) holds **Archive closed runs…** and, for
+admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
 drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
@@ -2597,7 +2598,9 @@ actions** (`…`) holds the rest, and the save hint **Installs here reach
 agents after you save.** is the header's second line while nothing is saved.
 On a phone the top bar already names the view, so the actions sit at the end
 of the tab row. The tab strip is 32px, 44px on a touch screen, and holds up
-to six tabs; **Add terminal tab** opens another.
+to six tabs; **Add terminal tab** opens another. Before the first open there
+is no **Add terminal tab**, and no strip at all when it would be empty; the
+empty state's **Open** starts the environment.
 
 **Environment actions** holds capability-gated **Forward port**, **Stop
 environment…** and **Reset to standard…**. Stopping the container and

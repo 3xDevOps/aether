@@ -12,6 +12,7 @@ export function Column({
   placeholder,
   agentNames,
   collapsed,
+  actions,
   footer,
 }: {
   column: BoardColumn
@@ -19,6 +20,7 @@ export function Column({
   placeholder: Placeholder
   agentNames: Record<string, string>
   collapsed?: boolean
+  actions?: ReactNode
   footer?: ReactNode
 }) {
   const [open, setOpen] = useState(!collapsed)
@@ -51,9 +53,12 @@ export function Column({
     return (
       <Collapsible asChild open={open} onOpenChange={setOpen}>
         <section aria-label={column.label} className="flex min-w-0 flex-col gap-2">
-          <h2 className="text-ui font-medium text-text">
-            <CollapsibleTrigger className="gap-2">{heading}</CollapsibleTrigger>
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-ui font-medium text-text">
+              <CollapsibleTrigger className="gap-2">{heading}</CollapsibleTrigger>
+            </h2>
+            {actions && <div className="ml-auto">{actions}</div>}
+          </div>
           <CollapsibleContent className="flex flex-col gap-2">{body}</CollapsibleContent>
         </section>
       </Collapsible>
@@ -61,7 +66,10 @@ export function Column({
   }
   return (
     <section aria-label={column.label} className="flex min-w-0 flex-col gap-2 lg:min-h-0">
-      <h2 className="flex h-7 shrink-0 items-center gap-2 px-1 text-ui font-medium text-text">{heading}</h2>
+      <div className="flex h-7 shrink-0 items-center gap-2 px-1">
+        <h2 className="flex items-center gap-2 text-ui font-medium text-text">{heading}</h2>
+        {actions && <div className="ml-auto">{actions}</div>}
+      </div>
       <div className="flex flex-1 flex-col gap-2 lg:-mx-1 lg:min-h-0 lg:overflow-y-auto lg:px-1 lg:pb-4">{body}</div>
     </section>
   )

@@ -516,7 +516,7 @@ export function TerminalDock({
           selectTab(tab)
           focusTerminal()
         }}
-        onAddTab={open}
+        onAddTab={empty ? undefined : open}
         maxTabs={maxTabs}
         onCloseTab={closeTab}
         height={terminalDockHeight}

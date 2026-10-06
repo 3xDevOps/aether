@@ -261,6 +261,7 @@ export function Dock({
       )}
       <div
         ref={headerRef}
+        hidden={fill && tabs.length === 0 && !onAddTab && !actions && !persistentActions}
         className="flex min-h-8 flex-wrap items-center gap-x-1 border-b border-seam bg-chrome px-2 coarse:min-h-11"
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
