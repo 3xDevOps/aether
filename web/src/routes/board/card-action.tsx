@@ -6,23 +6,16 @@ import { PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { isEnhanced, needsYouConditions, type NeedsYouTarget } from '@/lib/needs-you'
+import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 
-export type CardAction = 'approve' | 'reply' | 'open'
+const conditionOf = (card: BoardCard) => needsYouConditions.find((c) => c.id === card.needsYou)
 
-export function cardAction(card: BoardCard, approval: Approval | undefined): CardAction | undefined {
+export function cardAction(card: BoardCard, approval: Approval | undefined): PrimaryAction | undefined {
   if (card.group !== 'needs-you') return undefined
-  if (card.swarm) return 'open'
-  if (card.needsYou === 'permission' && approval) return 'approve'
-  if (card.needsYou === 'stopped') return 'reply'
-  return 'open'
-}
-
-function answersInTerminal(card: BoardCard): boolean {
-  return (card.needsYou === 'permission' || card.needsYou === 'question') && !isEnhanced(card.run)
+  return conditionOf(card)?.action(card.run, approval) ?? openAction
 }
 
 // The Run Room lives in the run view, so a notes target opens the run.
@@ -36,10 +29,21 @@ const routeOf: Record<NeedsYouTarget, 'terminal' | 'diff' | 'missions'> = {
 
 export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
   const { run } = card
-  const target = card.swarm ? 'swarm' : needsYouConditions.find((c) => c.id === card.needsYou)?.target ?? 'run'
-  const route = routeOf[target]
+  const route = routeOf[conditionOf(card)?.target ?? (card.swarm ? 'swarm' : 'run')]
   if (route === 'missions' && run.mission_id) navigate('missions', { missionId: run.mission_id })
   else navigate(route === 'diff' ? 'diff' : 'terminal', { runId: run.id })
+}
+
+export async function approveRequest(runID: string, approval: Approval) {
+  try {
+    const done = await api.approvalDecide(runID, approval.id, true)
+    useStore
+      .getState()
+      .decideApproval(done.workspace_id, done.id, done.decision, done.decided_by ?? '', done.decided_at ?? new Date().toISOString())
+    toast.success(`Approved: ${approval.action}`)
+  } catch (err) {
+    toast.error(`Approve failed: ${message(err)}`)
+  }
 }
 
 export function CardActionButton({
@@ -49,42 +53,28 @@ export function CardActionButton({
   onReply,
 }: {
   card: BoardCard
-  action: CardAction
+  action: PrimaryAction
   approval: Approval | undefined
   onReply: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
-  const decideApproval = useStore((s) => s.decideApproval)
   const [busy, setBusy] = useState(false)
 
-  const approve = async () => {
-    if (!approval) return
-    setBusy(true)
-    try {
-      const done = await api.approvalDecide(card.run.id, approval.id, true)
-      decideApproval(done.workspace_id, done.id, done.decision, done.decided_by ?? '', done.decided_at ?? new Date().toISOString())
-      toast.success(`Approved: ${approval.action}`)
-    } catch (err) {
-      toast.error(`Approve failed: ${message(err)}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const label = action === 'approve' ? 'Approve' : action === 'reply' ? 'Reply' : answersInTerminal(card) ? 'Open terminal' : 'Open'
   return (
     <Button
       variant="secondary"
       size="sm"
-      data-card-action={action}
+      data-card-action={action.kind}
       disabled={busy}
       onClick={() => {
-        if (action === 'approve') void approve()
-        else if (action === 'reply') onReply()
+        if (action.kind === 'approve' && approval) {
+          setBusy(true)
+          void approveRequest(card.run.id, approval).finally(() => setBusy(false))
+        } else if (action.kind === 'reply') onReply()
         else openCard(card, navigate)
       }}
     >
-      {label}
+      {action.label}
     </Button>
   )
 }

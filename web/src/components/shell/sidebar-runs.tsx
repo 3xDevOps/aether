@@ -8,6 +8,7 @@ import { useDelayed } from '@/lib/hooks'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
+import { approveRequest } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useRun, useSidebarGroups, useStateContext } from '@/store/hooks'
@@ -22,13 +23,6 @@ export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
   if (condition?.target === 'changes') return { name: 'diff', params: { runId: run.id } }
   if (condition?.target === 'swarm' && run.mission_id) return { name: 'missions', params: { missionId: run.mission_id } }
   return { name: 'terminal', params: { runId: run.id } }
-}
-
-const actionLabel: Partial<Record<string, string>> = {
-  question: 'Reply',
-  'room-question': 'Reply',
-  'swarm-question': 'Reply',
-  'unreviewed-finish': 'Review',
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {
@@ -253,17 +247,22 @@ function AnswerButton({ run }: { run: RunRecord }) {
   const ctx = useStateContext()
   const condition = needsYou(run, ctx)
   if (!condition) return null
+  const approval = ctx.approvalsByRun[run.id]?.[0]
+  const action = condition.action(run, approval)
   return (
     <Button
       variant="ghost"
       size="sm"
       tabIndex={-1}
       onClick={() => {
-        const route = needsYouRoute(run, ctx)
-        navigate(route.name, route.params)
+        if (action.kind === 'approve' && approval) void approveRequest(run.id, approval)
+        else {
+          const route = needsYouRoute(run, ctx)
+          navigate(route.name, route.params)
+        }
       }}
     >
-      {actionLabel[condition.id] ?? 'Open'}
+      {action.label}
     </Button>
   )
 }

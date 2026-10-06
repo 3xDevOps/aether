@@ -202,6 +202,19 @@ describe('board columns', () => {
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
   })
 
+  it('acts on a swarm card for the integrator itself when the integrator needs you', () => {
+    const integrator = run({
+      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+      pending_inputs: [{ id: 'p', session_id: 's', kind: 'permission' }],
+    })
+    seed([integrator])
+    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
+    renderBoard()
+
+    fireEvent.click(cardOf('coordinate checkout work').getByRole('button', { name: 'Open terminal' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: 'run_integrator' } })
+  })
+
   it('renders card meta contributions: an overlap count and a swarm conflict count', () => {
     const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
     seed([integrator, working])
@@ -275,7 +288,7 @@ describe('Needs you actions', () => {
     renderBoard()
 
     expect(column('Needs you').getByText('Finished, review the result')).toBeDefined()
-    fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Open' }))
+    fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route).toEqual({ name: 'diff', params: { runId: merged.id } })
   })
 

@@ -41,6 +41,13 @@ export type NeedsYouID =
   | 'stopped'
   | 'unreviewed-finish'
 
+export interface PrimaryAction {
+  kind: 'approve' | 'reply' | 'open'
+  label: string
+}
+
+export const openAction: PrimaryAction = { kind: 'open', label: 'Open' }
+
 export interface NeedsYouCondition {
   id: NeedsYouID
   applies: (run: RunRecord, ctx: StateContext) => boolean
@@ -48,6 +55,7 @@ export interface NeedsYouCondition {
   reason: (run: RunRecord, ctx: StateContext) => string
   since: (run: RunRecord, ctx: StateContext) => string
   target: NeedsYouTarget
+  action: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
 }
 
 interface Spec {
@@ -60,6 +68,7 @@ interface Spec {
   reason: (run: RunRecord, ctx: StateContext) => string
   since?: (run: RunRecord, ctx: StateContext) => string | undefined
   target: NeedsYouTarget
+  action?: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
 }
 
 function condition(spec: Spec): NeedsYouCondition {
@@ -70,6 +79,7 @@ function condition(spec: Spec): NeedsYouCondition {
   return {
     id: spec.id,
     target: spec.target,
+    action: spec.action ?? (() => openAction),
     reason: spec.reason,
     since: (run, ctx) => spec.since?.(run, ctx) ?? run.stateChangedAt,
     applies: (run, ctx) => {
@@ -85,6 +95,9 @@ function condition(spec: Spec): NeedsYouCondition {
 export function isEnhanced(run: Pick<Run, 'acp'>): boolean {
   return run.acp === true
 }
+
+const answerIn = (run: RunRecord, enhancedLabel: string): PrimaryAction =>
+  ({ kind: 'open', label: isEnhanced(run) ? enhancedLabel : 'Open terminal' })
 
 // `outcome_unseen` is owner-scoped on the server.
 export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
@@ -208,6 +221,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       if (approval) return `Permission: ${approval.action}`
       return isEnhanced(run) ? 'Permission requested' : 'Permission: answer in the terminal'
     },
+    action: (run, approval) => (approval ? { kind: 'approve', label: 'Approve' } : answerIn(run, 'Open')),
     since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
   }),
   condition({
@@ -216,6 +230,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     holds: (run) => nativeRequests(run, questionKinds).length > 0,
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
     reason: (run) => (isEnhanced(run) ? 'Question from the agent' : 'Question: answer in the terminal'),
+    action: (run) => answerIn(run, 'Answer'),
   }),
   condition({
     id: 'queued-message',
@@ -243,6 +258,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
         ? (run.unanswered_questions ?? 0) > 0
         : openRoomQuestions(run, ctx).length > 0),
     resolvers: (run) => [run.member_id],
+    action: () => ({ kind: 'open', label: 'Answer' }),
     reason: (run, ctx) => {
       const question = openRoomQuestions(run, ctx)[0]
       if (!question) return 'Open question in the Run Room'
@@ -258,6 +274,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       openSwarmQuestions(run, ctx).length > 0 || (currentIntegrator(run, ctx)?.open_questions ?? 0) > 0,
     resolvers: (run, ctx) => [currentIntegrator(run, ctx)?.accountable_human_id],
     admins: true,
+    action: () => ({ kind: 'open', label: 'Answer' }),
     reason: (run, ctx) => {
       const question = openSwarmQuestions(run, ctx)[0]
       return question ? `The integrator asks: ${question.body}` : 'The integrator has a question'
@@ -316,6 +333,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       !run.reason?.startsWith(blockedPrefix) &&
       enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],
+    action: () => ({ kind: 'reply', label: 'Reply' }),
     reason: (run, ctx) => {
       const label = run.reason?.startsWith(stalledPrefix) ? 'No activity' : 'Agent idle'
       return run.stateChangedAtEstimated ? label : `${label} for ${waited(run.stateChangedAt, ctx.now)}`
@@ -327,6 +345,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     background: true,
     holds: (run) => awaitingReview(run),
     resolvers: (run) => [run.member_id],
+    action: () => ({ kind: 'open', label: 'Review' }),
     reason: (run) =>
       run.status === 'failed' ? 'Failed, review the result' : 'Finished, review the result',
   }),

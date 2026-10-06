@@ -349,10 +349,10 @@ A run row is a 28px `ListRow` (44px on a coarse pointer): a shaped state dot,
 the title, and the agent's monochrome glyph. Its accessible name starts with
 the state word, then the workspace when it is another one, the title and the
 reason. Paused, finished and other members' working rows recede: their title
-is in the muted colour. A Needs you row offers its answer on hover, focus and
-a coarse pointer: **Reply** for a question, **Review** for an unreviewed
-finish, otherwise **Open**; the action and the row itself both go to the view
-the condition names. The list is one tab stop (roving `tabindex`); Arrow
+is in the muted colour. A Needs you row offers the condition's primary
+action on hover, focus and a coarse pointer, the same one its board card
+shows (see [Board](#board)): **Approve** resolves in place, every other
+action and the row itself go to the view the condition names. The list is one tab stop (roving `tabindex`); Arrow
 keys, Home and End move within it, `j` and `k` move from anywhere (starting
 at the open run), and `u` opens the next run that needs you, oldest first.
 
@@ -840,21 +840,30 @@ A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
 
 A click anywhere on the card opens the run. A swarm is one card: the
 objective, a phase word ("Swarm active") and its workers' counts; it opens
-the swarm page and renders `card:meta` for its root run. Workers never
+the swarm page, or acts for the root run when the root itself needs you, and
+renders `card:meta` for its root run. Workers never
 appear as cards of their own, archived ones included; a swarm whose
 integrator is not listed is rooted at its oldest worker. `useBoard` reuses a
 card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
 
 A Needs you card shows its primary action on hover, on keyboard focus and
-always on a touch screen (`card-action.tsx`):
+always on a touch screen (`card-action.tsx`). Each condition in
+`src/lib/needs-you.ts` names one action, which the card and the sidebar row
+both show:
 
 | Condition | Action |
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
-| Agent idle or stalled | **Reply**: a popover composer on the card; the message goes through `run.inject`, `Mod+Enter` sends |
+| Agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run |
 | Native permission or question on a Standard run | **Open terminal** |
-| Anything else | **Open**: where the condition's `target` in `src/lib/needs-you.ts` points - the run (requests, Run Room questions, holds), its Diff for an unreviewed finish, or the swarm page |
+| Native question on an Enhanced run, Run Room or swarm question | **Answer** |
+| Unreviewed finish | **Review** |
+| Anything else | **Open** |
+
+Every action but Approve and the card's Reply goes where the condition's
+`target` points: the run (requests, Run Room questions, holds), its Diff for
+an unreviewed finish, or the swarm page.
 
 While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so

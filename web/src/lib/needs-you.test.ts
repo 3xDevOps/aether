@@ -1,6 +1,6 @@
 import { needsYou, needsYouConditions, waitingOn, type NeedsYouID } from '@/lib/needs-you'
 import { presentRun } from '@/lib/status'
-import type { MissionAttempt } from '@/lib/types'
+import type { MissionAttempt, Run } from '@/lib/types'
 import type { MissionDetail } from '@/store/missions'
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
@@ -213,7 +213,19 @@ describe('needs you conditions', () => {
 
   it('treats a Background run the server drives over ACP as Enhanced', () => {
     const background = record({ mode: 'headless', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'permission' }] })
-    expect(presentRun(background, stateContext()).reason).toBe('Permission requested')
+    const shown = presentRun(background, stateContext())
+    expect(shown.reason).toBe('Permission requested')
+    expect(shown.needsYou?.action(background, undefined)).toEqual({ kind: 'open', label: 'Open' })
+  })
+
+  it.each([
+    [{ pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Open terminal'],
+    [{ acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Answer'],
+    [{ status: 'needs-attention' }, 'Reply'],
+    [{ status: 'completed', outcome_unseen: true }, 'Review'],
+  ] satisfies [Partial<Run>, string][])('gives %o the primary action %s', (fields, label) => {
+    const shown = record(fields)
+    expect(needsYou(shown, stateContext())?.action(shown, undefined).label).toBe(label)
   })
 
   it('names no wait for a run parked before the snapshot', () => {
