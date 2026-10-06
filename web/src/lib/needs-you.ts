@@ -251,11 +251,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'swarm',
     background: true,
     holds: (run, ctx) => {
-      if (run.mission_role !== 'integrator') return false
       const mission = currentIntegrator(run, ctx)
-      // Without the swarm's record only a failure is certain: a completed
-      // integrator may simply have finished the swarm.
-      if (!missionOf(run, ctx)) return run.status === 'failed' || run.status === 'interrupted'
       return mission !== undefined && (Boolean(mission.integrator_launch_error) || isTerminal(run.status))
     },
     resolvers: (run, ctx) => [swarmHuman(run, ctx)],

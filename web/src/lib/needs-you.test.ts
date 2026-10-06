@@ -266,6 +266,19 @@ describe('swarm workers', () => {
   })
 })
 
+describe('stopped integrators', () => {
+  const failed = record({ ...integrator, status: 'failed' })
+
+  it('counts nothing until the swarm record loads', () => {
+    expect(needsYou(failed, stateContext())).toBeUndefined()
+  })
+
+  it('counts nothing for a replaced integrator', () => {
+    const replaced = stateContext({ missions: { mission_1: mission({ current_integrator_run_id: 'run_next' }) } })
+    expect(needsYou(failed, replaced)).toBeUndefined()
+  })
+})
+
 describe('background runs', () => {
   it('reach Needs you only on an unreviewed finish or a failure', () => {
     const ctx = stateContext({ approvalsByRun: { run_1: [approval()] } })

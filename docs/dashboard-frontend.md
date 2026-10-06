@@ -1032,7 +1032,10 @@ first that applies:
 A condition that applies to someone else leaves the run Working with
 "Waiting for Alice". A worker in a running swarm with a live integrator
 counts only for a control hold or a blocked report: the integrator handles
-its stops and requests. A Background (`headless`) run reaches Needs you only
+its stops and requests. A stopped integrator counts only while the swarm
+record names it as current; the dashboard loads the selected workspace's
+swarms, so another workspace's stopped integrator appears once you select
+that workspace. A Background (`headless`) run reaches Needs you only
 through the swarm rows, a blocked report, an Enhanced failure or an unreviewed finish. A
 Working run's reason is what its agent is doing ("Reading src/auth.ts", from
 `run.agent`), else "Queued", "Starting" or "Agent working".
