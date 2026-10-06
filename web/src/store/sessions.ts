@@ -1,7 +1,8 @@
 import type { Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { Event, RoomMessage, RoomMessageState, RunInputRequest } from '@/lib/types'
+import { inputTitle } from '@/lib/run-requests'
+import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { toolTenses, type AgentPayload } from '@/store/activity'
 import { isTerminal, type RunRecord } from '@/store/runs'
@@ -106,13 +107,13 @@ export interface WorkEntry {
 
 export type SessionRow =
   | { kind: 'user'; id: string; at: string; authorID: string; body: string; delivery: Delivery; deliverAfter?: string; failure?: string }
-  | { kind: 'note'; id: string; at: string; authorID: string; body: string }
+  | { kind: 'note'; id: string; at: string; authorID: string; body: string; question?: boolean }
   | { kind: 'work'; id: string; at: string; summary: string; entries: WorkEntry[] }
   | {
       kind: 'request'
       id: string
       at: string
-      answer: 'terminal' | 'reply'
+      answer: 'input' | 'reply'
       title: string
       body?: string
       authorID?: string
@@ -221,13 +222,6 @@ function statusRow(event: Event): SessionRow | null {
   }
 }
 
-const requestTitle: Record<RunInputRequest['kind'], string> = {
-  permission: 'The agent asks for permission',
-  question: 'The agent asks a question',
-  form: 'The agent asks you to fill in a form',
-  extension_ui: 'The agent opened a dialog',
-}
-
 /** Room steers are delivered through the same inject that records a timeline
  * steer, so a timeline steer matching a room message is the same message. */
 function sameSteer(row: SessionRow, steer: RoomMessage): boolean {
@@ -272,6 +266,8 @@ export function rowsForRun({ run, events, room, memberName }: SessionSources): S
       } })
     } else if (m.kind === 'comment') {
       items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body } })
+    } else if (m.kind === 'question' && m.actor_id === run.member_id) {
+      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body, question: true } })
     } else if (m.kind === 'question') {
       const reply = replies.get(m.id)
       items.push({ at: m.created_at, order, row: {
@@ -314,9 +310,8 @@ export function rowsForRun({ run, events, room, memberName }: SessionSources): S
       kind: 'request',
       id: `input:${request.id}`,
       at: run.stateChangedAt,
-      answer: 'terminal',
-      title: requestTitle[request.kind],
-      body: 'Answer in the terminal',
+      answer: 'input',
+      title: inputTitle[request.kind],
     })
   }
   return rows

@@ -5,7 +5,8 @@ import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { Approval, RoomMessage, RunInputRequest } from '@/lib/types'
+import { inputHint, inputTitle } from '@/lib/run-requests'
+import type { Approval, RoomMessage } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
@@ -22,13 +23,6 @@ export const requestCardID = {
 
 const emptyMessages: RoomMessage[] = []
 const emptyApprovals: Approval[] = []
-
-const inputTitle: Record<RunInputRequest['kind'], string> = {
-  permission: 'The agent asks for permission',
-  question: 'The agent asks a question',
-  form: 'The agent asks you to fill in a form',
-  extension_ui: 'The agent opened a dialog',
-}
 
 function secondsUntil(at: string | undefined): number {
   return at ? Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000)) : 0
@@ -122,9 +116,9 @@ export function NeedsYouCards({ run, agent, room, nav }: {
           key={input.id}
           id={requestCardID.input(input.id)}
           title={inputTitle[input.kind]}
-          actions={agent.hasAgentTerminal && <Button size="sm" onClick={openTerminal}>Open terminal</Button>}
+          actions={agent.hasAgentTerminal && <Button size="sm" variant="secondary" onClick={openTerminal}>Open terminal</Button>}
         >
-          {agent.hasAgentTerminal ? 'Answer in the terminal.' : 'Answer it from the agent’s session.'}
+          {inputHint(agent.hasAgentTerminal)}
         </RequestCard>
       ))}
       {approvals.map((approval) => (

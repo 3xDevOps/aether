@@ -7,6 +7,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { RequestCard } from '@/components/ui/request-card'
 import { EventRow, MessageRow, WorkEntry, WorkGroup } from '@/components/ui/timeline'
 import { api } from '@/lib/api'
+import { inputHint } from '@/lib/run-requests'
 import type { RoomMessage } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { Composer } from '@/routes/run/composer'
@@ -43,7 +44,7 @@ function Row({ row, agent, nav }: { row: SessionRow; agent: AgentTerminal; nav: 
       )
     case 'note':
       return (
-        <MessageRow variant="note" author={`${name(row.authorID)} · note`} meta={<RelativeTime at={row.at} />}>
+        <MessageRow variant="note" author={`${name(row.authorID)} · ${row.question ? 'question' : 'note'}`} meta={<RelativeTime at={row.at} />}>
           {row.body}
         </MessageRow>
       )
@@ -67,16 +68,16 @@ function Row({ row, agent, nav }: { row: SessionRow; agent: AgentTerminal; nav: 
         <RequestCard
           title={row.title}
           meta={<RelativeTime at={row.at} />}
-          actions={row.answer === 'terminal'
+          actions={row.answer === 'input'
             ? agent.hasAgentTerminal && (
-              <Button size="sm" onClick={() => {
+              <Button size="sm" variant="secondary" onClick={() => {
                 nav.go('terminal')
                 if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()
               }}>Open terminal</Button>
             )
             : <Button size="sm" variant="secondary" onClick={() => nav.reveal(requestCardID.question(row.id))}>Reply</Button>}
         >
-          {row.body}
+          {row.answer === 'input' ? inputHint(agent.hasAgentTerminal) : row.body}
         </RequestCard>
       )
     case 'event':

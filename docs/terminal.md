@@ -239,7 +239,8 @@ this run, shown when there is any or the run belongs to a swarm), **Notes**
 and the run record. A note is for people only: the agent never sees it.
 **Add** posts it as a `comment`. A question a teammate posts appears in
 **Needs you** for the run owner with a reply field; **Reply** posts a
-correlated `reply`. The run snapshot counts unanswered questions from anyone
+correlated `reply`. The owner's own question shows in the Session view as a
+plain message with no action. The run snapshot counts unanswered questions from anyone
 but the owner, so the run is in the owner's **Needs you** before anyone opens
 it; the owner's own questions are for teammates. The question does not change
 the run's wire status.

@@ -81,10 +81,17 @@ describe('session rows', () => {
     ])
   })
 
-  it('ends with the terminal requests and the finish', () => {
+  it('shows the owner\'s own question as a note with no request', () => {
+    const own = roomMessage({ id: 'q1', kind: 'question', actor_id: alice.id, body: 'anyone know the port?', created_at: '2026-08-14T10:05:00Z' })
+    expect(rows({ run: toRecord(run()), events: [], room: [own], memberName }).at(-1)).toEqual({
+      kind: 'note', authorID: alice.id, body: 'anyone know the port?', question: true,
+    })
+  })
+
+  it('ends with the agent\'s pending requests and the finish', () => {
     const waiting = toRecord(run({ pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }))
     expect(rows({ run: waiting, events: [], room: [], memberName }).at(-1)).toEqual({
-      kind: 'request', answer: 'terminal', title: 'The agent asks for permission', body: 'Answer in the terminal',
+      kind: 'request', answer: 'input', title: 'The agent asks for permission',
     })
     const failed = toRecord(run({ status: 'failed', reason: 'agent exited 1', finished_at: '2026-08-14T10:09:00Z' }))
     expect(rows({ run: failed, events: [], room: [], memberName }).at(-1)).toEqual({

@@ -1491,9 +1491,12 @@ The Session view is a `virtua` list in a 736px column over `rowsForRun`
 messages, the run record and its pending inputs: `user` (a message to the
 agent with its delivery word), `note`, `work` (consecutive tool calls folded
 into "Ran 3 commands and read 2 files", expanding to verb-first entries),
-`request` (a terminal request reads "Answer in the terminal" with **Open
-terminal**; a teammate question offers **Reply**), `event` and `finished`. A
-timeline steer that matches a room message is shown once. The log keeps the
+`request` (an agent request reads "Answer in the terminal." with **Open
+terminal**, or "Answer it from the agent's session." when the run has no agent
+terminal; a teammate question offers **Reply**, the owner's own question is a
+plain message), `event` and `finished`. Request titles and that copy live in
+`lib/run-requests.ts`, shared with Details. A timeline steer that matches a
+room message is shown once. The log keeps the
 last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
 row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 `steer_request` with the lease the tab holds; its rules are in
