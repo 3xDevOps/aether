@@ -135,9 +135,10 @@ describe('swarms', () => {
     expect(groups.finished).toEqual([])
   })
 
-  it('lists workers standalone when no integrator is listed', () => {
-    const groups = runGroups(input([worker('w1'), worker('w2')]))
-    expect(ids(groups.working).sort()).toEqual(['w1', 'w2'])
+  it('roots a swarm at its oldest worker when no integrator is listed', () => {
+    const groups = runGroups(input([worker('w1'), worker('w2', { created_at: '2026-08-14T09:00:00Z' })]))
+    expect(ids(groups.working)).toEqual(['w2'])
+    expect(ids(groups.working[0].swarm?.members ?? [])).toEqual(['w1'])
   })
 })
 

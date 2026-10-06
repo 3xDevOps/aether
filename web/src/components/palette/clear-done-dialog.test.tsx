@@ -71,7 +71,7 @@ describe('release confirmation dialog', () => {
     })
     render(<ReleaseFinishedDialog />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Release 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Free 1' }))
 
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
     expect(archiveMocks.runRelease).toHaveBeenCalledTimes(1)
@@ -81,9 +81,9 @@ describe('release confirmation dialog', () => {
   it('says so when no finished run keeps its container', () => {
     useStore.setState({ paletteDialog: 'release-finished' })
     render(<ReleaseFinishedDialog />)
-    expect(screen.getByText('No finished runs hold resources')).toBeDefined()
+    expect(screen.getByText('No finished runs keep a container')).toBeDefined()
     expect(screen.queryByText(/cannot be relaunched/)).toBeNull()
-    expect(screen.queryByRole('button', { name: /Release/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Free/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
     expect(archiveMocks.runRelease).not.toHaveBeenCalled()

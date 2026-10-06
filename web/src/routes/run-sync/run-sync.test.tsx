@@ -132,7 +132,7 @@ describe('sync badge', () => {
     })
     render(<Board />)
 
-    const badges = screen.getAllByLabelText('Sync overlay running')
+    const badges = screen.getAllByRole('button', { name: 'Syncing' })
     expect(badges).toHaveLength(1)
     const card = screen
       .getByRole('button', { name: 'mirrored locally' })

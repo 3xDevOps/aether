@@ -34,9 +34,9 @@ test('an agent success report waits in Needs you until its owner opens the run',
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
   await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
   await expect(card('Needs you').getByText('Finished, review the result')).toBeVisible()
-  await expect(card('Needs you').getByLabel('Needs you', { exact: true })).toBeVisible()
 
-  await card('Needs you').getByRole('button', { name: task, exact: true }).click()
+  await card('Needs you').hover()
+  await card('Needs you').getByRole('button', { name: 'Open', exact: true }).click()
   await expect
     .poll(async () => (await alice.api.rpc<{ run: { outcome_unseen?: boolean } }>('run.get', { run_id: run.id })).run.outcome_unseen ?? false)
     .toBe(false)

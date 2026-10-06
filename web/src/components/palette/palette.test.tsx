@@ -846,9 +846,9 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Release finished resources...'))
+    fireEvent.click(await screen.findByText('Free retained containers...'))
     expect(api.runRelease).not.toHaveBeenCalled()
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Release 1' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(archived.id))
     expect(useStore.getState().runs[archived.id]?.archived_at).toBeDefined()
   })
