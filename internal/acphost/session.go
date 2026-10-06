@@ -90,17 +90,35 @@ const promptAcceptGrace = 1500 * time.Millisecond
 // turnAck resolves when the agent accepts a turn's prompt (its first update
 // or request) or answers it.
 type turnAck struct {
-	done chan struct{}
-	err  error
+	done      chan struct{}
+	err       error
+	delivered func(error)
 }
 
-func (a *turnAck) resolve(err error) {
+func (s *Session) resolveLocked(a *turnAck, err error) {
 	select {
 	case <-a.done:
+		return
 	default:
-		a.err = err
-		close(a.done)
 	}
+	a.err = err
+	close(a.done)
+	if a.delivered == nil {
+		return
+	}
+	switch {
+	case err == nil || errors.Is(err, ErrClosed):
+	case s.conn.closed():
+		err = ErrClosed
+	default:
+		err = fmt.Errorf("acphost: the agent refused the prompt: %w", err)
+	}
+	s.callback(func() { a.delivered(err) })
+}
+
+type queuedPrompt struct {
+	blocks    []acp.ContentBlock
+	delivered func(error)
 }
 
 // Session ties an agent connection to its item log and viewers.
@@ -119,7 +137,7 @@ type Session struct {
 	turn       int64
 	turnActive bool
 	starting   *turnAck
-	queue      [][]acp.ContentBlock
+	queue      []queuedPrompt
 	subs       map[chan Item]struct{}
 	closed     bool
 	capped     bool
@@ -245,8 +263,10 @@ func (s *Session) Close() error { return s.conn.Close() }
 // Prompt sends input to the agent. With no turn running it starts one and
 // returns once the agent accepted it; a refusal is an error. While a turn
 // runs, steer asks the agent to add the input to that turn if it advertises
-// steering; otherwise the input waits for the turn to end.
-func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool) (Receipt, error) {
+// steering; otherwise the input waits for the turn to end. delivered, if set,
+// is called once for a queued prompt: with nil when the agent accepts it, or
+// with why it was never delivered.
+func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool, delivered func(error)) (Receipt, error) {
 	if len(blocks) == 0 {
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
@@ -256,12 +276,12 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks)
+		ack := s.startTurnLocked(blocks, nil)
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
 	if !steer || !s.conn.Info().Steering {
-		s.queue = append(s.queue, blocks)
+		s.queue = append(s.queue, queuedPrompt{blocks, delivered})
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeQueued}, nil
 	}
@@ -306,11 +326,11 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks)
+		ack := s.startTurnLocked(blocks, nil)
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
-	s.queue = append(s.queue, blocks)
+	s.queue = append(s.queue, queuedPrompt{blocks, delivered})
 	s.mu.Unlock()
 	return Receipt{Outcome: OutcomeQueued}, nil
 }
@@ -344,7 +364,7 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bo
 		s.mu.Unlock()
 		return false, nil
 	}
-	ack := s.startTurnLocked(blocks)
+	ack := s.startTurnLocked(blocks, nil)
 	s.mu.Unlock()
 	if _, err := awaitAccept(ctx, ack); err != nil {
 		return false, err
@@ -352,8 +372,8 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bo
 	return true, nil
 }
 
-func (s *Session) startTurnLocked(blocks []acp.ContentBlock) *turnAck {
-	ack := &turnAck{done: make(chan struct{})}
+func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(error)) *turnAck {
+	ack := &turnAck{done: make(chan struct{}), delivered: delivered}
 	s.starting = ack
 	s.turn++
 	s.turnActive = true
@@ -371,7 +391,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock) *turnAck {
 // acceptedLocked resolves the starting turn's prompt as accepted.
 func (s *Session) acceptedLocked() {
 	if s.starting != nil {
-		s.starting.resolve(nil)
+		s.resolveLocked(s.starting, nil)
 		s.starting = nil
 	}
 }
@@ -395,7 +415,6 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
-	ack.resolve(err)
 	if err != nil && s.conn.closed() {
 		// Record what the agent sent before it went away ahead of the
 		// interruption.
@@ -403,6 +422,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.resolveLocked(ack, err)
 	if s.starting == ack {
 		s.starting = nil
 	}
@@ -426,7 +446,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	if len(s.queue) > 0 && !s.conn.closed() {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
-		s.startTurnLocked(next)
+		s.startTurnLocked(next.blocks, next.delivered)
 		return
 	}
 	s.callback(func() {
@@ -673,6 +693,10 @@ func (s *Session) watch() {
 	s.stop()
 	s.conn.drain()
 	s.mu.Lock()
+	if s.starting != nil {
+		s.resolveLocked(s.starting, ErrClosed)
+		s.starting = nil
+	}
 	if s.turnActive {
 		s.proj.endTurn()
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "The agent connection closed before the turn finished."}})
@@ -684,9 +708,12 @@ func (s *Session) watch() {
 			}
 		})
 	}
-	for _, blocks := range s.queue {
+	for _, queued := range s.queue {
+		if queued.delivered != nil {
+			s.callback(func() { queued.delivered(ErrClosed) })
+		}
 		var text strings.Builder
-		for _, b := range blocks {
+		for _, b := range queued.blocks {
 			if b.Text != nil {
 				text.WriteString(b.Text.Text)
 			}

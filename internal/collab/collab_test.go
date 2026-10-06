@@ -198,6 +198,30 @@ func (s *collabStore) TransitionRoomMessage(_ context.Context, id string, state 
 	m.Failure = failure
 	return nil
 }
+func (s *collabStore) MarkRoomMessageAgentQueued(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.messages[id]
+	if m == nil || m.State != store.RoomMessageSent || m.AgentDelivery != "" {
+		return false, nil
+	}
+	m.AgentDelivery = store.AgentQueued
+	return true, nil
+}
+func (s *collabStore) SettleRoomMessageAgentDelivery(_ context.Context, id string, failure *store.RoomMessageFailure) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.messages[id]
+	if m == nil || m.State != store.RoomMessageSent && m.State != store.RoomMessageUncertain || m.AgentDelivery == store.AgentDelivered {
+		return false, nil
+	}
+	if failure != nil {
+		m.State, m.Failure = store.RoomMessageNotSent, failure
+	} else {
+		m.AgentDelivery = store.AgentDelivered
+	}
+	return true, nil
+}
 func (s *collabStore) DecideRoomMessage(_ context.Context, id string, from, to store.RoomMessageState, by string, at time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -298,7 +322,7 @@ type collabPTY struct {
 	err   error
 }
 
-func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, _ bool) (string, error) {
+func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, _ bool, _ func(error)) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
@@ -729,7 +753,7 @@ func TestOverdueWorkerWaitsForSchedulerRecovery(t *testing.T) {
 	worker, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Now: clock.Now,
 		Ready: ready, WorkerInterval: time.Hour,
-		Inject: func(context.Context, domain.RunID, domain.MemberID, string, bool) (string, error) {
+		Inject: func(context.Context, domain.RunID, domain.MemberID, string, bool, func(error)) (string, error) {
 			delivered <- struct{}{}
 			return "", nil
 		},
@@ -1055,7 +1079,7 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	var injectedMessage string
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string, _ bool) (string, error) {
+		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
 			if gotRun != run.ID {
 				t.Fatalf("injected run=%q, want %q", gotRun, run.ID)
 			}
@@ -1103,7 +1127,7 @@ func TestControllerSteerReachesInjectorAndReturnsOutcome(t *testing.T) {
 	var steered bool
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, steer bool) (string, error) {
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, steer bool, _ func(error)) (string, error) {
 			steered = steer
 			return "injected", nil
 		},

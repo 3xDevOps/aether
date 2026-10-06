@@ -216,7 +216,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 		t.Fatalf("sidecar %+v (%v)", sc, err)
 	}
 	waitItems(t, e.sched, run.ID, "the switch notice", noticeTitled("Switched to Standard"))
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "typed into the terminal", false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "typed into the terminal", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if injects := e.pty.injected(); len(injects) != 1 || injects[0].message != "typed into the terminal" {
@@ -260,7 +260,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 	if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != domain.LaunchACP || !row.ACP {
 		t.Fatalf("row mode %q acp %v", row.Mode, row.ACP)
 	}
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "a turn after switching back", turnEnded("end_turn", 2))
@@ -544,7 +544,7 @@ func TestSwitchingRunRefusesInput(t *testing.T) {
 	go func() { done <- e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admitNow) }()
 	waitFor(t, "the switch", func() bool { return e.sched.Switching(run.ID) == domain.LaunchTUI })
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "hello", false); !errors.Is(err, ErrSwitching) {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "hello", false, nil); !errors.Is(err, ErrSwitching) {
 		t.Fatalf("Inject during the switch: %v", err)
 	}
 	close(hold)

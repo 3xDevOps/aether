@@ -1538,6 +1538,11 @@ UPDATE runs SET acp = 1 WHERE mode = 'acp';
 	`
 ALTER TABLE missions ADD COLUMN archived_at INTEGER;
 `,
+	// v53: whether an enhanced run's agent has taken a steer it queued
+	// behind a running turn.
+	`
+ALTER TABLE room_messages ADD COLUMN agent_delivery TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

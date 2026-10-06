@@ -65,6 +65,7 @@ type RoomMessage struct {
 	DecidedBy        string              `json:"decided_by,omitempty"`
 	DecidedAt        *string             `json:"decided_at,omitempty"`
 	DeliveredAt      *string             `json:"delivered_at,omitempty"`
+	AgentDelivery    string              `json:"agent_delivery,omitempty"`
 	Failure          *RoomMessageFailure `json:"failure,omitempty"`
 	CreatedAt        string              `json:"created_at"`
 	UpdatedAt        string              `json:"updated_at"`
@@ -319,7 +320,7 @@ func RoomMessageFromStore(m *store.RoomMessage) RoomMessage {
 		IdempotencyKey: m.IdempotencyKey, State: RoomMessageState(m.State),
 		DeliverAfter: collaborationTimePtr(m.DeliverAfter), DecidedBy: string(m.DecidedBy),
 		DecidedAt: collaborationTimePtr(m.DecidedAt), DeliveredAt: collaborationTimePtr(m.DeliveredAt),
-		Failure:   roomMessageFailureFromStore(m.Failure),
+		AgentDelivery: string(m.AgentDelivery), Failure: roomMessageFailureFromStore(m.Failure),
 		CreatedAt: collaborationTime(m.CreatedAt), UpdatedAt: collaborationTime(m.UpdatedAt),
 	}
 }

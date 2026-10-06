@@ -599,7 +599,7 @@ func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 	f.paused[run] = paused
 }
 
-func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool) (string, error) {
+func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
 	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
 }
 

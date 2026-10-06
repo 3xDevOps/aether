@@ -264,7 +264,7 @@ func TestEnhancedRunSendsTaskAndReportsTurns(t *testing.T) {
 	if sc.AgentSessionID != fresh.HarnessSessionID || sc.AgentExec == nil || sc.AgentExec.ExecID != execs[0].identity.ExecID {
 		t.Fatalf("sidecar session %q exec %+v", sc.AgentSessionID, sc.AgentExec)
 	}
-	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "again", false)
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "again", false, nil)
 	if err != nil || outcome != acphost.OutcomeSent {
 		t.Fatalf("Inject = %q, %v", outcome, err)
 	}
@@ -278,7 +278,7 @@ func TestEnhancedRunPermissionAnsweredOnce(t *testing.T) {
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskPermission, false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskPermission, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var pending []domain.RunInputRequest
@@ -305,7 +305,7 @@ func TestEnhancedRunFormAnswerCarriesValues(t *testing.T) {
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskForm, false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskForm, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var pending []domain.RunInputRequest
@@ -331,7 +331,7 @@ func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptRefuse, false); err == nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptRefuse, false, nil); err == nil {
 		t.Fatal("Inject of a refused prompt succeeded")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
@@ -339,7 +339,7 @@ func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
 		t.Fatalf("reason %q", got.Reason)
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
@@ -362,7 +362,7 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 	e, rt := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptWait)
 	e.waitAgentWorking(t, run.ID)
-	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "queued behind the turn", false)
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "queued behind the turn", false, nil)
 	if err != nil || outcome != acphost.OutcomeQueued {
 		t.Fatalf("Inject = %q, %v", outcome, err)
 	}
@@ -375,7 +375,7 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 				it.Notice.Description == "queued behind the turn"
 		})
 	})
-	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, "after exit", false)
+	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, "after exit", false, nil)
 	if got := collab.ClassifyReceipt(err); got != collab.ReceiptNotSent {
 		t.Fatalf("receipt %q for %v", got, err)
 	}
@@ -416,7 +416,7 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 		entry := s2.runs[run.ID]
 		return entry != nil && entry.agentReport.State == agentstatus.Idle && len(entry.pendingInputs) == 0
 	})
-	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "after restart", false); err != nil {
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "after restart", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 1))
@@ -470,7 +470,7 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	}
 	first := rt.all()[0]
 	waitFor(t, "adapter stopped", first.exited)
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "closed", false); err == nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "closed", false, nil); err == nil {
 		t.Fatal("a closed run took input")
 	}
 	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
@@ -484,7 +484,7 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	if mode := e.sched.acp.session(run.ID).State().Mode; mode != "plan" || !slices.Contains(execs[1].agent.Methods(), acp.AgentMethodSessionSetMode) {
 		t.Fatalf("reopened in mode %q, want the recorded plan mode re-applied", mode)
 	}
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "after reopen", false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "after reopen", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "a turn after reopen", turnEnded("end_turn", 2))
@@ -517,7 +517,7 @@ func TestEnhancedRunAdapterFailureParksRun(t *testing.T) {
 	if !strings.Contains(got.Reason, "enhanced session failed") || !strings.Contains(got.Reason, "managed exec") {
 		t.Fatalf("reason %q", got.Reason)
 	}
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "hi", false); !errors.Is(err, ErrACPNotRunning) {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "hi", false, nil); !errors.Is(err, ErrACPNotRunning) {
 		t.Fatalf("Inject without a session: %v", err)
 	}
 	items := waitItems(t, e.sched, run.ID, "failure notice", func(items []acphost.Item) bool { return len(items) > 0 })
@@ -670,7 +670,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		t.Fatal("resume did not offer the idle session mail that arrived while paused")
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.waitAgentWorking(t, run.ID)

@@ -184,10 +184,19 @@ the agent refuses at once (an error such as `authRequired`) returns that
 error and the message is not sent. During a turn it waits
 for the turn to end (`queued`) unless `steer: true` is set and the agent
 advertised steering when the session opened, which adds it to the running
-turn (`injected`). If the agent connection closes before a queued message
-starts its turn, the transcript records a `Message not delivered: agent
-connection closed` notice with its text; it is not resent when the session
-resumes. A message posted after the connection closed reads `not_sent`.
+turn (`injected`).
+
+A queued room message is `state: "sent"` with `agent_delivery: "queued"`,
+and the dashboard reads **Queued** on it. When its turn starts and the agent
+accepts it, `agent_delivery` becomes `delivered` and the dashboard reads
+**Sent**. If the agent refuses it, the message becomes `not_sent` with
+`failure.code: "agent_refused"` and the agent's error. If the agent
+connection closes before the agent accepts it, the message becomes
+`not_sent` with `failure.code: "agent_disconnected"` and the transcript
+records a `Message not delivered: agent connection closed` notice with its
+text; it is not resent when the session resumes. Each change publishes a
+`workspace.room_message` event. A message posted after the connection
+closed reads `not_sent`.
 
 ## Status
 
@@ -253,7 +262,9 @@ session with `session/resume`, or `session/load` with the replayed history
 dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
-the run parks at `needs-attention` until the next prompt. The restored
+the run parks at `needs-attention` until the next prompt. Messages still
+queued behind that turn read **Not sent** (`agent_disconnected`); send them
+again once the session is back. The restored
 session is switched back to the last mode the log recorded. A session that
 cannot be restored starts a new one and says so in the log.
 

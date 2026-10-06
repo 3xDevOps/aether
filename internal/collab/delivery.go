@@ -4,13 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
+
+const agentDeliveryTimeout = 10 * time.Second
 
 func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error, steer bool) (Result, error) {
 	var (
@@ -50,7 +55,7 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
-	if err := s.settleRoomMessage(ctx, msg, receipt); err != nil {
+	if err := s.settleRoomMessage(ctx, msg, receipt, outcome == acphost.OutcomeQueued); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			var getErr error
 			stored, getErr = s.cfg.Store.GetRoomMessage(ctx, msg.ID)
@@ -131,7 +136,31 @@ func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *dom
 	if s.cfg.Inject == nil {
 		return "", ErrNoInjector
 	}
-	return s.cfg.Inject(ctx, run.ID, actor.ID, message, steer)
+	return s.cfg.Inject(ctx, run.ID, actor.ID, message, steer, func(err error) {
+		s.agentDelivered(context.WithoutCancel(ctx), msg.ID, err)
+	})
+}
+
+func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr error) {
+	ctx, cancel := context.WithTimeout(ctx, agentDeliveryTimeout)
+	defer cancel()
+	var failure *store.RoomMessageFailure
+	switch {
+	case errors.Is(deliveryErr, acphost.ErrClosed):
+		failure = &store.RoomMessageFailure{Code: "agent_disconnected", Message: deliveryErr.Error()}
+	case deliveryErr != nil:
+		failure = &store.RoomMessageFailure{Code: "agent_refused", Message: deliveryErr.Error()}
+	}
+	changed, err := s.cfg.Store.SettleRoomMessageAgentDelivery(ctx, id, failure)
+	if err == nil && changed {
+		var stored *store.RoomMessage
+		if stored, err = s.cfg.Store.GetRoomMessage(ctx, id); err == nil {
+			err = s.publishMessage(ctx, stored)
+		}
+	}
+	if err != nil {
+		slog.Warn("collab: record the agent's delivery of a queued message", "message", id, "error", err)
+	}
 }
 
 // serializeAgentMessage keeps the body and validated container-visible

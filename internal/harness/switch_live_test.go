@@ -178,7 +178,7 @@ func startLiveACP(ctx context.Context, t *testing.T, agent liveAgent, dir, sessi
 func liveTurn(ctx context.Context, t *testing.T, s *acphost.Session, prompt string) string {
 	t.Helper()
 	before := s.Log().LastSeq()
-	if _, err := s.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false); err != nil {
+	if _, err := s.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
 	for {

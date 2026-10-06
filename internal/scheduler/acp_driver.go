@@ -139,14 +139,14 @@ func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
 	return time.Time{}
 }
 
-func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, message string, steer bool) (string, error) {
+func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, message string, steer bool, delivered func(error)) (string, error) {
 	sess, err := d.live(run.ID)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ptyhost.ErrNoSession, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, acpSteerTimeout)
 	defer cancel()
-	receipt, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(message)}, steer)
+	receipt, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(message)}, steer, delivered)
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}
@@ -358,7 +358,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":
-		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false); err != nil {
+		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false, nil); err != nil {
 			slog.Warn("scheduler: send the task to the agent", "run", runID, "error", err)
 		}
 	case !fresh:
@@ -385,7 +385,7 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 			return
 		}
 	}
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false); err != nil {
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
 		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }

@@ -1285,7 +1285,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
-	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi", false); !errors.Is(err, ptyhost.ErrNoSession) {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi", false, nil); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
 	}
 }

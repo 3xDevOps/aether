@@ -597,7 +597,11 @@ switch, and one without `switching` closes it.
 `run.inject` takes `steer: true` to add a message to the agent's running
 turn, and `control_session_id`/`control_generation` to deliver it at once
 rather than after the room's moderation delay; its result's `outcome` is
-`sent`, `queued` or `injected` for an enhanced run.
+`sent`, `queued` or `injected` for an enhanced run. A `queued` message
+carries `agent_delivery: "queued"` until the agent takes it
+(`"delivered"`), or turns `not_sent` with `failure.code` `agent_refused` or
+`agent_disconnected`; each change publishes `workspace.room_message`
+([enhanced-runs.md](enhanced-runs.md#permissions-and-input)).
 
 ### Candidate integration methods
 

@@ -24,7 +24,7 @@ func TestReplayRecordedAgents(t *testing.T) {
 			if s.SessionID() != m.sessionID() {
 				t.Fatalf("session id %q, want %q", s.SessionID(), m.sessionID())
 			}
-			r, err := s.Prompt(context.Background(), textPrompt("Reply with exactly the word pong"), false)
+			r, err := s.Prompt(context.Background(), textPrompt("Reply with exactly the word pong"), false, nil)
 			if err != nil || r.Outcome != OutcomeSent {
 				t.Fatalf("Prompt = %+v, %v", r, err)
 			}
@@ -71,7 +71,7 @@ func TestChunksCoalesce(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("count"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("count"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -129,7 +129,7 @@ func TestToolCallMerge(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("test it"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("test it"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -178,7 +178,7 @@ func TestPlanIsReplacedWhole(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("plan"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("plan"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -212,7 +212,7 @@ func TestPermissionAnswer(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("clean"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("clean"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	pending := rec.waitInputs(t, 1)
@@ -259,7 +259,7 @@ func TestCancelAnswersPendingRequests(t *testing.T) {
 		return map[string]any{"stopReason": "cancelled"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("clean"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("clean"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	pending := rec.waitInputs(t, 1)
@@ -308,7 +308,7 @@ func TestElicitations(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("ship it"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("ship it"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	q := rec.waitInputs(t, 1)[0]
@@ -370,7 +370,7 @@ func TestRestore(t *testing.T) {
 		if len(ofKind(its, KindMessage)) != 0 || len(ofKind(its, KindCommands)) != 1 || len(ofKind(its, KindReset)) != 0 {
 			t.Fatalf("load items %+v", its)
 		}
-		if _, err := s.Prompt(context.Background(), textPrompt("again"), false); err != nil {
+		if _, err := s.Prompt(context.Background(), textPrompt("again"), false, nil); err != nil {
 			t.Fatal(err)
 		}
 		rec.waitIdle(t)
@@ -404,7 +404,7 @@ func TestUnknownUpdateKindsAreKeptRaw(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -441,13 +441,13 @@ func TestPromptsAreSerialized(t *testing.T) {
 		return map[string]any{"outcome": "injected"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if r, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil || r.Outcome != OutcomeSent {
+	if r, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil || r.Outcome != OutcomeSent {
 		t.Fatalf("first: %+v %v", r, err)
 	}
-	if r, err := s.Prompt(context.Background(), textPrompt("second"), false); err != nil || r.Outcome != OutcomeQueued {
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, nil); err != nil || r.Outcome != OutcomeQueued {
 		t.Fatalf("second: %+v %v", r, err)
 	}
-	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true); err != nil || r.Outcome != OutcomeInjected {
+	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true, nil); err != nil || r.Outcome != OutcomeInjected {
 		t.Fatalf("steer: %+v %v", r, err)
 	}
 	<-steered
@@ -488,10 +488,10 @@ func TestUnknownSteerOutcomeIsAnError(t *testing.T) {
 		return map[string]any{"outcome": "somethingNew"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true); err == nil || !strings.Contains(err.Error(), "somethingNew") {
+	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true, nil); err == nil || !strings.Contains(err.Error(), "somethingNew") {
 		t.Fatalf("got %+v %v, want an error naming the outcome", r, err)
 	}
 	close(release)
@@ -526,14 +526,14 @@ func TestSteerStartingAnAgentTurnIsCancelled(t *testing.T) {
 		return map[string]any{"outcome": "startedNewTurn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
 		rec.waitIdle(t)
 		close(turnEnded)
 	}()
-	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true); err == nil || !strings.Contains(err.Error(), "startedNewTurn") {
+	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true, nil); err == nil || !strings.Contains(err.Error(), "startedNewTurn") {
 		t.Fatalf("steer: %+v %v, want an error naming startedNewTurn", r, err)
 	}
 	select {
@@ -545,7 +545,7 @@ func TestSteerStartingAnAgentTurnIsCancelled(t *testing.T) {
 	if len(notices) != 1 || notices[0].Notice.Title != "Steered message stopped" {
 		t.Fatalf("notices %+v", notices)
 	}
-	if r, err := s.Prompt(context.Background(), textPrompt("next"), false); err != nil || r.Outcome != OutcomeSent {
+	if r, err := s.Prompt(context.Background(), textPrompt("next"), false, nil); err != nil || r.Outcome != OutcomeSent {
 		t.Fatalf("next: %+v %v", r, err)
 	}
 	rec.waitIdle(t)
@@ -567,7 +567,7 @@ func TestConnectionLossMidTurn(t *testing.T) {
 		return nil, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("work"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("work"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitInputs(t, 1)
@@ -586,7 +586,7 @@ func TestConnectionLossMidTurn(t *testing.T) {
 	if len(lastInputs) != 0 {
 		t.Fatalf("inputs not cleared: %v", lastInputs)
 	}
-	if _, err := s.Prompt(context.Background(), textPrompt("more"), false); !errors.Is(err, ErrClosed) {
+	if _, err := s.Prompt(context.Background(), textPrompt("more"), false, nil); !errors.Is(err, ErrClosed) {
 		t.Fatalf("prompt after close: %v", err)
 	}
 	log, err := OpenLog(s.cfg.LogPath)
@@ -615,11 +615,11 @@ func TestQueuedPromptFailsWhenTheConnectionCloses(t *testing.T) {
 		return nil, acp.NewRequestCancelled(nil)
 	}
 	s, _ := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	if r, err := s.Prompt(context.Background(), textPrompt("second"), false); err != nil || r.Outcome != OutcomeQueued {
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, nil); err != nil || r.Outcome != OutcomeQueued {
 		t.Fatalf("second: %+v %v", r, err)
 	}
 	_ = m.stdout.Close()
@@ -628,7 +628,7 @@ func TestQueuedPromptFailsWhenTheConnectionCloses(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("session did not end")
 	}
-	if _, err := s.Prompt(context.Background(), textPrompt("third"), false); !errors.Is(err, ErrClosed) || !strings.Contains(err.Error(), "agent connection closed") {
+	if _, err := s.Prompt(context.Background(), textPrompt("third"), false, nil); !errors.Is(err, ErrClosed) || !strings.Contains(err.Error(), "agent connection closed") {
 		t.Fatalf("prompt after close: %v", err)
 	}
 	log, err := OpenLog(s.cfg.LogPath)
@@ -673,7 +673,7 @@ func TestUpdatesBeforeExitAreKept(t *testing.T) {
 		return nil, nil
 	}
 	s, _ := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -740,7 +740,7 @@ func TestOptionsModesAndAuth(t *testing.T) {
 	if err != nil || len(sessions) != 1 || sessions[0].Title != "Earlier" {
 		t.Fatalf("list: %+v %v", sessions, err)
 	}
-	if _, err := s.Prompt(context.Background(), textPrompt("hi"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("hi"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -757,7 +757,7 @@ func TestPromptErrorIsShown(t *testing.T) {
 		return nil, acp.NewAuthRequired(nil)
 	}
 	s, rec := startMock(t, m, Config{})
-	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false)
+	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false, nil)
 	if err == nil || !strings.Contains(err.Error(), "Authentication required") || receipt.Outcome != "" {
 		t.Fatalf("Prompt = %+v, %v; want the refusal", receipt, err)
 	}
@@ -782,7 +782,7 @@ func TestPromptIsSentOnceTheAgentStreams(t *testing.T) {
 	}
 	s, rec := startMock(t, m, Config{})
 	start := time.Now()
-	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false)
+	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false, nil)
 	if err != nil || receipt.Outcome != OutcomeSent {
 		t.Fatalf("Prompt = %+v, %v", receipt, err)
 	}
@@ -825,7 +825,7 @@ func TestSubscribeReplaysAtMostTheWindow(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
@@ -858,7 +858,7 @@ func TestSubscribeHasNoGap(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
 		t.Fatal(err)
 	}
 	<-started

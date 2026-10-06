@@ -59,8 +59,9 @@ const (
 
 // Injector is the scheduler's actor-aware canonical steering seam. It owns
 // PTY acceptance and records the timeline/co-author effects exactly once after
-// acceptance. The outcome is empty for a terminal run.
-type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
+// acceptance. The outcome is empty for a terminal run. delivered follows a
+// "queued" outcome as acphost.Session.Prompt says.
+type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error)
 
 // AttachmentValidator accepts only an opaque reference to an image already
 // known to the image service. A validator is required whenever attachments
@@ -532,7 +533,7 @@ func (s *Service) authorizeDecision(run domain.RunID, actor domain.MemberID, ses
 	return nil
 }
 
-func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage, receipt Receipt) error {
+func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage, receipt Receipt, agentQueued bool) error {
 	var (
 		state     store.RoomMessageState
 		delivered *time.Time
@@ -555,6 +556,11 @@ func (s *Service) settleRoomMessage(ctx context.Context, msg *store.RoomMessage,
 	}
 	if err := s.cfg.Store.TransitionRoomMessage(ctx, msg.ID, state, delivered, failure); err != nil {
 		return err
+	}
+	if agentQueued {
+		if _, err := s.cfg.Store.MarkRoomMessageAgentQueued(ctx, msg.ID); err != nil {
+			return err
+		}
 	}
 	stored, err := s.cfg.Store.GetRoomMessage(ctx, msg.ID)
 	if err != nil {

@@ -174,7 +174,7 @@ func TestIntegrationModeSwitchDocker(t *testing.T) {
 	if strings.Contains(ps, "--resume=") || !strings.Contains(ps, "acp-mock") {
 		t.Fatalf("processes in Enhanced mode:\n%s", ps)
 	}
-	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, "say pong", false); err != nil {
+	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, "say pong", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "a turn after switching back", turnEnded("end_turn", 2))

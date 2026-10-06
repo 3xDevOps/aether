@@ -24,11 +24,11 @@ func init() {
 			Workspaces: d.Store,
 			Bus:        d.Bus,
 			Control:    d.Control,
-			Inject: func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error) {
+			Inject: func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error) {
 				if d.Runs == nil {
 					return "", fmt.Errorf("scheduler injection is unavailable")
 				}
-				return d.Runs.Inject(ctx, run, actor, message, steer)
+				return d.Runs.Inject(ctx, run, actor, message, steer, delivered)
 			},
 			Attachments: attachmentValidator,
 			Ready:       d.Runs.RecoveryReady(),
