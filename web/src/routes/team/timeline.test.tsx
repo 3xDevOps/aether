@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type { Event, TimelinePage, TimelineQuery } from '@/lib/types'
 import { olderFeed, openFeed } from '@/routes/team/sync'
@@ -290,6 +290,41 @@ describe('workspace activity feed', () => {
     await olderFeed(useStore, client)
     expect(useStore.getState().feedFloor).toBe(head - 2 * window)
     expect(useStore.getState().feed.map((e) => e.seq)).toContain(3400)
+  })
+
+  it('reads again on the next event after a failed read, without a reconnect', async () => {
+    let fail = true
+    const client = fakeApi({
+      workspaceTimeline: vi.fn(async (q: TimelineQuery) => {
+        if (fail) throw new Error('502 Bad Gateway')
+        const after = q.after_seq ?? 0
+        if (after >= Number.MAX_SAFE_INTEGER) return { events: [], next_seq: head, more: false }
+        return { events: history, next_seq: head, more: false }
+      }),
+    })
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+    expect((await screen.findByRole('alert')).textContent).toContain('502')
+
+    fail = false
+    useStore.setState({ lastSeq: 1 })
+
+    expect(await screen.findByText(/waiting on a question/)).toBeDefined()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(windowsAsked(client)).toEqual([head - window])
+  })
+
+  it('reads on from the cursor when a later read stopped short', async () => {
+    const client = feedApi()
+    seed()
+    render(<TimelineFeed params={{}} client={client} />)
+    expect(await screen.findByText(/waiting on a question/)).toBeDefined()
+    act(() => useStore.setState({ feedTruncated: true }))
+
+    act(() => useStore.setState({ lastSeq: 1 }))
+
+    await vi.waitFor(() => expect(windowsAsked(client)).toEqual([head - window, head]))
+    await vi.waitFor(() => expect(useStore.getState().feedTruncated).toBe(false))
   })
 
   it('abandons a read the view has already moved on from', async () => {

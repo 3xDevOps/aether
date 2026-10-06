@@ -2339,7 +2339,10 @@ count, and neither creates a second action inbox.
   `run.title` and `run.agent` only when asked for by type), skipping a
   sequence already held. The cursor follows only while the window is whole -
   no read in flight, failed or cut short - and a view reads from the cursor
-  again when the stream reconnects. "Load older"
+  again when the stream reconnects. A failed or cut-short read is retried on
+  the next event applied (a failed opening read reopens the window), so one
+  bad response does not pin the error until the user changes a filter. A
+  read that reaches the log head clears the cut-short notice. "Load older"
   reads the new stretch only, up to where the previous window began, keeping
   what is already loaded: re-reading the whole widened window would spend the
   page budget on history the feed already has and lose the newest end of it.

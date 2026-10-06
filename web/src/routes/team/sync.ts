@@ -174,7 +174,9 @@ export function useTeamRefresh(client: Api = api): void {
 /**
  * Marks a feed view mounted while `active`, so `applyEvent` adds the live
  * events its filters select, and reads what the stream may have skipped when
- * the connection comes back. The view opens the feed itself.
+ * the connection comes back. A read that failed or stopped on its page
+ * budget leaves a gap the live tail cannot close, so the next event applied
+ * reads it again. The view opens the feed itself.
  */
 export function useLiveFeed(active: boolean, client: Api = api): void {
   const holdFeed = useStore((s) => s.holdFeed)
@@ -182,6 +184,17 @@ export function useLiveFeed(active: boolean, client: Api = api): void {
   const wasLive = useRef(live)
 
   useEffect(() => (active ? holdFeed() : undefined), [active, holdFeed])
+
+  useEffect(() => {
+    if (!active) return
+    return useStore.subscribe((s, prev) => {
+      if (s.lastSeq === prev.lastSeq || s.feedLoading) return
+      if (!s.feedError && !s.feedTruncated) return
+      // Nothing loaded means the opening probe may never have found the
+      // head; draining from zero would page the log from its start.
+      void (s.feed.length === 0 ? openFeed(useStore, client) : drain(useStore, client))
+    })
+  }, [active, client])
 
   useEffect(() => {
     const reconnected = live && !wasLive.current
@@ -272,6 +285,8 @@ async function read(
       cursor = got.next_seq
       if (!got.more || (until > 0 && cursor >= until)) {
         store.getState().setFeedLoading(false)
+        // Read through to the head, nothing past the cursor is missing.
+        if (until === 0) store.getState().setFeedTruncated(false)
         return true
       }
     }
@@ -302,6 +317,6 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// A read that fails leaves the surface showing what it had; the next event
-// tries again.
+// A read that fails leaves the surface showing what it had; the next
+// heartbeat, reconnect or wake reads it again.
 function ignore(): void {}
