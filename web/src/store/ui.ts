@@ -307,8 +307,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
       lastHarnessByAccount: { ...s.lastHarnessByAccount, [accountID]: harness },
     }))
   },
-  // Opening a workspace also makes it the active scope, so the sidebar and
-  // every scoped surface follow the view.
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },

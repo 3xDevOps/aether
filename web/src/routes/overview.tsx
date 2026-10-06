@@ -5,8 +5,6 @@ import { registerRoute } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useListedRuns } from '@/store/hooks'
 
-// One flat list in group order, next to the board's three columns. The
-// command palette is what points at it.
 function Overview() {
   const runs = useListedRuns(useStore((s) => s.activeWorkspace))
   return (

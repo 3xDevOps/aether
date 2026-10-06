@@ -131,7 +131,6 @@ export function createRootStore() {
         // as the step it meant. Every version before 4 has no furthest step:
         // the resume point is the only evidence of how far the member got,
         // and without it the header would turn every later step inert.
-        // Version 5 replaced the sidebar's Status/Member grouping with Mine.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
