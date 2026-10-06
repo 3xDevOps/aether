@@ -276,6 +276,36 @@ describe('swarm', () => {
     ])
   })
 
+  it('launches an Enhanced integrator and refuses Background with the reason', async () => {
+    await openSwarm()
+    const integratorMode = (name: string) =>
+      within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name }) as HTMLButtonElement
+    expect(integratorMode('Standard').getAttribute('aria-checked')).toBe('true')
+    expect(integratorMode('Background').disabled).toBe(true)
+    expect(screen.getByText('Background is not offered: it exits after one turn, so the integrator could not be asked or told.')).toBeDefined()
+    await userEvent.click(integratorMode('Enhanced'))
+    await userEvent.click(workerMode('Standard'))
+
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'acp' })
+    expect(params.execution_choices).toEqual([
+      { account_member_id: alice.id, harness: 'claude', mode: 'acp' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    ])
+  })
+
+  it('falls back to a Standard integrator when the agent has no Enhanced support', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ enhanced: 'none' })])
+    await openSwarm()
+    const enhanced = within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name: 'Enhanced' }) as HTMLButtonElement
+    expect(enhanced.disabled).toBe(true)
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.missionCreate).mock.calls[0][0].integrator.mode).toBe('tui')
+  })
+
   it('runs a worker whose agent cannot use the chosen mode in Standard, and says so', async () => {
     vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'pi', display_name: 'Pi', enhanced: 'none' })])
     await openSwarm()

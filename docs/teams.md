@@ -963,10 +963,11 @@ objective into tasks, runs as many workers on them as it judges useful,
 delivers the verified result, and reports success. No human approves the plan
 or the delivery.
 The dashboard's launch dialog creates one on its **Swarm** tab: an
-objective, the **Integrator agent**, **Agents for workers**, and a **Worker
-mode** that defaults to Background. The dashboard's integrator always runs
-Standard, and a worker whose agent cannot use the worker mode runs Standard,
-which its row says. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
+objective, the **Integrator agent**, an **Integrator mode** (Standard or
+Enhanced; Background is refused because it exits after one turn),
+**Agents for workers**, and a **Worker mode** that defaults to Background. A
+worker whose agent cannot use the worker mode runs Standard, which its row
+says. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
 shared account named by `--account`) with the `--agent` harness in
 `standard` mode, or `enhanced` with `--mode enhanced`
 ([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on a

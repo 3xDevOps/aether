@@ -3196,19 +3196,19 @@ The launch dialog opens on **Run**. When the gateway advertises
 tab, titled **New swarm**, with the help line "The integrator plans the
 work, starts a worker run per task, and combines the results." It asks for
 an objective, the **Integrator agent** (the same picker as Run, on the
-account under Options), **Agents for workers** (a checkbox row per installed
-agent and account, defaulting to the integrator account's first launchable
-agent) and **Worker mode**, which defaults to Background. The form has no
-integrator mode field yet, so the integrator runs Standard although the
-server also accepts Enhanced; `mission.create` refuses a Background
-integrator, which exits after one turn. Each worker choice is sent in the worker mode when its agent can
+account under Options), **Integrator mode** (Standard by default; Enhanced
+when the agent supports it; Background disabled with the reason
+`mission.create` gives: it exits after one turn), **Agents for workers** (a
+checkbox row per installed agent and account, defaulting to the integrator
+account's first launchable agent) and **Worker mode**, which defaults to
+Background. Each worker choice is sent in the worker mode when its agent can
 use it and in Standard otherwise; the row says so ("Runs Standard: no
 Enhanced support"). Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
 `mission.create` refuses an integrator whose exact account/harness/mode is
-not one of `execution_choices`, so the integrator's `tui` choice is always
+not one of `execution_choices`, so the integrator's own choice is always
 sent; a worker choice with the same tuple is not sent twice, and the list is
 sorted by account, harness and mode, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts

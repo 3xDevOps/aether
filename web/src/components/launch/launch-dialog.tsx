@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
-import { modeRefusal } from '@/components/launch/modes'
+import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
 import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,12 @@ function idempotencyKey(): string {
 // and resending the same contents under the same key replays it.
 const swarmKeys = new Map<string, string>()
 
+const backgroundIntegrator: Refusal = {
+  reason: 'Background is not offered: it exits after one turn, so the integrator could not be asked or told.',
+  short: 'exits after one turn',
+  setUp: false,
+}
+
 export function LaunchDialog() {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
@@ -51,13 +57,16 @@ export function LaunchDialog() {
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
   const choice = useAgentChoice({ account, ownAccountID })
-  const { agents, agentError, harness, mode, noAgents } = choice
+  const { agents, agentError, agent, harness, mode, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
   const [workerError, setWorkerError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<WorkerChoice[]>([])
   const [workerMode, setWorkerMode] = useState<LaunchMode>('headless')
+  const [chosenIntegratorMode, setIntegratorMode] = useState<LaunchMode>('tui')
+  const integratorRefused = { ...refusals(agent, harness), headless: backgroundIntegrator }
+  const integratorMode = integratorRefused[chosenIntegratorMode] ? 'tui' : chosenIntegratorMode
   const [error, setError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
 
@@ -145,7 +154,7 @@ export function LaunchDialog() {
     if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness) {
       throw new Error('Enter an objective and choose an integrator agent.')
     }
-    const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: 'tui' }
+    const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: integratorMode }
     const workerChoices = workers.map((choice): MissionExecutionChoice => {
       const info = agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness)
       return { ...choice, mode: modeRefusal(info, choice.harness, workerMode) ? 'tui' : workerMode }
@@ -246,13 +255,22 @@ export function LaunchDialog() {
                 <Textarea autoFocus required rows={3} placeholder="What outcome should the integrator coordinate?" value={objective} onChange={(event) => setObjective(event.target.value)} />
               </FormField>
               {integratorPicker}
+              {harness && (
+                <ModeControl
+                  label="Integrator mode"
+                  value={integratorMode}
+                  onChange={(next) => { setError(null); setIntegratorMode(next) }}
+                  refused={integratorRefused}
+                  onSetUp={setUp}
+                />
+              )}
               <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} />
               <ModeControl
                 label="Worker mode"
                 value={workerMode}
                 onChange={setWorkerMode}
                 onSetUp={setUp}
-                help="The integrator runs in Standard. A worker whose agent cannot use the chosen mode runs in Standard."
+                help="A worker whose agent cannot use the chosen mode runs in Standard."
               />
             </TabsContent>
             {notes}
