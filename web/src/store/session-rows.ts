@@ -120,17 +120,18 @@ interface ToolTrack {
   truncated: boolean
 }
 
-function workItem(track: ToolTrack, ended: boolean): WorkItem {
+function workItem(turn: number, track: ToolTrack, ended: boolean): WorkItem {
   const { call } = track
   const reported = toolStatus(call)
   const status = ended && reported === 'running' ? 'done' : reported
+  const took = Date.parse(track.last.time) - Date.parse(track.first.time)
   return {
-    id: call.id,
+    id: `${turn}:${call.id}`,
     tool: call.tool_kind ?? 'other',
     label: toolLabel(call, status),
     status,
     at: track.first.time,
-    durationMs: status === 'running' ? undefined : Date.parse(track.last.time) - Date.parse(track.first.time),
+    durationMs: status === 'running' || took < quietDuration ? undefined : took,
     seq: track.last.seq,
     truncated: track.truncated,
     command: call.tool_kind === 'execute' ? call.title : undefined,
@@ -157,6 +158,8 @@ const stopText: Record<string, [string, Tone]> = {
   max_turn_requests: ['Stopped: too many model requests in one turn', 'failed'],
   refusal: ['Stopped: the agent refused', 'failed'],
 }
+
+const quietDuration = 50
 
 function seconds(ms: number): string {
   const s = Math.round(ms / 1000)
@@ -189,7 +192,7 @@ export function turnRows(turn: Turn): SessionRow[] {
       case 'thought': {
         const m = item.message
         if (!m) break
-        const key = `${item.kind}:${m.message_id}`
+        const key = `${item.kind}:${turn.turn}:${m.message_id}`
         const open = messages.get(key)
         if (open) {
           open.text += m.text
@@ -224,7 +227,7 @@ export function turnRows(turn: Turn): SessionRow[] {
         const request = item.request
         if (!request) break
         if (!requests.has(request.id)) {
-          slots.push({ kind: 'row', row: { kind: 'answered', id: `req:${request.id}`, at: item.time, request } })
+          slots.push({ kind: 'row', row: { kind: 'answered', id: `req:${turn.turn}:${request.id}`, at: item.time, request } })
         }
         requests.set(request.id, { request, item })
         break
@@ -254,8 +257,8 @@ export function turnRows(turn: Turn): SessionRow[] {
   let work: ToolTrack[] = []
   const flush = () => {
     if (work.length === 0) return
-    const entries = work.map((track) => workItem(track, turn.closed || ended !== null))
-    rows.push({ kind: 'work', id: `work:${work[0]!.call.id}`, at: work[0]!.first.time, summary: workSummary(entries.map((e) => e.tool)), entries })
+    const entries = work.map((track) => workItem(turn.turn, track, turn.closed || ended !== null))
+    rows.push({ kind: 'work', id: `work:${turn.turn}:${work[0]!.call.id}`, at: work[0]!.first.time, summary: workSummary(entries.map((e) => e.tool)), entries })
     work = []
   }
   for (const slot of slots) {
@@ -313,7 +316,6 @@ export function turnRows(turn: Turn): SessionRow[] {
 
 const frozen = new WeakMap<Turn, SessionRow[]>()
 
-/** A closed turn derives once; only the open turn re-derives on each frame. */
 export function rowsOfTurn(turn: Turn): SessionRow[] {
   if (!turn.closed) return turnRows(turn)
   let rows = frozen.get(turn)

@@ -105,4 +105,25 @@ describe('turns', () => {
     const turns = appendItems([], Array.from({ length: 10 }, (_, i) => item('usage', 1 + Math.floor(i / 4))))
     expect(trimTurns(turns, 5).flatMap((turn) => turn.items.map((it) => it.seq))).toEqual([6, 7, 8, 9, 10])
   })
+
+  it('keeps row and entry ids unique when turns reuse a tool call or message id', () => {
+    const turn = (n: number) => [
+      item('turn_start', n),
+      say(n, 'user', 'go', 'same'),
+      tool(n, 'mock-tool', 'read', 'Read a.js', 'completed'),
+      item('turn_end', n, { stop_reason: 'end_turn' }),
+    ]
+    const rows = appendItems([], [...turn(1), ...turn(2)]).flatMap(rowsOfTurn)
+    const ids = rows.map((row) => row.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const entries = rows.flatMap((row) => (row.kind === 'work' ? row.entries.map((entry) => entry.id) : []))
+    expect(entries).toEqual(['1:mock-tool', '2:mock-tool'])
+  })
+
+  it('leaves out a duration too short to matter', () => {
+    const started = tool(1, 'r1', 'read', 'Read a.js', 'in_progress')
+    const done = { ...tool(1, 'r1', 'read', 'Read a.js', 'completed'), time: started.time }
+    const [work] = turnRows(turnOf([started, done]))
+    expect(work).toMatchObject({ entries: [{ status: 'done', durationMs: undefined }] })
+  })
 })
