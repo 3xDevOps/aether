@@ -7,8 +7,8 @@ import { parsePatch } from '@/routes/diff/parse'
 const planFold = 20
 
 const planIcon: Record<string, React.ReactNode> = {
-  completed: <CircleCheck aria-label="Done" className="text-state-done" />,
-  in_progress: <CircleDot aria-label="In progress" className="text-state-working" />,
+  completed: <CircleCheck aria-label="Done" className="text-muted" />,
+  in_progress: <CircleDot aria-label="In progress" className="text-text" />,
 }
 
 export function PlanCard({ entries }: { entries: { content: string; status?: string }[] }) {

@@ -632,26 +632,19 @@
     padding: 0.125rem 0.5rem;
   }
 
-  .tok-keyword,
-  .tok-operator {
-    color: var(--state-working);
+  .tok-keyword {
+    font-weight: 600;
   }
   .tok-string,
-  .tok-string2 {
-    color: var(--state-done);
-  }
+  .tok-string2,
   .tok-number,
   .tok-bool,
   .tok-atom {
-    color: var(--state-needs-you);
+    color: var(--accent-text);
   }
   .tok-comment,
   .tok-meta {
     color: var(--text-muted);
     font-style: italic;
-  }
-  .tok-typeName,
-  .tok-className {
-    color: var(--accent-text);
   }
 }
