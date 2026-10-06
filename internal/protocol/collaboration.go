@@ -228,6 +228,9 @@ type RunRoomStatusResult struct {
 type RunRoomPostResult struct {
 	Message RoomMessage `json:"message"`
 	Receipt string      `json:"receipt,omitempty"`
+	// Outcome is what an enhanced run's agent did with a delivered steer:
+	// sent, queued or injected.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 type RunRoomDecideResult struct {

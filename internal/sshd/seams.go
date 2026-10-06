@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -83,6 +84,15 @@ type RunController interface {
 	// ACPSubscribe opens an enhanced run's session item stream after
 	// afterSeq.
 	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
+	// ACPAnswer resolves a pending request of an enhanced run's agent; the
+	// first answer wins.
+	ACPAnswer(run domain.RunID, requestID, optionID string) error
+	ACPCancel(ctx context.Context, run domain.RunID) error
+	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
+	// ACPHistory reads up to limit items before beforeSeq, oldest first;
+	// zero reads from the newest.
+	ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error)
+	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// SetArchived hides a Final run from the board (archived true) or

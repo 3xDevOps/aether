@@ -184,6 +184,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
+import type { SessionFrame, SessionItem, SessionLease } from '@/lib/session-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -567,8 +568,40 @@ export const api = {
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
-  runInject: (runID: string, message: string, idempotencyKey: string) =>
-    call<RoomPostResult>('run.inject', { run_id: runID, message, idempotency_key: idempotencyKey }),
+  /** steer asks an enhanced run's agent to add the message to its running
+   * turn; the lease makes delivery immediate instead of moderated. */
+  runInject: (
+    runID: string,
+    message: string,
+    idempotencyKey: string,
+    opts?: { steer?: boolean; lease?: SessionLease },
+  ) =>
+    call<RoomPostResult>('run.inject', {
+      run_id: runID,
+      message,
+      idempotency_key: idempotencyKey,
+      ...(opts?.steer ? { steer: true } : {}),
+      ...opts?.lease,
+    }),
+  runInputAnswer: (runID: string, requestID: string, optionID: string, lease: SessionLease) =>
+    call<unknown>('run.input.answer', {
+      run_id: runID,
+      request_id: requestID,
+      option_id: optionID,
+      ...lease,
+    }),
+  runACPCancel: (runID: string, lease: SessionLease) =>
+    call<unknown>('run.acp.cancel', { run_id: runID, ...lease }),
+  runACPSetOption: (runID: string, optionID: string, value: string | boolean, lease: SessionLease) =>
+    call<unknown>('run.acp.set_option', { run_id: runID, option_id: optionID, value, ...lease }),
+  runACPHistory: (runID: string, beforeSeq?: number, limit?: number) =>
+    call<{ frames: SessionFrame[] }>('run.acp.history', {
+      run_id: runID,
+      before_seq: beforeSeq,
+      limit,
+    }).then((r) => r.frames),
+  runACPItem: (runID: string, seq: number) =>
+    call<{ item: SessionItem }>('run.acp.item', { run_id: runID, seq }).then((r) => r.item),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>

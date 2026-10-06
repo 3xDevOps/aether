@@ -371,6 +371,13 @@ type RunInjectParams struct {
 	RunID          string `json:"run_id"`
 	Message        string `json:"message"`
 	IdempotencyKey string `json:"idempotency_key"`
+	// Steer asks an enhanced run's agent to add the message to its running
+	// turn instead of queueing it for the next one.
+	Steer bool `json:"steer,omitempty"`
+	// The control lease, when the caller holds it, delivers the message at
+	// once instead of after the moderation delay.
+	ControlSessionID  string `json:"control_session_id,omitempty"`
+	ControlGeneration uint64 `json:"control_generation,omitempty"`
 }
 
 // RunCloseParams are the params of run.close; Outcome is "merged" or

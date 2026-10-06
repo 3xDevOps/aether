@@ -537,6 +537,8 @@ export interface RoomStatusResult {
 export interface RoomPostResult {
   message: RoomMessage
   receipt?: RoomDeliveryReceipt
+  /** What an enhanced run's agent did with a delivered steer. */
+  outcome?: 'sent' | 'queued' | 'injected'
 }
 
 export interface RoomDecideResult {

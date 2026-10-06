@@ -312,7 +312,7 @@ func (s *Server) runRoomDecide(ctx context.Context, member domain.MemberID, raw 
 }
 
 func roomMutationResult(result collab.Result) protocol.RunRoomPostResult {
-	out := protocol.RunRoomPostResult{Receipt: string(result.Receipt)}
+	out := protocol.RunRoomPostResult{Receipt: string(result.Receipt), Outcome: result.Outcome}
 	if result.Message != nil {
 		out.Message = protocol.RoomMessageFromStore(result.Message)
 	}

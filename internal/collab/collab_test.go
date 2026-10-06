@@ -1093,6 +1093,37 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	}
 }
 
+func TestControllerSteerReachesInjectorAndReturnsOutcome(t *testing.T) {
+	st, clock, ws, owner, _, run := setupCollab(t)
+	controlService := control.New(control.Config{Now: clock.Now})
+	lease, _, err := controlService.Acquire(string(run.ID), string(owner.ID), "tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var steered bool
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, steer bool) (string, error) {
+			steered = steer
+			return "injected", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest,
+		Body: "also check the tests", IdempotencyKey: "steer", Steer: true,
+		ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !steered || result.Receipt != ReceiptSent || result.Outcome != "injected" {
+		t.Fatalf("steer %v receipt %q outcome %q", steered, result.Receipt, result.Outcome)
+	}
+}
+
 func TestStatusCountsQueuedSteerBeyondFirstPage(t *testing.T) {
 	st, clock, ws, _, other, run := setupCollab(t)
 	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Now: clock.Now})

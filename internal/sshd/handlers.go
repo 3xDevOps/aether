@@ -311,6 +311,10 @@ func (s *Server) runInject(ctx context.Context, member domain.MemberID, params j
 		Kind:           store.RoomMessageSteerRequest,
 		Body:           p.Message,
 		IdempotencyKey: p.IdempotencyKey,
+		Steer:          p.Steer,
+
+		ControllerSessionID:  p.ControlSessionID,
+		ControllerGeneration: p.ControlGeneration,
 	})
 	if err != nil {
 		return nil, collaborationRPCError(err)
