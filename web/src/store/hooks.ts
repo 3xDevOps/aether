@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import type { StateContext } from '@/lib/needs-you'
@@ -173,4 +173,10 @@ export function useSelf(): { id: string | null; role: Member['role'] | null } {
 /** Whether the caller holds the admin role. False until hydrated. */
 export function useIsAdmin(): boolean {
   return useStore((s) => s.info?.member.role === 'admin')
+}
+
+/** While `shown`, the phone top bar shrinks New run to an icon, so the page's own action stays the one filled button. */
+export function useHeaderPrimary(shown: boolean) {
+  const hold = useStore((s) => s.holdHeaderPrimary)
+  useEffect(() => (shown ? hold() : undefined), [shown, hold])
 }

@@ -23,7 +23,10 @@ export function TopBar() {
   const togglePalette = useStore((s) => s.togglePalette)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const needsYou = useNeedsYouCount()
-  const title = run
+  const pagePrimary = useStore((s) => s.headerPrimaries > 0)
+  const title = route.name === 'run'
+    ? 'Run'
+    : run
     ? runLabel(run)
     : workspace?.name ?? titles[route.name] ?? surfaces(cap, true).find((surface) => surface.name === route.name)?.label ?? 'Aether'
 
@@ -50,12 +53,16 @@ export function TopBar() {
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
-        {canLaunch({ cap, role }) && (
+        {canLaunch({ cap, role }) && (pagePrimary ? (
+          <Button variant="ghost" size="icon" label="New run" onClick={() => openDialog('launch')}>
+            <Plus />
+          </Button>
+        ) : (
           <Button size="sm" onClick={() => openDialog('launch')}>
             <Plus />
             New run
           </Button>
-        )}
+        ))}
       </div>
       <ConnectionLine className="px-3 pb-1.5" />
     </header>

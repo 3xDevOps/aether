@@ -92,6 +92,8 @@ export interface UiSlice {
   sidebarWidth: number
   sidebarCollapsed: boolean
   sidebarDrawerOpen: boolean
+  /** Mounted pages showing their own filled action in their header. */
+  headerPrimaries: number
   terminalDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
@@ -130,6 +132,7 @@ export interface UiSlice {
   setTextSize: (size: TextSize) => void
   setSidebarWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
+  holdHeaderPrimary: () => () => void
   setTerminalDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
   setSingleKeyShortcuts: (on: boolean) => void
@@ -159,6 +162,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   sidebarWidth: defaultSidebarWidth,
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
+  headerPrimaries: 0,
   terminalDockHeight: 280,
   terminalFontSize: defaultTerminalFontSize,
   singleKeyShortcuts: true,
@@ -193,6 +197,10 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setDiffWrap: (diffWrap) => set({ diffWrap }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarDrawerOpen: (sidebarDrawerOpen) => set({ sidebarDrawerOpen }),
+  holdHeaderPrimary: () => {
+    set((s) => ({ headerPrimaries: s.headerPrimaries + 1 }))
+    return () => set((s) => ({ headerPrimaries: s.headerPrimaries - 1 }))
+  },
   setOnboarded: (onboarded) =>
     set(
       onboarded ? { onboarded: true, ...wizardReset } : { onboarded: false },

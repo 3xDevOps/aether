@@ -22,7 +22,7 @@ import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
-import { useRunPresentation } from '@/store/hooks'
+import { useHeaderPrimary, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
 
@@ -177,6 +177,7 @@ export function RunHeader({
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const primary = usePrimaryAction(run, view, agent, nav)
+  useHeaderPrimary(Boolean(primary))
 
   return (
     <>

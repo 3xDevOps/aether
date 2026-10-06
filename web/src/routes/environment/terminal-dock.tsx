@@ -37,7 +37,7 @@ import {
 } from '@/routes/terminal/attach'
 import { StopEnvironmentDialog } from '@/routes/environment/stop-environment-dialog'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useHeaderPrimary } from '@/store/hooks'
 import {
   emitEnvTerminalSocketData,
   getEnvTerminalSocket,
@@ -433,6 +433,7 @@ export function TerminalDock({
 
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
+  useHeaderPrimary(dock.status?.running === true || (empty && containment === 'fill'))
   const loading = dock.status === null && dock.statusError === null
   const open = () => {
     setCollapsed(false)

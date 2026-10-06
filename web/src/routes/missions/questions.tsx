@@ -10,6 +10,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { MissionQuestion } from '@/lib/types'
 import { useStore } from '@/store'
+import { useHeaderPrimary } from '@/store/hooks'
 
 export const answerFormID = (question: MissionQuestion) => `swarm-answer-${question.id}`
 
@@ -125,6 +126,7 @@ export function SwarmQuestions({
 }) {
   const accountable = useMemberName(accountableID)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  useHeaderPrimary(canAnswer && questions.some((question) => !question.answered_at))
   if (questions.length === 0) return null
   const waiting = questions.some((question) => !question.answered_at || drafts[question.id])
   const title = waiting ? 'Questions for you' : 'Questions from the integrator'

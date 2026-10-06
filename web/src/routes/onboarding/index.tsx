@@ -10,7 +10,7 @@ import { FirstRunStep } from '@/routes/onboarding/first-run-step'
 import { RepositoryStep } from '@/routes/onboarding/repository-step'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useHeaderPrimary } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 function StepChips({ first, current, furthest, onJump }: { first: number; current: number; furthest: number; onJump: (step: number) => void }) {
@@ -56,6 +56,7 @@ function StepChips({ first, current, furthest, onJump }: { first: number; curren
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
+  useHeaderPrimary(true)
   const persistedStep = useStore((s) => s.onboardingStep)
   const persistedFurthest = useStore((s) => s.onboardingFurthest)
   const setOnboardingStep = useStore((s) => s.setOnboardingStep)
