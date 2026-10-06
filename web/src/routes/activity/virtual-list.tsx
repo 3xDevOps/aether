@@ -1,12 +1,14 @@
-import { createContext, type ReactElement, type RefObject, useContext, useLayoutEffect, useRef } from 'react'
+import { createContext, type ReactElement, type RefObject, useContext, useLayoutEffect, useRef, useState } from 'react'
 import { type CustomItemComponentProps, Virtualizer } from 'virtua'
 
 const SetSize = createContext(0)
+const FocusRow = createContext<(index: number) => void>(() => {})
 
 function Item({ style, index, children, ref }: CustomItemComponentProps) {
   const size = useContext(SetSize)
+  const focusRow = useContext(FocusRow)
   return (
-    <li ref={ref} style={style} aria-setsize={size} aria-posinset={index + 1} className="border-b border-seam last:border-b-0">
+    <li ref={ref} style={style} aria-setsize={size} aria-posinset={index + 1} onFocus={() => focusRow(index)} className="border-b border-seam last:border-b-0">
       {children}
     </li>
   )
@@ -22,6 +24,7 @@ export function VirtualList<T>({
   children: (item: T, index: number) => ReactElement
 }) {
   const previous = useRef(data)
+  const [focused, setFocused] = useState<number | null>(null)
   useLayoutEffect(() => {
     previous.current = data
   })
@@ -31,9 +34,19 @@ export function VirtualList<T>({
   const shift = prepended && (scrollRef.current?.scrollTop ?? 0) > 0
   return (
     <SetSize.Provider value={data.length}>
-      <Virtualizer as="ol" item={Item} data={data} scrollRef={scrollRef} bufferSize={400} shift={shift}>
-        {children}
-      </Virtualizer>
+      <FocusRow.Provider value={setFocused}>
+        <Virtualizer
+          as="ol"
+          item={Item}
+          data={data}
+          scrollRef={scrollRef}
+          bufferSize={400}
+          shift={shift}
+          keepMounted={focused !== null && focused < data.length ? [focused] : undefined}
+        >
+          {children}
+        </Virtualizer>
+      </FocusRow.Provider>
     </SetSize.Provider>
   )
 }

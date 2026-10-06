@@ -37,6 +37,7 @@ export function ChangesView({ runID }: { runID: string }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [current, setCurrent] = useState<string | null>(null)
   const ids = useId()
+  const [focusedFile, setFocusedFile] = useState<number | null>(null)
   const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
@@ -114,9 +115,14 @@ export function ChangesView({ runID }: { runID: string }) {
         {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
         <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           {virtual ? (
-            <Virtualizer ref={list} data={files}>
-              {patchAt}
-            </Virtualizer>
+            <div onFocus={(event) => {
+              const id = (event.target as HTMLElement).closest('section')?.id ?? ''
+              if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
+            }}>
+              <Virtualizer ref={list} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
+                {patchAt}
+              </Virtualizer>
+            </div>
           ) : (
             files.map(patchAt)
           )}
