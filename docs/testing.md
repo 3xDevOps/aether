@@ -304,8 +304,9 @@ AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
 (cd web && bunx playwright install chromium)
 
 # Real dashboard interaction through the built gateway/server, as root like the
-# installed service: an unprivileged server leaves run checkouts owned by your
-# uid, and Git in the root standard image refuses them as "dubious ownership".
+# installed service. Without sudo the suite runs the server as your uid; a
+# passing test's teardown chowns what root containers left back to you with
+# the scenario's standard image before deleting its scratch directory.
 sudo env "PATH=$PATH" "HOME=$HOME" \
   "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
   AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \

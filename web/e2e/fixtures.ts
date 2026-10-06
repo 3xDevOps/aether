@@ -11,6 +11,7 @@ import { test as base } from '@playwright/test'
 
 import { GatewayClient, type InviteResult } from './harness/client'
 import {
+  reclaimOwnership,
   removeContainers,
   removeMemberImages,
   runContainer,
@@ -19,7 +20,7 @@ import {
 import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
 import { repoRoot, scratchDir } from './harness/paths'
-import { dockerReachable, type Server, type ServerOptions, startServer } from './harness/server'
+import { dockerReachable, type Server, type ServerOptions, standardImage, startServer } from './harness/server'
 
 export interface Member {
   name: string
@@ -255,7 +256,13 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
     }
     // A failed test keeps its data directory, server log and repositories.
     if (testInfo.status === testInfo.expectedStatus) {
-      rmSync(dir, { recursive: true, force: true })
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EACCES') throw err
+        await reclaimOwnership(dir, serverOptions.standardImage ?? standardImage)
+        rmSync(dir, { recursive: true, force: true })
+      }
     } else {
       await testInfo.attach('aether-server output', { body: server.output() })
     }
