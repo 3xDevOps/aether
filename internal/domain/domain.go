@@ -585,8 +585,9 @@ type Run struct {
 	// FinishedAt is when the run reached a terminal status; nil until then.
 	FinishedAt *time.Time
 	// UnansweredQuestions is the number of non-denied, non-cancelled room
-	// questions without a correlated reply. It is populated by run snapshot
-	// reads and is zero for newly-created runs.
+	// questions to the run's owner (asked by anyone else) without a
+	// correlated reply. It is populated by run snapshot reads and is zero
+	// for newly-created runs.
 	UnansweredQuestions int
 	// UnackedMessages is how much agent mail addressed to the run it has not
 	// acknowledged, populated by run snapshot reads.

@@ -245,6 +245,22 @@ describe('viewer scoping', () => {
     expect(needsYou(record(), ctx)).toBeUndefined()
   })
 
+  // The board card reads the server's count before the room loads; the run
+  // header reads the loaded room. The server counts only questions to the owner.
+  it.each([
+    { asker: 'the owner', actor: alice.id, count: 0, want: 'stopped' },
+    { asker: 'a teammate', actor: bob.id, count: 1, want: 'room-question' },
+  ])('agrees between card and header on a question from $asker', ({ actor, count, want }) => {
+    const parked = { status: 'needs-attention' as const, reason: 'stalled: no output or file changes for 10m4s' }
+    const card = needsYou(record({ ...parked, unanswered_questions: count }), stateContext())
+    const header = needsYou(
+      record({ ...parked, unanswered_questions: count }),
+      stateContext({ roomMessages: { run_1: [roomMessage({ kind: 'question', actor_id: actor })] } }),
+    )
+    expect(card?.id).toBe(want)
+    expect(header?.id).toBe(want)
+  })
+
   it('lets an admin resolve a swarm question for another accountable human', () => {
     const ctx = {
       missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },

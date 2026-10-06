@@ -166,6 +166,7 @@ func runSnapshotQuery(where string) string {
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'
+			AND question.actor_id <> runs.member_id
 			AND question.state NOT IN ('denied', 'cancelled')
 			AND NOT EXISTS (
 				SELECT 1 FROM room_messages reply

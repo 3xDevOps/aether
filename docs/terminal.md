@@ -231,8 +231,9 @@ or answered the request. Retries use the
 same message identity, so they do not create a second request.
 
 Questions appear in the Run Room where they apply. **Answer** posts a
-correlated reply. The run snapshot includes its unanswered-question count,
-so the run is in the owner's **Needs you** before anyone opens the room.
+correlated reply. The run snapshot counts unanswered questions from anyone
+but the owner, so the run is in the owner's **Needs you** before anyone
+opens the room; the owner's own questions are for teammates.
 The question does not change the run's wire status. The
 card identifies the run owner and links to the Run Room. Questions and queued
 steers do not create a separate action inbox.

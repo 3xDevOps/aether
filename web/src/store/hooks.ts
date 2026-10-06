@@ -72,7 +72,7 @@ export function useRunIDs(workspace: string): string[] {
 export function useRunInput(run: Run) {
   const approvals = useStore((s) => s.approvalsByRun[run.id]?.length ?? 0)
   const questions = useStore((s) => run.unanswered_questions ??
-    unansweredQuestions(s.roomMessages[run.id] ?? []).length)
+    unansweredQuestions(s.roomMessages[run.id] ?? []).filter((m) => m.actor_id !== run.member_id).length)
   const requests = run.pending_inputs ?? []
   const native = requests.length
   const parts: string[] = []
