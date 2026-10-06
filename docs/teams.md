@@ -884,17 +884,18 @@ scheduler: harness "<name>" is your own agent definition, which runs only on you
 ```
 
 An agent whose owner has no login for it, or only an empty file at its login
-path, is listed as `<name> (not logged in)`. The owner logs in from
-their own **Environment** terminal, and the recipient presses **Refresh
-agents**. A launch from the CLI fails with a reason like:
+path, is a disabled row reading **Not logged in** in the launch dialog's agent
+list. The owner logs in from their own **Environment** terminal, and the
+recipient opens the dialog again, which reads the list afresh. A launch from
+the CLI fails with a reason like:
 
 ```
 provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in to claude in their own environment terminal
 ```
 
 An agent whose owner login is there but cannot be shared (a symlink in its
-path, a file with another hard link) is listed as `<name> (unavailable)`, with
-the error a launch returns.
+path, a file with another hard link) is a disabled row reading
+**Unavailable**, and the dialog shows the error a launch returns.
 
 A Claude Code login refreshed in the owner's environment terminal reaches
 recipients' runs only if that terminal was started after the owner's first

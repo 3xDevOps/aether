@@ -140,16 +140,11 @@ Use compact workbench geometry rather than landing-page ornament:
 - Only floating surfaces cast `shadow-overlay`; content panels have none.
   Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
-- Board Cards use compact, natural-height rows with a full-width title, state
-  badge, a reason line and brief owner/harness/time metadata. A Needs you
-  reason reads in the text colour, never with a second dot or a **New** pill.
-  **Details** reveals the branch and copy control along with the full details;
-  protection, questions, conflicts and archival state remain visible when relevant.
-  Desktop column headers share a subgrid row so card lists start together.
-  Map packs fixed-size nodes from `map-layout.ts`, not measured card heights;
-  its camera controls live with the **Runs** header rather than in a second
-  toolbar. Preserve the gesture, camera and motion contracts in
-  [Dashboard SPA: Board](dashboard-frontend.md#board).
+- A board card is three lines: the state line (shaped dot, reason, relative
+  time), a title of at most two lines, and the meta line (agent glyph and
+  name, owner avatar, `+a −d`, the `card:meta` slot). A Needs you reason reads
+  in the text colour, the others in `muted`, never with a second dot or a
+  **New** pill. See [Dashboard SPA: Board](dashboard-frontend.md#board).
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main

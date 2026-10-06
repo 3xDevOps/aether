@@ -70,13 +70,9 @@ When `AETHER_DASHBOARD` points at the server gateway instead, the browser
 sends no token: Tailscale WhoIs identifies the phone or development browser
 on every request.
 
-`?run=<run_id>` is read the same way, by `takeRequestedRun` beside the token
-reader in `src/lib/api.ts`, and `hydrate` in `src/store/sync.ts` acts on it
-once the runs are in the store: it navigates to that run's terminal, or
-leaves the board alone when the run is not one this member was sent. Reading
-it removes it from the address bar, which is what makes it one-shot - a
-reconnect re-hydrates and must not drag the member back. It is the whole
-deep-link contract for both shells; see
+`?run=<run_id>` is the route itself, not a one-time parameter: it stays in
+the address bar, so a reload reopens the run, and it is the whole deep-link
+contract for both shells. See [URL state](#url-state) and
 [local-gateway.md](local-gateway.md#running-it).
 
 Node 22+ is required for a hand-run dashboard build. The complete contributor
@@ -218,13 +214,15 @@ there is no separate per-run Overview route.
 
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
-one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
-`palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
-`local`, `messages`, `ui`). A new feature adds a slice file and one spread in
+one file each (`server`, `workspaces`, `runs`, `members`, `env-terminal`,
+`terminal`, `board`, `palette`, `approvals`, `presence`, `cost`, `timeline`,
+`diff`, `files`, `collaboration`, `local`, `missions`, `messages`, `ui`). A
+new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
-may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, the **Mine** toggle, dismissed update
-versions, terminal zoom) are persisted;
+may read another's data. Only view preferences and local progress (theme,
+sidebar width and collapse state, dock heights, terminal zoom, single-key
+shortcuts, diff wrap, `activeWorkspace`, the **Mine** toggle, launch defaults,
+dismissed update versions, onboarding progress) are persisted;
 `persistedUi` in `store/index.ts` is the list that decides. Server data is
 always re-fetched.
 
@@ -1169,7 +1167,7 @@ stays disabled until one is written (`runLaunch` in
 the wire: an empty task and `tui` are the server's defaults.
 
 The form remembers a mode per agent in the persisted `launchDefaults` slice
-(`{mode, at}` keyed by agent name, store version 6). It preselects the
+(`{mode, at}` keyed by agent name, store version 7). It preselects the
 launchable agent launched most recently, then the agent of the newest run,
 then the first launchable one, and starts in that agent's remembered mode,
 else its `default_mode` from `agent.list`, else Standard; a remembered mode
@@ -1311,8 +1309,8 @@ in history it does nothing. In a menu it is that menu's typeahead, and on a
 select it jumps to the option that starts with it. The guard finds a select
 by its `combobox` role, since the control is a button. **Settings >
 Appearance > Single-key shortcuts** (on by default, persisted with the other
-view preferences) turns off every character key in the table: `n`, `?` and
-the `g` sequences. Escape and the chords stay live.
+view preferences) turns off every character key: `n`, `?`, `u`, `j`, `k`,
+the `g` sequences and the board card's `a`, `r` and `o`. Escape and the chords stay live.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 
@@ -2228,8 +2226,7 @@ both what it renders and the overlap set the conflict chips read.
 `src/routes/team/` is presence, the shared approval inbox, the workspace
 activity feed and budgets - the four readouts of the team features
 (`internal/approvals`, `internal/timeline`, `internal/cost`). None of them owns
-a view of its own in the shell: watchers reach the run card through its
-slot, presence and spend are the **Team** line in the sidebar footer menu, and
+a view of its own in the shell: watchers show in the run view, presence and spend are the **Team** line in the sidebar footer menu, and
 the two full views are registry routes (`approvals`, `timeline`): Activity is
 a sidebar row, Approvals is reached from the palette, and each is gated on the
 method it needs.
@@ -2973,8 +2970,8 @@ about itself and appears wherever the member is an admin.
   command palette, the shortcuts dialog and the updates dialog once in
   `AppShell`.
 - **Harness and state are separate.** The harness glyph says who is running;
-  the state indicator or badge says what state. Board cards use a labeled
-  state badge without a duplicate dot. The five presentation states are
+  the state indicator or line says what state. Board cards use a state line:
+  one shaped dot and the reason. The five presentation states are
   described under [Run state](#run-state).
 - **A working run moves where an indicator is used.** `StateIndicator` swaps
   the static dot for three dots bouncing in `--state-working` in run headers

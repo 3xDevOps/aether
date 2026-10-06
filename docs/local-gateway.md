@@ -64,16 +64,16 @@ which the dashboard reports as an expired link, showing that message, rather
 than retrying a credential the gateway has already rejected. Open the URL
 `aether gui` printed again to get a working one.
 
-`run` is the other query parameter the dashboard reads on first load, and it
-leaves the address bar the same way. `?run=<run_id>` opens that run's
-terminal as soon as the first hydration has the runs, even when the local
-gateway has no project clone. An authorized run link takes precedence over
-optional local onboarding. A run the member cannot see is ignored.
-This is how both shells deliver an
-`aether://run/<id>` deep link - the desktop shell (`desktop/main.js`) and the
-Android app (`android/`) append it to the dashboard URL and load that -
-and removing it is what stops a reload, or the re-hydration a reconnect runs,
-from reopening a run the member has since left.
+`run` is the other query parameter the dashboard reads on first load.
+`?run=<run_id>` opens that run's terminal, even when the local gateway has no
+project clone, and stays in the address bar: the dashboard keeps its current
+view in the query string, so a reload reopens the run. An authorized run link
+takes precedence over optional local onboarding. A run the member cannot see
+is replaced, without a history entry (`replaceState`), by the board, or by
+onboarding for a member who has not finished it. This is how both shells
+deliver an `aether://run/<id>` deep link - the desktop shell
+(`desktop/main.js`) and the Android app (`android/`) append it to the
+dashboard URL and load that.
 
 Onboarding is an initial landing page, not a reconnect redirect. Choosing
 **Manage workspaces** during startup keeps that route, and linking a clone
