@@ -147,7 +147,7 @@ const rules: Rule[] = [
     name: 'token colours',
     why: 'Colour comes from the tokens in index.css, never the Tailwind palette.',
     pattern:
-      /\b(?:bg|text|border(?:-[trblxy])?|ring|outline|fill|stroke|from|via|to|divide|decoration|placeholder|caret|shadow)-(?:(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}|black|white)\b/,
+      /\b(?:bg|text|border(?:-[trblxy])?|ring|outline|fill|stroke|from|via|to|divide|decoration|placeholder|caret|shadow)-(?:(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}|black|white)\b|\b(?:bg|text|border|ring|fill|stroke|outline|decoration|from|via|to)-\[(?:#|rgb|hsl|oklch)/,
     legacy: [
       'routes/browser/surface.tsx',
     ],
