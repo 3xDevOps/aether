@@ -181,6 +181,7 @@ type Store interface {
 	CostStore
 	ServerUpdateStore
 	CollaborationStore
+	RunMessageHistoryStore
 
 	Close() error
 }

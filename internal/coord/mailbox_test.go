@@ -507,54 +507,66 @@ func TestInboxRateLimit(t *testing.T) {
 	}
 }
 
-// TestSendStampsOneWorkspaceNote pins the audit trail a send leaves.
-// Radar peers are always runs of the same workspace, so both sides of the
-// exchange share one timeline and one note covers it: a second stamp would
-// only double the entry the humans read.
-func TestSendStampsOneWorkspaceNote(t *testing.T) {
+func TestSendAndAckPublishTypedMessageEvents(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "src/auth.go")
 
-	timeline, err := h.bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
-	})
+	sub, err := h.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
+		events.TypeTimeline, events.TypeCoordMessage, events.TypeCoordMessageAcked,
+	}}})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	defer timeline.Close() //nolint:errcheck // test cleanup
-
-	if _, serr := h.svc.Send(ctx, a, sendParams(b, "hold off on auth.go")); serr != nil {
-		t.Fatalf("Send: %v", serr)
-	}
-
-	var note events.Event
-	select {
-	case note = <-timeline.Events():
-	case <-time.After(2 * time.Second):
-		t.Fatal("the coordination message was never stamped into the timeline")
-	}
-	p, ok := note.Payload.(events.TimelinePayload)
-	if !ok || note.ActorID != "" || note.WorkspaceID != h.workspace || note.RunID != a {
-		t.Fatalf("timeline event = %+v, want a server-originated note on the sender's run", note)
-	}
-	if !strings.Contains(p.Message, "coordination message to run "+string(b)) {
-		t.Fatalf("note = %q, want the outgoing stamp", p.Message)
-	}
-	// A second send is what proves the first left exactly one note: its own
-	// stamp is the next event on the stream, with nothing between them.
-	if _, serr := h.svc.Send(ctx, a, sendParams(b, "still on it")); serr != nil {
-		t.Fatalf("second Send: %v", serr)
-	}
-	select {
-	case next := <-timeline.Events():
-		np, nok := next.Payload.(events.TimelinePayload)
-		if !nok || !strings.Contains(np.Message, "still on it") {
-			t.Fatalf("second event = %+v, want the second send's own stamp and no duplicate of the first", next)
+	defer sub.Close() //nolint:errcheck // test cleanup
+	next := func() events.Event {
+		t.Helper()
+		select {
+		case ev := <-sub.Events():
+			return ev
+		case <-time.After(2 * time.Second):
+			t.Fatal("no coordination event was published")
+			return events.Event{}
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the second coordination message was never stamped")
+	}
+
+	sent, serr := h.svc.Ask(ctx, a, protocol.CoordAskParams{ToRunID: string(b), Body: "hold off on auth.go?", IdempotencyKey: "ask"})
+	if serr != nil {
+		t.Fatalf("Ask: %v", serr)
+	}
+	ev := next()
+	p, ok := ev.Payload.(events.CoordMessagePayload)
+	if !ok || ev.ActorID != "" || ev.RunID != a || ev.ID != store.CoordAuditEventID(sent.QuestionID) {
+		t.Fatalf("send event = %+v, want a server-originated coord.message on the sender's run", ev)
+	}
+	want := events.CoordMessagePayload{
+		MessageID: sent.QuestionID, WorkspaceID: h.workspace, FromRunID: a, ToRunID: b,
+		Kind: protocol.CoordMessageKindQuestion, CorrelationID: sent.QuestionID,
+	}
+	if p != want {
+		t.Fatalf("send payload = %+v, want %+v", p, want)
+	}
+
+	batch, ierr := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{})
+	if ierr != nil || len(batch.Messages) != 1 {
+		t.Fatalf("Inbox = %+v, %v; want the question", batch, ierr)
+	}
+	if _, ierr = h.svc.Inbox(ctx, b, protocol.CoordInboxParams{AckToken: batch.AckToken}); ierr != nil {
+		t.Fatalf("Inbox ack: %v", ierr)
+	}
+	if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
+		t.Fatalf("drain outbox: %v", err)
+	}
+	ev = next()
+	ack, ok := ev.Payload.(events.CoordMessageAckedPayload)
+	if !ok || ev.RunID != b || ack.MessageID != sent.QuestionID || ack.ToRunID != b || ack.AckedAt == "" {
+		t.Fatalf("ack event = %+v, want coord.message.acked for %s", ev, sent.QuestionID)
+	}
+	select {
+	case extra := <-sub.Events():
+		t.Fatalf("unexpected extra event %+v; the timeline note is retired", extra)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -907,7 +919,7 @@ func TestCoordOutboxQuarantinesEventIDConflict(t *testing.T) {
 		if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
 			t.Fatalf("drain audit conflict: %v", err)
 		}
-		pub, err := h.db.GetCoordAuditPublication(ctx, msg.ID)
+		pub, err := h.db.GetCoordAuditPublication(ctx, store.CoordAuditEventID(msg.ID))
 		if err != nil {
 			t.Fatalf("GetCoordAuditPublication: %v", err)
 		}

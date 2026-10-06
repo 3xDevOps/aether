@@ -216,7 +216,7 @@ func (s *Service) Release(run domain.RunID) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("coord: remove %s: %w", dir, err)
 	}
-	if err := s.cfg.Mail.DeleteRunMessages(context.Background(), run); err != nil {
+	if err := s.cfg.Mail.RetireRunMessages(context.Background(), run); err != nil {
 		return fmt.Errorf("coord: retire mailbox: %w", err)
 	}
 	return nil
@@ -277,7 +277,7 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 			if err := os.RemoveAll(dir); err != nil {
 				return fmt.Errorf("coord: remove %s: %w", dir, err)
 			}
-			if err := s.cfg.Mail.DeleteRunMessages(ctx, run); err != nil {
+			if err := s.cfg.Mail.RetireRunMessages(ctx, run); err != nil {
 				return fmt.Errorf("coord: retire mailbox: %w", err)
 			}
 		}

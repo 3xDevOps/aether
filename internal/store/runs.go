@@ -123,7 +123,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID); err != nil {
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -154,7 +154,8 @@ func runSnapshotQuery(where string) string {
 		COALESCE(integrator.id, worker_mission.id, ''),
 		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
-		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, '')
+		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
+		(SELECT COUNT(*) FROM run_messages m WHERE m.to_run = runs.id AND m.acked_at IS NULL AND m.retired_at IS NULL)
 		FROM runs
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (

@@ -178,6 +178,7 @@ type Service struct {
 	runs             map[domain.RunID]*runLifecycle
 	reportCursor     store.CoordOutboxCursor
 	auditCursor      store.CoordOutboxCursor
+	outboxKick       chan struct{}
 	closed           bool
 	wg               sync.WaitGroup
 }
@@ -232,6 +233,7 @@ func New(cfg Config) (*Service, error) {
 		reportLocks:      make(map[domain.RunID]*sync.Mutex),
 		reportPackets:    make(map[string]protocol.EvidencePacket),
 		runs:             make(map[domain.RunID]*runLifecycle),
+		outboxKick:       make(chan struct{}, 1),
 	}, nil
 }
 

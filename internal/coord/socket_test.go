@@ -55,7 +55,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	h.peers.pair(a, b, "src/auth.go")
 
 	timeline, err := h.bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
+		Filter: events.Filter{Types: []events.Type{events.TypeCoordMessage}},
 	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -118,23 +118,23 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 
 	select {
 	case e := <-timeline.Events():
-		p, ok := e.Payload.(events.TimelinePayload)
-		if !ok || e.RunID != a || e.ActorID != "" {
-			t.Fatalf("timeline event = %+v, want the server-originated send on run %s", e, a)
-		}
-		if p.Kind != events.TimelineNote {
-			t.Fatalf("timeline kind = %q, want a note", p.Kind)
+		p, ok := e.Payload.(events.CoordMessagePayload)
+		if !ok || e.RunID != a || e.ActorID != "" || p.MessageID != sent.MessageID || p.ToRunID != b {
+			t.Fatalf("message event = %+v, want the server-originated send on run %s", e, a)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("the coordination message was never stamped into the timeline")
+		t.Fatal("the coordination message was never published")
 	}
 
-	// Releasing a run retires its mailbox with the rest of its state.
+	// Releasing a run retires its unread mail but keeps it as history.
 	if err := h.svc.Release(b); err != nil {
 		t.Fatalf("Release(b): %v", err)
 	}
 	if n, err := h.db.CountUnackedRunMessages(ctx, b); err != nil || n != 0 {
 		t.Fatalf("unacked after release = %d (err %v), want 0", n, err)
+	}
+	if msg, err := h.db.GetRunMessage(ctx, sent.MessageID); err != nil || msg.RetiredAt == nil {
+		t.Fatalf("message after release = %+v (err %v), want it kept and retired", msg, err)
 	}
 }
 func TestMissionMethodWhitelistIntegrationSurface(t *testing.T) {

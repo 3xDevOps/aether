@@ -1484,6 +1484,48 @@ DROP TABLE missions_migrate;
 CREATE INDEX idx_missions_workspace ON missions(workspace_id, created_at, id);
 CREATE INDEX idx_missions_integrator_run ON missions(current_integrator_run_id);
 `,
+	// v50: agent messages stay as history with their sender's swarm, and the
+	// audit outbox holds typed message and acknowledgement events, not bodies.
+	`
+ALTER TABLE run_messages ADD COLUMN mission_id TEXT;
+ALTER TABLE run_messages ADD COLUMN retired_at INTEGER;
+CREATE INDEX idx_run_messages_workspace ON run_messages(workspace_id, created_at, id);
+CREATE INDEX idx_run_messages_mission ON run_messages(mission_id, created_at, id) WHERE mission_id IS NOT NULL;
+CREATE TABLE coord_audit_publications_v50 (
+	event_id          TEXT PRIMARY KEY,
+	event_type        TEXT NOT NULL CHECK (event_type IN ('coord.message', 'coord.message.acked')),
+	message_id        TEXT NOT NULL,
+	workspace_id      TEXT NOT NULL,
+	mission_id        TEXT NOT NULL DEFAULT '',
+	from_run          TEXT NOT NULL,
+	to_run            TEXT NOT NULL,
+	kind              TEXT NOT NULL,
+	correlation_id    TEXT NOT NULL DEFAULT '',
+	acked_at          INTEGER,
+	publication_state TEXT NOT NULL DEFAULT 'pending' CHECK (publication_state IN ('pending', 'published')),
+	attempts          INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at   INTEGER NOT NULL DEFAULT 0,
+	last_error        TEXT NOT NULL DEFAULT '',
+	quarantined_at    INTEGER,
+	quarantine_error  TEXT NOT NULL DEFAULT '',
+	created_at        INTEGER NOT NULL,
+	published_at      INTEGER
+);
+INSERT INTO coord_audit_publications_v50
+	(event_id, event_type, message_id, workspace_id, from_run, to_run, kind, correlation_id,
+	 publication_state, attempts, next_attempt_at, last_error, quarantined_at, quarantine_error,
+	 created_at, published_at)
+	SELECT a.event_id, 'coord.message', a.message_id, a.workspace_id, a.from_run, a.to_run,
+	       COALESCE(m.kind, 'message'), COALESCE(m.correlation_id, ''),
+	       a.publication_state, a.attempts, a.next_attempt_at, a.last_error, a.quarantined_at,
+	       a.quarantine_error, a.created_at, a.published_at
+	FROM coord_audit_publications a LEFT JOIN run_messages m ON m.id = a.message_id;
+DROP TABLE coord_audit_publications;
+ALTER TABLE coord_audit_publications_v50 RENAME TO coord_audit_publications;
+CREATE INDEX idx_coord_audit_publications_due
+	ON coord_audit_publications(publication_state, quarantined_at, next_attempt_at, created_at, event_id);
+CREATE INDEX idx_coord_audit_publications_message ON coord_audit_publications(message_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

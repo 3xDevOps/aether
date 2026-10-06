@@ -765,3 +765,31 @@ func (d *DB) CheckIntegratorInput(ctx context.Context, integratorRun, workerRun 
 	}
 	return nil
 }
+
+// ListMissionRunIDs returns every run that has served the mission: its
+// integrators, current and replaced, and every worker attempt's run.
+func (d *DB) ListMissionRunIDs(ctx context.Context, id domain.MissionID) ([]domain.RunID, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT current_integrator_run_id FROM missions WHERE id = ?1 AND current_integrator_run_id IS NOT NULL
+		UNION SELECT initial_run_id FROM mission_create_receipts WHERE mission_id = ?1
+		UNION SELECT run_id FROM mission_integrator_replacements WHERE mission_id = ?1
+		UNION SELECT run_id FROM mission_attempts WHERE mission_id = ?1 AND run_id IS NOT NULL`, id)
+	if err != nil {
+		return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only rows
+	var out []domain.RunID
+	for rows.Next() {
+		var run domain.RunID
+		if err := rows.Scan(&run); err != nil {
+			return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+		}
+		if run != "" {
+			out = append(out, run)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+	}
+	return out, nil
+}
