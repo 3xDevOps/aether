@@ -1,7 +1,7 @@
 import { PanelLeft, Plus, Search } from '@/components/icons'
 import { ConnectionLine } from '@/components/shell/connection'
 import { Button } from '@/components/ui/button'
-import { canLaunch } from '@/lib/commands'
+import { canLaunch, launchBlocked } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
@@ -15,6 +15,7 @@ const titles: Record<string, string> = {
 export function TopBar() {
   const cap = useCapability()
   const role = useSelfRole()
+  const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const route = useStore((s) => s.route)
   const run = useStore((s) => (s.route.params.runId ? s.runs[s.route.params.runId] : undefined))
   const workspace = useStore((s) => (s.route.name === 'workspace' ? s.workspaces[s.route.params.workspaceId ?? ''] : undefined))
@@ -54,11 +55,11 @@ export function TopBar() {
           <Search />
         </Button>
         {canLaunch({ cap, role }) && (iconLaunch ? (
-          <Button variant="ghost" size="icon" label="New run" onClick={() => openDialog('launch')}>
+          <Button variant="ghost" size="icon" label="New run" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />
           </Button>
         ) : (
-          <Button size="sm" onClick={() => openDialog('launch')}>
+          <Button size="sm" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />
             New run
           </Button>

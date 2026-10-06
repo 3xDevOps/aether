@@ -31,7 +31,7 @@ import {
 import { api, ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import type { Member, PullResult, Workspace } from '@/lib/types'
+import type { LinkStatus, Member, PullResult, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
@@ -455,6 +455,13 @@ export function canLaunch({
   role: Member['role'] | null
 }): boolean {
   return cap.hasMethod('run.launch') && allowed('launch', { id: null, role })
+}
+
+export const unlinkedReason = 'Link this computer to a server first'
+
+/** An unlinked gateway serves only onboarding, so nothing can launch yet. */
+export function launchBlocked(linkStatus: Pick<LinkStatus, 'server_configured'> | null): string | undefined {
+  return linkStatus?.server_configured === false ? unlinkedReason : undefined
 }
 
 export function boardCommands(ctx: BoardCommandContext): Command[] {

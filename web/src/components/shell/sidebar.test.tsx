@@ -60,6 +60,18 @@ describe('shell landmarks', () => {
     expect(screen.queryByRole('contentinfo')).toBeNull()
   })
 
+  it('holds New run and shows no initials until the computer is linked', () => {
+    useStore.setState({ info: null, linkStatus: { server_configured: false, linked: false, addr: '', user: '', repo: '' } })
+    render(<AppShell />)
+
+    const launch = nav().getByRole('button', { name: /New run/ })
+    expect(launch.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(launch)
+    expect(useStore.getState().paletteDialog).toBeNull()
+    const footer = screen.getByRole('button', { name: /^Not signed in/ })
+    expect(within(footer).queryByText('NI')).toBeNull()
+  })
+
   it('groups runs under an h2 each, Finished collapsed by default', () => {
     render(<AppShell />)
 

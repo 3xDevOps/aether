@@ -74,7 +74,13 @@ export function SidebarFooter() {
       <Menu>
         <MenuTrigger asChild>
           <Button variant="ghost" hint={word} aria-label={`${name}, ${word}`} className="w-full justify-start">
-            <Avatar name={name} color={color} size="header" />
+            {self ? (
+              <Avatar name={name} color={color} size="header" />
+            ) : (
+              <span aria-hidden className="grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] border-seam bg-chrome text-muted">
+                <User className="size-3" />
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate text-left text-text">{name}</span>
             <ConnectionDot />
           </Button>

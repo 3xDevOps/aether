@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ListRow } from '@/components/ui/list-row'
 import { Separator } from '@/components/ui/separator'
 import { useIsMobile } from '@/lib/breakpoints'
-import { canLaunch } from '@/lib/commands'
+import { canLaunch, launchBlocked } from '@/lib/commands'
 import { useDrag } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
@@ -206,6 +206,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
   const cap = useCapability()
   const admin = useIsAdmin()
   const role = useSelfRole()
+  const blocked = useStore((s) => launchBlocked(s.linkStatus))
   const togglePalette = useStore((s) => s.togglePalette)
   const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
   const openDialog = useStore((s) => s.openPaletteDialog)
@@ -243,8 +244,10 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
       {canLaunch({ cap, role }) && (
         <div className="shrink-0 px-2 pb-1">
           <Button
-            hint={`New run · ${shortcutLabel('launch')}`}
+            hint={blocked ?? `New run · ${shortcutLabel('launch')}`}
+            aria-disabled={blocked ? true : undefined}
             onClick={() => {
+              if (blocked) return
               setDrawerOpen(false)
               openDialog('launch')
             }}
