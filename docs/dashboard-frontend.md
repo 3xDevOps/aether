@@ -455,15 +455,19 @@ WhoIs gateway. Directory requests are lazy and cached in
 `src/store/files.ts`; file content comes from `files.read` or `config.read`.
 A live run can switch from **File** to **Diff vs base**.
 
-The tree is a browse pane beside the editor at medium widths. On narrow
-screens it is the first view; selecting a file opens the editor and **Browse**
-returns to the tree. CodeMirror provides syntax highlighting for JSON/JSONC,
+The tree lists each workspace's `base: <branch>` first, then its live runs
+under **Run checkouts** and the member's configuration roots under **Agent
+config**; both groups start folded, so a run's or root's tree is read only
+when it is opened. Folder expansion is kept per view. The tree sits beside the
+editor from `md` up. On a phone it is the first view; once a file is open the
+editor fills the screen and **Browse** opens the tree as a side sheet. CodeMirror provides syntax highlighting for JSON/JSONC,
 JavaScript/TypeScript, Markdown, Python and TOML, plus find/replace. The
 editor renders complete UTF-8 text without NUL bytes up to 64 MiB; binary and
 oversized responses remain read-only.
 
 The action label states the write target: base files show **Commit to
-<branch>**, creating one file commit without pushing upstream; live-run files
+<branch>…**, which opens a dialog saying the commit lands on that branch and
+is not pushed upstream, then creates one file commit; live-run files
 show **Save**, changing the run's uncommitted checkout; configuration files
 show **Save**, changing only the authenticated member's persistent home.
 Base writes require **Push**, run writes require **Steer**, and config reads or
@@ -471,7 +475,8 @@ writes are always for the calling member and require **Launch**. A new
 configuration file accepts nested relative paths and refuses to overwrite an
 existing file.
 
-Saves are explicit (**Save**, **Commit to <branch>**, or Ctrl/Cmd-S); there is
+Saves are explicit (**Save**, **Commit to <branch>…**, or Ctrl/Cmd-S, which
+opens the same commit dialog for a base file); there is
 no autosave or force-save. Open tabs and dirty drafts live in memory and survive
 route changes and reconnects to the same identity. A different authenticated
 member or server clears them. The browser warns before unloading dirty buffers.
@@ -486,6 +491,19 @@ imports and Files edits do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
+
+## Templates view
+
+`src/routes/templates/` lists the active workspace's templates
+(`template.list`), one row each: agent glyph, name, mode word (Standard,
+Enhanced, Background), whether it is scheduled, the task, and when it next
+launches, last launched or was saved. **Launch** is the row's action and opens
+the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
+**Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
+the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
+never computed in the browser. **Duplicate** opens the form prefilled under
+`<name> copy`. With no templates the view says what one is and offers **New
+template**.
 
 ## Window bar
 
@@ -1218,8 +1236,13 @@ install tools and save the environment. It is reached through the sidebar's
 **Environment** row or `g e`, and only when the gateway advertises the
 `terminal` WebSocket. The view mounts `TerminalDock` (`terminal-dock.tsx`)
 with `containment="fill"`, so the dock fills the view with no resize handle
-and no collapse control. The Agents and GitHub onboarding steps mount the same
-dock inline.
+and no collapse control. On desktop the dock hands its actions to the view's
+header (`header` prop): **Save environment** is the header's only primary
+button, **More** (`Environment actions`) holds the rest, and the save hint is
+the header's second line. On a phone the top bar already names the view, so
+Save and More sit at the end of the tab row instead of wrapping under it. The
+tab strip is 32px, 44px on a touch screen. The Agents and GitHub onboarding
+steps mount the same dock inline, where the actions stay in its tab row.
 
 ## Keyboard and focus
 
@@ -1804,7 +1827,7 @@ terminal.
 
 The Environment view's `TerminalDock` exposes **Save environment** as its primary action
 while the member's terminal is running. **More** contains capability-gated
-**Forward port**, **Stop environment** and **Reset to standard**. Stopping the
+**Forward port**, **Stop environment…** and **Reset to standard…**. Stopping the
 container and discarding the saved image remain separate decisions with
 separate confirmations: Stop confirms with a plain primary button and says
 the saved image is kept. Reset appears only when there is a `saved_image` to
@@ -2175,8 +2198,8 @@ activity feed and budgets - the four readouts of the team features
 (`internal/approvals`, `internal/timeline`, `internal/cost`). None of them owns
 a view of its own in the shell: watchers show in the run view, presence and spend are the **Team** line in the sidebar footer menu, and
 the two full views are registry routes (`approvals`, `timeline`): Activity is
-a sidebar row, Approvals is reached from the palette, and each is gated on the
-method it needs.
+a sidebar row whose view lives in `src/routes/activity/`, Approvals is reached
+from the palette, and each is gated on the method it needs.
 
 The approval inbox is for agent permission and plan approvals. Teammate
 questions and queued messages stay contextual to their run, in its Details
@@ -2275,9 +2298,10 @@ questions and queued messages stay contextual to their run, in its Details
   window stays oldest-first.
   When that budget does run out the view says so rather than stopping
   quietly. Every open stamps the read, so pages still arriving under the
-  filters the user just left write nothing. Actor dots are the member's own
-  colour from the member payload. This is the one scoped surface that keeps a
-  workspace picker of its own, because comparing what happened in one workspace
+  filters the user just left write nothing. Actor avatars carry the member's
+  own colour from the member payload. This is the one scoped surface that
+  keeps a workspace filter of its own (shown when there is more than one
+  workspace), because comparing what happened in one workspace
   against another is the question the view exists to answer; it opens on the
   active workspace and switching it clears the run filter, since a run belongs
   to exactly one workspace.
@@ -2290,13 +2314,32 @@ questions and queued messages stay contextual to their run, in its Details
   description, or the reverse, without failing the build. A type the map has
   never heard of renders as its wire string, because a server newer than the
   dashboard can emit one.
-- **Activity run links preview labels to two lines**, while the button retains the full label in its accessible name and `title`.
-- **Below `sm` the filter bar folds.** Four labelled selects are most of a
-  phone screen before the first entry, so only the workspace one - the filter
-  that scopes the feed at all - stays out, and Run, Member and Type go behind
-  a **Filters** disclosure. Its caption counts the three that are set, so a
-  feed narrowed by a filter the member cannot see is not read as an empty
-  log.
+- **One Filter popover.** **Filter** in the Activity header holds Workspace,
+  **Show** (every event, one event type, or **Agent messages**), Run and
+  Member; its label counts what is set (`Filter · 2`), so a narrowed feed is
+  not read as an empty log. **More** holds **Raw events**, which prints each
+  row's wire type and JSON payload instead of its description.
+- **Rows share one time column.** Each row is a grid: relative time, a state
+  dot only on `run.status` (the run's new state), the actor's avatar or the
+  message kind glyph, the type name with its description, and the run as a
+  quiet link. On a phone the time moves to the row's end and the run link
+  under the text. `coord.message` and `coord.message.acked` rows name sender
+  and recipient (`Backend → Planner`) and a delivery word, never the payload's
+  ids.
+- **The feed is virtualized.** `virtua` mounts only the rows near the
+  viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
+  row carries `aria-setsize` and `aria-posinset`, so a screen reader still
+  hears the list's real length.
+- **Agent messages is the workspace's message history.** Choosing it in
+  **Show** swaps the feed for `coord.messages.list` rows, newest first, drawn
+  by `components/messages/message-row.tsx`: kind glyph, sender → recipient
+  (each opens that run), kind word, delivery word (Sent, Delivered,
+  Acknowledged), relative time, and the body clamped at three lines. Sender
+  or Recipient asks the server for that run's mail (`run_id`) and keeps the
+  chosen side; **Thread** on a question or report narrows to it and its
+  replies. The search box filters the bodies already loaded and says so while
+  older pages remain; **Show all** reads the older pages, at most 20 per
+  click. New mail re-reads the newest page through the messages slice.
 - **A budget warns, it never stops anything.** The Team line in the sidebar
   footer menu shows the spend and the worst state any workspace is in (`ok`,
   `warn`, `exceeded`) - every workspace, ones with nothing running included,
@@ -2727,8 +2770,8 @@ offered the install-and-save that keeps it first, and told that `aether env
 reset` removes it. A member on the server's standard image is told an admin
 runs the command, or just to reopen the terminal when the image has already
 moved without them. Every remedy the copy names is reachable from the dock
-right below: **Save environment**, or **More** for **Reset to standard** and
-**Stop environment**. **Check again** re-runs the probe, because none of those
+right below: **Save environment**, or **More** for **Reset to standard…** and
+**Stop environment…**. **Check again** re-runs the probe, because none of those
 three restarts the container by itself.
 
 A probe that fails, or a dock that never got a terminal at all, puts the

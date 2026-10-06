@@ -140,7 +140,8 @@ runs. They are workspace settings, not image selection.
 
 ## Save the environment
 
-Save from the **Environment** view with **Save environment**, or run:
+Save from the **Environment** view with **Save environment**, its only
+primary button, or run:
 
 ```sh
 aether env save
@@ -170,7 +171,7 @@ first and then save.
 
 ## Reset to standard
 
-Reset from **Reset to standard** in the **Environment** view, or run:
+Reset from **More** > **Reset to standard…** in the **Environment** view, or run:
 
 ```sh
 aether env reset

@@ -17,8 +17,10 @@ aether terminal stop
 ```
 
 In the dashboard, select **Environment** in the sidebar (or press `g` then
-`e`). The terminal fills that view; **Open** or `+` in its header strip opens a
-tab. The first open starts the environment; the dock says **Starting your
+`e`). The terminal fills that view; **Open** or `+` in its tab strip opens a
+tab. **Save environment** and **More** (Forward port, Stop environment…, Reset
+to standard…) sit in the view's header, or at the end of the tab strip on a
+phone. The first open starts the environment; the dock says **Starting your
 environment container** until the shell attaches, and shows the server's own
 error if the start fails. Later tabs and tab switches reach a container that is
 already up, so those say **Connecting to your environment**. The dock reconnects

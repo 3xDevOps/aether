@@ -287,6 +287,13 @@ loaded the integration or received the turn.
 
 ## Seeing agent messages
 
+In the dashboard, open **Activity**, then **Filter** > **Show** > **Agent
+messages**: the workspace's mail, newest first, with sender → recipient,
+kind, delivery (Sent, Delivered, Acknowledged), and a search over the loaded
+bodies. Sender, Recipient and Thread narrow it; **Show all** reads older
+pages. The ordinary Activity feed shows each send as an **Agent message** row
+without the body.
+
 Members read agent mail on the control channel with `coord.messages.list`.
 It needs View on the workspace, so every member of the workspace can read
 message bodies, the same audience the workspace timeline has.

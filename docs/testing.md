@@ -993,17 +993,19 @@ runtime state.
 | `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The updates dialog, opened from the sidebar's notice row, at the smallest window `desktop/main.js` allows and at one smaller browser viewport: every prompt's actions stay on screen, bounded technical output does not push the dialog away, and the sidebar stays whole behind it |
-| `files-browser.mobile.spec.ts` | At a narrow viewport, opening a real repository file, returning with Browse, and opening another file without losing the tree; the explorer/editor's workspace base, live-run and member-configuration writes are covered by focused regressions |
+| `files-browser.mobile.spec.ts` | At a phone viewport, opening a real repository file from the tree, then **Browse** opening the tree as a side sheet and a second file from it; the editor's workspace base, live-run and member-configuration writes, the commit dialog and the folded Run checkouts and Agent config groups are covered by `routes/files/files.test.tsx` |
+| `activity` | A real run's log in Activity: one **Filter** popover narrowing to Run status, **Raw events** printing wire types and payloads, and **Show** > Agent messages switching to the real `coord.messages.list` history with its search box |
+| `templates` | A template saved over RPC listed as one row, **Schedule…** from its row menu setting a cron the real server answers with the next launch, and **Launch** opening the run |
 | `sidebar-drawer.spec.ts` | In a 600px desktop window, the sidebar sheet opened from the top bar answers `Mod+B` itself, returns focus to the opener and hands the palette back once it closes |
 | `keyboard-focus` | Escape closes a dialog or the sidebar footer menu on a run without leaving the run; the sidebar resizes by pointer and keyboard and keeps its controls inside 220px; focused shell controls paint the app's outline with computed style and contrast against the actual background |
 | `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. Browser tools owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |
 
-`board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
+`activity`, `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
 `run-deep-link`, `run-provisioning`, `run-switch`, `run-room.spec.ts`,
 `run-evidence.spec.ts`, `run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
 `run-evidence.mobile.spec.ts`, `shell-drawer.mobile.spec.ts`,
-`development-browser/browser.spec.ts`, `terminal-geometry`, `terminal-images`
+`development-browser/browser.spec.ts`, `templates`, `terminal-geometry`, `terminal-images`
 and `terminal-tools` need a
 reachable Docker daemon and skip without one. That skip is specific to the
 dashboard suite: `make test-integration` requires its real Docker setup and
