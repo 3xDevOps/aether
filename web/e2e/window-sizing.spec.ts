@@ -168,7 +168,7 @@ test('the update prompt offers its button where the prompt starts', async ({
 
   await button.click()
   await applyStarted
-  await expect(page.getByRole('button', { name: 'Updating...' })).toBeInViewport({
+  await expect(page.getByRole('button', { name: 'Updating…' })).toBeInViewport({
     ratio: 1,
   })
   await expectControlsInView(page)
@@ -197,7 +197,7 @@ test('the update prompt keeps its button in place while the app rebuilds', async
 
   await openDesktop(page, gateway)
   await page.getByRole('button', { name: 'Update now' }).click()
-  await expect(page.getByRole('button', { name: 'Rebuilding...' })).toBeInViewport({
+  await expect(page.getByRole('button', { name: 'Rebuilding…' })).toBeInViewport({
     ratio: 1,
   })
   await expectControlsInView(page, installedPrompts)

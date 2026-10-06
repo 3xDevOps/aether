@@ -281,16 +281,16 @@ export function CliBanner({
     flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
   const buttonLabel =
     flow.name === 'applying'
-      ? 'Updating...'
+      ? 'Updating…'
       : flow.name === 'rebuilding'
-        ? 'Rebuilding...'
+        ? 'Rebuilding…'
         : flow.name === 'relaunching'
-          ? 'Relaunching...'
+          ? 'Relaunching…'
           : 'Update now'
   const applyingLine =
     update.install_method === 'admin-prompt'
-      ? `Downloading ${version}, then macOS asks for an administrator password...`
-      : 'Updating the CLI...'
+      ? `Downloading ${version}, then macOS asks for an administrator password…`
+      : 'Updating the CLI…'
   const NoticeIcon =
     current || flow.name === 'applied' || flow.name === 'rebuilt'
       ? CheckCircle2
@@ -353,7 +353,7 @@ export function CliBanner({
           <div className="text-muted-foreground">
             <p>
               Rebuilding the app (about a minute; the first time also fetches
-              Node)...
+              Node)…
             </p>
             {flow.phase && (
               <p className="font-mono text-xs leading-5">{flow.phase}</p>

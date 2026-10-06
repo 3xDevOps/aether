@@ -136,7 +136,7 @@ export function EdgeSignIn({
       {error && <ErrorLine>{error}</ErrorLine>}
       {phase.name === 'signed-out' && (
         <Button size="sm" disabled={starting} onClick={() => void signIn()}>
-          {starting ? 'Signing in...' : 'Sign in'}
+          {starting ? 'Signing in…' : 'Sign in'}
         </Button>
       )}
       {phase.name === 'waiting' && (
@@ -161,7 +161,7 @@ export function EdgeSignIn({
             for the edge <span className="font-code">{edgeHost(phase.login.edge)}</span>.
           </p>
           <p role="status" className="text-muted">
-            Waiting for you to confirm the code in the browser...
+            Waiting for you to confirm the code in the browser…
           </p>
         </div>
       )}
@@ -371,7 +371,7 @@ function ServerPicker({
               <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />
             </FormField>
             <Button type="submit" size="sm" variant="secondary" disabled={busy || !code.trim()}>
-              {busy ? 'Claiming...' : 'Claim and link'}
+              {busy ? 'Claiming…' : 'Claim and link'}
             </Button>
           </form>
         </CollapsibleContent>
@@ -426,7 +426,7 @@ function ConfirmPin({
         <dd className="min-w-0 break-all font-code">{server.id}</dd>
         <dt className="text-muted">Host key</dt>
         <dd className="min-w-0 break-all font-code">
-          {fingerprint ?? (error ? 'not read' : 'reading...')}
+          {fingerprint ?? (error ? 'not read' : 'reading…')}
         </dd>
       </dl>
       {error && <ErrorLine>{error}</ErrorLine>}
@@ -437,7 +437,7 @@ function ConfirmPin({
       </p>
       <div className="flex min-w-0 flex-wrap gap-2">
         <Button size="sm" disabled={busy || fingerprint === null} onClick={onConfirm}>
-          {busy ? 'Linking...' : 'Link and pin'}
+          {busy ? 'Linking…' : 'Link and pin'}
         </Button>
         <Button size="sm" variant="secondary" disabled={busy} onClick={onCancel}>
           Cancel

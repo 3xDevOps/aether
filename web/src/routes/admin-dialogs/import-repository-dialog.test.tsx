@@ -51,7 +51,7 @@ describe('repository import context isolation', () => {
       const view = render(<ImportRepositoryDialog client={client} onImported={onImported} onClose={onClose} />)
       fillForm()
       submit()
-      expect(screen.getByRole('button', { name: 'Importing...' })).toHaveProperty('disabled', true)
+      expect(screen.getByRole('button', { name: 'Importing…' })).toHaveProperty('disabled', true)
 
       if (transition === 'unmount') {
         view.unmount()
@@ -101,7 +101,7 @@ describe('repository import context isolation', () => {
       if (outcome === 'success') oldRequest.resolve(imported)
       else oldRequest.reject(new Error('old connection lost'))
     })
-    expect(screen.getByRole('button', { name: 'Importing...' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Importing…' })).toHaveProperty('disabled', true)
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true)
     expect(screen.getByLabelText<HTMLInputElement>('Workspace name').value).toBe('current-project')
     expect(screen.queryByRole('region', { name: 'Import outcome' })).toBeNull()

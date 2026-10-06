@@ -119,7 +119,7 @@ export function BudgetDialog({
             Cancel
           </Button>
           <Button type="submit" form="budget-set" disabled={busy || !limitValid}>
-            {busy ? 'Saving...' : 'Set'}
+            {busy ? 'Saving…' : 'Set'}
           </Button>
         </DialogFooter>
       </DialogContent>

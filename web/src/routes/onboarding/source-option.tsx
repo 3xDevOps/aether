@@ -73,7 +73,7 @@ export function OnboardingSourceOption({
           : 'The server can fetch the repository itself. An administrator sets it up on this workspace\'s Repository page.'}
       </p>
       <div role="status" aria-label="Source mirror status" aria-live="polite" className="flex min-w-0 flex-col gap-2 self-stretch text-ui-sm">
-        {loading && <p className="text-muted">Checking source mirror status...</p>}
+        {loading && <p className="text-muted">Checking source mirror status…</p>}
         {!loading && statusError && <Callout tone="failed" role="alert">Could not check source mirror status: {statusError}</Callout>}
         {!loading && !statusError && !configured && (
           <p>

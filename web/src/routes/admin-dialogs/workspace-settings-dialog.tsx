@@ -121,7 +121,7 @@ export function WorkspaceSettingsDialog({
             Cancel
           </Button>
           <Button type="submit" form="workspace-settings" disabled={busy}>
-            {busy ? 'Saving...' : 'Save'}
+            {busy ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

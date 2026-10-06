@@ -328,10 +328,10 @@ banner again.
 
 The button does the same two steps the command does. It swaps the binaries,
 then rebuilds the app when one is installed, and the banner follows along:
-*Updating the CLI...*, then *Rebuilding the app (about a minute; the first
-time also fetches Node)...*, then *Relaunching*. On macOS with a binary in
+*Updating the CLI…*, then *Rebuilding the app (about a minute; the first
+time also fetches Node)…*, then *Relaunching*. On macOS with a binary in
 a directory this account cannot write, the first step reads *Downloading
-v1.3.0, then macOS asks for an administrator password...* and the dialog
+v1.3.0, then macOS asks for an administrator password…* and the dialog
 (Touch ID or password) opens once the download is verified; cancelling it
 ends the update there with nothing changed.
 **Update now** stays disabled until it is over. In the desktop app the shell relaunches itself onto the new

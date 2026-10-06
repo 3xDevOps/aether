@@ -58,7 +58,7 @@ export function MissingRun() {
       >
         <div className="flex items-center gap-2">
           <LoaderCircle className="size-4 animate-spin text-muted-foreground" aria-hidden />
-          <p className="text-[13px] leading-5 text-muted-foreground">Loading run details...</p>
+          <p className="text-[13px] leading-5 text-muted-foreground">Loading run details…</p>
         </div>
         <div className="mt-2 grid gap-1">
           <Skeleton className="h-7 rounded-sm" />

@@ -233,7 +233,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     const status = screen
       .getAllByRole('status')
       .map((node) => node.textContent)
-    expect(status).toContain('Checking your environment terminal for gh...')
+    expect(status).toContain('Checking your environment terminal for gh…')
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(socket.send).not.toHaveBeenCalled()
   })
@@ -461,7 +461,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     })
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(
-      screen.getByText('Waiting for your environment terminal to start...'),
+      screen.getByText('Waiting for your environment terminal to start…'),
     ).toBeDefined()
   })
 

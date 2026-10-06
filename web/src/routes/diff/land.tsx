@@ -46,7 +46,7 @@ export function Land({ run }: { run: RunRecord }) {
       ) : (
         cap.hasLocal('pull.switch') && (
           <Button size="sm" variant="secondary" disabled={switching} onClick={() => void switchBranch()}>
-            {switching ? 'Switching...' : 'Switch to it'}
+            {switching ? 'Switching…' : 'Switch to it'}
           </Button>
         )
       )}

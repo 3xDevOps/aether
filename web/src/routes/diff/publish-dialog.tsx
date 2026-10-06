@@ -57,7 +57,7 @@ function Checkout({ p }: { p: Publish }) {
   return (
     <section aria-label="Run checkout" className="grid min-w-0 gap-2 rounded-panel border border-seam bg-chrome p-3">
       <div className="flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
-        {status ? <Facts status={status} /> : <p className="text-ui text-muted">{p.errors.status ? 'Native Git status is unavailable.' : 'Loading native Git status...'}</p>}
+        {status ? <Facts status={status} /> : <p className="text-ui text-muted">{p.errors.status ? 'Native Git status is unavailable.' : 'Loading native Git status…'}</p>}
         <Button variant="secondary" size="sm" disabled={p.busy} onClick={() => void p.perform('status', p.refreshStatus)}>
           Refresh status
         </Button>

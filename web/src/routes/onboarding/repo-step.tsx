@@ -422,7 +422,7 @@ export function RepoStep({
                 disabled={forwarding}
                 onClick={() => void fastForward()}
               >
-                {forwarding ? 'Fast-forwarding...' : 'Fast-forward my clone'}
+                {forwarding ? 'Fast-forwarding…' : 'Fast-forward my clone'}
               </Button>
               {forwardError && (
                 <div className="space-y-1">
@@ -511,7 +511,7 @@ export function RepoStep({
             canPush && (
               <>
                 <Button size="sm" disabled={pushing} onClick={() => void push()}>
-                  {pushing ? 'Pushing...' : 'Push now'}
+                  {pushing ? 'Pushing…' : 'Push now'}
                 </Button>
                 {pushError && (
                   <div className="space-y-1">

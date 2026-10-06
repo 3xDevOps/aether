@@ -204,7 +204,7 @@ export function GitHubConnect({
         onClick={() => void connect()}
         disabled={busy || ghUnusable}
       >
-        {busy ? 'Connecting GitHub...' : "I've logged in"}
+        {busy ? 'Connecting GitHub…' : "I've logged in"}
       </Button>
     </section>
   )
@@ -226,8 +226,8 @@ function screenLine({
   if (ghUsable) return 'The login command is ready in your environment terminal:'
   if (checkFailed) return 'Could not check your environment terminal for gh:'
   return running
-    ? 'Checking your environment terminal for gh...'
-    : 'Waiting for your environment terminal to start...'
+    ? 'Checking your environment terminal for gh…'
+    : 'Waiting for your environment terminal to start…'
 }
 
 /** Only called for a gh that cannot log in, so the last arm is the outdated one. */

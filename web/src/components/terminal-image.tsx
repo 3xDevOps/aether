@@ -309,7 +309,7 @@ export function useTerminalImage({
               {uploading && (
                 <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
               )}
-              {uploading ? 'Uploading...' : 'Upload and insert'}
+              {uploading ? 'Uploading…' : 'Upload and insert'}
             </Button>
           </DialogFooter>
         </DialogContent>

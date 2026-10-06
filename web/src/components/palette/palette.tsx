@@ -141,7 +141,7 @@ export function PaletteBody({
       <CommandInput
         value={search}
         onValueChange={setSearch}
-        placeholder="Search commands, runs, workspaces..."
+        placeholder="Search commands, runs, workspaces…"
       />
       <CommandList browseOrder={browseOrder} className="min-h-0 px-1 pb-1">
         <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>

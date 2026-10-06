@@ -90,7 +90,7 @@ export function InjectDialog() {
             autoFocus
             rows={5}
             aria-describedby="inject-help"
-            placeholder="Steer the agent..."
+            placeholder="Steer the agent…"
             value={text}
             onChange={(e) => {
               const nextText = e.target.value
@@ -112,7 +112,7 @@ export function InjectDialog() {
             Cancel
           </Button>
           <Button type="submit" form="inject-message" disabled={sending || !text.trim()}>
-            {sending ? 'Sending...' : 'Send'}
+            {sending ? 'Sending…' : 'Send'}
           </Button>
         </DialogFooter>
       </DialogContent>

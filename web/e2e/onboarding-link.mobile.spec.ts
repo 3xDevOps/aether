@@ -66,7 +66,7 @@ test('the repository page keeps its content inside the phone after a Git push', 
   await page.setViewportSize({ width: 390, height: 600 })
   await page.goto(alice.url)
   await page.getByRole('button', { name: 'Search', exact: true }).tap()
-  await page.getByPlaceholder('Search commands, runs, workspaces...').fill('Manage workspaces')
+  await page.getByPlaceholder('Search commands, runs, workspaces…').fill('Manage workspaces')
   await page.getByRole('option', { name: 'Manage workspaces' }).tap()
   await page.getByRole('button', { name: 'More actions for project' }).tap()
   await page.getByRole('menuitem', { name: 'Repository' }).tap()

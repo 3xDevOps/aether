@@ -136,7 +136,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
               {linkError && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{linkError}</Callout>}
               <div>
                 <Button type="submit" size="sm" disabled={linking || !address.trim()}>
-                  {linking ? 'Linking...' : 'Link'}
+                  {linking ? 'Linking…' : 'Link'}
                 </Button>
               </div>
             </form>

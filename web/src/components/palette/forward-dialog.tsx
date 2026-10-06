@@ -153,7 +153,7 @@ export function ForwardDialog() {
           <div className="space-y-1.5" aria-label="Active forwards">
             <p className="text-xs font-medium text-muted-foreground">Active forwards</p>
             {loading ? (
-              <p className="text-[13px] text-muted-foreground">Loading forwards...</p>
+              <p className="text-[13px] text-muted-foreground">Loading forwards…</p>
             ) : forwards.length === 0 ? (
               <p className="text-[13px] text-muted-foreground">No active forwards</p>
             ) : (
@@ -176,7 +176,7 @@ export function ForwardDialog() {
                       onClick={() => void stop(forward.port)}
                       disabled={stopping !== null}
                     >
-                      {stopping === forward.port ? 'Stopping...' : 'Stop'}
+                      {stopping === forward.port ? 'Stopping…' : 'Stop'}
                     </Button>
                   </div>
                 ))}
@@ -193,7 +193,7 @@ export function ForwardDialog() {
             form="forward-port"
             disabled={starting || !target}
           >
-            {starting ? 'Starting...' : 'Start'}
+            {starting ? 'Starting…' : 'Start'}
           </Button>
         </DialogFooter>
       </DialogContent>

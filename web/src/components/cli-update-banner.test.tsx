@@ -171,7 +171,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     expect(
       await screen.findByText(
-        'Downloading v1.3.0, then macOS asks for an administrator password...',
+        'Downloading v1.3.0, then macOS asks for an administrator password…',
       ),
     ).toBeTruthy()
   })
@@ -417,9 +417,9 @@ describe('the desktop-app rebuild the Update button waits on', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
-    expect(screen.getByText('Updating the CLI...')).toBeTruthy()
+    expect(screen.getByText('Updating the CLI…')).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Updating...' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Updating…' }) as HTMLButtonElement).disabled,
     ).toBe(true)
 
     // update.apply resolves.
@@ -428,11 +428,11 @@ describe('the desktop-app rebuild the Update button waits on', () => {
     })
     expect(
       screen.getByText(
-        'Rebuilding the app (about a minute; the first time also fetches Node)...',
+        'Rebuilding the app (about a minute; the first time also fetches Node)…',
       ),
     ).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Rebuilding…' }) as HTMLButtonElement).disabled,
     ).toBe(true)
 
     // First update.status poll: still building, and names the phase.
@@ -441,7 +441,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
     })
     expect(screen.getByText('installing dependencies')).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Rebuilding...' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Rebuilding…' }) as HTMLButtonElement).disabled,
     ).toBe(true)
 
     // Second poll: the build is done and the apply said it would restart.
@@ -450,7 +450,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
     })
     expect(screen.getByText('Relaunching')).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Relaunching...' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Relaunching…' }) as HTMLButtonElement).disabled,
     ).toBe(true)
     expect(client.localUpdateStatus).toHaveBeenCalledTimes(2)
   })
@@ -514,7 +514,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await screen.findByText(
-      'Rebuilding the app (about a minute; the first time also fetches Node)...',
+      'Rebuilding the app (about a minute; the first time also fetches Node)…',
     )
     expect(useStore.getState().gatewayRestarting).toBe(false)
   })

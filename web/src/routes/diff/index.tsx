@@ -129,7 +129,7 @@ export function ChangesView({ runID }: { runID: string }) {
 
 function Empty({ snapshot, loading }: { snapshot: DiffSnapshot | null; loading: boolean }) {
   if (loading) {
-    return <p className="p-4 text-ui text-muted">{snapshot ? 'Loading what changed then...' : 'Loading the diff...'}</p>
+    return <p className="p-4 text-ui text-muted">{snapshot ? 'Loading what changed then…' : 'Loading the diff…'}</p>
   }
   if (snapshot) return <EmptyState title="No changes in this interval.">That interval recorded no textual change.</EmptyState>
   return <EmptyState title="No changes yet.">Nothing differs from the fork point. Files the agent changes show up here.</EmptyState>
