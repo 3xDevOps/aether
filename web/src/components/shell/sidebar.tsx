@@ -33,7 +33,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed, useDrag } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
-import { runLabel } from '@/lib/status'
+import { runLabel, type PresentationState } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
@@ -44,7 +44,6 @@ import {
   useNeedsYouCount,
   useRun,
   useRunInput,
-  useRunPresentation,
   useSidebarGroups,
 } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -712,12 +711,12 @@ function Group({
       <ul id={regionId} hidden={!expanded}>
         {expanded && group.runs.map((run) => (
           <li key={run.run.id}>
-            <RunRow runID={run.run.id} workspaceName={run.workspaceName} />
+            <RunRow runID={run.run.id} state={run.state} reason={run.reason} workspaceName={run.workspaceName} />
             {run.children.length > 0 && (
               <ul aria-label={`Workers of ${runLabel(run.run)}`}>
                 {run.children.map((child, index) => (
                   <li key={child.run.id}>
-                    <RunRow runID={child.run.id} workspaceName={child.workspaceName} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
+                    <RunRow runID={child.run.id} state={child.state} reason={child.reason} workspaceName={child.workspaceName} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
                   </li>
                 ))}
               </ul>
@@ -730,25 +729,27 @@ function Group({
 }
 
 /** Subscribes to its own run, so an event about another run leaves it alone. */
-const RunRow = memo(function RunRow({ runID, workspaceName, branch }: {
+const RunRow = memo(function RunRow({ runID, ...shown }: {
   runID: string
-  /** Set for a Needs you row outside the active workspace. */
+  state: PresentationState
+  reason: string
   workspaceName?: string
   branch?: 'middle' | 'last'
 }) {
   const run = useRun(runID)
-  return run ? <RunRowButton run={run} workspaceName={workspaceName} branch={branch} /> : null
+  return run ? <RunRowButton run={run} {...shown} /> : null
 })
 
-function RunRowButton({ run, workspaceName, branch }: {
+function RunRowButton({ run, state, reason, workspaceName, branch }: {
   run: RunRecord
+  state: PresentationState
+  reason: string
   workspaceName?: string
   branch?: 'middle' | 'last'
 }) {
   const navigate = useStore((s) => s.navigate)
   const selected = useStore((s) => isRunRoute(s.route, run.id))
   const ownerColor = useStore((s) => s.members[run.member_id]?.color)
-  const { state, reason } = useRunPresentation(run)
   const label = runLabel(run)
   const input = useRunInput(run)
   const role = run.mission_role === 'integrator'
