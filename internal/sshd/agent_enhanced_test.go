@@ -130,14 +130,14 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 	}
 	s.cfg.Homes = homes
 	s.cfg.Runs = &fakeRuns{}
-	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+	if err = s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	list := func(account domain.MemberID) map[string]protocol.AgentInfo {
 		t.Helper()
-		raw, err := json.Marshal(protocol.AgentListParams{AccountMemberID: string(account)})
-		if err != nil {
-			t.Fatal(err)
+		raw, marshalErr := json.Marshal(protocol.AgentListParams{AccountMemberID: string(account)})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
 		}
 		result, perr := s.agentList(ctx, grantee.ID, raw)
 		if perr != nil {
@@ -153,8 +153,8 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 	list(owner.ID)
 	for _, member := range []domain.MemberID{owner.ID, grantee.ID} {
 		// homes.Path would create the home it names.
-		if _, err := os.Lstat(filepath.Join(homes.Root(), string(member))); !os.IsNotExist(err) {
-			t.Errorf("agent.list created %s's home: %v", member, err)
+		if _, statErr := os.Lstat(filepath.Join(homes.Root(), string(member))); !os.IsNotExist(statErr) {
+			t.Errorf("agent.list created %s's home: %v", member, statErr)
 		}
 	}
 

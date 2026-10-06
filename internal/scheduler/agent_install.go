@@ -45,7 +45,7 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 		s.mu.Unlock()
 	}()
 
-	if _, err := s.EnsureTerminal(ctx, member); err != nil {
+	if _, err = s.EnsureTerminal(ctx, member); err != nil {
 		return "", 0, err
 	}
 	s.mu.Lock()
