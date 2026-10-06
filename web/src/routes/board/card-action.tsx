@@ -6,7 +6,7 @@ import { PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { needsYouConditions, type NeedsYouTarget } from '@/lib/needs-you'
+import { isEnhanced, needsYouConditions, type NeedsYouTarget } from '@/lib/needs-you'
 import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -22,7 +22,7 @@ export function cardAction(card: BoardCard, approval: Approval | undefined): Car
 }
 
 function answersInTerminal(card: BoardCard): boolean {
-  return (card.needsYou === 'permission' || card.needsYou === 'question') && card.run.mode !== 'acp'
+  return (card.needsYou === 'permission' || card.needsYou === 'question') && !isEnhanced(card.run)
 }
 
 // The Run Room lives in the run view, so a notes target opens the run.

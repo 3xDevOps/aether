@@ -82,6 +82,10 @@ function condition(spec: Spec): NeedsYouCondition {
   }
 }
 
+export function isEnhanced(run: Pick<Run, 'acp'>): boolean {
+  return run.acp === true
+}
+
 // `outcome_unseen` is owner-scoped on the server.
 export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
   return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
@@ -202,7 +206,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run, ctx) => {
       const approval = ctx.approvalsByRun[run.id]?.[0]
       if (approval) return `Permission: ${approval.action}`
-      return run.mode === 'acp' ? 'Permission requested' : 'Permission: answer in the terminal'
+      return isEnhanced(run) ? 'Permission requested' : 'Permission: answer in the terminal'
     },
     since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
   }),
@@ -211,7 +215,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'request',
     holds: (run) => nativeRequests(run, questionKinds).length > 0,
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
-    reason: (run) => (run.mode === 'acp' ? 'Question from the agent' : 'Question: answer in the terminal'),
+    reason: (run) => (isEnhanced(run) ? 'Question from the agent' : 'Question: answer in the terminal'),
   }),
   condition({
     id: 'queued-message',

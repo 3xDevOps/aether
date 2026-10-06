@@ -207,8 +207,13 @@ describe('needs you conditions', () => {
     ['permission', 'Permission requested'],
     ['question', 'Question from the agent'],
   ] as const)('gives no terminal instruction for an enhanced run\'s %s', (kind, reason) => {
-    const enhanced = record({ mode: 'acp', pending_inputs: [{ id: 'r1', session_id: 's1', kind }] })
+    const enhanced = record({ mode: 'acp', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind }] })
     expect(presentRun(enhanced, stateContext())).toMatchObject({ state: 'needs-you', reason })
+  })
+
+  it('treats a Background run the server drives over ACP as Enhanced', () => {
+    const background = record({ mode: 'headless', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'permission' }] })
+    expect(presentRun(background, stateContext()).reason).toBe('Permission requested')
   })
 
   it('names no wait for a run parked before the snapshot', () => {
