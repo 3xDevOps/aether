@@ -14,7 +14,7 @@ const buttonVariants = cva(
         secondary: 'border border-seam bg-raised text-text hover:not-aria-disabled:bg-hover-chrome',
         ghost: 'text-muted hover:not-aria-disabled:bg-hover-chrome hover:not-aria-disabled:text-text',
         danger: 'bg-state-failed text-on-failed hover:not-aria-disabled:bg-state-failed/90',
-        link: 'text-accent underline-offset-2 hover:not-aria-disabled:underline',
+        link: 'relative text-accent underline-offset-2 hover:not-aria-disabled:underline coarse:after:absolute coarse:after:inset-x-0 coarse:after:top-1/2 coarse:after:h-11 coarse:after:-translate-y-1/2',
       },
       size: {
         sm: 'h-6 px-2 text-ui-sm coarse:h-11 coarse:px-3',
