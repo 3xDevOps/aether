@@ -21,6 +21,23 @@ describe('shortcut reference', () => {
     expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
   })
 
+  it('returns focus to what had it before "?" opened the reference', async () => {
+    render(
+      <>
+        <ShortcutsDialog />
+        <button type="button">Board</button>
+      </>,
+    )
+    const before = screen.getByRole('button', { name: 'Board' })
+    before.focus()
+
+    fireEvent.keyDown(before, { key: '?', shiftKey: true })
+    expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+
+    expect(document.activeElement).toBe(before)
+  })
+
   // Only the reference is mounted, so of the global keys only its own answers.
   it("lists the keys that answer here and a run's keys, by scope", async () => {
     render(<ShortcutsDialog />)

@@ -3242,6 +3242,13 @@ nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
 keys are listed even from the board, where no run scope is on screen.
 
+A dialog a shortcut opens has no trigger to return to, so `useReturnFocus` in
+`src/lib/hooks.ts` records what had focus when it opened and puts focus back
+there on close: New run (`n`), the shortcuts dialog (`?`) and every dialog the
+palette opens. A palette command that opens a dialog hands the palette's own
+invoker over (`handOverFocus`), so closing New run after `⌘K` returns to
+where `⌘K` was pressed, not to the vanished palette input.
+
 Two window listeners serve every scope. Chords (a modifier beyond Shift) are
 matched while the event is capturing, so a terminal's own handler never turns
 them into input. Single keys are matched while it bubbles, after Radix and any

@@ -11,9 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { Template } from '@/lib/types'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 export function TemplateDialog({ onClose }: { onClose: () => void }) {
+  const returnFocus = useReturnFocus()
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const navigate = useStore((s) => s.navigate)
@@ -65,7 +67,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <DialogContent {...returnFocus} className="max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Launch from a template</DialogTitle>
           <DialogDescription>The template&apos;s saved task starts as a new run.</DialogDescription>

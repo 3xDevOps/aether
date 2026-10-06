@@ -16,6 +16,7 @@ import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
@@ -38,6 +39,7 @@ const backgroundIntegrator: Refusal = {
 }
 
 export function LaunchDialog() {
+  const returnFocus = useReturnFocus()
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const close = useStore((s) => s.closePaletteDialog)
@@ -225,7 +227,7 @@ export function LaunchDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <DialogContent {...returnFocus} className="max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <Tabs value={kind} onValueChange={(value) => { setKind(value as Kind); setError(null) }} className="contents">
           <DialogHeader>
             <DialogTitle>{kind === 'swarm' ? 'New swarm' : 'New run'}</DialogTitle>

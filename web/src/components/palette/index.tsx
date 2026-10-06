@@ -4,6 +4,7 @@ import { TemplateDialog } from '@/components/launch/template-dialog'
 import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
 import { useCommandRunner, type Command } from '@/lib/commands'
+import { handOverFocus } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { inModal } from '@/lib/keys'
 import { useStore } from '@/store'
@@ -82,6 +83,7 @@ export function CommandPalette() {
             return
           }
           const destinationOpen = useStore.getState().paletteDialog !== null || templates
+          if (!destinationOpen) handOverFocus(null)
           if (
             invokerIdentity.current !== useStore.getState().identityKey ||
             !restoreFocus.current ||
@@ -106,6 +108,7 @@ export function CommandPalette() {
         <PaletteBody
           onDone={(restore = true) => {
             restoreFocus.current = restore
+            if (!restore) handOverFocus(invoker.current)
             toggle(false)
           }}
           onTemplates={() => setTemplates(true)}

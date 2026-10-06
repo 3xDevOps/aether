@@ -6,6 +6,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { SectionLabel } from '@/components/ui/section-label'
+import { useReturnFocus } from '@/lib/hooks'
 import type { KeyScope } from '@/lib/key-scope'
 import {
   formatKeys,
@@ -129,12 +130,15 @@ export function ShortcutsDialog() {
   const setOpen = useStore((s) => s.setShortcutsOpen)
   const singleKeys = useStore((s) => s.singleKeyShortcuts)
   useKeybindings('global', { shortcuts: () => setOpen(true) })
+  const returnFocus = useReturnFocus()
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         className="max-h-[calc(100dvh-2rem)] max-w-[min(680px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+        onCloseAutoFocus={returnFocus.onCloseAutoFocus}
         onOpenAutoFocus={(event) => {
+          returnFocus.onOpenAutoFocus()
           event.preventDefault()
           ;(event.currentTarget as HTMLElement).focus()
         }}

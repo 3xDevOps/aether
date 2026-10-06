@@ -16,9 +16,11 @@ import {
   type LocalForwardStatusResult,
 } from '@/lib/api'
 import { message } from '@/lib/format'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 export function ForwardDialog() {
+  const returnFocus = useReturnFocus()
   const target = useStore((s) => s.paletteForwardTarget)
   const close = useStore((s) => s.closePaletteDialog)
   const [port, setPort] = useState('1455')
@@ -107,7 +109,7 @@ export function ForwardDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+      <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>
             {target?.startsWith('run:')

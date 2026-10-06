@@ -67,6 +67,13 @@ export function useMediaQuery(query: string): boolean {
   )
 }
 
+let handedOver: HTMLElement | null = null
+
+/** For a dialog that closes as it opens another, like the palette opening New run: the next useReturnFocus dialog returns to `target`. */
+export function handOverFocus(target: HTMLElement | null) {
+  handedOver = target
+}
+
 /** Focus handlers for a dialog that has no Radix trigger, so closing it returns focus to whatever opened it. */
 export function useReturnFocus() {
   const opener = useRef<HTMLElement | null>(null)
@@ -74,9 +81,10 @@ export function useReturnFocus() {
     onOpenAutoFocus: () => {
       const menu = document.activeElement?.closest('[role="menu"]')
       // A menu item is gone once its dialog closes; its menu's trigger is still there.
-      const target = menu
+      const target = handedOver ?? (menu
         ? [...document.querySelectorAll('[aria-controls]')].find((el) => el.getAttribute('aria-controls') === menu.id)
-        : document.activeElement
+        : document.activeElement)
+      handedOver = null
       opener.current = target instanceof HTMLElement ? target : null
     },
     onCloseAutoFocus: (event: Event) => {

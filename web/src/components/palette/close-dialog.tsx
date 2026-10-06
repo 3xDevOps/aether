@@ -15,9 +15,11 @@ import {
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 export function CloseDialog() {
+  const returnFocus = useReturnFocus()
   const runID = useStore((s) => s.paletteRunID)
   const run = useStore((s) => (s.paletteRunID ? s.runs[s.paletteRunID] : undefined))
   const close = useStore((s) => s.closePaletteDialog)
@@ -42,7 +44,7 @@ export function CloseDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+      <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(480px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Close this run?</DialogTitle>
           <DialogDescription>
