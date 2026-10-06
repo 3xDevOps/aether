@@ -9,8 +9,8 @@ const page: DevBrowserPage = {
   width: 390, height: 844, url: 'http://localhost:3000', title: 'App',
 }
 
-function frame(shown = page): ArrayBuffer {
-  const metadata: DevBrowserFrameMetadata = { ...shown, run_id: 'run_1', sequence: 1, mime_type: 'image/png', timestamp: '2026-09-26T00:00:00Z' }
+function frame(shown = page, sequence = 1): ArrayBuffer {
+  const metadata: DevBrowserFrameMetadata = { ...shown, run_id: 'run_1', sequence, mime_type: 'image/png', timestamp: '2026-09-26T00:00:00Z' }
   const json = new TextEncoder().encode(JSON.stringify(metadata))
   const packet = new ArrayBuffer(8 + json.length + 1)
   const view = new DataView(packet)
@@ -78,5 +78,26 @@ it('paints a frame that arrives before its new viewport is reported', async () =
   expect(screen.getByText('Waiting for browser frame')).toBeTruthy()
   view.rerender(<BrowserSurface {...props} page={resized} />)
   await screen.findByText('Live frame · 1280 × 800')
+  view.unmount()
+})
+
+it('leaves the painted frame alone when the page is re-reported with nothing parked', async () => {
+  const resized = { ...page, viewport_id: 'viewport-2', width: 1280, height: 800 }
+  const props = { runID: 'run_1', page, control: null, connection: 0, expanded: false, onExpandedChange: vi.fn(), onError: vi.fn(), onPage: vi.fn() }
+  const view = render(<BrowserSurface {...props} />)
+  await act(async () => {
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
+    socket.onmessage?.({ data: frame(resized, 1) })
+  })
+  view.rerender(<BrowserSurface {...props} page={resized} />)
+  await act(async () => {
+    StubSocket.last().onmessage?.({ data: frame({ ...resized, width: 1024, height: 640 }, 2) })
+  })
+  await screen.findByText('Live frame · 1024 × 640')
+  view.rerender(<BrowserSurface {...props} page={{ ...resized }} />)
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+  expect(screen.getByText('Live frame · 1024 × 640')).toBeTruthy()
   view.unmount()
 })

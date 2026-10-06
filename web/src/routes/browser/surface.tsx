@@ -80,6 +80,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     let failed = false
     let latest: BrowserFrame | null = null
     let parked: BrowserFrame | null = null
+    let painted = 0
     let decoding = false
     let sequence = 0
     const target = { run_id: props.runID, session_id: props.page.session_id, page_id: props.page.page_id, page_revision: props.page.page_revision }
@@ -120,7 +121,9 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
               parked = frame
               continue
             }
+            if (frame.metadata.sequence <= painted) continue
             parked = null
+            painted = frame.metadata.sequence
             element.width = frame.metadata.width
             element.height = frame.metadata.height
             context.drawImage(bitmap, 0, 0, element.width, element.height)
@@ -136,7 +139,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     }
     repaintParked.current = () => {
       if (!parked) return
-      latest ??= parked
+      if (!latest && parked.metadata.sequence > painted) latest = parked
       parked = null
       void paint()
     }
