@@ -1,7 +1,7 @@
 import { Archive, PackageX, Rocket } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api } from '@/lib/api'
@@ -118,11 +118,9 @@ export function Board() {
                 </Button>
               ))}
             </div>
-            <Chip color="default" variant="soft" size="sm">
-              <Chip.Label>
-                {total} {total === 1 ? 'run' : 'runs'}
-              </Chip.Label>
-            </Chip>
+            <Badge>
+              {total} {total === 1 ? 'run' : 'runs'}
+            </Badge>
           </>
         }
         subtitle={
@@ -198,24 +196,17 @@ function NewRunButton() {
   const role = useSelfRole()
   if (!canLaunch({ cap, role })) return null
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <Button
-            {...triggerProps}
-            variant="default"
-            size="default"
-            onClick={() => {
-              openDialog('launch')
-            }}
-          >
-            <Rocket />
-            New run
-          </Button>
-        )}
-      />
-      <Tooltip.Content>Launch a run</Tooltip.Content>
-    </Tooltip>
+    <Button
+      hint="Launch a run"
+      variant="primary"
+      size="md"
+      onClick={() => {
+        openDialog('launch')
+      }}
+    >
+      <Rocket />
+      New run
+    </Button>
   )
 }
 
@@ -237,8 +228,8 @@ function EmptyNotice() {
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           {workspace && <NewRunButton />}
-          {caps.hasMethod('workspace.list') && <Button variant="outline" onClick={() => navigate('workspaces')}>Add or manage workspaces</Button>}
-          {caps.hasMethod('agent.list') && <Button variant="outline" onClick={() => navigate('onboarding')}>Set up repository and agents</Button>}
+          {caps.hasMethod('workspace.list') && <Button variant="secondary" onClick={() => navigate('workspaces')}>Add or manage workspaces</Button>}
+          {caps.hasMethod('agent.list') && <Button variant="secondary" onClick={() => navigate('onboarding')}>Set up repository and agents</Button>}
         </div>
       </div>
     </div>
@@ -347,30 +338,19 @@ function ColumnHeader({
         {clearDone && <ClearDoneButton {...clearDone} onClosed={takeFocus} />}
         {releaseFinished && <ReleaseFinishedButton {...releaseFinished} onClosed={takeFocus} />}
         {archived && archived.count > 0 && (
-          <Tooltip>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <Button
-                  {...triggerProps}
-                  variant={archived.showing ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-[22px] min-h-[22px] px-1.5 text-xs"
-                  aria-pressed={archived.showing}
-                  onClick={() => archived.onToggle(!archived.showing)}
-                >
-                  <Archive className="size-3" aria-hidden />
-                  Archived {archived.count}
-                </Button>
-              )}
-            />
-            <Tooltip.Content>
-              {archived.showing ? 'Back to Finished' : 'Show archived runs'}
-            </Tooltip.Content>
-          </Tooltip>
+          <Button
+            hint={archived.showing ? 'Back to Finished' : 'Show archived runs'}
+            variant={archived.showing ? 'secondary' : 'ghost'}
+            size="sm"
+            className="h-[22px] min-h-[22px] px-1.5 text-xs"
+            aria-pressed={archived.showing}
+            onClick={() => archived.onToggle(!archived.showing)}
+          >
+            <Archive className="size-3" aria-hidden />
+            Archived {archived.count}
+          </Button>
         )}
-        <Chip color="default" variant="tertiary" size="sm" aria-label={`${count} runs`}>
-          <Chip.Label>{count}</Chip.Label>
-        </Chip>
+        <Badge aria-label={`${count} runs`}>{count}</Badge>
       </div>
     </header>
   )
@@ -414,23 +394,16 @@ function ClearDoneButton({
   return (
     <>
       {plan.eligible.length > 0 && (
-        <Tooltip>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <Button
-                {...triggerProps}
-                variant="ghost"
-                size="sm"
-                className="h-[22px] min-h-[22px] px-1.5 text-xs"
-                onClick={openConfirm}
-              >
-                <Archive className="size-3" aria-hidden />
-                Archive closed runs...
-              </Button>
-            )}
-          />
-          <Tooltip.Content>Archive hides runs and schedules deletion; it does not free memory</Tooltip.Content>
-        </Tooltip>
+        <Button
+          hint="Archive hides runs and schedules deletion; it does not free memory"
+          variant="ghost"
+          size="sm"
+          className="h-[22px] min-h-[22px] px-1.5 text-xs"
+          onClick={openConfirm}
+        >
+          <Archive className="size-3" aria-hidden />
+          Archive closed runs...
+        </Button>
       )}
       {open && snapshot && (
         <ClearDoneConfirm
@@ -471,26 +444,19 @@ function ReleaseFinishedButton({
   return (
     <>
       {plan.eligible.length > 0 && (
-        <Tooltip>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <Button
-                {...triggerProps}
-                variant="ghost"
-                size="sm"
-                className="h-[22px] min-h-[22px] px-1.5 text-xs"
-                onClick={() => {
-                  setSnapshot(plan)
-                  setOpen(true)
-                }}
-              >
-                <PackageX className="size-3" aria-hidden />
-                Release finished resources...
-              </Button>
-            )}
-          />
-          <Tooltip.Content>Free retained containers without archiving run history</Tooltip.Content>
-        </Tooltip>
+        <Button
+          hint="Free retained containers without archiving run history"
+          variant="ghost"
+          size="sm"
+          className="h-[22px] min-h-[22px] px-1.5 text-xs"
+          onClick={() => {
+            setSnapshot(plan)
+            setOpen(true)
+          }}
+        >
+          <PackageX className="size-3" aria-hidden />
+          Release finished resources...
+        </Button>
       )}
       {open && snapshot && (
         <ReleaseFinishedConfirm

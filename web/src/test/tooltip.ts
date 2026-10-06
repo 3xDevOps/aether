@@ -1,8 +1,4 @@
-// Reading a control's tooltip in a test. HeroUI's tooltip is React Aria's, and
-// it shows one only for a reader it believes is on the keyboard - which it
-// decides from the last key it saw. So the key comes first, then the focus.
-// Hover is not driveable here: jsdom produces no pointer modality, so the
-// pointer path belongs to the browser suite.
+// A tooltip opens on focus only after a navigation key; jsdom cannot hover.
 
 import { act, fireEvent, screen } from '@testing-library/react'
 import { expect } from 'vitest'

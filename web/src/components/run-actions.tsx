@@ -10,12 +10,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Tooltip } from '@/components/ui/heroui'
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from '@/components/ui/menu'
 import {
   handoffCommands,
   runCommands,
@@ -80,7 +80,7 @@ export function RunActions({ run }: { run: RunRecord }) {
   }
 
   const menuItem = (command: Command) => (
-    <DropdownMenuItem
+    <MenuItem
       key={command.id}
       disabled={running !== null || command.disabled}
       onSelect={() => {
@@ -91,7 +91,7 @@ export function RunActions({ run }: { run: RunRecord }) {
     >
       <command.Icon className="size-3" aria-hidden />
       {command.label}
-    </DropdownMenuItem>
+    </MenuItem>
   )
 
   return (
@@ -100,38 +100,32 @@ export function RunActions({ run }: { run: RunRecord }) {
         const blocked = running !== null || command.disabled === true
         const buttonLabel = command.short ?? command.label
         return (
-          <Tooltip key={command.id}>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <Button
-                  {...triggerProps}
-                  variant="secondary"
-                  size="sm"
-                  aria-disabled={blocked || undefined}
-                  onClick={() => select(command)}
-                >
-                  {running === command.id ? (
-                    <Loader2 className="size-3 animate-spin" aria-hidden />
-                  ) : (
-                    <command.Icon className="size-3" aria-hidden />
-                  )}
-                  {buttonLabel}
-                </Button>
-              )}
-            />
-            <Tooltip.Content>{command.label}</Tooltip.Content>
-          </Tooltip>
+          <Button
+            key={command.id}
+            hint={command.label}
+            variant="secondary"
+            size="sm"
+            aria-disabled={blocked || undefined}
+            onClick={() => select(command)}
+          >
+            {running === command.id ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+            ) : (
+              <command.Icon className="size-3" aria-hidden />
+            )}
+            {buttonLabel}
+          </Button>
         )
       })}
 
-      <DropdownMenu
+      <Menu
         open={menuOpen}
         onOpenChange={(open) => {
           if (open && inFlight.current) return
           setMenuOpen(open)
         }}
       >
-        <DropdownMenuTrigger asChild>
+        <MenuTrigger asChild>
           <Button
             ref={moreTrigger}
             variant="ghost"
@@ -145,8 +139,8 @@ export function RunActions({ run }: { run: RunRecord }) {
             )}
             More
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
+        </MenuTrigger>
+        <MenuContent
           align="end"
           onCloseAutoFocus={(event) => {
             if (!openingDialog.current) return
@@ -156,7 +150,7 @@ export function RunActions({ run }: { run: RunRecord }) {
         >
           {secondary.map(menuItem)}
           {handoffs.length > 0 && (
-            <DropdownMenuItem
+            <MenuItem
               disabled={running !== null}
               onSelect={() => {
                 if (inFlight.current) return
@@ -166,17 +160,17 @@ export function RunActions({ run }: { run: RunRecord }) {
             >
               <UserPlus className="size-3" aria-hidden />
               Hand off
-            </DropdownMenuItem>
+            </MenuItem>
           )}
           {destructive.length > 0 && (secondary.length > 0 || handoffs.length > 0) && (
-            <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+            <MenuSeparator />
           )}
           {destructive.map(menuItem)}
           {overflow.length === 0 && handoffs.length === 0 && (
-            <DropdownMenuItem disabled>No additional actions</DropdownMenuItem>
+            <MenuItem disabled>No additional actions</MenuItem>
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </MenuContent>
+      </Menu>
 
       {asking?.confirm && (
         <RunCommandConfirmation
@@ -204,7 +198,7 @@ export function RunActions({ run }: { run: RunRecord }) {
               {handoffs.map((command) => (
                 <Button
                   key={command.id}
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   className="justify-start"
                   aria-disabled={running !== null || undefined}

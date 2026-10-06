@@ -1,4 +1,4 @@
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import type { CardSlotProps } from '@/components/slots'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
@@ -31,13 +31,13 @@ export function PresenceStatus() {
           />
         ))}
       </span>
-      <Chip color="success" variant="soft" size="sm">
-        <Chip.Label>{online.length} online</Chip.Label>
-      </Chip>
+      <Badge tone="done">
+        {online.length} online
+      </Badge>
       {online.length > shown && (
-        <Chip color="default" variant="tertiary" size="sm">
-          <Chip.Label>+{online.length - shown}</Chip.Label>
-        </Chip>
+        <Badge>
+          +{online.length - shown}
+        </Badge>
       )}
     </span>
   )
@@ -64,9 +64,9 @@ export function Watchers({ run }: CardSlotProps) {
         ))}
       </span>
       {watchers.length > shown && (
-        <Chip color="default" variant="tertiary" size="sm">
-          <Chip.Label>+{watchers.length - shown}</Chip.Label>
-        </Chip>
+        <Badge>
+          +{watchers.length - shown}
+        </Badge>
       )}
     </span>
   )

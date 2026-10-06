@@ -16,12 +16,13 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Button } from '@/components/ui/button'
 import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import {
   Select,
   SelectContent,
@@ -265,7 +266,7 @@ export function Sidebar() {
               // viewport-fit=cover puts this under the notch and the home
               // indicator, so it paints to the edges and insets what it
               // holds, the way the title bar and status bar do.
-              className="fixed inset-y-0 left-0 z-50 flex max-w-full bg-sidebar pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left motion-reduce:animate-none"
+              className="fixed inset-y-0 left-0 z-50 flex max-w-full bg-sidebar pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl outline-none animate-sheet-left motion-reduce:animate-none"
             >
               <DialogPrimitive.Title className="sr-only">Runs</DialogPrimitive.Title>
               {nav}
@@ -333,13 +334,13 @@ function WorkspaceSwitcher({
           )}
         </span>
       )}
-      {caps.hasMethod('workspace.list') && <Button variant="ghost" size="icon" aria-label="Add or manage workspaces" title="Add or manage workspaces" onClick={() => navigate('workspaces')}><Plus className="size-4" /></Button>}
+      {caps.hasMethod('workspace.list') && <Button variant="ghost" size="icon" label="Add or manage workspaces" onClick={() => navigate('workspaces')}><Plus className="size-4" /></Button>}
       <Button
         ref={controlRef}
         variant="ghost"
         size="icon"
-        aria-label="Collapse sidebar"
-        title={`Collapse sidebar · ${shortcutLabel('sidebar')}`}
+        label="Collapse sidebar"
+        hint={`Collapse sidebar · ${shortcutLabel('sidebar')}`}
         onClick={onCollapse}
         className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm coarse:size-11 coarse:min-h-11 coarse:min-w-11"
       >
@@ -367,26 +368,19 @@ function MineToggle() {
   const mineOnly = useStore((s) => s.mineOnly)
   const setMineOnly = useStore((s) => s.setMineOnly)
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <Button
-            {...triggerProps}
-            variant="ghost"
-            size="sm"
-            aria-pressed={mineOnly}
-            onClick={() => setMineOnly(!mineOnly)}
-            className={cn(
-              'h-[26px] rounded-sm border border-border px-2 text-[12px] coarse:h-11',
-              mineOnly ? 'bg-selection font-medium text-selection-foreground' : 'text-muted-foreground',
-            )}
-          >
-            Mine
-          </Button>
-        )}
-      />
-      <Tooltip.Content>Show only your runs under Working and Finished</Tooltip.Content>
-    </Tooltip>
+    <Button
+      hint="Show only your runs under Working and Finished"
+      variant="ghost"
+      size="sm"
+      aria-pressed={mineOnly}
+      onClick={() => setMineOnly(!mineOnly)}
+      className={cn(
+        'h-[26px] rounded-sm border border-border px-2 text-[12px] coarse:h-11',
+        mineOnly ? 'bg-selection font-medium text-selection-foreground' : 'text-muted-foreground',
+      )}
+    >
+      Mine
+    </Button>
   )
 }
 
@@ -394,21 +388,14 @@ function NeedsYouBadge() {
   const count = useNeedsYouCount()
   if (count === 0) return null
   return (
-    <span
+    <Badge
+      tone="needs-you"
       aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       title={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       role="img"
-      className="rounded-sm bg-state-needs-you/15 px-1.5 text-[11px] font-medium text-state-needs-you"
     >
-      <Chip
-        color="warning"
-        variant="soft"
-        size="sm"
-        className="bg-state-needs-you/15 text-state-needs-you"
-      >
-        <Chip.Label>{count}</Chip.Label>
-      </Chip>
-    </span>
+      {count}
+    </Badge>
   )
 }
 
@@ -541,38 +528,27 @@ export function ActivityRail({
     name === 'approvals' ? approvalsLabel(label, waiting, inboxError) : label
   const approvalBadge = (waiting > 0 || inboxError !== null) && (
     <span aria-hidden className="absolute bottom-1 right-1 flex">
-      <Chip
-        color="warning"
-        variant="soft"
-        size="sm"
-        className="!h-4 !min-h-4 !min-w-4 !rounded-sm !px-0.5 !text-[10px] font-medium !leading-3 bg-state-needs-attention/15 text-state-needs-attention"
-      >
-        <Chip.Label>{inboxError ? '?' : waiting}</Chip.Label>
-      </Chip>
+      <Badge tone="needs-you" className="h-4 min-w-4 justify-center px-0.5 text-ui-xs">
+        {inboxError ? '?' : waiting}
+      </Badge>
     </span>
   )
 
   const renderLink = (surface: Surface) => {
     const { name, label, Icon } = surface
     return (
-      <Tooltip key={name}>
-        <Tooltip.Trigger<'button'>
-          render={(triggerProps) => (
-            <button
-              {...triggerProps}
-              type="button"
-              aria-label={labelFor(surface)}
-              aria-current={route.name === name ? 'page' : undefined}
-              onClick={() => navigate(name)}
-              className={cn(railButton, route.name === name && 'border-primary text-foreground')}
-            >
-              <Icon className="size-6" aria-hidden />
-              <span className="sr-only">{label}</span>
-              {name === 'approvals' && approvalBadge}
-            </button>
-          )}
-        />
-        <Tooltip.Content>{labelFor(surface)}</Tooltip.Content>
+      <Tooltip key={name} content={labelFor(surface)}>
+        <button
+          type="button"
+          aria-label={labelFor(surface)}
+          aria-current={route.name === name ? 'page' : undefined}
+          onClick={() => navigate(name)}
+          className={cn(railButton, route.name === name && 'border-primary text-foreground')}
+        >
+          <Icon className="size-6" aria-hidden />
+          <span className="sr-only">{label}</span>
+          {name === 'approvals' && approvalBadge}
+        </button>
       </Tooltip>
     )
   }
@@ -586,8 +562,8 @@ export function ActivityRail({
       hasApprovals && (waiting > 0 || inboxError) ? approvalsLabel('Approvals', waiting, inboxError) : null,
     ].filter(Boolean).join(', ')
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      <Menu>
+        <MenuTrigger asChild>
           <button
             type="button"
             aria-label={accessibleLabel}
@@ -597,8 +573,8 @@ export function ActivityRail({
             <span className="text-[10px] leading-3">{label}</span>
             {hasApprovals && approvalBadge}
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" aria-label={label}>
+        </MenuTrigger>
+        <MenuContent side="right" align="start" aria-label={label}>
           {(['Work', 'Workspace', 'Admin'] as const).map((group) => {
             const entries = links.filter((surface) => surface.group === group)
             if (!entries.length) return null
@@ -606,7 +582,7 @@ export function ActivityRail({
               <DropdownMenuPrimitive.Group key={group} aria-label={group}>
                 <div aria-hidden className="px-2 py-1 text-[11px] text-muted-foreground">{group}</div>
                 {entries.map((surface) => (
-                  <DropdownMenuItem
+                  <MenuItem
                     key={surface.name}
                     aria-label={labelFor(surface)}
                     aria-current={route.name === surface.name ? 'page' : undefined}
@@ -617,35 +593,29 @@ export function ActivityRail({
                     {surface.name === 'approvals' && (waiting > 0 || inboxError !== null) && (
                       <span aria-hidden className="ml-auto text-state-needs-attention">{inboxError ? '?' : waiting}</span>
                     )}
-                  </DropdownMenuItem>
+                  </MenuItem>
                 ))}
               </DropdownMenuPrimitive.Group>
             )
           })}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </MenuContent>
+      </Menu>
     )
   }
 
   return (
     <nav ref={railRef} aria-label="Surfaces" className="flex h-full w-12 shrink-0 flex-col border-r border-border bg-sidebar">
       {sidebarCollapsed && (
-        <Tooltip>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <button
-                {...triggerProps}
-                ref={toggleControl}
-                type="button"
-                aria-label="Expand sidebar"
-                onClick={onToggleSidebar}
-                className={railButton}
-              >
-                <PanelLeftOpen className="size-5" aria-hidden />
-              </button>
-            )}
-          />
-          <Tooltip.Content>Expand sidebar · {shortcutLabel('sidebar')}</Tooltip.Content>
+        <Tooltip content={<>Expand sidebar · {shortcutLabel('sidebar')}</>}>
+          <button
+            ref={toggleControl}
+            type="button"
+            aria-label="Expand sidebar"
+            onClick={onToggleSidebar}
+            className={railButton}
+          >
+            <PanelLeftOpen className="size-5" aria-hidden />
+          </button>
         </Tooltip>
       )}
       <div className="min-h-0 flex-1">

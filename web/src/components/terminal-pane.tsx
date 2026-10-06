@@ -21,7 +21,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -59,28 +58,21 @@ function ToolButton({
   ...props
 }: { hint: string } & React.ComponentProps<typeof Button>) {
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <Button
-            {...triggerProps}
-            {...props}
-            className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
-            aria-disabled={disabled || undefined}
-            onClick={(event) => {
-              if (disabled) return
-              onClick?.(event)
-            }}
-          >
-            {props.children}
-            <span className="hidden group-data-[expanded=true]/terminal-tools:inline">
-              {props['aria-label']}
-            </span>
-          </Button>
-        )}
-      />
-      <Tooltip.Content>{hint}</Tooltip.Content>
-    </Tooltip>
+    <Button
+      hint={hint}
+      {...props}
+      className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
+      aria-disabled={disabled || undefined}
+      onClick={(event) => {
+        if (disabled) return
+        onClick?.(event)
+      }}
+    >
+      {props.children}
+      <span className="hidden group-data-[expanded=true]/terminal-tools:inline">
+        {props.label}
+      </span>
+    </Button>
   )
 }
 
@@ -123,7 +115,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Open terminal search"
+        label="Open terminal search"
         hint={readingSurface ? 'Find in loaded recorded output (Ctrl+Shift+F)' : 'Find in terminal (Ctrl+Shift+F)'}
         onClick={() => controller.setFindOpen(true)}
       >
@@ -134,7 +126,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Decrease terminal text size"
+        label="Decrease terminal text size"
         hint="Decrease terminal text size (Ctrl+-)"
         disabled={!terminal || fontSize <= minTerminalFontSize}
         onClick={() => setFontSize(fontSize - 1)}
@@ -151,7 +143,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Increase terminal text size"
+        label="Increase terminal text size"
         hint="Increase terminal text size (Ctrl+=)"
         disabled={!terminal || fontSize >= maxTerminalFontSize}
         onClick={() => setFontSize(fontSize + 1)}
@@ -162,7 +154,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Reset terminal text size"
+        label="Reset terminal text size"
         hint={`Reset terminal text size to ${defaultTerminalFontSize}px (Ctrl+0)`}
         disabled={!terminal || fontSize === defaultTerminalFontSize}
         onClick={() => setFontSize(defaultTerminalFontSize)}
@@ -174,7 +166,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Copy terminal selection"
+        label="Copy terminal selection"
         hint="Copy terminal selection (Ctrl+Shift+C)"
         disabled={!terminal}
         onClick={() => {
@@ -189,7 +181,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Copy last screen"
+        label="Copy last screen"
         hint="Copy the rows on screen"
         disabled={!terminal}
         onClick={() => {
@@ -204,7 +196,7 @@ function TerminalTools({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Paste into terminal"
+        label="Paste into terminal"
         hint="Paste into terminal (Ctrl+Shift+V)"
         disabled={!terminal || !!readingSurface}
         onClick={() => {
@@ -290,7 +282,7 @@ function FindBar({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Find previous"
+        label="Find previous"
         onClick={() => find('previous')}
       >
         <ChevronUp />
@@ -299,12 +291,12 @@ function FindBar({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="Find next"
+        label="Find next"
         onClick={() => find('next')}
       >
         <ChevronDown />
       </Button>
-      <Button type="button" variant="ghost" size="icon" aria-label="Close find" onClick={onClose}>
+      <Button type="button" variant="ghost" size="icon" label="Close find" onClick={onClose}>
         <X />
       </Button>
     </div>
@@ -407,7 +399,7 @@ export function TerminalPane({
               <div className={coarse ? undefined : toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label="Terminal tools">
+                    <Button variant="ghost" size="icon" label="Terminal tools">
                       <SlidersHorizontal />
                     </Button>
                   </PopoverTrigger>
@@ -423,7 +415,7 @@ export function TerminalPane({
               )}
             </>
           ) : (
-            <Button variant="ghost" size="icon" aria-label="Close terminal search" onClick={closeFind}>
+            <Button variant="ghost" size="icon" label="Close terminal search" onClick={closeFind}>
               <Search />
             </Button>
           )}

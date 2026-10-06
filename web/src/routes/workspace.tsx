@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { RunList } from '@/components/run-list'
 import { WorkspaceMirrorDialog } from '@/components/workspace-mirror-dialog'
 import { WorkspaceRepositoryDialog } from '@/components/workspace-repository'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import {
@@ -78,21 +78,21 @@ export function WorkspaceView({ params }: RouteProps) {
         subtitle={`Base branch ${workspace.base_branch}`}
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={() => setDialog('repository')}>Repository settings</Button>
+            <Button size="sm" variant="secondary" onClick={() => setDialog('repository')}>Repository settings</Button>
             {canMirror && (
-              <Button size="sm" variant="outline" onClick={() => setDialog('mirror')}>
+              <Button size="sm" variant="secondary" onClick={() => setDialog('mirror')}>
                 Source control
               </Button>
             )}
             {isAdmin && caps.hasMethod('budget.set') && (
-              <Button size="sm" variant="outline" onClick={() => setDialog('budget')}>
+              <Button size="sm" variant="secondary" onClick={() => setDialog('budget')}>
                 Budget
               </Button>
             )}
             {isAdmin && caps.hasMethod('workspace.settings') && (
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 onClick={() => setDialog('settings')}
               >
                 Workspace settings
@@ -115,9 +115,9 @@ export function WorkspaceView({ params }: RouteProps) {
                 Runs stay scoped to this workspace and branch.
               </p>
             </div>
-            <Chip color="default" variant="soft" size="sm">
-              <Chip.Label>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</Chip.Label>
-            </Chip>
+            <Badge>
+              {runs.length} {runs.length === 1 ? 'run' : 'runs'}
+            </Badge>
           </div>
           <dl className="mx-auto mt-3 grid w-full max-w-[1400px] gap-3 border-t border-border pt-3 text-xs sm:grid-cols-3 sm:divide-x sm:divide-border">
             <div className="min-w-0 sm:pr-4">
@@ -146,16 +146,16 @@ export function WorkspaceView({ params }: RouteProps) {
                 </p>
                 {mirrorError && <p role="alert" className="mt-1 whitespace-pre-wrap text-xs text-state-failed">{mirrorError}</p>}
               </div>
-              <Button size="sm" variant="outline" onClick={() => setDialog('mirror')}>
+              <Button size="sm" variant="secondary" onClick={() => setDialog('mirror')}>
                 Open Source control
               </Button>
             </div>
           )}
         </section>
         <div className="flex flex-wrap gap-2 border-b px-4 py-3">
-          <Button size="sm" variant="outline" onClick={() => setDialog('local')}>Link local repository</Button>
-          <Button size="sm" variant="outline" onClick={() => useStore.getState().navigate('workspaces')}>Add another workspace</Button>
-          <Button size="sm" variant="outline" onClick={() => {
+          <Button size="sm" variant="secondary" onClick={() => setDialog('local')}>Link local repository</Button>
+          <Button size="sm" variant="secondary" onClick={() => useStore.getState().navigate('workspaces')}>Add another workspace</Button>
+          <Button size="sm" variant="secondary" onClick={() => {
             const state = useStore.getState()
             state.setOnboardingWorkspace(workspace.id)
             state.setOnboardingStep('Agents')

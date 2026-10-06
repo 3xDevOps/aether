@@ -4,7 +4,7 @@
 // the Events tab is already pinned to one run and leaves it off.
 
 import { memo, type ReactNode } from 'react'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { typeLabel, type EventType } from '@/lib/events'
 import { budgetStateLabel, money } from '@/lib/format'
@@ -33,14 +33,9 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
             <RelativeTime at={event.time} title={event.time} />
           </span>
           <span title={event.type} className="min-w-0 max-w-full">
-            <Chip
-              color="default"
-              variant="tertiary"
-              size="sm"
-              className="min-w-0 max-w-full justify-self-start"
-            >
-              <Chip.Label className="truncate">{typeLabel(event.type)}</Chip.Label>
-            </Chip>
+            <Badge className="min-w-0 max-w-full justify-self-start">
+              <span className="truncate">{typeLabel(event.type)}</span>
+            </Badge>
           </span>
           <span className="col-start-2 min-w-0 break-words leading-5 text-foreground/90 select-text">
             {describe(event)}

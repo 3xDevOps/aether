@@ -48,7 +48,8 @@ until then headings render in Inter.
 | --- | --- | --- | --- | --- |
 | `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
 | `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Title bar, sidebar, headers, code, browser chrome |
-| `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows, cards, ghost buttons |
+| `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows and cards on canvas |
+| `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#262728` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
 | `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces only |
 | `--seam` | `border-seam` | black 8% | white 8% | Every border |
 | `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
@@ -81,9 +82,13 @@ for callouts and request cards; `bg-accent-soft` likewise. Diffs use
 `text-diff-add`/`text-diff-del` (the done and failed colours) and
 `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
+Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
+`-opencode`) appear only on the Agents page and the launch picker, through
+`AgentGlyph colored`.
+
 `web/src/design-system.test.ts` checks every text tier on every surface, the
-accent text, the states and the diff colours for 4.5:1, and control borders
-and `--icon-faint` on canvas for 3:1, in both themes.
+accent text, the states and the diff colours for 4.5:1, and control borders,
+`--icon-faint` and the agent colours on canvas for 3:1, in both themes.
 
 Member colours are the only arbitrary server data applied inline, on avatars,
 attribution rails and the Map's owner boundaries. Identity colour never
@@ -92,9 +97,9 @@ replaces run-state colour.
 The pre-v2 names (`--background`, `--foreground`, `--card`, `--sidebar`,
 `--muted`, `--muted-foreground`, `--primary`, `--border`, `--input`,
 `--toolbar-hover`, `--destructive`, `--state-waiting`,
-`--state-needs-attention`, `--state-idle` and the HeroUI names) remain as
-aliases of these tokens until every screen is rebuilt. Do not use them in new
-code.
+`--state-needs-attention`, `--state-idle`) remain as aliases of these tokens
+until every screen is rebuilt; the old hover names (`--accent`, `--secondary`,
+`--toolbar-hover`) point at `--hover-chrome`. Do not use them in new code.
 
 ## Enforcement
 
@@ -123,8 +128,9 @@ Use compact workbench geometry rather than landing-page ornament:
   strip stays 36px, while dock headers use a `min-h-9` strip whose
   actions can wrap to another row; 22px status rows and 22-28px list rows
   according to real content.
-- 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
-  gaps, 16px content gutters and 12px compact gutters.
+- 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
+  coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
+  12px compact gutters.
   Shared `Label` captions are block-level: stacked caption-to-field spacing
   must measure 4px, including wrapped fields, rather than relying on margins
   on inline text.
@@ -153,7 +159,7 @@ own surfaces. Shared buttons, inputs and selectors use 40-44px touch targets
 under `coarse:` while retaining desktop density. Floating menus stay inside
 the available viewport and scroll to their last action.
 
-The run Browser uses shared 13px controls at 26px for mouse input and 44px
+The run Browser uses shared 13px controls at 28px for mouse input and 44px
 for coarse pointers, including native selects. Before a page is selected,
 the URL field and **Open browser** are primary; a selected page adds
 Back/Forward/Reload and **Go**. **Browser tools** holds page and viewport
@@ -255,9 +261,9 @@ status vocabulary for a run's presentation state. Domain status enums remain
 unchanged.
 
 `--duration-overlay` (120ms) and `--ease-out` are the overlay motion
-tokens. The current dialogs still animate over 150ms and HeroUI tooltips keep
-their own timing until the rebuilt menu, dialog and tooltip primitives adopt
-the tokens. Panels change instantly. The `state-pulse` dot and the
+tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
+it, sheets slide in from their edge, and every one leaves at once. Panels
+change instantly. The `state-pulse` dot and the
 `live-shimmer` text sweep step through a few frames per cycle rather than
 tweening, and stop under `prefers-reduced-motion: reduce`, where the shimmer
 leaves plain muted text.
@@ -294,15 +300,28 @@ unmounts after the fade, and is skipped under
 
 ## Accessibility and component contracts
 
-`src/components/ui/heroui.tsx` is the only entry point for the HeroUI v3
-`Chip` and `Tooltip` wrappers. Chips carry status and metadata, while run and
-dock strips keep their custom manual keyboard semantics. A Tooltip opens on
-keyboard focus and pointer hover with a shared 300ms hover delay, points
-`aria-describedby` at the control, and supplements rather than replaces an
-accessible name. Focusable controls use Tooltip descriptions instead of
-`title`; `title` remains for non-focusable paths, timestamps and breakdowns.
-Actor marks that need a name use `role="img"` and an `aria-label`, rather than
-leaving a named generic span.
+The primitives in `web/src/components/ui/` are the only building blocks:
+`Button`, `Badge`, `StatusDot` and `StateLine`, `Callout`, `PaneHeader`,
+`Tabs`, `Menu`, `Dialog` (`center`, `side`, `bottom`), `AlertDialog`,
+`Popover`, `Tooltip`, `Toaster`, the fields (`Input`, `Textarea`, `Select`,
+`Checkbox`, `RadioGroup`, `FormField`), `ListRow`, `SectionLabel`,
+`EmptyState`, `Kbd`, `Code`, `Avatar`, `AgentGlyph`, `Spinner`, `Separator`,
+`Skeleton` and `RelativeTime`. Radix provides the behaviour; there is no
+other component library.
+
+An icon-only `Button` (`size="icon"` or `"icon-sm"`) requires `label`, which
+becomes its accessible name and its Tooltip; `hint` replaces the tooltip
+text on any button. A Tooltip opens after a 300ms hover, or at once when the
+keyboard moves focus to its control, not when a click or a script does. It
+points `aria-describedby` at the control and supplements rather than replaces
+an accessible name. An open tooltip takes the first Escape. Focusable controls
+use Tooltip descriptions instead of `title`; `title` remains for
+non-focusable paths, timestamps and breakdowns. Actor marks that need a name
+use `role="img"` and an `aria-label`, rather than leaving a named generic span.
+
+Below 768px (`MOBILE_MAX_WIDTH` and `useIsMobile()` in
+`web/src/lib/breakpoints.ts`) every centred dialog opens as a bottom sheet,
+and a menu with more than six items does too.
 
 Yes-or-no confirmations use the AlertDialog primitive, not a dismissible
 Dialog. `AlertDialogAction` is destructive unless the caller says otherwise.

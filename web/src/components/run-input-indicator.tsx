@@ -1,5 +1,6 @@
 import { MessageCircleQuestion } from 'lucide-react'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import type { Run } from '@/lib/types'
 import { focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -20,24 +21,18 @@ export function RunInputIndicator({ run, compact = false }: { run: Run; compact?
     )
   }
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            aria-label={description}
-            onClick={() => navigate(input.destination, input.destination === 'terminal' ? { runId: run.id } : {})}
-            className={`${focusRing} inline-flex shrink-0 items-center rounded-sm coarse:min-h-11`}
-          >
-            <Chip color="warning" variant="soft" size="sm">
-              <MessageCircleQuestion className="size-3" aria-hidden />
-              <Chip.Label>{input.count} {input.count === 1 ? 'request' : 'requests'}</Chip.Label>
-            </Chip>
-          </button>
-        )}
-      />
-      <Tooltip.Content>{description}. Open {input.destination === 'terminal' ? 'Terminal' : 'Approvals'} to respond.</Tooltip.Content>
+    <Tooltip content={<>{description}. Open {input.destination === 'terminal' ? 'Terminal' : 'Approvals'} to respond.</>}>
+      <button
+        type="button"
+        aria-label={description}
+        onClick={() => navigate(input.destination, input.destination === 'terminal' ? { runId: run.id } : {})}
+        className={`${focusRing} inline-flex shrink-0 items-center rounded-sm coarse:min-h-11`}
+      >
+        <Badge tone="needs-you">
+          <MessageCircleQuestion className="size-3" aria-hidden />
+          {input.count} {input.count === 1 ? 'request' : 'requests'}
+        </Badge>
+      </button>
     </Tooltip>
   )
 }

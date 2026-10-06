@@ -1,7 +1,6 @@
 import { Copy } from 'lucide-react'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
 import { cn, focusRing } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 
@@ -22,25 +21,18 @@ export function CopyableCommand({ command }: { command: string }) {
       >
         {command}
       </code>
-      <Tooltip>
-        <Tooltip.Trigger<'button'>
-          render={(triggerProps) => (
-            <Button
-              {...triggerProps}
-              variant="ghost"
-              size="icon"
-              className="size-[22px] shrink-0"
-              aria-label={`Copy ${command}`}
-              onClick={() => {
-                void copyText(command, codeRef.current)
-              }}
-            >
-              <Copy className="size-3.5" aria-hidden />
-            </Button>
-          )}
-        />
-        <Tooltip.Content>Copy command</Tooltip.Content>
-      </Tooltip>
+      <Button
+        hint="Copy command"
+        variant="ghost"
+        size="icon"
+        className="size-[22px] shrink-0"
+        label={`Copy ${command}`}
+        onClick={() => {
+          void copyText(command, codeRef.current)
+        }}
+      >
+        <Copy className="size-3.5" aria-hidden />
+      </Button>
     </div>
   )
 }

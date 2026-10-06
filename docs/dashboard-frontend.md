@@ -4,9 +4,8 @@ The browser client is one static bundle served through either dashboard
 gateway: `aether gui` on the user's machine, or
 `aether-server --web-port` over HTTPS on the server's tailnet addresses.
 Next.js 16.3.4 produces the static export, while React 19 + TypeScript render
-the client runtime, Tailwind v4 and shadcn/ui primitives with CSS variables
-provide the base style, selected HeroUI v3 wrappers provide Chip and Tooltip,
-and Zustand holds the state. Both gateways use the shared `internal/webgate`
+the client runtime, Tailwind v4 and the Radix-based primitives in
+`src/components/ui/` provide the components, and Zustand holds the state. Both gateways use the shared `internal/webgate`
 API and WebSocket surfaces; the server gateway authenticates each request with
 Tailscale WhoIs and no browser token.
 
@@ -543,7 +542,7 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   a surface away from that edge also has to read, because an installed iOS app
   asks for a `black-translucent` status bar and gets the whole screen: it is
   `--safe-top` in `src/index.css`, and the title bar's height, the palette's
-  drop from under it and a top-anchored dialog's 1rem gap all count it. A surface that pads itself keeps
+  drop from under it and the side sheets' top padding all count it. A surface that pads itself keeps
   painting to the edge and insets only what it holds, so the notch shows the
   bar's own colour rather than a gap. Every inset is 0 where there is none, so
   nothing guards them. Toasts sit above the status bar rather than against the
@@ -556,9 +555,7 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   shrinks the layout viewport instead of sliding the page under itself. That
   is what every `dvh` in the app - dialogs, the palette, selects, menus, the
   status popup - is already sized against, so they all shorten when the
-  keyboard opens. Nothing in the shell uses `vh`. Where it is ignored the
-  layout viewport does not move, which is why dialogs also anchor to the top
-  below `sm` (see the end of this section).
+  keyboard opens. Nothing in the shell uses `vh`.
 - `themeColor` per `prefers-color-scheme` - the browser reads it before the
   SPA has applied the member's stored theme, so it follows the OS scheme
   rather than the app setting.
@@ -566,8 +563,9 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 A layout that only changes size belongs in CSS. Layouts that mount different
 elements for a finger than for a mouse, such as the diff timeline's disclosure
 and activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
-constants there include `coarsePointer`, Tailwind's `belowSm`/`belowMd`
-breakpoints and `phoneScreen`. Terminal utility controls respond to their
+constants there include `coarsePointer`, Tailwind's `belowSm` breakpoint and
+`phoneScreen`; the `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
+`src/lib/breakpoints.ts`. Terminal utility controls respond to their
 pane's container width rather than the window width. The shell sidebar and
 titlebar share the inclusive 640px drawer boundary.
 
@@ -576,7 +574,7 @@ titlebar share the inclusive 640px drawer boundary.
 finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
-sizes, `Input`, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`,
+sizes, `Input`, `CommandItem`, `MenuItem`, the `CollapsibleTrigger`,
 the `Select` trigger and its options, the dialog close, the palette trigger and
 input, the status bar controls, the sidebar run rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
@@ -599,12 +597,10 @@ height that reads it. Add a coarse size to a control in a fixed-height row
 only together with the row, or the control grows out of the bar that holds
 it.
 
-Dialogs anchor to the top (1rem plus `--safe-top`) below `sm` and centre from
-`sm` up. Where `interactive-widget` is ignored, a centred fixed dialog sits
-behind the keyboard; anchored to the top it stays in the visual viewport, and
-a dialog taller than the screen is clamped to the viewport less that gap and
-scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower than
-640px is treated as a phone here too.
+Below `md` every centred dialog opens as a bottom sheet, full width and at
+most 85dvh, and scrolls inside itself, so its footer stays in reach of a thumb
+and the soft keyboard shortens it from the top. `md` is a width breakpoint, so
+a desktop window narrower than 768px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
   Their actions become a narrow-screen grid and return to a desktop flex row;
@@ -1316,9 +1312,9 @@ inset has to carry the same variant as the token
 (`focus-visible:-outline-offset-2`): a bare `-outline-offset-2` is one
 pseudo-class less specific and loses at the moment the outline is drawn.
 
-`DropdownMenuContent` and `DialogContent` suppress the outline on themselves:
+`MenuContent` and `DialogContent` suppress the outline on themselves:
 each takes focus programmatically when it opens and has nothing to show for
-it. Their contents are not the same case. A `DropdownMenuItem` takes real DOM
+it. Their contents are not the same case. A `MenuItem` takes real DOM
 focus under Radix's roving tabindex, so it wears the outline like any other
 control, keeping its `focus:` background as well. A `SelectItem` is that case
 again: Radix moves DOM focus onto the highlighted option, so it wears the
@@ -1404,10 +1400,9 @@ rather than orphaning it.
 
 An open tooltip is the one overlay that neither guard names, and it does not
 need to: a tooltip owns no keys, and its trigger is an ordinary control.
-Escape is the exception. React Aria dismisses a tooltip from a capturing
-document listener that stops the event rather than marking it, so the shell
-never hears that press at all: on a run, the first Escape closes the tooltip
-and the second leaves. Every other key reaches the shell as usual, and a
+Escape is the exception. Radix closes the tooltip and marks that press
+handled, so the shell ignores it: on a run, the first Escape closes the
+tooltip and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
 
@@ -2124,7 +2119,7 @@ viewport, not just the displayed image. They do not emulate a different user
 agent, operating system or hardware.
 
 The pane uses shared 13px inputs and buttons and native selectors styled with
-`field`: 26px high for mouse input and 44px for coarse pointers. Primary
+`field`: 28px high for mouse input and 44px for coarse pointers. Primary
 controls wrap responsively; secondary controls stay in Browser tools. Long
 addresses, page titles and errors stay within the pane.
 
@@ -3026,7 +3021,7 @@ about itself and appears wherever the member is an admin.
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
   terminal's alone; code uses the system monospace stack; VT323 remains only
   the Aether wordmark and original startup. Use the
-  35/48/35/22/26/22px workbench geometry and avoid promotional titles or
+  35/48/35/22/28/24px workbench geometry and avoid promotional titles or
   oversized cards.
 - **Flat shell and palette host.** Use a 35px title/command bar, a 48px desktop
   activity rail and adjacent 320-520px workspace/run sidebar. On phones the
@@ -3070,21 +3065,19 @@ about itself and appears wherever the member is an admin.
 - **Disclosures normally unmount closed content.** `CollapsibleTrigger`
   supplies the marker. The status bar uses `forceMount` with closed-state
   hiding to retain its live contributors while the popup is closed.
-- **HeroUI has a narrow role.** `src/components/ui/heroui.tsx` wraps HeroUI v3
-  `Chip` and `Tooltip` and maps them to the house tokens. Use `Chip` for status
-  or metadata, and `Tooltip` for supplemental hover and keyboard help. Run and
-  dock tab strips retain their custom manual tab semantics. A `Chip` takes no
-  `title` of its own, so a pill whose text can be clipped wears one on the
-  span around it.
+- **Status and metadata pills are `Badge`.** It takes a run-state `tone` or
+  stays neutral. A `Badge` takes no `title` of its own, so a pill whose text
+  can be clipped wears one on the span around it. Run and dock tab strips
+  retain their custom manual tab semantics.
 - **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
   by the pointer and by nothing else, so on a control a keyboard can land on
   it is information that reader can never get at. A Tooltip opens on focus and
-  hover, with the shared wrapper's 300ms hover delay, and points the control's
-  `aria-describedby` at itself. It is a description rather than the name, so
-  an icon-only control keeps its `aria-label`. A `title` stays only on what a
+  hover, with a 300ms hover delay, and points the control's
+  `aria-describedby` at itself. It is a description rather than the name: an
+  icon-only `Button` takes `label`, which sets both. A `title` stays only on what a
   keyboard cannot land on - a truncated path, a timestamp, a breakdown -
-  since React Aria makes a tooltip trigger focusable, and a hint on a mark
-  would buy a tab stop per feed row or per card. A mark that names itself
+  since a tooltip needs a focusable trigger, and a hint on a mark would buy a
+  tab stop per feed row or per card. A mark that names itself
   needs `role="img"` first: a bare `<span>` is `generic`, and ARIA gives
   `generic` no name.
 - **A yes-or-no confirm is an `AlertDialog`, not a `Dialog`.** The role

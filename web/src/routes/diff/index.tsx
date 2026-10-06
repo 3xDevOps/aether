@@ -8,10 +8,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
-import { belowMd, coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { useIsMobile } from '@/lib/breakpoints'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
@@ -56,7 +58,7 @@ function DiffView({ params }: RouteProps) {
   const coarse = useMediaQuery(coarsePointer)
   // The timeline sits above the patch once the grid stacks, so below `md` it
   // is a disclosure rather than 208px of chrome before the first line.
-  const stacked = useMediaQuery(belowMd)
+  const stacked = useIsMobile()
   const wrap = wrapping ?? coarse
   usePatch(run ? runID : '')
 
@@ -110,21 +112,21 @@ function DiffView({ params }: RouteProps) {
               </p>
             </div>
             <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
-              <Chip color="default" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">
+              <Badge>
+                <span className="font-mono">
                   {shown.length} file{shown.length === 1 ? '' : 's'}
-                </Chip.Label>
-              </Chip>
-              <Chip color="success" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">+{total(shown, 'additions')}</Chip.Label>
-              </Chip>
-              <Chip color="danger" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">-{total(shown, 'deletions')}</Chip.Label>
-              </Chip>
+                </span>
+              </Badge>
+              <Badge tone="done">
+                <span className="font-mono">+{total(shown, 'additions')}</span>
+              </Badge>
+              <Badge tone="failed">
+                <span className="font-mono">-{total(shown, 'deletions')}</span>
+              </Badge>
               <ConflictChips run={run} />
               {snapshot && (
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   aria-label="Show current diff"
                   onClick={() => setSelected(null)}
@@ -257,44 +259,38 @@ function Timeline({
                 open tooltip with nothing in it still points the button's
                 `aria-describedby` at a missing element and still swallows
                 the first Escape. */}
-            <Tooltip isDisabled={shownable}>
-              <Tooltip.Trigger<'button'>
-                render={(triggerProps) => (
-                  <button
-                    {...triggerProps}
-                    type="button"
-                    aria-disabled={!shownable || undefined}
-                    onClick={() => {
-                      if (shownable) onSelect(snap.time)
-                    }}
-                    aria-pressed={selected === snap.time}
-                    className={cn(
-                      focusRing,
-                      'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
-                      'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
-                      selected === snap.time && 'border-primary bg-selection text-selection-foreground',
-                    )}
-                  >
-                    <RelativeTime at={snap.time} className="block truncate font-medium" />
-                    <span
-                      className={cn(
-                        'mt-0.5 block text-[11px] text-muted-foreground',
-                        selected === snap.time && 'text-selection-foreground/80',
-                      )}
-                    >
-                      {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
-                      {' · '}
-                      <span className="font-mono text-success-foreground">
-                        +{total(snap.files, 'additions')}
-                      </span>{' '}
-                      <span className="font-mono text-destructive">
-                        -{total(snap.files, 'deletions')}
-                      </span>
-                    </span>
-                  </button>
+            <Tooltip disabled={shownable} content={noTree}>
+              <button
+                type="button"
+                aria-disabled={!shownable || undefined}
+                onClick={() => {
+                  if (shownable) onSelect(snap.time)
+                }}
+                aria-pressed={selected === snap.time}
+                className={cn(
+                  focusRing,
+                  'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
+                  'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+                  selected === snap.time && 'border-primary bg-selection text-selection-foreground',
                 )}
-              />
-              <Tooltip.Content>{noTree}</Tooltip.Content>
+              >
+                <RelativeTime at={snap.time} className="block truncate font-medium" />
+                <span
+                  className={cn(
+                    'mt-0.5 block text-[11px] text-muted-foreground',
+                    selected === snap.time && 'text-selection-foreground/80',
+                  )}
+                >
+                  {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
+                  {' · '}
+                  <span className="font-mono text-success-foreground">
+                    +{total(snap.files, 'additions')}
+                  </span>{' '}
+                  <span className="font-mono text-destructive">
+                    -{total(snap.files, 'deletions')}
+                  </span>
+                </span>
+              </button>
             </Tooltip>
           </li>
         )

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { Bot, MessageSquare, Shield, Users, X } from 'lucide-react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
@@ -470,33 +470,22 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   return (
     <DialogPrimitive.Root open={isPhone && open} onOpenChange={(next) => { if (!next) closeRoom() }}>
       {!open && (
-        <Tooltip>
-          <Tooltip.Trigger<'button'> render={(triggerProps) => (
-            <button
-              {...triggerProps}
-              ref={(node) => {
-                opener.current = node
-                const ref = triggerProps.ref
-                if (typeof ref === 'function') {
-                  const cleanup = ref(node)
-                  if (cleanup) return () => { opener.current = null; cleanup() }
-                } else if (ref) ref.current = node
-              }}
-              type="button"
-              aria-label="Open Run Room"
-              aria-expanded={false}
-              aria-controls={roomID}
-              aria-keyshortcuts="Control+Shift+M Meta+Shift+M"
-              className="flex w-8 shrink-0 items-center justify-center border-l border-border bg-toolbar text-[12px] font-medium text-muted-foreground hover:bg-toolbar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:w-11"
-              onClick={() => { invoker.current = opener.current; setOpen(true) }}
-            >
-              <span className="flex items-center gap-2 [writing-mode:vertical-rl]">
-                <MessageSquare className="size-3.5 text-[var(--accent-soft-foreground)]" aria-hidden />
-                Run Room{count ? ` · ${count}` : ''}
-              </span>
-            </button>
-          )} />
-          <Tooltip.Content placement="left">Toggle Run Room · {shortcutLabel('run-room')}</Tooltip.Content>
+        <Tooltip side="left" content={`Toggle Run Room · ${shortcutLabel('run-room')}`}>
+          <button
+            ref={opener}
+            type="button"
+            aria-label="Open Run Room"
+            aria-expanded={false}
+            aria-controls={roomID}
+            aria-keyshortcuts="Control+Shift+M Meta+Shift+M"
+            className="flex w-8 shrink-0 items-center justify-center border-l border-border bg-toolbar text-[12px] font-medium text-muted-foreground hover:bg-toolbar-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:w-11"
+            onClick={() => { invoker.current = opener.current; setOpen(true) }}
+          >
+            <span className="flex items-center gap-2 [writing-mode:vertical-rl]">
+              <MessageSquare className="size-3.5 text-[var(--accent-soft-foreground)]" aria-hidden />
+              Run Room{count ? ` · ${count}` : ''}
+            </span>
+          </button>
         </Tooltip>
       )}
       <RoomPortal>
@@ -529,7 +518,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
             </RoomTitle>
             <div className="flex items-center gap-2">
               <kbd className="text-ui-xs text-muted-foreground">{shortcutLabel('run-room')}</kbd>
-              <Button type="button" size="icon" variant="ghost" aria-label="Close Run Room" onClick={closeRoom}><X className="size-4" aria-hidden /></Button>
+              <Button type="button" size="icon" variant="ghost" label="Close Run Room" onClick={closeRoom}><X className="size-4" aria-hidden /></Button>
             </div>
           </header>
           {isPhone && <div className="shrink-0 space-y-2 border-b border-border px-3 py-2 text-[12px]">
@@ -671,8 +660,8 @@ function RoomMessageRow({ message, members, selfID, canModerate, busy, onAnswer,
         <span className={message.state === 'sent' ? 'text-state-success' : message.state === 'uncertain' ? 'text-state-warn' : message.state === 'not_sent' || message.state === 'denied' ? 'text-state-failed' : 'text-muted-foreground'}>{message.state === 'sent' && message.kind !== 'steer_request' ? 'Posted' : message.state === 'uncertain' ? 'Delivery uncertain' : message.state === 'not_sent' ? 'Not sent' : message.state === 'sent' ? 'Sent' : message.state}</span>
         {message.failure?.message && <span className="text-muted-foreground">{message.failure.message}</span>}
         {isQueued && <DeliveryCountdown deliverAfter={message.deliver_after} />}
-        {isQuestion && message.state === 'sent' && <Button type="button" size="sm" variant="outline" onClick={() => onAnswer(message)}>Answer</Button>}
-        {isQueued && canModerate && <><Button type="button" size="sm" onClick={() => onDecide(message.id, 'approve')} disabled={busy}>Approve now</Button><Button type="button" size="sm" variant="outline" onClick={() => onDecide(message.id, 'deny')} disabled={busy}>Deny</Button></>}
+        {isQuestion && message.state === 'sent' && <Button type="button" size="sm" variant="secondary" onClick={() => onAnswer(message)}>Answer</Button>}
+        {isQueued && canModerate && <><Button type="button" size="sm" onClick={() => onDecide(message.id, 'approve')} disabled={busy}>Approve now</Button><Button type="button" size="sm" variant="secondary" onClick={() => onDecide(message.id, 'deny')} disabled={busy}>Deny</Button></>}
       </div>
     </article>
   )

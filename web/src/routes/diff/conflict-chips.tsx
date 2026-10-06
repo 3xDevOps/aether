@@ -1,7 +1,7 @@
 import { FileWarning, TriangleAlert } from 'lucide-react'
 import { Fragment } from 'react'
 import { registerSlot, type CardSlotProps } from '@/components/slots'
-import { Tooltip } from '@/components/ui/heroui'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
@@ -31,35 +31,27 @@ export function ConflictChips({ run }: CardSlotProps) {
     const [first = '', ...rest] = peer.files
     return (
       <Fragment key={peer.run_id}>
-        <Tooltip>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <button
-                {...triggerProps}
-                type="button"
-                onClick={() => {
-                  navigate('terminal', { runId: peer.run_id })
-                }}
-                aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
-                className={cn(
-                  focusRing,
-                  'inline-flex min-h-[22px] coarse:min-h-11 min-w-0 max-w-full items-center gap-1.5 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[12px] hover:bg-state-needs-attention/20',
-                )}
-              >
-                <TriangleAlert className="size-3.5 shrink-0 text-state-needs-attention" aria-hidden />
-                <span className="max-w-32 truncate font-mono">{basename(first)}</span>
-                {rest.length > 0 && (
-                  <span className="shrink-0 text-muted-foreground">+{rest.length}</span>
-                )}
-                <span className="max-w-28 shrink-0 truncate" style={{ color: member?.color }}>
-                  {who}
-                </span>
-              </button>
+        <Tooltip content={`${peer.files.join('\n')}\n\nalso being changed by ${who}`}>
+          <button
+            type="button"
+            onClick={() => {
+              navigate('terminal', { runId: peer.run_id })
+            }}
+            aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
+            className={cn(
+              focusRing,
+              'inline-flex min-h-[22px] coarse:min-h-11 min-w-0 max-w-full items-center gap-1.5 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[12px] hover:bg-state-needs-attention/20',
             )}
-          />
-          <Tooltip.Content className="whitespace-pre-line">
-            {`${peer.files.join('\n')}\n\nalso being changed by ${who}`}
-          </Tooltip.Content>
+          >
+            <TriangleAlert className="size-3.5 shrink-0 text-state-needs-attention" aria-hidden />
+            <span className="max-w-32 truncate font-mono">{basename(first)}</span>
+            {rest.length > 0 && (
+              <span className="shrink-0 text-muted-foreground">+{rest.length}</span>
+            )}
+            <span className="max-w-28 shrink-0 truncate" style={{ color: member?.color }}>
+              {who}
+            </span>
+          </button>
         </Tooltip>
         {coarse && (
           <span className="min-w-0 basis-full break-all font-mono text-[11px] text-muted-foreground">

@@ -18,7 +18,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import {
   Dialog,
   DialogContent,
@@ -214,7 +215,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
         subtitle={isAdmin ? count : `${count} - roles read only`}
         actions={
           canInvite ? (
-            <Button size="default" onClick={() => setInviting(true)}>
+            <Button size="md" onClick={() => setInviting(true)}>
               <UserPlus />
               Invite
             </Button>
@@ -241,9 +242,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                     New members stay here until an admin approves them.
                   </p>
                 </div>
-                <Chip color="warning" variant="soft" size="sm">
-                  <Chip.Label>{pending.length}</Chip.Label>
-                </Chip>
+                <Badge tone="needs-you">
+                  {pending.length}
+                </Badge>
               </div>
               <ul className="overflow-hidden border-y border-border">
                 {pending.map((member) => (
@@ -256,11 +257,11 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                       {member.display_name}
                     </span>
                     <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-                      <Chip color="warning" variant="tertiary" size="sm">
-                        <Chip.Label>Pending</Chip.Label>
-                      </Chip>
+                      <Badge tone="needs-you">
+                        Pending
+                      </Badge>
                       {caps.hasMethod('member.approve') && isAdmin && (
-                        <Button size="default" onClick={() => void approve(member)}>
+                        <Button size="md" onClick={() => void approve(member)}>
                           Approve
                         </Button>
                       )}
@@ -298,9 +299,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                           />
                           <span className="min-w-0 break-words font-medium">{member.display_name}</span>
                           {member.id === self?.id && (
-                            <Chip color="accent" variant="tertiary" size="sm">
-                              <Chip.Label>(you)</Chip.Label>
-                            </Chip>
+                            <Badge>
+                              (you)
+                            </Badge>
                           )}
                         </div>
                       </td>
@@ -335,9 +336,9 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                               </SelectContent>
                             </Select>
                           ) : (
-                            <Chip color="default" variant="tertiary" size="sm">
-                              <Chip.Label>{member.role}</Chip.Label>
-                            </Chip>
+                            <Badge>
+                              {member.role}
+                            </Badge>
                           )}
                         </div>
                       </td>
@@ -347,17 +348,17 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                             Presence
                           </span>
                           {online.has(member.id) ? (
-                            <Chip color="success" variant="soft" size="sm">
-                              <Chip.Label>online</Chip.Label>
-                            </Chip>
+                            <Badge tone="done">
+                              online
+                            </Badge>
                           ) : (
-                            <Chip color="default" variant="tertiary" size="sm" className="max-w-full">
-                              <Chip.Label className="break-words">
+                            <Badge className="max-w-full">
+                              <span className="break-words">
                                 {lastSeen.has(member.id)
                                   ? <>offline - last seen <RelativeTime at={lastSeen.get(member.id) ?? ''} /></>
                                   : 'offline'}
-                              </Chip.Label>
-                            </Chip>
+                              </span>
+                            </Badge>
                           )}
                         </div>
                       </td>
@@ -377,7 +378,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                                 Actions
                               </span>
                               <Button
-                                size="default"
+                                size="md"
                                 variant="ghost"
                                 onClick={() => setRemoving(member)}
                               >
@@ -438,8 +439,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                       running keep the mounts they started with until they end.
                     </p>
                     <Button
-                      size="default"
-                      variant="outline"
+                      size="md"
+                      variant="secondary"
                       onClick={() => setStoppingTerminal(true)}
                     >
                       Stop environment
@@ -467,17 +468,12 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                             {member.display_name}
                           </span>
                           <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-                            <Chip
-                              color={shared ? 'success' : 'default'}
-                              variant="tertiary"
-                              size="sm"
-                              className="hidden sm:flex"
-                            >
-                              <Chip.Label>{shared ? 'Shared' : 'Not shared'}</Chip.Label>
-                            </Chip>
+                            <Badge tone={shared ? 'done' : 'neutral'} className="hidden sm:flex">
+                              {shared ? 'Shared' : 'Not shared'}
+                            </Badge>
                             <Button
-                              size="default"
-                              variant={shared ? 'outline' : 'default'}
+                              size="md"
+                              variant={shared ? 'secondary' : 'primary'}
                               disabled={sharing !== null}
                               onClick={() => void toggleAccountShare(member)}
                             >
@@ -505,33 +501,25 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
               </div>
               <div className="flex flex-wrap items-center gap-2 border-y border-border py-2">
                 {presetColors.map((color) => (
-                  <Tooltip key={color}>
-                    <Tooltip.Trigger<'button'>
-                      render={(triggerProps) => (
-                        <button
-                          {...triggerProps}
-                          type="button"
-                          aria-label={`Set color ${color}`}
-                          aria-pressed={self.color === color}
-                          className={cn(
-                            focusRing,
-                            'size-8 rounded-full border-2 border-background ring-1 ring-border/70 transition-[box-shadow,transform] hover:scale-105 hover:ring-2 aria-pressed:ring-2 motion-reduce:transition-none',
-                          )}
-                          style={{ backgroundColor: color }}
-                          onClick={() => {
-                            void recolor(color)
-                          }}
-                        />
+                  <Tooltip key={color} content={self.color === color ? `Current color ${color}` : `Set color ${color}`}>
+                    <button
+                      type="button"
+                      aria-label={`Set color ${color}`}
+                      aria-pressed={self.color === color}
+                      className={cn(
+                        focusRing,
+                        'size-8 rounded-full border-2 border-background ring-1 ring-border/70 transition-[box-shadow,transform] hover:scale-105 hover:ring-2 aria-pressed:ring-2 motion-reduce:transition-none',
                       )}
+                      style={{ backgroundColor: color }}
+                      onClick={() => {
+                        void recolor(color)
+                      }}
                     />
-                    <Tooltip.Content>
-                      {self.color === color ? `Current color ${color}` : `Set color ${color}`}
-                    </Tooltip.Content>
                   </Tooltip>
                 ))}
-                <Chip color="default" variant="tertiary" size="sm" className="ml-1">
-                  <Chip.Label>{self.color}</Chip.Label>
-                </Chip>
+                <Badge className="ml-1">
+                  {self.color}
+                </Badge>
               </div>
             </section>
           )}
@@ -625,7 +613,7 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
                 value={result.code}
                 onFocus={(e) => e.target.select()}
               />
-              <Button variant="outline" size="default" onClick={() => void copy()}>
+              <Button variant="secondary" size="md" onClick={() => void copy()}>
                 <Copy />
                 {copied ? 'Copied' : 'Copy'}
               </Button>
@@ -647,11 +635,11 @@ function InviteDialog({ client, onClose }: { client: Api; onClose: () => void })
           </p>
         )}
         <DialogFooter>
-          <Button variant="outline" size="default" onClick={onClose}>
+          <Button variant="secondary" size="md" onClick={onClose}>
             {result ? 'Done' : 'Cancel'}
           </Button>
           {!result && (
-            <Button size="default" disabled={busy} onClick={() => void generate()}>
+            <Button size="md" disabled={busy} onClick={() => void generate()}>
               Generate code
             </Button>
           )}

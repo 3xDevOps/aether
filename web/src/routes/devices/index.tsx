@@ -17,7 +17,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import type { Tone } from '@/components/ui/status-dot'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -29,11 +30,11 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
 
-const statusColor: Record<Device['status'], 'warning' | 'success' | 'default'> = {
-  registered: 'warning',
-  pending: 'warning',
-  approved: 'success',
-  revoked: 'default',
+const statusTone: Record<Device['status'], Tone> = {
+  registered: 'needs-you',
+  pending: 'needs-you',
+  approved: 'done',
+  revoked: 'neutral',
 }
 
 /** What stops working when a device is revoked, said before it happens. */
@@ -124,7 +125,7 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                 onChange={(e) => setCode(e.target.value)}
               />
             </Label>
-            <Button type="submit" size="default" disabled={looking || !code.trim()}>
+            <Button type="submit" size="md" disabled={looking || !code.trim()}>
               Review
             </Button>
           </form>
@@ -155,9 +156,9 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                       <span className="min-w-0 break-words text-[13px] font-medium">
                         {device.label}
                       </span>
-                      <Chip color={statusColor[device.status]} variant="soft" size="sm">
-                        <Chip.Label>{device.status}</Chip.Label>
-                      </Chip>
+                      <Badge tone={statusTone[device.status]}>
+                        {device.status}
+                      </Badge>
                     </div>
                     <p className="min-w-0 break-words text-xs text-muted-foreground">
                       {isAdmin && <>{owner(device)} · </>}
@@ -182,7 +183,7 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                   {device.status !== 'revoked' && (
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
                       <Button
-                        size="default"
+                        size="md"
                         variant="ghost"
                         aria-label={`Revoke ${device.label}`}
                         onClick={() => setRevoking(device)}

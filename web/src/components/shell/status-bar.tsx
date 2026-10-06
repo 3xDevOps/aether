@@ -5,7 +5,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { formatBytes } from '@/lib/format'
 import { UsageReader } from '@/components/shell/usage'
 import { inModal } from '@/lib/keys'
@@ -106,18 +107,11 @@ function ServerUpdateNotice() {
       title={notice}
       className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
     >
-      <Chip
-        color="warning"
-        variant="soft"
-        // The state token by hand, the way its neighbour carries
-        // needs-attention: HeroUI's warning foreground is amber, and this
-        // readout has always been the neutral the rest of the bar uses.
-        className="flex min-w-0 shrink items-center bg-state-waiting/15 text-muted-foreground"
-      >
-        <Chip.Label className="min-w-0 break-words whitespace-normal">
+      <Badge className="h-auto min-h-5 min-w-0 shrink">
+        <span className="min-w-0 break-words whitespace-normal">
           {notice}
-        </Chip.Label>
-      </Chip>
+        </span>
+      </Badge>
     </span>
   )
 }
@@ -170,29 +164,21 @@ function VersionLabel({ version, protocol }: { version: string; protocol: string
 
   const latest = update.cli.latest ?? ''
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              clearDismissedUpdates()
-            }}
-            aria-label={`Update available: ${latest}`}
-            className={cn(
-              focusRing,
-              'flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 rounded-sm px-1 break-words whitespace-normal hover:text-foreground',
-            )}
-          >
-            {label}
-            <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
-          </button>
+    <Tooltip content={<>{latest} is available - show the update banner</>}>
+      <button
+        type="button"
+        onClick={() => {
+          clearDismissedUpdates()
+        }}
+        aria-label={`Update available: ${latest}`}
+        className={cn(
+          focusRing,
+          'flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 rounded-sm px-1 break-words whitespace-normal hover:text-foreground',
         )}
-      />
-      <Tooltip.Content>
-        {latest} is available - show the update banner
-      </Tooltip.Content>
+      >
+        {label}
+        <span className="size-2 rounded-full bg-state-waiting" aria-hidden />
+      </button>
     </Tooltip>
   )
 }
@@ -279,18 +265,12 @@ export function StatusBar() {
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
         >
-          <Tooltip>
-            <Tooltip.Trigger<'button'>
-              render={(triggerProps) => (
-                <CollapsibleTrigger
-                  {...triggerProps}
-                  className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground"
-                  aria-label="Show status details"
-                  aria-controls="status-details"
-                />
-              )}
+          <Tooltip content="Show status details">
+            <CollapsibleTrigger
+              className="h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] w-[var(--status-bar-height)] justify-center rounded-sm border border-transparent text-muted-foreground hover:border-border hover:bg-toolbar-hover hover:text-foreground"
+              aria-label="Show status details"
+              aria-controls="status-details"
             />
-            <Tooltip.Content>Show status details</Tooltip.Content>
           </Tooltip>
           <CollapsibleContent
             id="status-details"
@@ -301,23 +281,16 @@ export function StatusBar() {
               className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[min(70dvh,calc(100dvh_-_var(--status-bar-height)_-_env(safe-area-inset-bottom)_-_1rem))] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-normal shadow-lg"
             >
               {unreachable !== null && (
-                // needs-attention has no HeroUI colour of its own, so the
-                // chip carries the state token rather than the nearest
-                // stand-in.
                 <span
                   role="status"
                   title={unreachableLabel[unreachable]}
                   className="flex min-h-[var(--status-bar-height)] min-w-0 items-center break-words whitespace-normal"
                 >
-                  <Chip
-                    color="warning"
-                    variant="soft"
-                    className="flex min-w-0 shrink items-center bg-state-needs-attention/15 text-state-needs-attention"
-                  >
-                    <Chip.Label className="min-w-0 break-words whitespace-normal">
+                  <Badge tone="needs-you" className="h-auto min-h-5 min-w-0 shrink">
+                    <span className="min-w-0 break-words whitespace-normal">
                       {unreachableLabel[unreachable]}
-                    </Chip.Label>
-                  </Chip>
+                    </span>
+                  </Badge>
                 </span>
               )}
               <ServerUpdateNotice />

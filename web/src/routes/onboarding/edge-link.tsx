@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Api } from '@/lib/api'
@@ -295,7 +295,7 @@ function ServerPicker({
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <p className={errorLine}>{error}</p>
           {servers === null && (
-            <Button size="sm" variant="outline" onClick={() => void load()}>
+            <Button size="sm" variant="secondary" onClick={() => void load()}>
               Retry
             </Button>
           )}
@@ -344,15 +344,15 @@ function ServerPicker({
               <div className="min-w-0 space-y-0.5">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="min-w-0 break-words font-medium">{server.name}</span>
-                  <Chip color={server.online ? 'success' : 'default'} variant="soft" size="sm">
-                    <Chip.Label>{server.online ? 'online' : 'offline'}</Chip.Label>
-                  </Chip>
-                  <Chip color="default" variant="tertiary" size="sm">
-                    <Chip.Label>{server.role}</Chip.Label>
-                  </Chip>
-                  <Chip color="default" variant="tertiary" size="sm">
-                    <Chip.Label>{server.kind}</Chip.Label>
-                  </Chip>
+                  <Badge tone={server.online ? 'done' : 'neutral'}>
+                    {server.online ? 'online' : 'offline'}
+                  </Badge>
+                  <Badge>
+                    {server.role}
+                  </Badge>
+                  <Badge>
+                    {server.kind}
+                  </Badge>
                 </div>
                 <p className="min-w-0 text-xs text-muted-foreground">
                   {policyLine[server.access_policy]}
@@ -363,7 +363,7 @@ function ServerPicker({
               </div>
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 disabled={busy}
                 aria-label={`Link ${server.name}`}
                 onClick={() => setConfirming(server)}
@@ -421,7 +421,7 @@ function ServerPicker({
           </Button>
         </form>
       ) : (
-        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+        <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
           Add a server
         </Button>
       )}
@@ -493,7 +493,7 @@ function ConfirmPin({
         <Button size="sm" disabled={busy || fingerprint === null} onClick={onConfirm}>
           {busy ? 'Linking...' : 'Link and pin'}
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={onCancel}>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
       </div>

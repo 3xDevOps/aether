@@ -98,14 +98,6 @@ export const groupLabel: Record<RunGroup, string> = {
   finished: 'Finished',
 }
 
-export const stateTone: Record<PresentationState, 'warning' | 'accent' | 'default' | 'success' | 'danger'> = {
-  'needs-you': 'warning',
-  working: 'accent',
-  paused: 'default',
-  done: 'success',
-  failed: 'danger',
-}
-
 // Token classes only - no colour literals in components.
 export const stateDotClass: Record<PresentationState, string> = {
   'needs-you': 'bg-state-needs-you',

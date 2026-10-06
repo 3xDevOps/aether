@@ -39,7 +39,8 @@ import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import type { Tone } from '@/components/ui/status-dot'
 import { RunStatusChip } from '@/components/run-list'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
@@ -112,14 +113,14 @@ const statusLabel: Record<MissionTask['status'], string> = {
   blocked: 'Blocked',
 }
 
-const statusColor: Record<MissionTask['status'], 'accent' | 'default' | 'success' | 'warning' | 'danger'> = {
-  ready: 'accent',
-  working: 'warning',
-  review: 'warning',
-  done: 'success',
-  proposed: 'default',
-  abandoned: 'danger',
-  blocked: 'danger',
+const statusTone: Record<MissionTask['status'], Tone> = {
+  ready: 'neutral',
+  working: 'working',
+  review: 'needs-you',
+  done: 'done',
+  proposed: 'neutral',
+  abandoned: 'failed',
+  blocked: 'failed',
 }
 
 function missionStatus(mission: Mission, tasks: MissionTask[], submissions: MissionSubmission[]): string {
@@ -283,7 +284,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         </div>
         {missionNextCursor && (
           <div className="mt-3 flex justify-center">
-            <Button size="sm" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+            <Button size="sm" variant="secondary" onClick={() => void loadMore()} disabled={loadingMore}>
               {loadingMore ? 'Loading missions…' : 'Load older missions'}
             </Button>
           </div>
@@ -413,15 +414,15 @@ function MissionDetailView({
         subtitle={mission ? `${missionStatus(mission, detail?.tasks ?? [], detail?.submissions ?? [])} · ${mission.id}` : undefined}
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={onBack}>
+            <Button size="sm" variant="secondary" onClick={onBack}>
               All missions
             </Button>
-            <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
+            <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>
               <RefreshCw className="size-3.5" aria-hidden />
               Refresh
             </Button>
             {canCancel && (
-              <Button size="sm" variant="outline" onClick={() => setCancelOpen(true)}>
+              <Button size="sm" variant="secondary" onClick={() => setCancelOpen(true)}>
                 Cancel swarm
               </Button>
             )}
@@ -450,7 +451,7 @@ function MissionDetailView({
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
                   {canReplace && (
-                    <Button size="sm" variant="outline" onClick={() => setReplaceOpen(true)}>
+                    <Button size="sm" variant="secondary" onClick={() => setReplaceOpen(true)}>
                       Replace integrator
                     </Button>
                   )}
@@ -474,9 +475,9 @@ function MissionDetailView({
               </div>
               <div className="mt-3 flex flex-wrap gap-1">
                 {(['ready', 'working', 'review', 'done', 'abandoned', 'blocked'] as const).map((status) => (
-                  <Chip key={status} color={status === 'done' ? 'success' : status === 'review' ? 'warning' : 'default'} variant="soft" size="sm">
-                    <Chip.Label>{statusLabel[status]} {taskCounts[status] ?? 0}</Chip.Label>
-                  </Chip>
+                  <Badge key={status} tone={status === 'done' ? 'done' : status === 'review' ? 'needs-you' : 'neutral'}>
+                    {statusLabel[status]} {taskCounts[status] ?? 0}
+                  </Badge>
                 ))}
               </div>
             </section>
@@ -589,13 +590,13 @@ function TaskCard({
         </div>
         <div className="flex flex-wrap gap-1">
           {pending && (
-            <Chip color="warning" variant="soft" size="sm">
-              <Chip.Label>Revision pending</Chip.Label>
-            </Chip>
+            <Badge tone="needs-you">
+              Revision pending
+            </Badge>
           )}
-          <Chip color={statusColor[task.status]} variant="soft" size="sm">
-            <Chip.Label>{statusLabel[task.status]}</Chip.Label>
-          </Chip>
+          <Badge tone={statusTone[task.status]}>
+            {statusLabel[task.status]}
+          </Badge>
         </div>
       </div>
       {pending && (
@@ -673,7 +674,7 @@ function TaskCard({
             {attempt.last_error && <span className="basis-full text-state-failed">{attempt.last_error}</span>}
             {(attempt.orchestration_hold || attempt.takeover_active) && <span className="text-state-needs-attention">Human control hold{attempt.takeover_member_id ? ` · ${attempt.takeover_member_id}` : ''}</span>}
             {attempt.run_id && <Button size="sm" variant="ghost" onClick={() => onRun(attempt.run_id)}>Worker run</Button>}
-            {canRelease && attempt.takeover_active && <Button size="sm" variant="outline" disabled={releasingAttemptID === attempt.id} onClick={() => onRelease(attempt)}>{releasingAttemptID === attempt.id ? 'Releasing…' : 'Release control'}</Button>}
+            {canRelease && attempt.takeover_active && <Button size="sm" variant="secondary" disabled={releasingAttemptID === attempt.id} onClick={() => onRelease(attempt)}>{releasingAttemptID === attempt.id ? 'Releasing…' : 'Release control'}</Button>}
             {(attempt.orchestration_hold || attempt.takeover_active) && <span className="basis-full text-state-needs-attention">Release control here or from the worker run after expiry or restart.</span>}
           </div>
         ))}
@@ -761,7 +762,7 @@ function IntegratorReplacement({
           <div className="space-y-1.5"><Label>Harness</Label><Select value={harness} onValueChange={setHarness}><SelectTrigger disabled={!harnesses.length}><SelectValue placeholder="Choose a harness" /></SelectTrigger><SelectContent>{harnesses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div>
         </div>
         {error && <ErrorNotice error={error} />}
-        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={() => void submit()} disabled={saving || !account || !harness}>Replace</Button></div>
+        <div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={() => void submit()} disabled={saving || !account || !harness}>Replace</Button></div>
       </div>
     </div>
   )
@@ -916,7 +917,7 @@ function MissionRunChip({ run }: CardSlotProps) {
       ),
     )
   if (!mission) return null
-  return <Chip color="accent" variant="soft" size="sm"><Chip.Label>Mission</Chip.Label></Chip>
+  return <Badge>Mission</Badge>
 }
 registerSlot('card:chips', 'mission-diagnostics', MissionConflictDiagnostics)
 registerSlot('card:warnings', 'mission-diagnostics', MissionConflictWarning)

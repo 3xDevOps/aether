@@ -3,7 +3,8 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import type { Tone } from '@/components/ui/status-dot'
 import {
   Collapsible,
   CollapsibleContent,
@@ -46,11 +47,11 @@ export function phaseLabel(mission: Mission): string {
   }
 }
 
-const phaseChipColor: Record<MissionPhase, 'accent' | 'default' | 'success' | 'danger'> = {
-  planning: 'default',
-  active: 'accent',
-  completed: 'success',
-  cancelled: 'danger',
+const phaseTone: Record<MissionPhase, Tone> = {
+  planning: 'neutral',
+  active: 'working',
+  completed: 'done',
+  cancelled: 'failed',
 }
 
 /** The mission-list marker. It replaces the generic Mission chip: which phase
@@ -58,13 +59,13 @@ const phaseChipColor: Record<MissionPhase, 'accent' | 'default' | 'success' | 'd
  * reader must do. */
 export function PhaseChip({ mission }: { mission: Mission }) {
   return (
-    <Chip color={phaseChipColor[mission.phase]} variant="soft" size="sm">
-      <Chip.Label>{phaseLabel(mission)}</Chip.Label>
-    </Chip>
+    <Badge tone={phaseTone[mission.phase]}>
+      {phaseLabel(mission)}
+    </Badge>
   )
 }
 
-const phaseTone: Record<MissionPhase, string> = {
+const phaseRail: Record<MissionPhase, string> = {
   planning: 'border-seam bg-hover',
   active: 'border-seam bg-hover',
   completed: 'border-state-success bg-state-success/10',
@@ -100,7 +101,7 @@ export function PhaseBanner({
   const exited = !final && Boolean(integratorRun && isTerminal(integratorRun.status))
   const notStarted = !final && integratorMissing
   return (
-    <section aria-label="Mission phase" className={`mb-3 border-l-2 px-2 py-1.5 text-xs ${phaseTone[mission.phase]}`}>
+    <section aria-label="Mission phase" className={`mb-3 border-l-2 px-2 py-1.5 text-xs ${phaseRail[mission.phase]}`}>
       <p className="font-medium">{phaseLabel(mission)}</p>
       <p className="mt-0.5">
         {!notStarted
@@ -127,7 +128,7 @@ export function PhaseBanner({
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {exited && <span className="min-w-0 break-words">The integrator run {integratorRunID} has exited; replace the integrator to continue</span>}
           {canReplace && (
-            <Button size="sm" variant="outline" onClick={onReplace}>
+            <Button size="sm" variant="secondary" onClick={onReplace}>
               Replace integrator
             </Button>
           )}

@@ -1,7 +1,8 @@
 import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
@@ -25,41 +26,30 @@ export function ApprovalStatus() {
   if (!phone || !cap.hasMethod('approval.list') || (waiting === 0 && !error)) return null
 
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              navigate('approvals')
-            }}
-            className={cn(
-              focusRing,
-              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
-            )}
-          >
-            <ShieldQuestion
-              className={cn(
-                'size-3.5',
-                error ? 'text-state-failed' : 'text-state-needs-attention',
-              )}
-              aria-hidden
-            />
-            <Chip
-              color={error ? 'danger' : 'warning'}
-              variant="soft"
-              size="sm"
-              className="max-w-44"
-            >
-              <Chip.Label className="truncate">
-                {error ? 'queue unreadable' : `${waiting} waiting`}
-              </Chip.Label>
-            </Chip>
-          </button>
+    <Tooltip content={error ?? 'Open Approvals'}>
+      <button
+        type="button"
+        onClick={() => {
+          navigate('approvals')
+        }}
+        className={cn(
+          focusRing,
+          'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
         )}
-      />
-      <Tooltip.Content>{error ?? 'Open Approvals'}</Tooltip.Content>
+      >
+        <ShieldQuestion
+          className={cn(
+            'size-3.5',
+            error ? 'text-state-failed' : 'text-state-needs-attention',
+          )}
+          aria-hidden
+        />
+        <Badge tone={error ? 'failed' : 'needs-you'} className="max-w-44">
+          <span className="truncate">
+            {error ? 'queue unreadable' : `${waiting} waiting`}
+          </span>
+        </Badge>
+      </button>
     </Tooltip>
   )
 }
@@ -100,8 +90,8 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
         actions={
           <Button
-            variant="outline"
-            size="default"
+            variant="secondary"
+            size="md"
             aria-pressed={showDecided}
             onClick={() => setShowDecided(!showDecided)}
           >
@@ -187,19 +177,9 @@ function Row({
       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Chip
-              color={open ? 'warning' : approval.decision === 'approved' ? 'success' : 'danger'}
-              variant="soft"
-              size="sm"
-            >
-              <Chip.Label>
-                {open
-                  ? 'Needs decision'
-                  : approval.decision === 'approved'
-                    ? 'Approved'
-                    : 'Denied'}
-              </Chip.Label>
-            </Chip>
+            <Badge tone={open ? 'needs-you' : approval.decision === 'approved' ? 'done' : 'failed'}>
+              {open ? 'Needs decision' : approval.decision === 'approved' ? 'Approved' : 'Denied'}
+            </Badge>
             <span className="min-w-0 break-words text-[13px] font-medium">{approval.action}</span>
           </div>
           {approval.detail ? (
@@ -217,13 +197,13 @@ function Row({
         </div>
         {open && (
           <span className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-            <Button size="default" disabled={busy} onClick={() => void decide(true)}>
+            <Button size="md" disabled={busy} onClick={() => void decide(true)}>
               <Check />
               Approve
             </Button>
             <Button
-              size="default"
-              variant="outline"
+              size="md"
+              variant="secondary"
               disabled={busy}
               onClick={() => void decide(false)}
             >

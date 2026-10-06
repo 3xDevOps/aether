@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
 import type { TakeoverInteraction } from '@/routes/terminal/use-takeover'
 import './control-button.css'
 
@@ -75,69 +74,62 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
   const clipPath = `polygon(0 0, ${edge + 20}% 0, ${edge}% 100%, 0 100%)`
 
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'> render={(triggerProps) => (
-        <Button
-          {...triggerProps}
-          type="button"
-          size="sm"
-          variant={ownsControl ? 'default' : 'outline'}
-          aria-label={label}
-          aria-disabled={unavailable || !ownsControl && takeover?.phase === 'review'}
-          className="terminal-control-button shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
-          onPointerDown={(event) => {
-            if (event.button !== 0 || !event.isPrimary || unavailable) return
-            begin({ pointer: event.pointerId })
-            event.currentTarget.setPointerCapture(event.pointerId)
-          }}
-          onPointerUp={(event) => {
-            if (gesture.current?.pointer !== event.pointerId) return
-            finish(false)
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-          }}
-          onPointerMove={(event) => {
-            if (gesture.current?.pointer !== event.pointerId) return
-            const rect = event.currentTarget.getBoundingClientRect()
-            if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) finish(true)
-          }}
-          onPointerCancel={() => finish(true)}
-          onLostPointerCapture={() => finish(true)}
-          onContextMenu={(event) => event.preventDefault()}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              if (gesture.current) { event.preventDefault(); event.stopPropagation(); finish(true) }
-              takeover?.cancel()
-              return
-            }
-            if (event.key !== ' ' && event.key !== 'Enter') return
-            event.preventDefault()
-            if (!event.repeat) begin({ key: event.key })
-          }}
-          onKeyUp={(event) => {
-            if (gesture.current?.key !== event.key) return
-            event.preventDefault()
-            const short = finish(false)
-            suppressClick.current = true
-            if (short) click()
-          }}
-          onBlur={(event) => { triggerProps.onBlur?.(event); finish(true) }}
-          onClick={(event) => {
-            if (suppressClick.current) { event.preventDefault(); return }
-            click()
-          }}
-        >
-          <span className="terminal-control-label" aria-hidden="true">{text}</span>
-          {progress !== undefined && progress > 0 && <>
-            <span className="terminal-control-fill" style={{ clipPath }} aria-hidden="true" />
-            <span className="terminal-control-covered" style={{ clipPath }} aria-hidden="true">{text}</span>
-          </>}
-        </Button>
-      )} />
-      <Tooltip.Content>
-        {ownsControl ? 'Release terminal control' : takeover?.phase === 'review'
-          ? `Waiting for the controller's decision · ${takeover.seconds}s`
-          : 'Click to take free control. Hold for 5 seconds to request an occupied terminal. Release early or press Escape to cancel.'}
-      </Tooltip.Content>
-    </Tooltip>
+    <Button
+      hint={ownsControl ? 'Release terminal control' : takeover?.phase === 'review'
+        ? `Waiting for the controller's decision · ${takeover.seconds}s`
+        : 'Click to take free control. Hold for 5 seconds to request an occupied terminal. Release early or press Escape to cancel.'}
+      type="button"
+      size="sm"
+      variant={ownsControl ? 'primary' : 'secondary'}
+      aria-label={label}
+      aria-disabled={unavailable || !ownsControl && takeover?.phase === 'review'}
+      className="terminal-control-button shrink-0 px-2 coarse:h-11 coarse:min-h-11 coarse:px-2"
+      onPointerDown={(event) => {
+        if (event.button !== 0 || !event.isPrimary || unavailable) return
+        begin({ pointer: event.pointerId })
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }}
+      onPointerUp={(event) => {
+        if (gesture.current?.pointer !== event.pointerId) return
+        finish(false)
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (gesture.current?.pointer !== event.pointerId) return
+        const rect = event.currentTarget.getBoundingClientRect()
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) finish(true)
+      }}
+      onPointerCancel={() => finish(true)}
+      onLostPointerCapture={() => finish(true)}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          if (gesture.current) { event.preventDefault(); event.stopPropagation(); finish(true) }
+          takeover?.cancel()
+          return
+        }
+        if (event.key !== ' ' && event.key !== 'Enter') return
+        event.preventDefault()
+        if (!event.repeat) begin({ key: event.key })
+      }}
+      onKeyUp={(event) => {
+        if (gesture.current?.key !== event.key) return
+        event.preventDefault()
+        const short = finish(false)
+        suppressClick.current = true
+        if (short) click()
+      }}
+      onBlur={() => finish(true)}
+      onClick={(event) => {
+        if (suppressClick.current) { event.preventDefault(); return }
+        click()
+      }}
+    >
+      <span className="terminal-control-label" aria-hidden="true">{text}</span>
+      {progress !== undefined && progress > 0 && <>
+        <span className="terminal-control-fill" style={{ clipPath }} aria-hidden="true" />
+        <span className="terminal-control-covered" style={{ clipPath }} aria-hidden="true">{text}</span>
+      </>}
+    </Button>
   )
 }

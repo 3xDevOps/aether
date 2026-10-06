@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -150,7 +150,7 @@ export function InvitationsSection({ client }: { client: Api }) {
             </SelectContent>
           </Select>
         </div>
-        <Button type="submit" size="default" disabled={busy || !who.trim()}>
+        <Button type="submit" size="md" disabled={busy || !who.trim()}>
           Invite account
         </Button>
       </form>
@@ -181,13 +181,11 @@ export function InvitationsSection({ client }: { client: Api }) {
                   <span className="min-w-0 break-words text-[13px] font-medium">
                     {invitee(invitation)}
                   </span>
-                  <Chip color="default" variant="tertiary" size="sm">
-                    <Chip.Label>
+                  <Badge>
                       {invitation.member_id
                         ? `links ${memberName(invitation.member_id)}`
                         : invitation.role}
-                    </Chip.Label>
-                  </Chip>
+                  </Badge>
                 </div>
                 <p className="min-w-0 break-words text-xs text-muted-foreground">
                   invited by {memberName(invitation.created_by)} ·{' '}
@@ -197,7 +195,7 @@ export function InvitationsSection({ client }: { client: Api }) {
                 </p>
               </div>
               <Button
-                size="default"
+                size="md"
                 variant="ghost"
                 aria-label={`Revoke invitation for ${invitee(invitation)}`}
                 onClick={() => setRevoking(invitation)}

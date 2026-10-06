@@ -1,4 +1,4 @@
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { RunList } from '@/components/run-list'
 import { ViewHeader } from '@/components/view-header'
 import { registerRoute } from '@/routes/registry'
@@ -12,9 +12,9 @@ function Overview() {
       <ViewHeader
         title="All runs"
         titleAdornment={
-          <Chip color="default" variant="soft" size="sm">
-            <Chip.Label>{runs.length} total</Chip.Label>
-          </Chip>
+          <Badge>
+            {runs.length} total
+          </Badge>
         }
         subtitle="Current workspace · Needs you first"
       />

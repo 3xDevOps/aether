@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import { Copy, Minus, PanelLeftOpen, Rocket, Square, X } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
+import { Tooltip } from '@/components/ui/tooltip'
 import { CommandPaletteTrigger } from '@/components/palette'
 import { cn, focusRing } from '@/lib/utils'
 import { canLaunch } from '@/lib/commands'
@@ -69,28 +69,22 @@ function ControlButton({
   className?: string
 }) {
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            aria-label={label}
-            onClick={() => {
-              onClick()
-            }}
-            style={NO_DRAG}
-            className={cn(
-              focusRing,
-              'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
-              className,
-            )}
-          >
-            <Icon size={14} aria-hidden />
-          </button>
+    <Tooltip content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={() => {
+          onClick()
+        }}
+        style={NO_DRAG}
+        className={cn(
+          focusRing,
+          'grid h-full w-[46px] place-items-center text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
+          className,
         )}
-      />
-      <Tooltip.Content>{label}</Tooltip.Content>
+      >
+        <Icon size={14} aria-hidden />
+      </button>
     </Tooltip>
   )
 }
@@ -153,7 +147,7 @@ export function TitleBar({
           variant="ghost"
           size="icon"
           style={NO_DRAG}
-          aria-label="Expand sidebar"
+          label="Expand sidebar"
           aria-controls="sidebar-drawer"
           aria-expanded={drawerOpen}
           disabled={commandPaletteDisabled}

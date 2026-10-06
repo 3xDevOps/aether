@@ -1,5 +1,5 @@
 import { CircleAlert, TriangleAlert } from 'lucide-react'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetState } from '@/lib/types'
 import { useStore } from '@/store'
@@ -35,7 +35,7 @@ export function BudgetStatus() {
   }
 
   const stateColor =
-    totals.state === 'exceeded' ? 'danger' : totals.state === 'warn' ? 'warning' : 'success'
+    totals.state === 'exceeded' ? 'failed' : totals.state === 'warn' ? 'needs-you' : 'done'
 
   return (
     <span
@@ -44,15 +44,13 @@ export function BudgetStatus() {
       aria-label={`Budget ${money.format(totals.costUSD)}${totals.advisory ? '+' : ''}`}
     >
       <StateIcon state={totals.state} />
-      <Chip color={stateColor} variant="soft" size="sm">
-        <Chip.Label>
+      <Badge tone={stateColor}>
           {money.format(totals.costUSD) + (totals.advisory ? '+' : '')}
-        </Chip.Label>
-      </Chip>
+      </Badge>
       {totals.state !== 'ok' && (
-        <Chip color={stateColor} variant="tertiary" size="sm">
-          <Chip.Label>{budgetStateLabel[totals.state]}</Chip.Label>
-        </Chip>
+        <Badge tone={stateColor}>
+          {budgetStateLabel[totals.state]}
+        </Badge>
       )}
     </span>
   )

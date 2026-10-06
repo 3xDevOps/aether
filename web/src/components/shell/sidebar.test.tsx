@@ -127,6 +127,11 @@ describe('Sidebar', () => {
     await userEvent.tab()
     expect(drawer.contains(document.activeElement)).toBe(true)
 
+    // Tab landed on an icon button, so the first Escape closes its tooltip.
+    await screen.findByRole('tooltip')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Runs' })).toBeDefined()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()
     expect(screen.queryByRole('navigation', { name: 'Surfaces' })).toBeNull()

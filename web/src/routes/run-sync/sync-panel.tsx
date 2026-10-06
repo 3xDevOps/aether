@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { message } from '@/lib/format'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
+import { Tooltip } from '@/components/ui/tooltip'
 import { api, type Api } from '@/lib/api'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -21,27 +21,21 @@ export function SyncBadge({ run }: CardSlotProps) {
   if (state !== 'running') return null
 
   return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            aria-label="Sync overlay running"
-            onClick={() => {
-              navigate('settings', {})
-            }}
-            className={cn(
-              focusRing,
-              'flex shrink-0 items-center gap-1 rounded-sm bg-state-working/15 px-1.5 py-0.5 text-[11px] text-state-working',
-            )}
-          >
-            <RefreshCw className="size-3.5" aria-hidden />
-            <span className="sr-only">Running</span>
-          </button>
+    <Tooltip content="Sync overlay running">
+      <button
+        type="button"
+        aria-label="Sync overlay running"
+        onClick={() => {
+          navigate('settings', {})
+        }}
+        className={cn(
+          focusRing,
+          'flex shrink-0 items-center gap-1 rounded-sm bg-state-working/15 px-1.5 py-0.5 text-[11px] text-state-working',
         )}
-      />
-      <Tooltip.Content>Sync overlay running</Tooltip.Content>
+      >
+        <RefreshCw className="size-3.5" aria-hidden />
+        <span className="sr-only">Running</span>
+      </button>
     </Tooltip>
   )
 }
@@ -161,7 +155,7 @@ export function SyncPanel({
       )}
       <div className="flex flex-wrap gap-2">
         {active ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void stop()}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void stop()}>
             Stop
           </Button>
         ) : (
@@ -176,7 +170,7 @@ export function SyncPanel({
           {error.verb === 'start' && (
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               className="mt-2"
               disabled={busy}
               onClick={() => void start(true)}

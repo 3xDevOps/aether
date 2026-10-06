@@ -2,13 +2,13 @@ import { Archive, ChevronDown, Copy, GitBranch, GitCommit, Shield } from 'lucide
 import { memo, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { RunInputIndicator } from '@/components/run-input-indicator'
-import { Chip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
-import { runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { mapCardHeight } from '@/routes/board/map-layout'
@@ -144,7 +144,7 @@ export const RunCard = memo(function RunCard({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={`Copy branch ${run.branch}`}
+            label={`Copy branch ${run.branch}`}
             onClick={() => void copyText(run.branch, branchRef.current)}
           >
             <Copy className="size-3" aria-hidden />
@@ -199,10 +199,10 @@ export const RunCard = memo(function RunCard({
               )}
               {deletesLabel && (
                 <span title="Archived" className="shrink-0">
-                  <Chip color="default" variant="soft" size="sm">
+                  <Badge>
                     <Archive className="size-3" aria-hidden />
-                    <Chip.Label>{deletesLabel}</Chip.Label>
-                  </Chip>
+                    {deletesLabel}
+                  </Badge>
                 </span>
               )}
               <CardSlot name="card:badges" run={run} />
@@ -273,14 +273,9 @@ function swarmCounts({ counts }: SwarmSummary): string {
 
 function StateChip({ state }: { state: PresentationState }) {
   return (
-    <Chip
-      color={stateTone[state]}
-      variant="soft"
-      size="sm"
-      aria-label={stateLabel[state]}
-    >
-      <Chip.Label>{stateLabel[state]}</Chip.Label>
-    </Chip>
+    <Badge tone={state} aria-label={stateLabel[state]}>
+      {stateLabel[state]}
+    </Badge>
   )
 }
 
