@@ -71,6 +71,7 @@ import {
   CircleHelp as LucideCircleHelp,
   Reply as LucideReply,
   ArrowRight as LucideArrowRight,
+  WrapText as LucideWrapText,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -146,6 +147,7 @@ export const ClipboardPaste = icon(LucideClipboardPaste)
 export const ScanText = icon(LucideScanText)
 export const ImageUp = icon(LucideImageUp)
 export const Camera = icon(LucideCamera)
+export const WrapText = icon(LucideWrapText)
 export const ScrollText = icon(LucideScrollText)
 export const PanelRight = icon(LucidePanelRight)
 export const CircleCheck = icon(LucideCircleCheck)

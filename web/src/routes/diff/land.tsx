@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { GitBranch, Check } from 'lucide-react'
+import { Check, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { useCapability } from '@/store/hooks'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 /** Shows where a successful pull left the run branch on this machine. */
@@ -14,9 +14,6 @@ export function Land({ run }: { run: RunRecord }) {
   const cap = useCapability()
   const [switching, setSwitching] = useState(false)
 
-  if (!run.last_commit) {
-    return <p className="border-b border-dashed px-3 py-2 text-[12px] text-muted-foreground">Nothing committed yet</p>
-  }
   if (!pull) return null
 
   const switchBranch = async () => {
@@ -35,14 +32,14 @@ export function Land({ run }: { run: RunRecord }) {
   return (
     <section
       aria-label="Pulled branch"
-      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-[12px]"
+      className="flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-seam px-3 py-1 text-ui-sm text-text"
     >
-      <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-[1_1_16rem]">
-        Branch <code className="break-all font-mono text-[12px]">{pull.branch}</code> is on your machine
+      <GitBranch className="size-3.5 shrink-0 text-muted" aria-hidden />
+      <span className="min-w-0 flex-1">
+        Branch <code className="font-code break-all">{pull.branch}</code> is on your machine
       </span>
       {pull.current ? (
-        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground">
+        <span className="inline-flex shrink-0 items-center gap-1 text-muted">
           <Check className="size-3.5 text-state-done" aria-hidden />
           You're on it
         </span>

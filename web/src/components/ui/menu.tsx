@@ -64,17 +64,37 @@ const itemClass = cn(
   '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-3.5 [&_svg]:text-muted',
 )
 
+const describedClass = 'h-auto min-h-7 py-1 coarse:h-auto coarse:min-h-11'
+
+function Described({ children, description }: { children: React.ReactNode; description: React.ReactNode }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate">{children}</span>
+      <span className="text-ui-sm text-muted">{description}</span>
+    </span>
+  )
+}
+
 export function MenuItem({
   className,
   tone,
+  description,
+  children,
   ...props
-}: React.ComponentProps<typeof MenuPrimitive.Item> & { tone?: 'danger' }) {
+}: React.ComponentProps<typeof MenuPrimitive.Item> & { tone?: 'danger'; description?: React.ReactNode }) {
   return (
     <MenuPrimitive.Item
       data-slot="menu-item"
-      className={cn(itemClass, tone === 'danger' && 'text-state-failed [&_svg]:text-state-failed', className)}
+      className={cn(
+        itemClass,
+        tone === 'danger' && 'text-state-failed [&_svg]:text-state-failed',
+        description !== undefined && describedClass,
+        className,
+      )}
       {...props}
-    />
+    >
+      {description === undefined ? children : <Described description={description}>{children}</Described>}
+    </MenuPrimitive.Item>
   )
 }
 
@@ -116,14 +136,19 @@ export function MenuRadioGroup(props: React.ComponentProps<typeof MenuPrimitive.
 export function MenuRadioItem({
   className,
   children,
+  description,
   ...props
-}: React.ComponentProps<typeof MenuPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof MenuPrimitive.RadioItem> & { description?: React.ReactNode }) {
   return (
-    <MenuPrimitive.RadioItem data-slot="menu-radio-item" className={cn(itemClass, 'pl-7', className)} {...props}>
+    <MenuPrimitive.RadioItem
+      data-slot="menu-radio-item"
+      className={cn(itemClass, 'pl-7', description !== undefined && describedClass, className)}
+      {...props}
+    >
       <MenuPrimitive.ItemIndicator className="absolute left-2 flex items-center">
         <Check />
       </MenuPrimitive.ItemIndicator>
-      {children}
+      {description === undefined ? children : <Described description={description}>{children}</Described>}
     </MenuPrimitive.RadioItem>
   )
 }
