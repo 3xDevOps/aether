@@ -1193,7 +1193,7 @@ nothing). An agent that is not installed stays listed, disabled, with
 launches where the deployment pinned a harness with `--harness-definitions`.
 With nothing installed, nothing is preselected, Launch stays disabled, and
 the form says "No agent is installed in your environment." with a **Set up
-an agent** button. The list is read each time the dialog opens; a failed
+an agent** button in place of the per-row links. The list is read each time the dialog opens; a failed
 read shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Standard** (`tui`,
@@ -1205,7 +1205,8 @@ is disabled with the reason under the control when the agent reports
 installed ("The Enhanced adapter for <agent> is not installed.", with
 **Set up**). A launch never switches mode on its own: the mode sent is the
 one the control shows, and a refusal from `run.launch` appears in the dialog
-verbatim under "Launch failed" while the dialog stays open. The task is
+verbatim under "Launch failed" while the dialog stays open, until another
+agent or mode is chosen. The task is
 optional in Standard and Enhanced - a taskless launch opens the agent with
 no prompt - and required in Background, which takes no input, so Launch
 stays disabled until one is written (`runLaunch` in
