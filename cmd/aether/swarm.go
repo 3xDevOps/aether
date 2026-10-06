@@ -232,8 +232,6 @@ func renderSwarms(w io.Writer, missions []protocol.Mission) error {
 	return tw.Flush()
 }
 
-// cell keeps free text to its first line, tabs as spaces, so it cannot
-// shift the columns.
 func cell(s string) string {
 	return strings.ReplaceAll(firstLine(s), "\t", " ")
 }
