@@ -24,6 +24,7 @@ export const noMessageFilters: MessageFilters = { sender: '', recipient: '', thr
 const showAllPages = 20
 
 function messageScope(workspaceID: string, filters: MessageFilters): MessageScope {
+  if (filters.thread) return { kind: 'thread', workspaceID, correlationID: filters.thread }
   const runID = filters.sender || filters.recipient
   return runID ? { kind: 'run', workspaceID, runID } : { kind: 'workspace', workspaceID }
 }
@@ -31,7 +32,6 @@ function messageScope(workspaceID: string, filters: MessageFilters): MessageScop
 function matches(message: RunMessage, filters: MessageFilters, query: string): boolean {
   if (filters.sender && message.from_run_id !== filters.sender) return false
   if (filters.recipient && message.to_run_id !== filters.recipient) return false
-  if (filters.thread && message.id !== filters.thread && message.correlation_id !== filters.thread) return false
   if (!query) return true
   return [message.body, message.summary, message.outcome, message.next_action].some((text) => text?.toLowerCase().includes(query))
 }
@@ -57,6 +57,7 @@ export function MessageHistory({
   const [reading, setReading] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
+  useMessageList(useStore, client, { kind: 'workspace', workspaceID })
   useMessageList(useStore, client, scope)
 
   const needle = query.trim().toLowerCase()

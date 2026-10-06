@@ -366,14 +366,39 @@ describe('agent message history', () => {
     expect(screen.getByText('2 of 3')).toBeDefined()
   })
 
+  function threadApi(workspacePage: RunMessage[]) {
+    return fakeApi({
+      ...feedApi(),
+      coordMessagesList: vi.fn(async (params: { correlation_id?: string }) =>
+        params.correlation_id
+          ? { messages: mail.filter((m) => m.id === params.correlation_id || m.correlation_id === params.correlation_id) }
+          : { messages: workspacePage, next_before: workspacePage.length < mail.length ? 'c1' : undefined },
+      ),
+    })
+  }
+
   it('narrows to one thread from a row', async () => {
+    const client = threadApi(mail)
     seed()
-    render(<ActivityRoute params={{}} client={mailApi()} />)
+    render(<ActivityRoute params={{}} client={client} />)
     await showMessages()
     await vi.waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(3))
     fireEvent.click(within(screen.getAllByRole('article')[1]).getByRole('button', { name: 'Thread' }))
     await vi.waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
+    expect(client.coordMessagesList).toHaveBeenCalledWith(expect.objectContaining({ correlation_id: 'msg_2' }))
     expect(screen.getByRole('button', { name: 'Filter · 2' })).toBeDefined()
+  })
+
+  it('reads the whole thread from the server when part of it is on an older page', async () => {
+    const client = threadApi([mail[0]])
+    seed()
+    render(<ActivityRoute params={{}} client={client} />)
+    await showMessages()
+    await vi.waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1))
+    fireEvent.click(within(screen.getByRole('article')).getByRole('button', { name: 'Thread' }))
+    await vi.waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
+    expect(screen.getAllByRole('article')[1].textContent).toContain('Cents or decimals?')
+    expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull()
   })
 
   it('asks the server for one run and keeps only what it sent', async () => {

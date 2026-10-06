@@ -2369,9 +2369,9 @@ questions and queued messages stay contextual to their run, in its Details
   (each a muted link to that run), kind word, delivery word (Sent, Delivered,
   Acknowledged), relative time, and the body clamped at three lines. Sender
   or Recipient asks the server for that run's mail (`run_id`) and keeps the
-  chosen side; **Thread** on a question or report narrows to it and its
-  replies; all three are in the Filter popover while Agent messages is
-  shown. The search box filters the bodies already loaded and says so while
+  chosen side; **Thread** on a question or report asks the server for that
+  thread (`correlation_id`), so replies on older pages show too; all three
+  are in the Filter popover while Agent messages is shown. The search box filters the bodies already loaded and says so while
   older pages remain; **Show all** reads the older pages, at most 20 per
   click. New mail re-reads the newest page through the messages slice.
 - **A budget warns, it never stops anything.** The Team line in the sidebar

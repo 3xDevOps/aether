@@ -10,6 +10,7 @@ export type MessageScope =
   | { kind: 'workspace'; workspaceID: string }
   | { kind: 'mission'; workspaceID: string; missionID: string }
   | { kind: 'run'; workspaceID: string; runID: string }
+  | { kind: 'thread'; workspaceID: string; correlationID: string }
 
 export function messageScopeKey(scope: MessageScope): string {
   switch (scope.kind) {
@@ -19,10 +20,12 @@ export function messageScopeKey(scope: MessageScope): string {
       return `mission:${scope.missionID}`
     case 'run':
       return `run:${scope.runID}`
+    case 'thread':
+      return `thread:${scope.correlationID}`
   }
 }
 
-type Participants = Pick<RunMessage, 'workspace_id' | 'mission_id' | 'from_run_id' | 'to_run_id'>
+type Participants = Pick<RunMessage, 'workspace_id' | 'mission_id' | 'from_run_id' | 'to_run_id' | 'correlation_id'>
 
 /** A run scope covers mail on either side of the run. */
 export function inMessageScope(scope: MessageScope, m: Participants): boolean {
@@ -34,6 +37,8 @@ export function inMessageScope(scope: MessageScope, m: Participants): boolean {
       return m.mission_id === scope.missionID
     case 'run':
       return m.from_run_id === scope.runID || m.to_run_id === scope.runID
+    case 'thread':
+      return m.correlation_id === scope.correlationID
   }
 }
 
@@ -120,6 +125,7 @@ export async function loadMessagePage(store: RootStore, client: Api, scope: Mess
       workspace_id: scope.workspaceID,
       mission_id: scope.kind === 'mission' ? scope.missionID : undefined,
       run_id: scope.kind === 'run' ? scope.runID : undefined,
+      correlation_id: scope.kind === 'thread' ? scope.correlationID : undefined,
       before: older ? (before ?? undefined) : undefined,
     })
     store.getState().setMessagePage(scope, page.messages ?? [], page.next_before, older)
@@ -141,8 +147,9 @@ export function useMessageList(store: RootStore, client: Api, scope: MessageScop
     const release = () => {
       if (!viewers.has(key)) store.getState().dropMessageList(key)
     }
+    const held = viewers.has(key)
     viewers.set(key, (viewers.get(key) ?? 0) + 1)
-    void loadMessagePage(store, client, scope).then(release)
+    if (!held) void loadMessagePage(store, client, scope).then(release)
     return () => {
       const left = viewers.get(key)! - 1
       if (left > 0) viewers.set(key, left)

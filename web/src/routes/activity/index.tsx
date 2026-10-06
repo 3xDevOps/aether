@@ -48,7 +48,7 @@ export function ActivityRoute({ params, client = api }: RouteProps & { client?: 
   const runOptions = useMemo(() => runIDs.map((id, i): Option => [id, runLabels[i]]), [runIDs, runLabels])
   const workspaceMessages = useStore(useShallow((s) => (messages ? scopeMessages(s, { kind: 'workspace', workspaceID: filters.workspaceID }) : [])))
   const threads = useMemo(
-    () => workspaceMessages.filter((m) => m.kind === 'question' || m.kind === 'report').map((m): Option => [m.id, threadTitle(m.body)]),
+    () => workspaceMessages.filter((m) => m.kind === 'question' || m.kind === 'report').map((m): Option => [m.correlation_id || m.id, threadTitle(m.body)]),
     [workspaceMessages],
   )
   const setMessageFilter = (patch: Partial<MessageFilters>) => setMessageFilters((current) => ({ ...current, ...patch }))
