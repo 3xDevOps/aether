@@ -125,7 +125,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             size="sm"
             hint="Copy branch name"
             aria-label={`Branch ${run.branch}, copy`}
-            className="min-w-0"
+            className="min-w-0 shrink"
             onClick={(event) => void copyText(run.branch, event.currentTarget)}
           >
             <span className="max-w-56 truncate font-code text-muted">{run.branch}</span>
