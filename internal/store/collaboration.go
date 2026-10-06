@@ -299,6 +299,7 @@ type RoomMessageStore interface {
 	// SettleRoomMessageAgentDelivery records a queued steer as delivered, or
 	// with a failure as not_sent. It returns false when it was settled before.
 	SettleRoomMessageAgentDelivery(context.Context, string, *RoomMessageFailure) (bool, error)
+	DropAgentQueuedRoomMessages(context.Context, *RoomMessageFailure) ([]string, error)
 }
 
 // EvidencePacketStore is the durable evidence packet persistence surface.

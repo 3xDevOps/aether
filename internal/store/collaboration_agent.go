@@ -54,6 +54,38 @@ func (d *DB) SettleRoomMessageAgentDelivery(ctx context.Context, id string, fail
 	return affected(res)
 }
 
+// Agent sessions end with the server process, so a steer still queued at
+// startup can never reach its agent.
+func (d *DB) DropAgentQueuedRoomMessages(ctx context.Context, failure *RoomMessageFailure) ([]string, error) {
+	now, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	failureJSON, err := marshalCollaborationJSON(failure, "")
+	if err != nil {
+		return nil, fmt.Errorf("store: drop queued room messages: %w", err)
+	}
+	rows, err := d.db.QueryContext(ctx, `UPDATE room_messages SET state = ?, failure = ?, updated_at = ?
+		WHERE state = ? AND agent_delivery = ? RETURNING id`,
+		RoomMessageNotSent, nullableJSON(failureJSON), now, RoomMessageSent, AgentQueued)
+	if err != nil {
+		return nil, fmt.Errorf("store: drop queued room messages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: drop queued room messages: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: drop queued room messages: %w", err)
+	}
+	return ids, nil
+}
+
 func affected(res sql.Result) (bool, error) {
 	n, err := res.RowsAffected()
 	if err != nil {

@@ -584,15 +584,27 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) err
 
 // shutdown closes every session without stopping its adapter or reporting
 // its end, as the end of the server process would; the next server replaces
-// the adapters and reports the restored sessions' state.
+// the adapters and reports the restored sessions' state. It waits for each
+// session's callbacks, so a dropped queued prompt is recorded before the
+// store closes.
 func (d *acpDriver) shutdown() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.closed = true
+	var sessions []*acphost.Session
 	for _, r := range d.runs {
 		r.stopping = true
 		if r.session != nil {
 			_ = r.session.Close()
+			sessions = append(sessions, r.session)
+		}
+	}
+	d.mu.Unlock()
+	deadline := time.After(acpStopGrace)
+	for _, session := range sessions {
+		select {
+		case <-session.Done():
+		case <-deadline:
+			return
 		}
 	}
 }

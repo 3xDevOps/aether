@@ -268,7 +268,8 @@ dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
 the run parks at `needs-attention` until the next prompt. Messages still
-queued behind that turn read **Not sent** (`agent_disconnected`); send them
+queued behind that turn read **Not sent** (`agent_disconnected`), also
+after a crash, since the next server records them when it starts; send them
 again once the session is back. The restored
 session is switched back to the last mode the log recorded. A session that
 cannot be restored starts a new one and says so in the log.

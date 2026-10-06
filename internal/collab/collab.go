@@ -173,6 +173,7 @@ type Service struct {
 	stop       context.CancelFunc
 	workerDone chan struct{}
 	overdueErr error
+	dropQueued sync.Once
 }
 
 // OverdueDeliveryError reports the latest overdue worker failure, kept after
@@ -219,11 +220,18 @@ func New(cfg Config) (*Service, error) {
 	return &Service{cfg: cfg, now: cfg.Now}, nil
 }
 
-// Start performs an immediate overdue sweep and then keeps sweeping until ctx
-// is cancelled. Calling Start more than once is harmless.
+// Start records the steers an earlier server process left queued behind an
+// agent turn as not sent, performs an immediate overdue sweep and then keeps
+// sweeping until ctx is cancelled. Call it before the scheduler opens agent
+// sessions. Calling Start more than once is harmless.
 func (s *Service) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: nil context", ErrInvalidRequest)
+	}
+	var dropErr error
+	s.dropQueued.Do(func() { dropErr = s.dropAgentQueued(ctx) })
+	if dropErr != nil {
+		return dropErr
 	}
 	s.mu.Lock()
 	if s.closed {

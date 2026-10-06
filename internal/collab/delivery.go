@@ -163,6 +163,23 @@ func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr err
 	}
 }
 
+func (s *Service) dropAgentQueued(ctx context.Context) error {
+	ids, err := s.cfg.Store.DropAgentQueuedRoomMessages(ctx, &store.RoomMessageFailure{Code: "agent_disconnected", Message: acphost.ErrClosed.Error()})
+	if err != nil {
+		return fmt.Errorf("collab: settle messages queued before the restart: %w", err)
+	}
+	for _, id := range ids {
+		msg, err := s.cfg.Store.GetRoomMessage(ctx, id)
+		if err != nil {
+			return fmt.Errorf("collab: read dropped message %s: %w", id, err)
+		}
+		if err := s.publishMessage(ctx, msg); err != nil {
+			return fmt.Errorf("collab: publish dropped message %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // serializeAgentMessage keeps the body and validated container-visible
 // attachment references in one bounded, unambiguous agent-facing message.
 func serializeAgentMessage(body string, attachments []string) string {

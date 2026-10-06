@@ -222,6 +222,18 @@ func (s *collabStore) SettleRoomMessageAgentDelivery(_ context.Context, id strin
 	}
 	return true, nil
 }
+func (s *collabStore) DropAgentQueuedRoomMessages(_ context.Context, failure *store.RoomMessageFailure) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for id, m := range s.messages {
+		if m.State == store.RoomMessageSent && m.AgentDelivery == store.AgentQueued {
+			m.State, m.Failure = store.RoomMessageNotSent, failure
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
 func (s *collabStore) DecideRoomMessage(_ context.Context, id string, from, to store.RoomMessageState, by string, at time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1178,5 +1190,41 @@ func TestStatusCountsQueuedSteerBeyondFirstPage(t *testing.T) {
 	}
 	if status.QueuedSteers != 1 {
 		t.Fatalf("queued steers = %d, want 1", status.QueuedSteers)
+	}
+}
+
+func TestStartRecordsSteersQueuedBeforeTheRestartAsNotSent(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.messages["queued"] = &store.RoomMessage{
+		ID: "queued", WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "after this turn",
+		State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(),
+	}
+	bus, err := events.NewInProc(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	counting := &failingCollabBus{Bus: bus}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Bus: counting, Now: clock.Now, WorkerInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if startErr := service.Start(ctx); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+
+	got, err := st.GetRoomMessage(ctx, "queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != "agent_disconnected" {
+		t.Fatalf("queued message after start = %q, %+v", got.State, got.Failure)
+	}
+	if n := counting.Successes(); n != 1 {
+		t.Fatalf("room publications = %d, want the dropped message", n)
 	}
 }
