@@ -17,17 +17,17 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
   const navigate = useStore((s) => s.navigate)
 
   return (
-    <li className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-border px-3 py-2 text-[13px] transition-colors last:border-b-0 hover:bg-toolbar-hover">
+    <li className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-seam px-3 py-2 text-ui transition-colors last:border-b-0 hover:bg-hover-chrome">
       <span
         role="img"
         aria-label={actor?.display_name ?? 'system'}
         title={actor?.display_name ?? 'system'}
-        className="mt-1 size-2 shrink-0 rounded-full bg-muted-foreground/45"
+        className="mt-1 size-2 shrink-0 rounded-full bg-icon-faint/45"
         style={actor ? { backgroundColor: actor.color } : undefined}
       />
       <div className="@container/feed-entry min-w-0">
         <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @md/feed-entry:grid-cols-[auto_minmax(0,1fr)_minmax(8rem,14rem)]">
-          <span className="shrink-0 pt-px text-xs tabular-nums text-muted-foreground">
+          <span className="shrink-0 pt-px text-ui-sm tabular-nums text-muted">
             <RelativeTime at={event.time} title={event.time} />
           </span>
           <span title={event.type} className="min-w-0 max-w-full">
@@ -35,7 +35,7 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
               <span className="truncate">{typeLabel(event.type)}</span>
             </Badge>
           </span>
-          <span className="col-start-2 min-w-0 break-words leading-5 text-foreground/90 select-text">
+          <span className="col-start-2 min-w-0 break-words leading-5 text-text/90 select-text">
             {describeEvent(event)}
           </span>
           {run && (
@@ -46,7 +46,7 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
               title={runLabel(run)}
               className={cn(
                 focusRing,
-                'col-start-2 row-start-3 min-h-[26px] coarse:min-h-11 min-w-0 max-w-full justify-self-start break-words text-left text-xs text-muted-foreground hover:text-foreground hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
+                'col-start-2 row-start-3 min-h-[26px] coarse:min-h-11 min-w-0 max-w-full justify-self-start break-words text-left text-ui-sm text-muted hover:text-text hover:underline @md/feed-entry:col-start-3 @md/feed-entry:row-start-1 @md/feed-entry:row-span-2 @md/feed-entry:justify-self-end',
               )}
             >
               <span className="line-clamp-2">{runLabel(run)}</span>

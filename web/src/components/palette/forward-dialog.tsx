@@ -141,31 +141,31 @@ export function ForwardDialog() {
               value={port}
               onChange={(event) => setPort(event.target.value)}
             />
-            <p id="forward-port-help" className="text-xs leading-4 text-muted-foreground">
+            <p id="forward-port-help" className="text-ui-sm leading-4 text-muted">
               Choose the port exposed by the agent. Localhost uses the same port.
             </p>
           </div>
           {error && (
-            <p role="alert" className="break-words text-xs text-state-failed">
+            <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
             </p>
           )}
           <div className="space-y-1.5" aria-label="Active forwards">
-            <p className="text-xs font-medium text-muted-foreground">Active forwards</p>
+            <p className="text-ui-sm font-medium text-muted">Active forwards</p>
             {loading ? (
-              <p className="text-[13px] text-muted-foreground">Loading forwards…</p>
+              <p className="text-ui text-muted">Loading forwards…</p>
             ) : forwards.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">No active forwards</p>
+              <p className="text-ui text-muted">No active forwards</p>
             ) : (
-              <div className="divide-y divide-border/70 border-y border-border/70">
+              <div className="divide-y divide-seam/70 border-y border-seam/70">
                 {forwards.map((forward) => (
                   <div
                     key={`${forward.target}:${forward.port}`}
                     className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-2 py-2"
                   >
-                    <span className="min-w-0 flex-1 break-words text-[13px]">
+                    <span className="min-w-0 flex-1 break-words text-ui">
                       <span className="font-medium">Port {forward.port}</span>{' '}
-                      <span className="text-muted-foreground">
+                      <span className="text-muted">
                         localhost:{forward.local_port} ({forward.conns} connections)
                       </span>
                     </span>

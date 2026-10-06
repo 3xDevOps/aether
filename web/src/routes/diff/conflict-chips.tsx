@@ -1,4 +1,4 @@
-import { TriangleAlert } from 'lucide-react'
+import { TriangleAlert } from '@/components/icons'
 import { Fragment } from 'react'
 import { registerSlot, type CardSlotProps } from '@/components/slots'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -32,13 +32,13 @@ export function ConflictChips({ run }: CardSlotProps) {
             aria-label={`${peer.files.length} overlapping file${peer.files.length === 1 ? '' : 's'} with ${who}, open their run`}
             className={cn(
               focusRing,
-              'inline-flex min-h-[22px] coarse:min-h-11 min-w-0 max-w-full items-center gap-1.5 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[12px] hover:bg-state-needs-attention/20',
+              'inline-flex min-h-[22px] coarse:min-h-11 min-w-0 max-w-full items-center gap-1.5 border border-state-needs-you/40 bg-state-needs-you/10 px-1.5 text-ui-sm hover:bg-state-needs-you/20',
             )}
           >
-            <TriangleAlert className="size-3.5 shrink-0 text-state-needs-attention" aria-hidden />
-            <span className="max-w-32 truncate font-mono">{basename(first)}</span>
+            <TriangleAlert className="size-3.5 shrink-0 text-state-needs-you" aria-hidden />
+            <span className="max-w-32 truncate font-code">{basename(first)}</span>
             {rest.length > 0 && (
-              <span className="shrink-0 text-muted-foreground">+{rest.length}</span>
+              <span className="shrink-0 text-muted">+{rest.length}</span>
             )}
             <span className="max-w-28 shrink-0 truncate" style={{ color: member?.color }}>
               {who}
@@ -46,7 +46,7 @@ export function ConflictChips({ run }: CardSlotProps) {
           </button>
         </Tooltip>
         {coarse && (
-          <span className="min-w-0 basis-full break-all font-mono text-[11px] text-muted-foreground">
+          <span className="min-w-0 basis-full break-all font-code text-ui-xs text-muted">
             {peer.files.join(' ')} - also being changed by {who}
           </span>
         )}

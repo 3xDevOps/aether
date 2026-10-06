@@ -3,7 +3,7 @@ import { extendTailwindMerge } from 'tailwind-merge'
 
 // Without the custom names, tailwind-merge reads `text-ui` as a text colour
 // and drops it when a colour class follows, and keeps both of
-// `rounded-sm rounded-control`.
+// `rounded-control rounded-control`.
 const twMerge = extendTailwindMerge({
   extend: {
     theme: { radius: ['control', 'panel'], shadow: ['overlay'] },
@@ -18,10 +18,10 @@ export function cn(...inputs: ClassValue[]) {
 /** An outline, not a ring: forced-colors mode discards box shadows, and ring
  * classes already mean "selected" on some controls. */
 export const focusRing =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
 
 export const focusRingInset =
-  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:transition-none'
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
 
 export const surface = 'rounded-panel border border-seam bg-raised text-text shadow-overlay'
 

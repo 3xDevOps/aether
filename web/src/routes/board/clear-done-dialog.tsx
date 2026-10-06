@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,7 +24,7 @@ export function ClearDoneConfirm({
   const n = plan.eligible.length
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
+      <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
             {n === 0 ? 'No closed runs to archive' : `Archive ${n} closed ${n === 1 ? 'run' : 'runs'}?`}
@@ -42,7 +42,7 @@ export function ClearDoneConfirm({
           </DialogDescription>
         </DialogHeader>
         {(plan.notClosed > 0 || plan.notAllowed > 0) && (
-          <ul className="list-disc space-y-1 pl-4 text-[13px] leading-5 text-muted-foreground">
+          <ul className="list-disc space-y-1 pl-4 text-ui leading-5 text-muted">
             {plan.notClosed > 0 && (
               <li>
                 {plan.notClosed} {plan.notClosed === 1 ? 'run stays' : 'runs stay'}: completed but
@@ -63,7 +63,7 @@ export function ClearDoneConfirm({
           </Button>
           {n > 0 && (
             <Button disabled={running} onClick={onConfirm}>
-              {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
+              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
               Archive {n}
             </Button>
           )}
@@ -87,7 +87,7 @@ export function ReleaseFinishedConfirm({
   const n = plan.eligible.length
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
+      <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
             {n === 0
@@ -111,7 +111,7 @@ export function ReleaseFinishedConfirm({
           </Button>
           {n > 0 && (
             <Button disabled={running} onClick={onConfirm}>
-              {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
+              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
               Free {n}
             </Button>
           )}

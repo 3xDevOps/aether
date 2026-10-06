@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CircleAlert, MonitorCog, ServerCog } from 'lucide-react'
+import { CircleAlert, MonitorCog, ServerCog } from '@/components/icons'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { desktopBridge } from '@/components/shell/window-bar'
@@ -201,22 +201,22 @@ function ShellBanner() {
       <div className={bannerContent}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="font-medium">The desktop app is out of date.</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ui-sm text-muted">
             Built by aether {desktopBridge()?.shellVersion}; serving {cliVersion}.
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-ui-sm text-muted">
           The dashboard itself is current - it ships inside the CLI. Only the
           window around it is old.
         </p>
         {buildError && (
           <div className="space-y-1">
-            <p className="text-xs font-medium text-state-failed">The last rebuild failed:</p>
+            <p className="text-ui-sm font-medium text-state-failed">The last rebuild failed:</p>
             <p className={cn(verbatim, 'text-state-failed')}>{buildError}</p>
           </div>
         )}
-        <Collapsible className="text-xs text-muted-foreground">
-          <CollapsibleTrigger className="font-medium hover:text-foreground">
+        <Collapsible className="text-ui-sm text-muted">
+          <CollapsibleTrigger className="font-medium hover:text-text">
             Rebuild instructions
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -381,13 +381,13 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
       <div className={bannerContent}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="font-medium">The server is behind.</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ui-sm text-muted">
             Server {running}, latest {latest}.
           </p>
         </div>
         {flow.name === 'available' && capable && (
-          <Collapsible className="text-xs text-muted-foreground">
-            <CollapsibleTrigger className="font-medium hover:text-foreground">
+          <Collapsible className="text-ui-sm text-muted">
+            <CollapsibleTrigger className="font-medium hover:text-text">
               What a server restart affects
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -401,27 +401,27 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         )}
         {flow.name === 'scheduled' && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               Update to {flow.version || latest} scheduled by {scheduledBy}, applies
               when no run is active.
             </p>
-            {waiting && <p className="text-muted-foreground">{waiting}</p>}
+            {waiting && <p className="text-muted">{waiting}</p>}
           </>
         )}
         {flow.name === 'applying' && (
-          <p className="text-muted-foreground">
+          <p className="text-muted">
             Downloading and verifying the release. Nothing has been replaced yet.
           </p>
         )}
         {flow.name === 'restarting' && (
-          <p className="text-muted-foreground">
+          <p className="text-muted">
             Restarting on the new version. Attached terminals reconnect on their
             own.
           </p>
         )}
         {flow.name === 'failed' && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               The update failed and nothing was replaced.
             </p>
             <p className={cn(verbatim, 'text-state-failed')}>{flow.detail}</p>
@@ -430,7 +430,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
         {(!capable || flow.name === 'failed') && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               {capable
                 ? 'Run these on the server host instead:'
                 : noButtonsLine(status, statusError)}

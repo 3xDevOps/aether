@@ -33,7 +33,7 @@ export function TerminalMock({ items }: { items: SessionItem[] }) {
           {line.text}
         </span>
       ))}
-      <span className="mt-0.5 block h-3.5 w-1.5 bg-muted" />
+      <span className="mt-0.5 block h-3.5 w-1.5 bg-chrome" />
     </span>
   )
 }

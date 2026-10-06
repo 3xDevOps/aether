@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleAlert, LoaderCircle } from 'lucide-react'
+import { ArrowLeft, CircleAlert, LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed } from '@/lib/hooks'
@@ -26,10 +26,10 @@ export function MissingRun() {
           <div className="flex min-w-0 items-start gap-2.5">
             <CircleAlert className="mt-0.5 size-4 shrink-0 text-state-failed" aria-hidden />
             <div className="min-w-0">
-              <h1 className="text-[15px] font-semibold leading-5">Run unavailable</h1>
+              <h1 className="text-title leading-5">Run unavailable</h1>
               <p
                 role="alert"
-                className="mt-0.5 break-words whitespace-pre-wrap text-[13px] leading-5 text-muted-foreground"
+                className="mt-0.5 break-words whitespace-pre-wrap text-ui leading-5 text-muted"
               >
                 {dead ? error : 'Cannot reach the server. Retrying.'}
               </p>
@@ -57,12 +57,12 @@ export function MissingRun() {
         className="w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4"
       >
         <div className="flex items-center gap-2">
-          <LoaderCircle className="size-4 animate-spin text-muted-foreground" aria-hidden />
-          <p className="text-[13px] leading-5 text-muted-foreground">Loading run details…</p>
+          <LoaderCircle className="size-4 animate-spin text-muted" aria-hidden />
+          <p className="text-ui leading-5 text-muted">Loading run details…</p>
         </div>
         <div className="mt-2 grid gap-1">
-          <Skeleton className="h-7 rounded-sm" />
-          <Skeleton className="h-7 rounded-sm" />
+          <div className="h-7"><Skeleton className="size-full" /></div>
+          <div className="h-7"><Skeleton className="size-full" /></div>
         </div>
       </div>
     ) : null
@@ -73,9 +73,9 @@ export function MissingRun() {
       aria-label="Run not found"
       className="flex h-full min-w-0 w-full items-start px-3 py-3 sm:px-4 sm:py-4"
     >
-      <div className="min-w-0 w-full max-w-3xl border-y border-border/80 px-3 py-2.5 sm:px-4">
-        <h1 className="text-[15px] font-semibold leading-5">Run not found</h1>
-        <p className="mt-0.5 break-words text-[13px] leading-5 text-muted-foreground">
+      <div className="min-w-0 w-full max-w-3xl border-y border-seam/80 px-3 py-2.5 sm:px-4">
+        <h1 className="text-title leading-5">Run not found</h1>
+        <p className="mt-0.5 break-words text-ui leading-5 text-muted">
           This run is not on the server. It may have been deleted.
         </p>
         <Button size="sm" className="mt-2" onClick={() => navigate('board')}>

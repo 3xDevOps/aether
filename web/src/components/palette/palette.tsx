@@ -1,4 +1,4 @@
-import { FolderGit2 } from 'lucide-react'
+import { FolderGit2 } from '@/components/icons'
 import { useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import {
@@ -111,7 +111,7 @@ export function PaletteBody({
       <command.Icon />
       <span className="min-w-0 flex-1 truncate">{command.label}</span>
       {command.disabled && (
-        <span className="shrink-0 text-xs text-muted-foreground">Unavailable</span>
+        <span className="shrink-0 text-ui-sm text-muted">Unavailable</span>
       )}
     </CommandItem>
   )
@@ -171,11 +171,11 @@ export function PaletteBody({
               <StateDot state={state} decorative className="mx-1 mt-1 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{runLabel(run)}</span>
-                <span className="block truncate text-xs text-muted-foreground">
+                <span className="block truncate text-ui-sm text-muted">
                   {workspaces[run.workspace_id]?.name ?? 'Workspace'} · {run.branch || 'No branch'}
                 </span>
               </span>
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              <span className="shrink-0 text-ui-sm font-medium text-muted">
                 {stateLabel[state]}
               </span>
             </CommandItem>
@@ -191,7 +191,7 @@ export function PaletteBody({
             >
               <FolderGit2 />
               <span className="min-w-0 flex-1 truncate">{w.name}</span>
-              <span className="max-w-32 truncate text-xs text-muted-foreground">{w.base_branch}</span>
+              <span className="max-w-32 truncate text-ui-sm text-muted">{w.base_branch}</span>
             </CommandItem>
           ))}
         </CommandGroup>

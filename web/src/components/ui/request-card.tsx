@@ -18,7 +18,7 @@ export function RequestCard({
     <div
       data-slot="request-card"
       tabIndex={-1}
-      className={cn('flex flex-col gap-1.5 rounded-panel bg-state-needs-you-soft px-3 py-2 text-ui text-text outline-none focus-visible:outline-2 focus-visible:outline-ring', className)}
+      className={cn('flex flex-col gap-1.5 rounded-panel bg-state-needs-you-soft px-3 py-2 text-ui text-text outline-none focus-visible:outline-2 focus-visible:outline-accent', className)}
       {...props}
     >
       <div className="flex min-w-0 items-center gap-1.5">

@@ -2,7 +2,7 @@
 // so the replay gate and `disableStdin` apply to a tap as to a keystroke.
 
 import type { Terminal } from '@xterm/xterm'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from '@/components/icons'
 import type * as React from 'react'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,7 @@ function KeyButton({
       variant={pressed ? 'primary' : 'secondary'}
       aria-label={label}
       aria-pressed={pressed}
-      className="shrink-0 px-3 font-mono text-[13px]"
+      className="shrink-0 px-3 font-code text-ui"
       // Taking focus would drop the soft keyboard between two keys.
       onPointerDown={(event) => event.preventDefault()}
       onClick={() => {
@@ -66,7 +66,7 @@ export function TerminalKeys({
       role="toolbar"
       aria-label="Terminal keys"
       className={cn(
-        'flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border bg-sidebar px-2 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        'flex shrink-0 items-center gap-1 overflow-x-auto border-t border-seam bg-chrome px-2 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
         className,
       )}
     >

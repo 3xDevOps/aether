@@ -98,11 +98,11 @@ export function InjectDialog() {
               setRequest((previous) => (previous && previous.payload !== nextText.trim() ? null : previous))
             }}
           />
-          <p id="inject-help" className="text-xs leading-4 text-muted-foreground">
+          <p id="inject-help" className="text-ui-sm leading-4 text-muted">
             This message is added to the run transcript and delivered to the agent.
           </p>
           {error && (
-            <p role="alert" className="break-words text-xs text-state-failed">
+            <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
             </p>
           )}

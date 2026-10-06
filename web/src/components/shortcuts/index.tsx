@@ -75,11 +75,11 @@ function ShortcutKeys({ value }: { value: string }) {
       {parts.map((part, index) => (
         <span key={`${part}-${index}`} className="flex min-w-0 max-w-full flex-wrap items-center gap-1 break-words">
           {index > 0 && (
-            <span aria-hidden className="text-[11px] text-muted-foreground">
+            <span aria-hidden className="text-ui-xs text-muted">
               {value.includes('then') ? 'then' : '+'}
             </span>
           )}
-          <kbd className="inline-flex min-h-[22px] min-w-0 max-w-full items-center justify-center break-words rounded-sm border border-border bg-muted px-1 font-mono text-[11px] font-medium leading-4 text-foreground">
+          <kbd className="inline-flex min-h-[22px] min-w-0 max-w-full items-center justify-center break-words rounded-control border border-seam bg-chrome px-1 font-code text-ui-xs font-medium leading-4 text-text">
             {part}
           </kbd>
         </span>
@@ -92,10 +92,10 @@ function ShortcutRow({ value, description }: { value: string; description: strin
   return (
     <div
       role="listitem"
-      className="grid min-w-0 grid-cols-[minmax(0,14rem)_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 rounded-sm px-2 py-1 odd:bg-muted/30 max-[479px]:grid-cols-1"
+      className="grid min-w-0 grid-cols-[minmax(0,14rem)_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 rounded-control px-2 py-1 odd:bg-chrome/30 max-[479px]:grid-cols-1"
     >
       <ShortcutKeys value={value} />
-      <span className="min-w-0 text-[13px] leading-5 text-muted-foreground">
+      <span className="min-w-0 text-ui leading-5 text-muted">
         {description}
       </span>
     </div>
@@ -113,7 +113,7 @@ function ShortcutGroup({
     <section className="space-y-1" aria-labelledby={`shortcut-${name}`}>
       <h3
         id={`shortcut-${name}`}
-        className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+        className="px-2 text-ui-xs font-semibold uppercase tracking-[0.08em] text-muted"
       >
         {name}
       </h3>

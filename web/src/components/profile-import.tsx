@@ -299,13 +299,13 @@ async function uploadDirectory(
 function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: string }) {
   if (entries.length === 0) return null
   return (
-    <div className="space-y-2 border-t border-border/70 pt-2">
-      <p className="text-sm font-medium">{label}: {entries.length}</p>
-      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+    <div className="space-y-2 border-t border-seam/70 pt-2">
+      <p className="text-ui font-medium">{label}: {entries.length}</p>
+      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-ui-sm">
         {entries.map((entry, index) => (
           <li key={`${entry.path}-${index}`}>
-            <span className="font-mono">{entry.path}</span>
-            <span className="text-muted-foreground">
+            <span className="font-code">{entry.path}</span>
+            <span className="text-muted">
               {' '}- {entry.detail ? `${entry.reason}: ${entry.detail}` : entry.reason}
             </span>
           </li>
@@ -517,40 +517,40 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
   return (
     <section
       aria-label="Agent config files"
-      className="min-w-0 space-y-4 border-t border-border/70 py-3"
+      className="min-w-0 space-y-4 border-t border-seam/70 py-3"
     >
       <div className="space-y-1">
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-ui leading-6 text-muted">
           Choose an agent configuration directory to import. You can return and
           import another directory or updated files whenever needed. Supported
-          roots include <span className="font-mono">~/.claude</span>,{' '}
-          <span className="font-mono">~/.codex</span>,{' '}
-          <span className="font-mono">~/.pi</span>, and{' '}
-          <span className="font-mono">~/.omp</span>.
+          roots include <span className="font-code">~/.claude</span>,{' '}
+          <span className="font-code">~/.codex</span>,{' '}
+          <span className="font-code">~/.pi</span>, and{' '}
+          <span className="font-code">~/.omp</span>.
         </p>
       </div>
       {importing && !status && (
-        <p role="status" className="text-sm text-muted-foreground">Waiting for the previous import to settle…</p>
+        <p role="status" className="text-ui text-muted">Waiting for the previous import to settle…</p>
       )}
 
       {roots === null && !rootsError && !importing && (
-        <p role="status" className="text-sm text-muted-foreground">
+        <p role="status" className="text-ui text-muted">
           Loading configuration destinations…
         </p>
       )}
       {rootsError && (
         <div className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-          <p className="text-sm text-state-failed">Loading configuration destinations failed: {rootsError}</p>
+          <p className="text-ui text-state-failed">Loading configuration destinations failed: {rootsError}</p>
         </div>
       )}
       {roots !== null && roots.length === 0 && (
-        <p className="border-y border-border/70 bg-card px-3 py-2.5 text-sm text-muted-foreground">
+        <p className="border-y border-seam/70 bg-canvas px-3 py-2.5 text-ui text-muted">
           This account has no supported configuration directories.
         </p>
       )}
 
-      <div className="border-y border-border/70 bg-card px-3 py-2.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm font-medium">
+      <div className="border-y border-seam/70 bg-canvas px-3 py-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 text-ui font-medium">
           <label htmlFor="configuration-directory-picker">Configuration directory</label>
           <input
             id="configuration-directory-picker"
@@ -574,11 +574,11 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           </Button>
         </div>
         {basename && (
-          <p className="mt-2 text-sm">
-            Selected directory: <span className="break-all font-mono">{basename}</span>
+          <p className="mt-2 text-ui">
+            Selected directory: <span className="break-all font-code">{basename}</span>
           </p>
         )}
-        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
+        <p className="mt-2 text-ui leading-5 text-muted">
           Known credential files and the selected agent's runtime files are
           left out before reading. Other files are sent to the server for
           checking when you confirm. Only checked files are transferred, in bounded
@@ -587,13 +587,13 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
       </div>
 
       {rawFiles && roots !== null && roots.length > 0 && (
-        <label className="flex min-w-0 flex-wrap items-center gap-3 text-sm">
+        <label className="flex min-w-0 flex-wrap items-center gap-3 text-ui">
           <span className="font-medium">
             {matchingRoots.length === 1 ? 'Destination' : 'Choose destination'}
           </span>
           <select
               aria-label="Configuration destination"
-              className="h-7 min-w-44 max-w-full rounded-sm border border-input bg-background px-2 text-sm coarse:h-11 coarse:text-base"
+              className="h-7 min-w-44 max-w-full rounded-control border border-control bg-canvas px-2 text-ui coarse:h-11"
               value={selectedHarness}
               disabled={importing || Boolean(result)}
               onChange={(event) => chooseDestination(event.target.value)}
@@ -609,31 +609,31 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
       )}
 
       {reading && (
-        <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm" role="status">
+        <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-ui" role="status">
           Preparing {rootLabel}; file contents will be read only when you import.
         </p>
       )}
       {selectionError && (
-        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+        <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-ui text-state-failed" role="alert">
           {selectionError}
         </p>
       )}
       {selection && !reading && (!status || recovering) && (
-        <div className="min-w-0 space-y-3 border-y border-border/70 bg-card px-3 py-3">
+        <div className="min-w-0 space-y-3 border-y border-seam/70 bg-canvas px-3 py-3">
           <div className="space-y-1">
-            <h4 className="text-sm font-semibold">Preview</h4>
-            <p className="text-sm">
+            <h4 className="text-ui font-semibold">Preview</h4>
+            <p className="text-ui">
               {included.length} files, {formatBytes(selectedBytes)} selected from{' '}
-              <span className="font-mono">{selection.basename}</span>.
+              <span className="font-code">{selection.basename}</span>.
             </p>
-            <p className="text-[13px] leading-5 text-muted-foreground">
+            <p className="text-ui leading-5 text-muted">
               Empty and binary files are preserved. {exclusions.length} files left out
               before upload. Uncheck anything you do not want copied.
             </p>
           </div>
 
-          <div className="space-y-2 border-t border-border/70 pt-2">
-            <p className="text-sm font-medium">Select files</p>
+          <div className="space-y-2 border-t border-seam/70 pt-2">
+            <p className="text-ui font-medium">Select files</p>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => setOmitted(new Set())}>Select all</Button>
               <Button size="sm" variant="secondary" onClick={() => setOmitted(new Set(selection.files.map(({ path }) => path)))}>Exclude all</Button>
@@ -645,14 +645,14 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                 </Button>
               )}
             </div>
-            <ul className="max-h-64 min-w-0 space-y-2 overflow-y-auto text-xs">
+            <ul className="max-h-64 min-w-0 space-y-2 overflow-y-auto text-ui-sm">
               {selection.files.map(({ path, file, problem }) => (
                 <li key={path} className="space-y-1">
                   <label className="flex items-start gap-2">
                     <input type="checkbox" aria-label={`Include ${path}`} checked={!omitted.has(path)}
                       onChange={(event) => toggleFile(path, event.target.checked)} />
-                    <span className="min-w-0 break-all font-mono">{path}</span>
-                    <span className="shrink-0 text-muted-foreground">{formatBytes(file.size)}</span>
+                    <span className="min-w-0 break-all font-code">{path}</span>
+                    <span className="shrink-0 text-muted">{formatBytes(file.size)}</span>
                   </label>
                   {problem && (
                     <p className="break-words text-state-failed">
@@ -670,19 +670,19 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
             </ul>
           </div>
           {blocked.length > 0 && (
-            <p role="alert" className="text-sm text-state-failed">
+            <p role="alert" className="text-ui text-state-failed">
               {blocked.length} selected files cannot be imported. Explicitly exclude them to continue with the rest.
               Nothing in this review has been uploaded.
             </p>
           )}
           <ExclusionList entries={exclusions} label="Left out before upload" />
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            For a file over 64 MiB, exclude it here, then use <span className="font-mono">aether terminal</span> to
+          <p className="text-ui leading-5 text-muted">
+            For a file over 64 MiB, exclude it here, then use <span className="font-code">aether terminal</span> to
             install or download that asset directly into the destination in your persistent home.
             Files is a text editor, not an alternative large-file uploader.
           </p>
 
-          <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-[13px] leading-5">
+          <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-ui leading-5">
             Before you confirm: matching remote configuration files will be
             overwritten, accepted files change your persistent remote home
             immediately, and this local directory will not be watched.
@@ -697,13 +697,13 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
         </div>
       )}
       {status && (
-        <div className="min-w-0 space-y-3 border-y border-border/70 bg-card px-3 py-3">
-          <p className="text-sm">
-            Directory: <span className="break-all font-mono">{status.basename}</span>
-            {' '}Destination: <span className="font-mono">{status.destination}</span>
+        <div className="min-w-0 space-y-3 border-y border-seam/70 bg-canvas px-3 py-3">
+          <p className="text-ui">
+            Directory: <span className="break-all font-code">{status.basename}</span>
+            {' '}Destination: <span className="font-code">{status.destination}</span>
           </p>
           {!result && (
-            <p role="status" className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm">
+            <p role="status" className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-ui">
               Importing configuration: {status.phase === 'reading' ? 'reading' : 'uploading'} the next batch.
               {' '}{status.result.files} files ({formatBytes(status.result.bytes)}) confirmed imported;
               {' '}{status.result.excluded.length} server exclusions from {status.totalFiles} selected files.
@@ -714,7 +714,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
             <>
               {result.error || status.unknownPaths.length > 0 ? (
                 <>
-                  <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+                  <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-ui text-state-failed" role="alert">
                     <p>
                       Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
                       {agentLabel(result.harness)}.
@@ -728,29 +728,29 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                       Inspect Files
                     </Button>
                   </div>
-                  <div className="space-y-2 border-t border-border/70 pt-2">
-                    <p className="text-sm font-medium">Imported paths: {result.imported_paths?.length ?? 0}</p>
-                    <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                  <div className="space-y-2 border-t border-seam/70 pt-2">
+                    <p className="text-ui font-medium">Imported paths: {result.imported_paths?.length ?? 0}</p>
+                    <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-ui-sm">
                       {result.imported_paths?.map((path) => (
-                        <li key={path} className="break-all font-mono">{path}</li>
+                        <li key={path} className="break-all font-code">{path}</li>
                       ))}
                     </ul>
                   </div>
                   {status.unknownPaths.length > 0 && (
-                    <details className="space-y-2 border-t border-border/70 pt-2">
-                      <summary className="cursor-pointer text-sm font-medium">
+                    <details className="space-y-2 border-t border-seam/70 pt-2">
+                      <summary className="cursor-pointer text-ui font-medium">
                         Paths with unknown outcome: {status.unknownPaths.length}
                       </summary>
-                      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-ui-sm">
                         {status.unknownPaths.map((path) => (
-                          <li key={path} className="break-all font-mono">{path}</li>
+                          <li key={path} className="break-all font-code">{path}</li>
                         ))}
                       </ul>
                     </details>
                   )}
                 </>
               ) : (
-                <div className="border-l-2 border-border bg-muted/20 px-3 py-2 text-sm" role="status">
+                <div className="border-l-2 border-seam bg-chrome/20 px-3 py-2 text-ui" role="status">
                   <p>Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
                     {agentLabel(result.harness)}.</p>
                   {status.excluded.length + result.excluded.length > 0 && (
@@ -760,18 +760,18 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
               )}
               {status.errors.length > (result.error ? 1 : 0) && (
                 <details>
-                  <summary className="cursor-pointer text-sm">Earlier import errors</summary>
-                  <ul className="space-y-1 text-xs">
+                  <summary className="cursor-pointer text-ui">Earlier import errors</summary>
+                  <ul className="space-y-1 text-ui-sm">
                     {status.errors.map((error, index) => <li key={index}>{error}</li>)}
                   </ul>
                 </details>
               )}
               {status.remaining.length > 0 && (
-                <div className="space-y-2 border-t border-border/70 pt-2">
-                  <p className="text-sm font-medium">Failed or unattempted paths: {status.remaining.length}</p>
-                  <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
+                <div className="space-y-2 border-t border-seam/70 pt-2">
+                  <p className="text-ui font-medium">Failed or unattempted paths: {status.remaining.length}</p>
+                  <ul className="max-h-52 space-y-1 overflow-y-auto text-ui-sm">
                     {status.remaining.map(({ destinationPath, problem }) => (
-                      <li key={destinationPath}><span className="font-mono">{destinationPath}</span>{problem?.detail && ` - ${problem.detail}`}</li>
+                      <li key={destinationPath}><span className="font-code">{destinationPath}</span>{problem?.detail && ` - ${problem.detail}`}</li>
                     ))}
                   </ul>
                   {!recovering && <Button size="sm" variant="secondary" disabled={roots === null} onClick={reviewRemaining}>Review remaining files</Button>}

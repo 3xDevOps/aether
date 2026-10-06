@@ -1,4 +1,4 @@
-import { Check, ShieldQuestion, X } from 'lucide-react'
+import { Check, ShieldQuestion, X } from '@/components/icons'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -57,12 +57,12 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
           {error && (
             <p
               role="alert"
-              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
+              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-ui text-state-failed"
             >
               {error}
             </p>
           )}
-          <ul className="overflow-hidden border-y border-border">
+          <ul className="overflow-hidden border-y border-seam">
             {rows.map((approval) => (
               <Row
                 key={approval.id}
@@ -76,9 +76,9 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
           </ul>
           {rows.length === 0 && !error && (
             <div className="border-y border-dashed px-4 py-8 text-center">
-              <ShieldQuestion className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden />
-              <p className="text-sm font-medium">Nothing is waiting on a decision.</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">
+              <ShieldQuestion className="mx-auto mb-2 size-5 text-muted" aria-hidden />
+              <p className="text-ui font-medium">Nothing is waiting on a decision.</p>
+              <p className="mt-1 text-ui text-muted">
                 Requests will appear here when an agent needs your approval.
               </p>
             </div>
@@ -123,8 +123,8 @@ function Row({
   return (
     <li
       className={cn(
-        'border-b border-border px-3 py-3 last:border-b-0',
-        !open && 'bg-muted/10',
+        'border-b border-seam px-3 py-3 last:border-b-0',
+        !open && 'bg-chrome/10',
       )}
     >
       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -133,19 +133,19 @@ function Row({
             <Badge tone={open ? 'needs-you' : approval.decision === 'approved' ? 'done' : 'failed'}>
               {open ? 'Needs decision' : approval.decision === 'approved' ? 'Approved' : 'Denied'}
             </Badge>
-            <span className="min-w-0 break-words text-[13px] font-medium">{approval.action}</span>
+            <span className="min-w-0 break-words text-ui font-medium">{approval.action}</span>
           </div>
           {approval.detail ? (
-            <div className="mt-2 border-l-2 border-border pl-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="mt-2 border-l-2 border-seam pl-2">
+              <p className="text-ui-xs font-medium uppercase tracking-wide text-muted">
                 Reason
               </p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 select-text">
+              <p className="mt-1 whitespace-pre-wrap break-words text-ui leading-5 select-text">
                 {approval.detail}
               </p>
             </div>
           ) : (
-            <p className="mt-2 text-[13px] text-muted-foreground">No additional reason provided.</p>
+            <p className="mt-2 text-ui text-muted">No additional reason provided.</p>
           )}
         </div>
         {open && (
@@ -167,8 +167,8 @@ function Row({
         )}
       </div>
 
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
-        <span className="min-w-0 break-words font-medium text-foreground/80">
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ui text-muted">
+        <span className="min-w-0 break-words font-medium text-text/80">
           {workspace?.name ?? approval.workspace_id}
         </span>
         {run && (
@@ -178,7 +178,7 @@ function Row({
             title={runLabel(run)}
             className={cn(
               focusRing,
-              'inline-flex min-h-[26px] coarse:min-h-11 min-w-0 max-w-full items-center truncate text-left hover:text-foreground hover:underline sm:max-w-60',
+              'inline-flex min-h-[26px] coarse:min-h-11 min-w-0 max-w-full items-center truncate text-left hover:text-text hover:underline sm:max-w-60',
             )}
           >
             {runLabel(run)}
@@ -188,7 +188,7 @@ function Row({
       </div>
 
       {!open && (
-        <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[13px]">
+        <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-ui">
           <span
             aria-hidden
             className="size-2 shrink-0 rounded-full"
@@ -200,7 +200,7 @@ function Row({
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-2 border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-[13px] text-state-failed">
+        <p role="alert" className="mt-2 border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-ui text-state-failed">
           {error}
         </p>
       )}

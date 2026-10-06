@@ -199,7 +199,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
             <div className="px-3">
               {candidateReview}
             </div>
-            <div className="border-b border-border px-3 py-2 text-ui-xs text-muted-foreground">
+            <div className="border-b border-seam px-3 py-2 text-ui-xs text-muted">
               Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
               Retained copies use capture access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
             </div>
@@ -207,9 +207,9 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
             {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-ui-sm text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry captures</Button>}</div>}
             {!selectedID ? (
               <div className="p-3">
-                {loading && <p className="text-ui-sm text-muted-foreground">Loading captures…</p>}
-                {!loading && !packets.length && <p className="text-ui-sm text-muted-foreground">No retained packets for this run.</p>}
-                <div className="divide-y divide-border">
+                {loading && <p className="text-ui-sm text-muted">Loading captures…</p>}
+                {!loading && !packets.length && <p className="text-ui-sm text-muted">No retained packets for this run.</p>}
+                <div className="divide-y divide-seam">
                   {packets.map((item) => (
                     <div key={item.id} className="flex items-start gap-2 py-2">
                       <div className="min-w-0 flex-1">
@@ -231,20 +231,20 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
                 <Button type="button" variant="ghost" size="sm" onClick={() => select(runID)}>Back to packets</Button>
                 {packet ? (
                   <>
-                    <div className="mt-2 border-b border-border pb-2">
+                    <div className="mt-2 border-b border-seam pb-2">
                       <div className="flex items-baseline justify-between gap-2">
                         <h3 className="text-ui font-semibold">{packet.trigger} capture</h3>
-                        <time className="text-ui-xs text-muted-foreground">{when(packet.captured_at)}</time>
+                        <time className="text-ui-xs text-muted">{when(packet.captured_at)}</time>
                       </div>
                       <p className="mt-1 text-ui-sm">{packet.objective || 'Objective not recorded'}</p>
-                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-xs text-muted-foreground">
+                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-ui-xs text-muted">
                         <div><dt className="inline font-medium">Base: </dt><dd className="inline break-all">{packet.base_revision || 'Unavailable'}</dd></div>
                         <div><dt className="inline font-medium">Packet-retain revision: </dt><dd className="inline break-all">{packet.retained_revision || 'Unavailable'}</dd></div>
                         <div><dt className="inline font-medium">Boundary: </dt><dd className="inline">{packet.event_boundary}</dd></div>
                         <div><dt className="inline font-medium">Sources: </dt><dd className="inline">{sourceSummary(packet)}</dd></div>
                       </dl>
-                      <p className="mt-1 text-ui-xs text-muted-foreground">The packet-retain revision is a later snapshot, not the Git boundary of an earlier capture.</p>
-                      {packet.expires_at && <p className="mt-1 text-ui-xs text-muted-foreground">Capture expires {when(packet.expires_at)}.</p>}
+                      <p className="mt-1 text-ui-xs text-muted">The packet-retain revision is a later snapshot, not the Git boundary of an earlier capture.</p>
+                      {packet.expires_at && <p className="mt-1 text-ui-xs text-muted">Capture expires {when(packet.expires_at)}.</p>}
                       {packet.availability === 'expired' && <p role="status" className="mt-1 text-ui-sm text-state-failed">This packet has expired. Retained bytes are no longer available.</p>}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Capture views">
@@ -261,7 +261,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
                     {view === 'patch' && <EvidenceText value={patch?.packet.id === packet.id ? patch.patch : undefined} truncated={patch?.packet.id === packet.id ? patch.truncated : undefined} empty="Patch unavailable" />}
                     {view === 'transcript' && <EvidenceText value={transcript?.packet.id === packet.id ? decodeTranscript(transcript.data_base64) : undefined} truncated={transcript?.packet.id === packet.id ? transcript.truncated : undefined} empty="Transcript unavailable" />}
                   </>
-                ) : <p className="mt-2 text-ui-sm text-muted-foreground">Loading packet…</p>}
+                ) : <p className="mt-2 text-ui-sm text-muted">Loading packet…</p>}
               </div>
             )}
           </div>
@@ -282,21 +282,21 @@ function EvidenceSummary({ packet, onAnswer }: { packet: EvidencePacket; onAnswe
     <div className="mt-3 space-y-3 text-ui-sm">
       <div>
         <h4 className="font-medium">Changed files</h4>
-        {packet.changed_files?.length ? <ul className="mt-1 space-y-1 text-muted-foreground">{packet.changed_files.map((file) => <li key={file.path} className="flex justify-between gap-2"><code className="truncate">{file.path}</code><span className="shrink-0">{file.status || 'changed'} {file.additions !== undefined || file.deletions !== undefined ? `+${file.additions ?? 0}/-${file.deletions ?? 0}` : ''}</span></li>)}</ul> : <p className="mt-1 text-muted-foreground">No changed files retained.</p>}
+        {packet.changed_files?.length ? <ul className="mt-1 space-y-1 text-muted">{packet.changed_files.map((file) => <li key={file.path} className="flex justify-between gap-2"><code className="truncate">{file.path}</code><span className="shrink-0">{file.status || 'changed'} {file.additions !== undefined || file.deletions !== undefined ? `+${file.additions ?? 0}/-${file.deletions ?? 0}` : ''}</span></li>)}</ul> : <p className="mt-1 text-muted">No changed files retained.</p>}
       </div>
       <div>
         <h4 className="font-medium">Source availability</h4>
-        <ul className="mt-1 space-y-1 text-muted-foreground">{(packet.sources ?? []).map((source) => <li key={source.name}>{source.name}: {source.available ? 'available' : `unavailable${source.reason ? ` (${source.reason})` : ''}`}{source.truncated ? ', truncated' : ''}</li>)}</ul>
+        <ul className="mt-1 space-y-1 text-muted">{(packet.sources ?? []).map((source) => <li key={source.name}>{source.name}: {source.available ? 'available' : `unavailable${source.reason ? ` (${source.reason})` : ''}`}{source.truncated ? ', truncated' : ''}</li>)}</ul>
       </div>
-      {packet.unresolved_facts?.length ? <div><h4 className="font-medium">Unresolved questions</h4><ul className="mt-1 space-y-1">{packet.unresolved_facts.map((fact) => <li key={fact} className="flex items-start justify-between gap-2"><span>{fact}</span>{onAnswer && <Button type="button" size="sm" variant="secondary" onClick={() => onAnswer(fact)}>Answer</Button>}</li>)}</ul></div> : <p className="text-muted-foreground">No unresolved questions recorded.</p>}
+      {packet.unresolved_facts?.length ? <div><h4 className="font-medium">Unresolved questions</h4><ul className="mt-1 space-y-1">{packet.unresolved_facts.map((fact) => <li key={fact} className="flex items-start justify-between gap-2"><span>{fact}</span>{onAnswer && <Button type="button" size="sm" variant="secondary" onClick={() => onAnswer(fact)}>Answer</Button>}</li>)}</ul></div> : <p className="text-muted">No unresolved questions recorded.</p>}
       {packet.next_action && <p><span className="font-medium">Next action: </span>{packet.next_action}</p>}
-      <p className="text-muted-foreground"><span className="font-medium">Provenance: </span>{packet.provenance || 'Not recorded'}</p>
+      <p className="text-muted"><span className="font-medium">Provenance: </span>{packet.provenance || 'Not recorded'}</p>
     </div>
   )
 }
 
 function EvidenceText({ value, truncated, empty }: { value?: string; truncated?: boolean; empty: string }) {
-  return <div className="mt-3"><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/20 p-2 font-mono text-ui-xs">{value || empty}</pre>{truncated && <p className="mt-1 text-ui-xs text-muted-foreground">This source was truncated by the server.</p>}</div>
+  return <div className="mt-3"><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-seam bg-chrome/20 p-2 font-code text-ui-xs">{value || empty}</pre>{truncated && <p className="mt-1 text-ui-xs text-muted">This source was truncated by the server.</p>}</div>
 }
 
 function decodeTranscript(value: string): string {
@@ -418,19 +418,19 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
   }
 
   return (
-    <details open={expanded} className="border-b border-border px-3 py-2">
+    <details open={expanded} className="border-b border-seam px-3 py-2">
       <summary onClick={(event) => { event.preventDefault(); setExpanded((value) => !value) }} className="cursor-pointer text-ui-sm font-medium">Select transient captures to retain</summary>
-      <p className="mt-2 text-ui-xs text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not a durable record.</p>
+      <p className="mt-2 text-ui-xs text-muted">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not a durable record.</p>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-ui-xs text-muted-foreground">{selected.length}/64 selected</span>
+        <span className="text-ui-xs text-muted">{selected.length}/64 selected</span>
         <Button type="button" size="sm" variant="ghost" disabled={loading || retaining} onClick={() => void loadCaptures()}>Refresh captures</Button>
       </div>
-      {loading && <p role="status" className="text-ui-sm text-muted-foreground">Loading transient captures…</p>}
+      {loading && <p role="status" className="text-ui-sm text-muted">Loading transient captures…</p>}
       {listError && <p role="alert" className="my-2 break-words text-ui-sm text-state-failed">{listError}</p>}
-      {!loading && !listError && !captures.length && <p className="text-ui-sm text-muted-foreground">No transient captures available.</p>}
+      {!loading && !listError && !captures.length && <p className="text-ui-sm text-muted">No transient captures available.</p>}
       <div className="max-h-80 space-y-2 overflow-y-auto">
         {captures.map((capture) => (
-          <div key={capture.id} className="rounded border border-border p-2">
+          <div key={capture.id} className="rounded border border-seam p-2">
             <label className="flex items-center gap-2 text-ui-sm">
               <input
                 type="checkbox"
@@ -438,19 +438,19 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
                 disabled={retaining || (!selected.includes(capture.id) && selected.length >= 64)}
                 onChange={(event) => setSelected((current) => event.target.checked ? [...current, capture.id] : current.filter((id) => id !== capture.id))}
               />
-              Select {capture.source} capture <span className="break-all font-mono text-ui-xs">{capture.id}</span>
+              Select {capture.source} capture <span className="break-all font-code text-ui-xs">{capture.id}</span>
             </label>
             <CaptureMetadata capture={capture} />
             <CaptureImage capture={capture} client={client} />
           </div>
         ))}
       </div>
-      {truncated && <p className="mt-2 text-ui-xs text-muted-foreground">The capture list is truncated; only the listed captures can be selected here.</p>}
+      {truncated && <p className="mt-2 text-ui-xs text-muted">The capture list is truncated; only the listed captures can be selected here.</p>}
       {next && <Button type="button" size="sm" variant="ghost" disabled={loading || retaining} onClick={() => void loadCaptures(next)}>Load more captures</Button>}
       <label className="mt-3 block text-ui-sm">
         Verification notes
         <textarea
-          className="mt-1 min-h-20 w-full rounded border border-input bg-background px-2 py-1 text-ui-sm"
+          className="mt-1 min-h-20 w-full rounded border border-control bg-canvas px-2 py-1 text-ui-sm"
           value={notes}
           disabled={retaining}
           maxLength={4096}
@@ -458,9 +458,9 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
           placeholder="What you actually checked, the result, and any limits or missing observations."
         />
       </label>
-      <p className={`text-ui-xs ${noteBytes > 4096 ? 'text-state-failed' : 'text-muted-foreground'}`}>{noteBytes}/4096 UTF-8 bytes. Notes are observations, not an automatic verification claim.</p>
+      <p className={`text-ui-xs ${noteBytes > 4096 ? 'text-state-failed' : 'text-muted'}`}>{noteBytes}/4096 UTF-8 bytes. Notes are observations, not an automatic verification claim.</p>
       <Button type="button" size="sm" className="mt-2" disabled={retaining || !selected.length || noteBytes > 4096} onClick={() => void retain()}>{retaining ? 'Retaining…' : 'Retain selected captures'}</Button>
-      {idempotencyKey && <p className="mt-2 break-all text-ui-xs text-muted-foreground">Idempotency key: {idempotencyKey}</p>}
+      {idempotencyKey && <p className="mt-2 break-all text-ui-xs text-muted">Idempotency key: {idempotencyKey}</p>}
       {retainError && <div role="alert" className="mt-2 text-ui-sm text-state-failed"><p className="break-words">{retainError}</p><p>No automatic retry was made. Retrying the unchanged selection and notes reuses this key; inspect retained captures if the outcome is uncertain.</p></div>}
       {retainedID && <p role="status" className="mt-2 break-words text-ui-sm">Retained packet <code>{retainedID}</code>. Use this packet ID with the existing report <code>--evidence-ref</code>; retaining does not report an outcome.</p>}
     </details>
@@ -471,11 +471,11 @@ function RetainedCaptures({ packet, client }: { packet: EvidencePacket; client: 
   const expired = packet.availability === 'expired' || Boolean(packet.expires_at && Date.parse(packet.expires_at) <= Date.now())
   return (
     <div className="mt-3 space-y-2 text-ui-sm">
-      {packet.verification_notes && <div><h4 className="font-medium">Verification notes</h4><p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{packet.verification_notes}</p></div>}
+      {packet.verification_notes && <div><h4 className="font-medium">Verification notes</h4><p className="mt-1 whitespace-pre-wrap break-words text-muted">{packet.verification_notes}</p></div>}
       <h4 className="font-medium">Retained captures</h4>
-      {!packet.captures?.length && <p className="text-muted-foreground">{expired ? 'Capture bytes are expired; no retained capture metadata is available.' : 'No captures were retained in this packet.'}</p>}
+      {!packet.captures?.length && <p className="text-muted">{expired ? 'Capture bytes are expired; no retained capture metadata is available.' : 'No captures were retained in this packet.'}</p>}
       {packet.captures?.map((capture) => (
-        <div key={capture.id} className="rounded border border-border p-2">
+        <div key={capture.id} className="rounded border border-seam p-2">
           <CaptureMetadata capture={capture} />
           <CaptureImage capture={capture} client={client} packetID={packet.id} unavailable={expired ? 'Expired: retained image bytes are no longer available.' : undefined} />
         </div>
@@ -486,7 +486,7 @@ function RetainedCaptures({ packet, client }: { packet: EvidencePacket; client: 
 
 function CaptureMetadata({ capture }: { capture: DevArtifact }) {
   return (
-    <dl className="mt-2 space-y-1 break-words text-ui-xs text-muted-foreground">
+    <dl className="mt-2 space-y-1 break-words text-ui-xs text-muted">
       <div><dt className="inline font-medium">Original source: </dt><dd className="inline">{capture.source} · {capture.id}</dd></div>
       <div><dt className="inline font-medium">Captured: </dt><dd className="inline">{when(capture.captured_at)}</dd></div>
       <div><dt className="inline font-medium">Session / incarnation: </dt><dd className="inline break-all">{capture.incarnation || 'Not recorded'}</dd></div>
@@ -565,7 +565,7 @@ function CaptureImage({ capture, client, packetID, unavailable }: CaptureImagePr
             // The authenticated helper fetches private bytes; an object URL
             // cannot be routed through the Next image optimizer.
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt={`${packetID ? 'Retained' : 'Transient'} ${capture.source} capture from ${when(capture.captured_at)}`} className="h-auto max-w-full rounded border border-border" onError={() => setError('The downloaded capture could not be decoded as an image.')} />
+            <img src={url} alt={`${packetID ? 'Retained' : 'Transient'} ${capture.source} capture from ${when(capture.captured_at)}`} className="h-auto max-w-full rounded border border-seam" onError={() => setError('The downloaded capture could not be decoded as an image.')} />
           )}
           <a href={url} download={`${capture.id}.png`} className="inline-block text-ui-sm underline">Download original PNG</a>
         </>

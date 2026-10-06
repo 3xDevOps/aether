@@ -32,7 +32,7 @@ export function TerminalControlBorder({
     const style = getComputedStyle(svg)
     const from = Number.parseFloat(style.strokeDashoffset) || 0
     const primary = style.getPropertyValue('--accent-fill').trim()
-    const danger = style.getPropertyValue('--destructive').trim()
+    const danger = style.getPropertyValue('--state-failed').trim()
     const color = appearance === 'takeover' && previousTakeoverProgress.current === 1
       ? danger : from === 1 ? primary : style.color
     const target = appearance === 'active' ? 0 : 1
@@ -91,7 +91,7 @@ export function TerminalControlBorder({
         <g
           data-takeover-border
           style={{
-            color: 'var(--destructive)',
+            color: 'var(--state-failed)',
             strokeDashoffset: reducedMotion ? 0 : 1 - progress,
           }}
         >

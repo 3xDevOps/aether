@@ -25,7 +25,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
       return (
         <div
           role="alert"
-          className="border-y border-state-failed/35 bg-state-failed/10 px-3 py-2 text-[13px] leading-5 text-state-failed sm:px-4"
+          className="border-y border-state-failed/35 bg-state-failed/10 px-3 py-2 text-ui leading-5 text-state-failed sm:px-4"
         >
           <span className="break-words whitespace-pre-wrap">
             {dead ? error : 'Cannot reach the server. Retrying.'}
@@ -35,18 +35,18 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
     }
     if (loading) {
       return (
-        <div className="grid gap-0 border-y border-border px-3 py-2 sm:px-4">
-          <Skeleton className="h-7 rounded-none" />
-          <Skeleton className="h-7 rounded-none" />
-          <Skeleton className="h-7 rounded-none" />
+        <div className="grid gap-0 border-y border-seam px-3 py-2 sm:px-4">
+          <div className="h-7"><Skeleton className="size-full" /></div>
+          <div className="h-7"><Skeleton className="size-full" /></div>
+          <div className="h-7"><Skeleton className="size-full" /></div>
         </div>
       )
     }
     return hydrated ? (
       <div className="w-full px-3 py-4 sm:px-4 sm:py-5">
-        <div className="border-y border-border px-3 py-3">
-          <p className="text-[13px] font-medium">{empty}</p>
-          <p className="mt-1 text-xs leading-4 text-muted-foreground">
+        <div className="border-y border-seam px-3 py-3">
+          <p className="text-ui font-medium">{empty}</p>
+          <p className="mt-1 text-ui-sm leading-4 text-muted">
             New runs will appear here as soon as they are launched.
           </p>
         </div>
@@ -56,8 +56,8 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
 
   return (
     <div className="w-full px-3 py-2 sm:px-4 sm:py-3">
-      <div className="border-y border-border">
-        <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-sidebar/30 px-3 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase md:grid">
+      <div className="border-y border-seam">
+        <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-chrome/30 px-3 py-1.5 text-ui-xs font-medium tracking-wide text-muted uppercase md:grid">
           <span>Run</span>
           <span>Owner</span>
           <span>Status</span>
@@ -80,7 +80,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                 style={{ borderLeftColor: owner?.color }}
                 className={cn(
                   focusRing,
-                  'grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 border-l-2 border-l-transparent px-3 py-2 text-left transition-colors hover:bg-toolbar-hover md:grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] md:items-center',
+                  'grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 border-l-2 border-l-transparent px-3 py-2 text-left transition-colors hover:bg-hover-chrome md:grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] md:items-center',
                 )}
               >
                 <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2 md:col-auto md:row-auto">
@@ -98,16 +98,16 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                         'block min-h-[22px] coarse:min-h-11 max-w-full rounded-[2px] text-left',
                       )}
                     >
-                      <span className="block line-clamp-2 break-words text-[13px] font-medium leading-5">
+                      <span className="block line-clamp-2 break-words text-ui font-medium leading-5">
                         {runLabel(run)}
                       </span>
                     </button>
-                    <span className="mt-0.5 block break-words text-xs leading-4 text-muted-foreground">
+                    <span className="mt-0.5 block break-words text-ui-sm leading-4 text-muted">
                       <span>{run.harness}</span>
                       <span aria-hidden> · </span>
                       <span
                         data-run-navigation-exempt={run.branch ? 'true' : undefined}
-                        className={run.branch ? 'select-text font-mono' : undefined}
+                        className={run.branch ? 'select-text font-code' : undefined}
                         title={run.branch || undefined}
                         onMouseDown={
                           run.branch
@@ -129,22 +129,22 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                         </>
                       )}
                     </span>
-                    <span className="mt-0.5 block break-words text-xs leading-4 text-muted-foreground md:hidden">
+                    <span className="mt-0.5 block break-words text-ui-sm leading-4 text-muted md:hidden">
                       {owner?.display_name ?? run.member_id}
                     </span>
                   </div>
                 </div>
-                <span className="hidden min-w-0 items-center gap-2 break-words text-xs leading-4 text-muted-foreground md:flex">
+                <span className="hidden min-w-0 items-center gap-2 break-words text-ui-sm leading-4 text-muted md:flex">
                   {owner?.display_name ?? run.member_id}
                 </span>
-                <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground md:col-auto md:row-auto">
+                <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-ui-sm text-muted md:col-auto md:row-auto">
                   <span className="md:hidden">Status</span>
                   <StatusChip state={state} />
                   <RunInputIndicator run={run} />
                 </span>
                 <RelativeTime
                   at={run.stateChangedAt}
-                  className="col-start-2 row-start-1 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground md:col-auto md:row-auto"
+                  className="col-start-2 row-start-1 whitespace-nowrap text-right text-ui-sm tabular-nums text-muted md:col-auto md:row-auto"
                   title={run.stateChangedAt}
                 />
               </div>
@@ -162,7 +162,7 @@ export function RunStatusChip({ run }: { run: RunRecord }) {
 
 export function StatusChip({ state }: { state: PresentationState }) {
   return (
-    <span className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-border/80 px-1.5 py-px text-xs leading-4 text-foreground">
+    <span className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
       <StateIndicator state={state} decorative />
       <span>{stateLabel[state]}</span>
     </span>

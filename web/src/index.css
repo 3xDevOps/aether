@@ -189,55 +189,6 @@
   --scrim: rgb(0 0 0 / 0.56);
 }
 
-/* Legacy names, each an alias of a v2 token so the screens not yet rebuilt
-   move onto the v2 palette at once. Screen rebuilds stop using them; the
-   last one deletes this block. Several old roles collapse into one token
-   here (card and background, muted and sidebar). The old hover names
-   (secondary, accent, toolbar-hover) point at --hover-chrome: they hover
-   chrome surfaces, where --hover does not show in the dark theme. */
-:root,
-.dark {
-  --background: var(--canvas);
-  --foreground: var(--text);
-  --card: var(--canvas);
-  --card-foreground: var(--text);
-  --popover: var(--raised);
-  --popover-foreground: var(--text);
-  --widget: var(--raised);
-  --primary: var(--accent-fill);
-  --primary-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
-  --primary-foreground: var(--on-accent);
-  --sidebar: var(--chrome);
-  --secondary: var(--hover-chrome);
-  --secondary-foreground: var(--text);
-  --muted: var(--chrome);
-  --muted-foreground: var(--text-muted);
-  --accent: var(--hover-chrome);
-  --accent-foreground: var(--text);
-  --destructive: var(--state-failed);
-  --destructive-foreground: var(--on-failed);
-  --border: var(--seam);
-  --input: var(--control-border);
-  --ring: var(--accent-fill);
-  --selection-foreground: var(--text);
-  --toolbar-hover: var(--hover-chrome);
-  --scrollbar-thumb: var(--icon-faint);
-  --scrollbar-thumb-hover: var(--text-muted);
-  --scrollbar-track: transparent;
-  --field-background: var(--canvas);
-  --field-foreground: var(--text);
-  --field-placeholder: var(--text-muted);
-
-  --state-waiting: var(--state-needs-you);
-  --state-needs-attention: var(--state-needs-you);
-  --state-idle: var(--state-paused);
-
-  --accent-soft-foreground: var(--accent-text);
-  --success-foreground: var(--state-done);
-  --warning-soft-foreground: var(--state-needs-you);
-  --danger-soft-foreground: var(--state-failed);
-}
-
 /* Theme-independent values. `static` emits every one to :root, so plain CSS
    (`text-title`, the overlay keyframes) can read them too. */
 @theme static {
@@ -253,7 +204,7 @@
 
   --font-sans: 'Inter Variable', 'Inter Fallback', system-ui, sans-serif;
   --font-title: 'Saira', 'Inter Variable', 'Inter Fallback', sans-serif;
-  /* `font-mono` is code text; only xterm uses JetBrainsMono NFM. */
+  /* Code text; only xterm uses JetBrainsMono NFM. */
   --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --font-mono: var(--font-code);
 
@@ -338,54 +289,15 @@
   --color-agent-omp: var(--agent-omp);
   --color-agent-opencode: var(--agent-opencode);
 
-  /* `accent` and `muted` mean different colours per property: a fill and a
-     link colour for accent, a surface (legacy) and a text tier for muted.
-     Tailwind reads the property namespace before `--color-*`. */
+  /* `accent` is a fill for backgrounds and borders but the link colour for
+     text. Tailwind reads the property namespace before `--color-*`. */
   --color-accent: var(--accent-fill);
   --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --text-color-accent: var(--accent-text);
   --text-color-muted: var(--text-muted);
+  --color-scrim: var(--scrim);
 
   --shadow-overlay: var(--overlay-shadow);
-
-  /* Legacy utilities, aliases of the v2 tokens above. */
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-hover);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-field: var(--field-background);
-  --color-ring: var(--ring);
-  --color-selection-foreground: var(--selection-foreground);
-  --color-toolbar-hover: var(--toolbar-hover);
-  --color-state-waiting: var(--state-waiting);
-  --color-state-needs-attention: var(--state-needs-attention);
-  --color-state-idle: var(--state-idle);
-  /* Misspelled names some screens use; they rendered nothing until now.
-     design-system.test.ts lists the files, and each screen rebuild moves
-     them to the real state name. */
-  --color-state-attention: var(--state-needs-you);
-  --color-state-success: var(--state-done);
-  --color-state-warn: var(--state-needs-you);
-
-  --color-scrim: var(--scrim);
-  --color-success-foreground: var(--success-foreground);
-  --color-warning-soft-foreground: var(--warning-soft-foreground);
-  --color-danger-soft-foreground: var(--danger-soft-foreground);
 }
 
 /* Saira at 600 for pane, dialog, step and empty-state headings only. */
@@ -428,14 +340,14 @@
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-seam;
   }
   html,
   body {
     height: 100%;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-canvas text-text antialiased;
     font-family: var(--font-sans);
     font-feature-settings: normal;
     font-size: var(--text-ui);
@@ -446,7 +358,7 @@
 @supports not selector(::-webkit-scrollbar) {
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    scrollbar-color: var(--icon-faint) transparent;
   }
 }
 
@@ -457,24 +369,24 @@
   }
 
   *::-webkit-scrollbar-track {
-    background: var(--scrollbar-track);
+    background: transparent;
   }
 
   *::-webkit-scrollbar-thumb {
     min-height: 36px;
     border: 2px solid transparent;
     border-radius: 0;
-    background: var(--scrollbar-thumb);
+    background: var(--icon-faint);
     background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: var(--scrollbar-thumb-hover);
+    background: var(--text-muted);
     background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-corner {
-    background: var(--scrollbar-track);
+    background: transparent;
   }
 }
 @layer components {

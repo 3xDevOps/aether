@@ -1,6 +1,6 @@
 // Recording either outcome also makes the server stop a still-live container.
 
-import { Archive, GitMerge } from 'lucide-react'
+import { Archive, GitMerge } from '@/components/icons'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -52,7 +52,7 @@ export function CloseDialog() {
         </DialogHeader>
         <div className="min-h-0 min-w-0 overflow-y-auto px-3 py-3 sm:px-4">
           {error && (
-            <p role="alert" className="break-words text-xs text-state-failed">
+            <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
             </p>
           )}

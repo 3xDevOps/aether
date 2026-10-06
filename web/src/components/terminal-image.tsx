@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { Loader2 } from 'lucide-react'
+import { LoaderCircle } from '@/components/icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import {
@@ -275,24 +275,24 @@ export function useTerminalImage({
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3 px-3 py-3 sm:px-4">
-            <p className="text-xs leading-4 text-muted-foreground">
+            <p className="text-ui-sm leading-4 text-muted">
               Some clipboard managers provide only a client-local path. The remote terminal cannot read that path; choose the actual image file here. Supported formats: PNG, JPEG, GIF, and WebP, up to 8 MiB.
             </p>
             {selected && (
-              <div className="flex min-w-0 items-center gap-3 rounded-[2px] border border-border bg-background p-2">
+              <div className="flex min-w-0 items-center gap-3 rounded-[2px] border border-seam bg-canvas p-2">
                 {preview ? (
-                  <img className="size-16 shrink-0 rounded-[2px] border border-border object-contain" src={preview} alt="Selected image preview" />
+                  <img className="size-16 shrink-0 rounded-[2px] border border-seam object-contain" src={preview} alt="Selected image preview" />
                 ) : (
-                  <span className="grid size-16 shrink-0 place-items-center rounded-[2px] border border-border text-xs text-muted-foreground">Image</span>
+                  <span className="grid size-16 shrink-0 place-items-center rounded-[2px] border border-seam text-ui-sm text-muted">Image</span>
                 )}
-                <span className="min-w-0 break-words text-sm">{selected.name || 'Clipboard image'}</span>
+                <span className="min-w-0 break-words text-ui">{selected.name || 'Clipboard image'}</span>
               </div>
             )}
             <Button type="button" variant="secondary" onClick={openPicker} disabled={uploading}>
               Choose another image
             </Button>
             {error && (
-              <p role="alert" className="break-words text-xs text-state-failed">
+              <p role="alert" className="break-words text-ui-sm text-state-failed">
                 {error}
               </p>
             )}
@@ -307,7 +307,7 @@ export function useTerminalImage({
               disabled={!selected || !!selectedError || uploading}
             >
               {uploading && (
-                <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
               )}
               {uploading ? 'Uploading…' : 'Upload and insert'}
             </Button>

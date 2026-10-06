@@ -2,7 +2,7 @@
 // dismiss control on its right. Kept apart from update-banner.tsx so the
 // per-banner files can import it without importing each other.
 
-import { X } from 'lucide-react'
+import { X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
@@ -15,7 +15,7 @@ export const banner =
 export const bannerContent = 'col-start-2 row-start-1 min-w-0 space-y-1'
 
 export const bannerIcon =
-  'mt-px grid size-[22px] shrink-0 place-items-center rounded-sm bg-primary/10 text-primary'
+  'mt-px grid size-[22px] shrink-0 place-items-center rounded-control bg-accent/10 text-accent'
 
 export const bannerActions =
   'col-start-2 row-start-2 flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1'
@@ -23,7 +23,7 @@ export const bannerActions =
 // Technical output is bounded so a failed rebuild cannot push the workbench
 // or its actions out of reach. It remains selectable and scrollable in place.
 export const verbatim =
-  'max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-mono text-xs leading-5 select-text'
+  'max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 select-text'
 
 /** The dismiss control every banner carries. */
 export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }) {

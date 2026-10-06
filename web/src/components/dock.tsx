@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronsDown, ChevronsUp, ChevronUp, Plus, X } from '@/components/icons'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
@@ -233,8 +233,8 @@ export function Dock({
       ref={dockRef}
       id={dockID}
       className={cn(
-        'relative flex min-h-0 flex-col bg-sidebar',
-        fill ? 'h-full flex-1' : 'shrink-0 border-t border-border',
+        'relative flex min-h-0 flex-col bg-chrome',
+        fill ? 'h-full flex-1' : 'shrink-0 border-t border-seam',
       )}
       style={collapsed || fill ? undefined : { height: currentHeight }}
       aria-label="Environment terminal"
@@ -255,13 +255,13 @@ export function Dock({
             focusRing,
             // Without `touch-none` the browser claims a pen or trackpad drag
             // as a pan and cancels the pointer stream this listens to.
-            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-accent/20 focus-visible:bg-accent/20',
           )}
         />
       )}
       <div
         ref={headerRef}
-        className="flex min-h-8 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2 coarse:min-h-11"
+        className="flex min-h-8 flex-wrap items-center gap-x-1 border-b border-seam bg-chrome px-2 coarse:min-h-11"
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
@@ -273,8 +273,8 @@ export function Dock({
               <div
                 key={tab.id}
                 className={cn(
-                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted-foreground',
-                  activeTab === tab.id && 'border-b-primary text-foreground',
+                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted',
+                  activeTab === tab.id && 'border-b-accent text-text',
                 )}
               >
                 {/* Prevent the native tab button from taking focus or activating
@@ -342,7 +342,7 @@ export function Dock({
                     <span
                       data-tab-close
                       aria-hidden="true"
-                      className="mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-none text-muted-foreground transition-[background-color,color] duration-100 hover:bg-toolbar-hover hover:text-foreground active:bg-toolbar-hover motion-reduce:transition-none"
+                      className="mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-none text-muted transition-[background-color,color] duration-100 hover:bg-hover-chrome hover:text-text active:bg-hover-chrome motion-reduce:transition-none"
                     >
                       <X className="pointer-events-none size-4" />
                     </span>
@@ -367,14 +367,14 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span role="status" className="px-1 text-[12px] text-muted-foreground">
+            <span role="status" className="px-1 text-ui-sm text-muted">
               At most {maxTabs} tabs
             </span>
           )}
         </div>
         {persistentActions}
         {!collapsed && actions && (
-          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
+          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-seam max-[640px]:py-1">
             {actions}
           </div>
         )}

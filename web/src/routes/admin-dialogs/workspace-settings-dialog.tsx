@@ -79,20 +79,20 @@ export function WorkspaceSettingsDialog({
             void save()
           }}
         >
-          <div className="border-y bg-sidebar px-3 py-2.5">
-            <p className="text-xs font-medium text-muted-foreground">Base branch</p>
-            <p className="mt-1 break-all font-mono text-[13px]" aria-label="Base branch">
+          <div className="border-y bg-chrome px-3 py-2.5">
+            <p className="text-ui-sm font-medium text-muted">Base branch</p>
+            <p className="mt-1 break-all font-code text-ui" aria-label="Base branch">
               {workspace?.base_branch || 'unknown'}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-ui-sm text-muted">
               New runs fork from this branch.
             </p>
           </div>
-          {onRepository && <section className="space-y-2 border-b pb-3 text-xs">
+          {onRepository && <section className="space-y-2 border-b pb-3 text-ui-sm">
             <p>Manage the public/private read source, or link and relink a local clone. Deploy-key read access is separate from checkout Origin and your native Git/gh publishing credentials.</p>
             <Button type="button" size="sm" variant="secondary" onClick={onRepository}>Repository</Button>
           </section>}
-          <div className="min-w-0 space-y-1 text-[13px]">
+          <div className="min-w-0 space-y-1 text-ui">
             <Label htmlFor="workspace-steer">Who may message others&apos; runs</Label>
             <Select
               value={steerOthers || everyone}
@@ -106,12 +106,12 @@ export function WorkspaceSettingsDialog({
                 <SelectItem value="admins_only">admins only</SelectItem>
               </SelectContent>
             </Select>
-            <p id="workspace-steer-help" className="text-xs text-muted-foreground">
+            <p id="workspace-steer-help" className="text-ui-sm text-muted">
               Applies to runs started by another member.
             </p>
           </div>
           {error && (
-            <p role="alert" className="text-xs text-state-failed">
+            <p role="alert" className="text-ui-sm text-state-failed">
               {error}
             </p>
           )}

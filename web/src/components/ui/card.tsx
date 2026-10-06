@@ -38,7 +38,7 @@ export function CardTitle({
         data-card-open
         aria-label={label}
         onClick={onOpen}
-        className="line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-ring"
+        className="line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-accent"
       >
         {children}
       </button>

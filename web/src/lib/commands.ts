@@ -1,31 +1,6 @@
 // Run and board verbs as data: the palette and the action buttons render the same list.
 
-import type { LucideIcon } from 'lucide-react'
-import {
-  Archive,
-  ArchiveRestore,
-  Cable,
-  CircleCheck,
-  Download,
-  FileText,
-  House,
-  List,
-  MessageSquarePlus,
-  Monitor,
-  Moon,
-  Network,
-  Pause,
-  Play,
-  PackageX,
-  RefreshCw,
-  Rocket,
-  Shield,
-  ShieldOff,
-  Square,
-  Sun,
-  Trash2,
-  UserPlus,
-} from 'lucide-react'
+import { Archive, ArchiveRestore, Cable, CircleCheck, Download, FileText, House, List, type LucideIcon, MessageSquarePlus, Monitor, Moon, Network, PackageX, Pause, Play, RefreshCw, Rocket, Shield, ShieldOff, Square, Sun, Trash2, UserPlus } from '@/components/icons'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { api, ApiError, type Api } from '@/lib/api'

@@ -85,7 +85,7 @@ export function BudgetDialog({
                 onChange={(e) => setLimit(e.target.value)}
                 aria-describedby="budget-limit-help"
               />
-              <p id="budget-limit-help" className="text-xs text-muted-foreground">
+              <p id="budget-limit-help" className="text-ui-sm text-muted">
                 Maximum spend reported for this workspace.
               </p>
             </div>
@@ -100,13 +100,13 @@ export function BudgetDialog({
                 onChange={(e) => setWarn(e.target.value)}
                 aria-describedby="budget-warn-help"
               />
-              <p id="budget-warn-help" className="text-xs text-muted-foreground">
+              <p id="budget-warn-help" className="text-ui-sm text-muted">
                 Optional threshold for an early warning.
               </p>
             </div>
           </div>
           {error && (
-            <p role="alert" className="text-xs text-state-failed">
+            <p role="alert" className="text-ui-sm text-state-failed">
               {error}
             </p>
           )}

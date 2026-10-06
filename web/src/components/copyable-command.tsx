@@ -1,4 +1,4 @@
-import { Copy } from 'lucide-react'
+import { Copy } from '@/components/icons'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn, focusRing } from '@/lib/utils'
@@ -8,14 +8,14 @@ export function CopyableCommand({ command }: { command: string }) {
   const codeRef = useRef<HTMLElement>(null)
 
   return (
-    <div className="flex min-w-0 items-center gap-1 border border-border bg-background px-1.5 py-1 rounded-sm">
+    <div className="flex min-w-0 items-center gap-1 border border-seam bg-canvas px-1.5 py-1 rounded-control">
       <code
         ref={codeRef}
         tabIndex={0}
         title={command}
         className={cn(
           focusRing,
-          'min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-mono text-[12px] leading-5 text-foreground select-text',
+          'min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-code text-ui-sm leading-5 text-text select-text',
         )}
       >
         {command}

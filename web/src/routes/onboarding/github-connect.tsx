@@ -111,8 +111,8 @@ export function GitHubConnect({
         className="min-w-0 space-y-4 border-l-2 border-state-done/60 bg-state-done/5 px-3 py-3"
       >
         <div className="space-y-1">
-          <p className="text-base font-semibold text-state-done">GitHub connected</p>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-title text-state-done">GitHub connected</p>
+          <p className="text-ui leading-6 text-muted">
             Connected to GitHub as {connection.login}. Signing key{' '}
             {connection.fingerprint} is registered on your account.
           </p>
@@ -129,25 +129,25 @@ export function GitHubConnect({
     return (
       <section
         aria-label="Connect GitHub"
-        className="min-w-0 max-w-2xl space-y-4 border-t border-border/70 py-3"
+        className="min-w-0 max-w-2xl space-y-4 border-t border-seam/70 py-3"
       >
         <div className="space-y-1">
-          <p className="text-base font-semibold">Connect GitHub</p>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-title">Connect GitHub</p>
+          <p className="text-ui leading-6 text-muted">
             Open your environment terminal and log in to GitHub there:
           </p>
         </div>
-        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
           aether terminal
         </code>
-        <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted p-3 font-mono text-xs">
+        <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-seam/70 bg-chrome p-3 font-code text-ui-sm">
           {githubLoginCommand}
         </pre>
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-ui leading-6 text-muted">
           Finish the device login in your browser, then finish the
           connection from a terminal:
         </p>
-        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
           aether github connect
         </code>
       </section>
@@ -157,11 +157,11 @@ export function GitHubConnect({
   return (
     <section
       aria-label="Connect GitHub"
-      className="min-w-0 space-y-4 border-t border-border/70 py-3"
+      className="min-w-0 space-y-4 border-t border-seam/70 py-3"
     >
       <div className="space-y-1">
-        <p className="text-base font-semibold">Connect GitHub</p>
-        <p className="text-sm leading-6 text-muted-foreground" role="status">
+        <p className="text-title">Connect GitHub</p>
+        <p className="text-ui leading-6 text-muted" role="status">
           {screenLine({ ghUsable, ghUnusable, checkFailed, running })}
         </p>
       </div>
@@ -183,12 +183,12 @@ export function GitHubConnect({
       />
       {(ghUsable || checkFailed) && (
         <>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-ui leading-6 text-muted">
             {checkFailed
               ? 'This is the login the check would have made sure your terminal could run; nothing has been typed into it.'
               : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected inside a container: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
           </p>
-          <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+          <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
             {githubLoginCommand}
           </code>
         </>
@@ -252,10 +252,10 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
   const savedIsTheProblem = !!probe.saved_image
   return (
     <>
-      <p className="text-sm text-muted-foreground">{describeGitHubCli(probe)}</p>
+      <p className="text-ui text-muted">{describeGitHubCli(probe)}</p>
       {probe.admin_remedy && (
         <>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-ui text-muted">
             The image is the server's standard one, so a server admin gets
             the server a newer one:
           </p>
@@ -263,7 +263,7 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
         </>
       )}
       {probe.remedy && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-ui text-muted">
           {probe.path
             ? `That file is in your own Environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
             : savedIsTheProblem

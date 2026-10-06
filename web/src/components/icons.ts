@@ -11,14 +11,11 @@ import {
   ChevronUp as LucideChevronUp,
   Copy as LucideCopy,
   Ellipsis as LucideEllipsis,
-  Eye as LucideEye,
   FileText as LucideFileText,
   Folder as LucideFolder,
   FolderGit2 as LucideFolderGit2,
   GitBranch as LucideGitBranch,
   History as LucideHistory,
-  Image as LucideImage,
-  Info as LucideInfo,
   Keyboard as LucideKeyboard,
   ListTodo as LucideListTodo,
   LoaderCircle as LucideLoaderCircle,
@@ -32,7 +29,6 @@ import {
   Plus as LucidePlus,
   RefreshCw as LucideRefreshCw,
   Search as LucideSearch,
-  Send as LucideSend,
   Settings as LucideSettings,
   Shield as LucideShield,
   Sparkles as LucideSparkles,
@@ -44,7 +40,6 @@ import {
   Users as LucideUsers,
   Wrench as LucideWrench,
   X as LucideX,
-  Zap as LucideZap,
   LayoutGrid as LucideLayoutGrid,
   Compass as LucideCompass,
   FolderTree as LucideFolderTree,
@@ -83,6 +78,37 @@ import {
   ListPlus as LucideListPlus,
   CornerUpRight as LucideCornerUpRight,
   ExternalLink as LucideExternalLink,
+  Archive as LucideArchive,
+  ArchiveRestore as LucideArchiveRestore,
+  ArrowDown as LucideArrowDown,
+  Cable as LucideCable,
+  ChevronsDown as LucideChevronsDown,
+  ChevronsUp as LucideChevronsUp,
+  CircleAlert as LucideCircleAlert,
+  CloudOff as LucideCloudOff,
+  CornerDownLeft as LucideCornerDownLeft,
+  Download as LucideDownload,
+  GitMerge as LucideGitMerge,
+  Hourglass as LucideHourglass,
+  House as LucideHouse,
+  KeyRound as LucideKeyRound,
+  List as LucideList,
+  LogIn as LucideLogIn,
+  MessageCircleQuestion as LucideMessageCircleQuestion,
+  MessageSquarePlus as LucideMessageSquarePlus,
+  Monitor as LucideMonitor,
+  MonitorCog as LucideMonitorCog,
+  Moon as LucideMoon,
+  Network as LucideNetwork,
+  PackageX as LucidePackageX,
+  Rocket as LucideRocket,
+  ServerCog as LucideServerCog,
+  ServerOff as LucideServerOff,
+  ShieldOff as LucideShieldOff,
+  Sun as LucideSun,
+  Unplug as LucideUnplug,
+  UserPlus as LucideUserPlus,
+  WifiOff as LucideWifiOff,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -108,13 +134,10 @@ export const ChevronRight = icon(LucideChevronRight)
 export const ChevronUp = icon(LucideChevronUp)
 export const Copy = icon(LucideCopy)
 export const Ellipsis = icon(LucideEllipsis)
-export const Eye = icon(LucideEye)
 export const FileText = icon(LucideFileText)
 export const FolderGit2 = icon(LucideFolderGit2)
 export const GitBranch = icon(LucideGitBranch)
 export const History = icon(LucideHistory)
-export const Image = icon(LucideImage)
-export const Info = icon(LucideInfo)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)
@@ -128,7 +151,6 @@ export const Play = icon(LucidePlay)
 export const Plus = icon(LucidePlus)
 export const RefreshCw = icon(LucideRefreshCw)
 export const Search = icon(LucideSearch)
-export const Send = icon(LucideSend)
 export const Settings = icon(LucideSettings)
 export const Shield = icon(LucideShield)
 export const Sparkles = icon(LucideSparkles)
@@ -141,7 +163,6 @@ export const TriangleAlert = icon(LucideTriangleAlert)
 export const Users = icon(LucideUsers)
 export const Wrench = icon(LucideWrench)
 export const X = icon(LucideX)
-export const Zap = icon(LucideZap)
 export const LayoutGrid = icon(LucideLayoutGrid)
 export const Compass = icon(LucideCompass)
 export const FolderTree = icon(LucideFolderTree)
@@ -182,3 +203,34 @@ export const ListPlus = icon(LucideListPlus)
 export const CornerUpRight = icon(LucideCornerUpRight)
 export const ExternalLink = icon(LucideExternalLink)
 export const ChevronLeft = icon(LucideChevronLeft)
+export const Archive = icon(LucideArchive)
+export const ArchiveRestore = icon(LucideArchiveRestore)
+export const ArrowDown = icon(LucideArrowDown)
+export const Cable = icon(LucideCable)
+export const ChevronsDown = icon(LucideChevronsDown)
+export const ChevronsUp = icon(LucideChevronsUp)
+export const CircleAlert = icon(LucideCircleAlert)
+export const CloudOff = icon(LucideCloudOff)
+export const CornerDownLeft = icon(LucideCornerDownLeft)
+export const Download = icon(LucideDownload)
+export const GitMerge = icon(LucideGitMerge)
+export const Hourglass = icon(LucideHourglass)
+export const House = icon(LucideHouse)
+export const KeyRound = icon(LucideKeyRound)
+export const List = icon(LucideList)
+export const LogIn = icon(LucideLogIn)
+export const MessageCircleQuestion = icon(LucideMessageCircleQuestion)
+export const MessageSquarePlus = icon(LucideMessageSquarePlus)
+export const Monitor = icon(LucideMonitor)
+export const MonitorCog = icon(LucideMonitorCog)
+export const Moon = icon(LucideMoon)
+export const Network = icon(LucideNetwork)
+export const PackageX = icon(LucidePackageX)
+export const Rocket = icon(LucideRocket)
+export const ServerCog = icon(LucideServerCog)
+export const ServerOff = icon(LucideServerOff)
+export const ShieldOff = icon(LucideShieldOff)
+export const Sun = icon(LucideSun)
+export const Unplug = icon(LucideUnplug)
+export const UserPlus = icon(LucideUserPlus)
+export const WifiOff = icon(LucideWifiOff)

@@ -28,7 +28,7 @@ export function RunCommandConfirmation({
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <AlertDialogContent
-        className="max-w-[min(420px,calc(100%-2rem))] p-3 sm:p-4"
+        className="max-w-[min(420px,calc(100%-2rem))]"
         onCloseAutoFocus={onCloseAutoFocus}
       >
         <AlertDialogHeader>

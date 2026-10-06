@@ -46,7 +46,7 @@ export function TakeoverDialog({ open, requesterName, seconds, pending, error, o
         <p role="status" aria-live="polite" aria-atomic="true" className="text-ui tabular-nums">
           {seconds > 0 ? `Control transfers automatically in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.` : 'Waiting for the server’s decision…'}
         </p>
-        {error && <p role="alert" className="text-ui text-danger-soft-foreground">{error}</p>}
+        {error && <p role="alert" className="text-ui text-state-failed">{error}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel aria-disabled={pending} onClick={(event) => {
             event.preventDefault()
