@@ -149,6 +149,20 @@ describe('the Enhanced session view', () => {
     await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'also docs', expect.any(String), { steer: true, lease: expect.objectContaining({ control_generation: 4 }) }))
   })
 
+  it('does nothing on Mod+Enter with an empty box, and keeps Interrupt while a request waits', async () => {
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, steering: true }) }, [item('turn_start', 1)])
+    vi.mocked(api.runACPCancel).mockClear()
+    const box = await screen.findByRole('combobox', { name: 'Message the agent' })
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    expect(api.runACPCancel).not.toHaveBeenCalled()
+    session.items(item('request', 1, { request: permission }))
+    act(() => useStore.getState().acpAck('run_1', { ok: true, seq: 100, replay: 0, epoch: 0, live: true, has_control: true, state: state({ turn_in_flight: true, pending: [permission] }) }))
+    expect(await screen.findByText('Answer the request above to continue.')).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
+    expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
   it('offers Take control instead of the box when the viewer has no lease', async () => {
     open()
     const session = acpSocket().open({ has_control: false }, [])

@@ -4,17 +4,17 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 
 export type Pill = 'send' | 'steer' | 'queue' | 'interrupt' | 'resume'
 
-export function pillFor({ paused, turnRunning, steering, modHeld, empty }: {
+export function pillFor({ paused, turnRunning, steering, queueHeld, empty }: {
   paused: boolean
   turnRunning: boolean
   steering: boolean
-  modHeld: boolean
+  queueHeld: boolean
   empty: boolean
 }): Pill {
   if (paused) return 'resume'
   if (!turnRunning) return 'send'
   if (empty) return 'interrupt'
-  return modHeld || !steering ? 'queue' : 'steer'
+  return queueHeld || !steering ? 'queue' : 'steer'
 }
 
 export const pillHint: Record<Pill, string> = {
@@ -35,6 +35,7 @@ export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: bool
 export interface EnhancedGate {
   reason: string
   takeControl?: boolean
+  interrupt?: boolean
 }
 
 export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, sessionLive, pending, hasLease, controller }: {
@@ -55,9 +56,9 @@ export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, s
   if (stream === 'refused') return { reason: streamError ?? 'The session stream was refused.' }
   if (stream !== 'live') return { reason: 'Connecting to the agent…' }
   if (!sessionLive) return { reason: 'The agent’s session is not running.' }
-  if (pending > 0) return { reason: 'Answer the request above to continue.' }
+  if (pending > 0) return { reason: 'Answer the request above to continue.', interrupt: hasLease }
   if (!hasLease) {
-    const reason = controller === 'self' ? 'You control this run in another tab.'
+    const reason = controller === 'self' ? 'Your other session still holds control.'
       : controller === 'other' ? 'Someone else controls this run.'
         : 'Take control to message the agent.'
     return { reason, takeControl: true }

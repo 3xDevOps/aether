@@ -3,11 +3,11 @@ import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
 describe('the composer pill', () => {
-  const base = { paused: false, turnRunning: false, steering: true, modHeld: false, empty: false }
+  const base = { paused: false, turnRunning: false, steering: true, queueHeld: false, empty: false }
   it.each([
     [{}, 'send'],
     [{ turnRunning: true }, 'steer'],
-    [{ turnRunning: true, modHeld: true }, 'queue'],
+    [{ turnRunning: true, queueHeld: true }, 'queue'],
     [{ turnRunning: true, steering: false }, 'queue'],
     [{ turnRunning: true, empty: true }, 'interrupt'],
     [{ paused: true, turnRunning: true }, 'resume'],
@@ -35,9 +35,14 @@ describe('the Enhanced composer gate', () => {
     [{ sessionLive: false }, 'The agent’s session is not running.'],
     [{ pending: 1 }, 'Answer the request above to continue.'],
     [{ hasLease: false }, 'Take control to message the agent.'],
-    [{ hasLease: false, controller: 'self' as const }, 'You control this run in another tab.'],
+    [{ hasLease: false, controller: 'self' as const }, 'Your other session still holds control.'],
     [{ hasLease: false, controller: 'other' as const }, 'Someone else controls this run.'],
   ])('%j', (over, reason) => {
     expect(enhancedBlock({ ...open, ...over })?.reason ?? null).toBe(reason)
+  })
+
+  it('keeps Interrupt for the lease holder while a request waits', () => {
+    expect(enhancedBlock({ ...open, pending: 1 })?.interrupt).toBe(true)
+    expect(enhancedBlock({ ...open, pending: 1, hasLease: false })?.interrupt).toBe(false)
   })
 })

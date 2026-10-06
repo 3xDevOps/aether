@@ -223,14 +223,14 @@ function StandardComposer({ run, agent, room, textarea, onFocusChange }: Compose
   )
 }
 
-function useModHeld(active: boolean): boolean {
+function useQueueHeld(active: boolean): boolean {
   const [held, setHeld] = useState(false)
   useEffect(() => {
     if (!active) {
       setHeld(false)
       return
     }
-    const update = (event: KeyboardEvent) => setHeld(event.metaKey || event.ctrlKey)
+    const update = (event: KeyboardEvent) => setHeld((event.metaKey || event.ctrlKey) && event.shiftKey)
     const clear = () => setHeld(false)
     window.addEventListener('keydown', update)
     window.addEventListener('keyup', update)
@@ -261,7 +261,7 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
   const idempotency = useRef<{ text: string; key: string } | null>(null)
   const hintID = useId()
   const listID = useId()
-  const modHeld = useModHeld(focused)
+  const queueHeld = useQueueHeld(focused)
 
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const state = session?.state
@@ -277,7 +277,7 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
     controller: !controllerID ? null : controllerID === self.id ? 'self' : 'other',
   })
   const turnRunning = state?.turn_in_flight ?? false
-  const pill = pillFor({ paused, turnRunning, steering: state?.steering ?? false, modHeld, empty: !body.trim() })
+  const pill = pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !body.trim() })
 
   const [dismissed, setDismissed] = useState(false)
   const trigger = focused && !dismissed ? triggerAt(body, caret) : null
@@ -344,7 +344,21 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
     if (lease) await attempt(() => api.runACPSetOption(run.id, option.id, value, lease))
   }
 
-  if (gate && !gate.takeControl) return <Closed reason={gate.reason} dock={dock} />
+  if (gate && !gate.takeControl) {
+    return (
+      <Closed
+        reason={gate.reason}
+        dock={dock}
+        failure={gate.interrupt ? error : undefined}
+        action={gate.interrupt && turnRunning && (
+          <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
+            <Square className="fill-current" />
+            Interrupt
+          </Button>
+        )}
+      />
+    )
+  }
   if (gate) {
     return (
       <Closed
@@ -360,7 +374,7 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
 
   const look = pillLook[pill]
   const pillDisabled = busy || (pill !== 'interrupt' && pill !== 'resume' && !body.trim())
-  const keyHint = coarse ? undefined : pill === 'steer' ? `Steer (${shortcutLabel('composer-send')}); hold ${formatKeys('$mod')} to queue` : `${look.label} (${shortcutLabel('composer-send')})`
+  const keyHint = coarse ? undefined : pill === 'steer' ? `Steer (${shortcutLabel('composer-send')}); ${shortcutLabel('composer-queue')} queues` : `${look.label} (${shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')})`
 
   return (
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
@@ -385,8 +399,12 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
             setFocused(next)
             onFocusChange(next)
           }}
-          onSend={() => act(pill === 'interrupt' ? 'interrupt' : pill === 'resume' ? 'resume' : turnRunning && state?.steering ? 'steer' : turnRunning ? 'queue' : 'send')}
-          onQueue={() => act(turnRunning ? 'queue' : 'send')}
+          onSend={() => {
+            if (body.trim()) act(pill)
+          }}
+          onQueue={() => {
+            if (body.trim()) act(turnRunning ? 'queue' : 'send')
+          }}
           placeholder={turnRunning ? 'Message the agent while it works' : 'Message the agent, / for commands, @ for files'}
           describedBy={hintID}
           combobox={{ expanded: suggestions.length > 0, controls: listID, active: suggestions.length ? `${listID}-${current}` : undefined }}
@@ -416,7 +434,7 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
             hint={keyHint}
             aria-label={pill === 'interrupt' ? 'Interrupt the agent' : undefined}
             disabled={pillDisabled}
-            onClick={(event) => act(pill === 'steer' && (event.metaKey || event.ctrlKey) ? 'queue' : pill)}
+            onClick={() => act(pill)}
           >
             <look.Icon className={cn(pill === 'interrupt' && 'fill-current')} />
             {busy ? 'Sending…' : look.label}
