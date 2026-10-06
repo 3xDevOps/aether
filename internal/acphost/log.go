@@ -113,7 +113,15 @@ func (l *Log) Append(it *Item) error {
 	}
 	b = append(b, '\n')
 	if _, err := l.f.Write(b); err != nil {
-		return fmt.Errorf("acphost: append item: %w", err)
+		err = fmt.Errorf("acphost: append item: %w", err)
+		// A short write leaves part of a line behind; the next append would
+		// land after it and every later line would sit at the wrong offset.
+		if terr := l.f.Truncate(l.size); terr != nil {
+			_ = l.f.Close()
+			l.f = nil
+			return errors.Join(err, fmt.Errorf("acphost: cut partial item log line, log closed: %w", terr))
+		}
+		return err
 	}
 	l.note(itemHeader{Seq: it.Seq, Epoch: it.Epoch, Turn: it.Turn, Kind: it.Kind}, l.size)
 	l.size += int64(len(b))
