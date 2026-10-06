@@ -16,7 +16,6 @@ type RunMessageHistoryStore interface {
 	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 }
 
-// RunMessageFilter.RunID matches either side of a message.
 type RunMessageFilter struct {
 	WorkspaceID   domain.WorkspaceID
 	MissionID     domain.MissionID
@@ -49,15 +48,19 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		FROM run_messages m
 		LEFT JOIN coord_reports report ON m.kind = 'message'
 			AND report.id = m.correlation_id AND report.run_id = m.from_run
-		WHERE m.workspace_id = ?`
+		WHERE `
 	args := []any{f.WorkspaceID}
+	if f.RunID != "" {
+		// Unary + keeps SQLite off the workspace index, which would walk the
+		// workspace's whole history, so it reads the run's from/to indexes.
+		query += `+m.workspace_id = ? AND (m.from_run = ? OR m.to_run = ?)`
+		args = append(args, f.RunID, f.RunID)
+	} else {
+		query += `m.workspace_id = ?`
+	}
 	if f.MissionID != "" {
 		query += ` AND m.mission_id = ?`
 		args = append(args, f.MissionID)
-	}
-	if f.RunID != "" {
-		query += ` AND (m.from_run = ? OR m.to_run = ?)`
-		args = append(args, f.RunID, f.RunID)
 	}
 	if f.CorrelationID != "" {
 		query += ` AND m.correlation_id = ?`

@@ -1492,6 +1492,8 @@ ALTER TABLE run_messages ADD COLUMN mission_id TEXT;
 ALTER TABLE run_messages ADD COLUMN retired_at INTEGER;
 CREATE INDEX idx_run_messages_workspace ON run_messages(workspace_id, created_at, id);
 CREATE INDEX idx_run_messages_mission ON run_messages(mission_id, created_at, id) WHERE mission_id IS NOT NULL;
+CREATE INDEX idx_run_messages_from ON run_messages(from_run, created_at, id);
+CREATE INDEX idx_run_messages_to ON run_messages(to_run, created_at, id);
 CREATE TABLE coord_audit_publications_v50 (
 	event_id          TEXT PRIMARY KEY,
 	event_type        TEXT NOT NULL CHECK (event_type IN ('coord.message', 'coord.message.acked')),
