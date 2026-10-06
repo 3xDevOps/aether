@@ -10,6 +10,20 @@ import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-
 import { alice, bob, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
+const eventRenders = vi.hoisted(() => new Map<string, number>())
+
+vi.mock('@/components/ui/timeline', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/timeline')>()
+  return {
+    ...actual,
+    EventRow: (props: Parameters<typeof actual.EventRow>[0]) => {
+      const text = typeof props.children === 'string' ? props.children : ''
+      eventRenders.set(text, (eventRenders.get(text) ?? 0) + 1)
+      return actual.EventRow(props)
+    },
+  }
+})
+
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
@@ -161,6 +175,22 @@ describe('the Enhanced session view', () => {
     expect(await screen.findByText('Answer the request above to continue.')).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
     expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
+  it('leaves a closed turn\'s rows alone while the next turn streams', async () => {
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 1 }, [
+      item('turn_start', 1),
+      say(1, 'user', 'first'),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+      item('turn_start', 2),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    await within(log).findByText('Finished in 2s')
+    const before = eventRenders.get('Finished in 2s')
+    for (let i = 0; i < 5; i++) session.items(say(2, 'assistant', `part ${i}`, 'reply'))
+    await within(log).findByText(/part 4/)
+    expect(eventRenders.get('Finished in 2s')).toBe(before)
   })
 
   it('offers Take control instead of the box when the viewer has no lease', async () => {

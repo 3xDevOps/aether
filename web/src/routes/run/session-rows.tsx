@@ -11,8 +11,7 @@ import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
 import { inputHint } from '@/lib/run-requests'
-import type { RunMessage } from '@/lib/types'
-import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { runLabel as labelOfRun } from '@/lib/status'
 import type { RunNavigation } from '@/routes/run/header'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { AnsweredText } from '@/routes/run/session-requests'
@@ -60,11 +59,58 @@ export interface RowContext {
   runID: string
   task: string
   ownerID: string
-  agent: AgentTerminal
-  nav: RunNavigation
-  expanded: Record<string, true> | undefined
-  messages: Record<string, RunMessage>
-  runLabel: (runID: string) => string
+  hasAgentTerminal: boolean
+  openTerminal: () => void
+  go: RunNavigation['go']
+  reveal: RunNavigation['reveal']
+}
+
+function useExpanded(runID: string, id: string): boolean {
+  return useStore((s) => s.expandedRows[runID]?.[id] === true)
+}
+
+function WorkRow({ row, runID }: { row: Extract<SessionRow, { kind: 'work' }>; runID: string }) {
+  const expanded = useExpanded(runID, row.id)
+  const running = row.entries.some((entry) => entry.status === 'running')
+  const failed = row.entries.filter((entry) => entry.status === 'failed').length
+  return (
+    <WorkGroup
+      summary={failed ? `${row.summary} · ${failed} failed` : row.summary}
+      trailing={running ? undefined : <RelativeTime at={row.at} />}
+      expanded={expanded}
+      onToggle={() => useStore.getState().toggleSessionRow(runID, row.id)}
+    />
+  )
+}
+
+function EntryRow({ entry, runID }: { entry: WorkItem; runID: string }) {
+  const key = entryKey(entry.id)
+  const expanded = useExpanded(runID, key)
+  const detail = hasDetail(entry)
+  return (
+    <WorkEntry
+      tool={entry.tool}
+      status={entry.status}
+      trailing={duration(entry.durationMs)}
+      expanded={detail ? expanded : undefined}
+      onToggle={detail ? () => useStore.getState().toggleSessionRow(runID, key) : undefined}
+    >
+      {entry.label}
+    </WorkEntry>
+  )
+}
+
+function MailRow({ messageID, runID }: { messageID: string; runID: string }) {
+  const m = useStore((s) => s.runMessages[messageID])
+  const runs = useStore((s) => s.runs)
+  if (!m) return null
+  return (
+    <AgentMessageRow
+      message={m}
+      label={(id) => (id === runID ? 'This run' : runs[id] ? labelOfRun(runs[id]) : id)}
+      onOpenRun={(id) => id === runID ? undefined : () => useStore.getState().navigate('run', { runId: id })}
+    />
+  )
 }
 
 function hasDetail(entry: WorkItem): boolean {
@@ -93,7 +139,6 @@ function EntryDetail({ runID, entry }: { runID: string; entry: WorkItem }) {
 function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
   const members = useStore((s) => s.members)
   const name = (id: string) => members[id]?.display_name ?? id
-  const toggle = (id: string) => () => useStore.getState().toggleSessionRow(ctx.runID, id)
   switch (row.kind) {
     case 'user': {
       const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body
@@ -139,24 +184,14 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       )
     case 'thinking':
       return <EventRow detail={row.text}>Thought</EventRow>
-    case 'work': {
-      const running = row.entries.some((entry) => entry.status === 'running')
-      const failed = row.entries.filter((entry) => entry.status === 'failed').length
-      return (
-        <WorkGroup
-          summary={failed ? `${row.summary} · ${failed} failed` : row.summary}
-          trailing={running ? undefined : <RelativeTime at={row.at} />}
-          expanded={Boolean(ctx.expanded?.[row.id])}
-          onToggle={toggle(row.id)}
-        />
-      )
-    }
+    case 'work':
+      return <WorkRow row={row} runID={ctx.runID} />
     case 'live':
       return <LiveActivityRow>{row.label}</LiveActivityRow>
     case 'plan':
       return <PlanCard entries={row.entries} />
     case 'changed-files':
-      return <ChangedFiles files={row.files} onOpen={() => ctx.nav.go('changes')} />
+      return <ChangedFiles files={row.files} onOpen={() => ctx.go('changes')} />
     case 'answered':
       return (
         <EventRow tone={row.request.status === 'cancelled' ? 'neutral' : 'done'} trailing={<RelativeTime at={row.at} />}>
@@ -176,49 +211,23 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
           title={row.title}
           meta={<RelativeTime at={row.at} />}
           actions={row.answer === 'input'
-            ? ctx.agent.hasAgentTerminal && (
-              <Button size="sm" variant="secondary" onClick={() => {
-                ctx.nav.go('terminal')
-                if (!ctx.agent.localControl && !ctx.agent.controlUnavailable) ctx.agent.session.takeControl()
-              }}>Open terminal</Button>
-            )
-            : <Button size="sm" variant="secondary" onClick={() => ctx.nav.reveal(requestCardID.question(row.id))}>Reply</Button>}
+            ? ctx.hasAgentTerminal && <Button size="sm" variant="secondary" onClick={ctx.openTerminal}>Open terminal</Button>
+            : <Button size="sm" variant="secondary" onClick={() => ctx.reveal(requestCardID.question(row.id))}>Reply</Button>}
         >
-          {row.answer === 'input' ? inputHint(ctx.agent.hasAgentTerminal) : row.body}
+          {row.answer === 'input' ? inputHint(ctx.hasAgentTerminal) : row.body}
         </RequestCard>
       )
     case 'event':
       return <EventRow tone={row.tone} detail={row.detail} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
     case 'finished':
       return <EventRow tone={row.tone} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>
-    case 'agent-message': {
-      const m = ctx.messages[row.messageID]
-      if (!m) return null
-      return (
-        <AgentMessageRow
-          message={m}
-          label={ctx.runLabel}
-          onOpenRun={(runID) => runID === ctx.runID ? undefined : () => useStore.getState().navigate('run', { runId: runID })}
-        />
-      )
-    }
+    case 'agent-message':
+      return <MailRow messageID={row.messageID} runID={ctx.runID} />
   }
 }
 
-export const TimelineRow = memo(function TimelineRow({ flat, ctx }: { flat: FlatRow; ctx: RowContext }) {
-  if (flat.depth === 0) return <Row row={flat.row} ctx={ctx} />
-  const { entry } = flat
-  if (flat.depth === 2) return <EntryDetail runID={ctx.runID} entry={entry} />
-  const detail = hasDetail(entry)
-  return (
-    <WorkEntry
-      tool={entry.tool}
-      status={entry.status}
-      trailing={duration(entry.durationMs)}
-      expanded={detail ? Boolean(ctx.expanded?.[entryKey(entry.id)]) : undefined}
-      onToggle={detail ? () => useStore.getState().toggleSessionRow(ctx.runID, entryKey(entry.id)) : undefined}
-    >
-      {entry.label}
-    </WorkEntry>
-  )
+export const TimelineRow = memo(function TimelineRow({ depth, row, entry, ctx }: { depth: 0 | 1 | 2; row?: SessionRow; entry?: WorkItem; ctx: RowContext }) {
+  if (depth === 0) return <Row row={row!} ctx={ctx} />
+  if (depth === 2) return <EntryDetail runID={ctx.runID} entry={entry!} />
+  return <EntryRow entry={entry!} runID={ctx.runID} />
 })

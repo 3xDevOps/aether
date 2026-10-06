@@ -5,7 +5,6 @@ import { VList, type VListHandle } from 'virtua'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
-import { runLabel as labelOfRun } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { Composer } from '@/routes/run/composer'
@@ -41,8 +40,6 @@ function byTime(rows: SessionRow[], extra: SessionRow[]): SessionRow[] {
   return [...out, ...sorted.slice(next)]
 }
 
-/** The item log names no author, so a person's message is matched to the
- * room message that carried it; one not logged yet is still on its way. */
 function withSteers(rows: SessionRow[], room: RoomMessage[]): SessionRow[] {
   const steers = room.filter((m) => m.kind === 'steer_request')
   const used = new Set<string>()
@@ -118,8 +115,6 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   const log = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]))
   const roomError = useStore((s) => s.roomError[run.id])
   const roomLoading = useStore((s) => s.roomLoading[run.id] === true)
-  const runs = useStore((s) => s.runs)
-  const messageMap = useStore((s) => s.runMessages)
   const hasMessages = useStore((s) => (s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids.length ?? 0) > 0)
   const olderRoom = useStore((s) => {
     const page = s.roomPagination[run.id]
@@ -135,16 +130,21 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)
 
+  const latest = useRef({ agent, nav })
+  latest.current = { agent, nav }
   const ctx: RowContext = useMemo(() => ({
     runID: run.id,
     task: run.task,
     ownerID: run.member_id,
-    agent,
-    nav,
-    expanded,
-    messages: messageMap,
-    runLabel: (id: string) => (id === run.id ? 'This run' : runs[id] ? labelOfRun(runs[id]) : id),
-  }), [run.id, run.task, run.member_id, agent, nav, expanded, messageMap, runs])
+    hasAgentTerminal: agent.hasAgentTerminal,
+    openTerminal: () => {
+      const { agent: current, nav: to } = latest.current
+      to.go('terminal')
+      if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
+    },
+    go: (view) => latest.current.nav.go(view),
+    reveal: (id) => latest.current.nav.reveal(id),
+  }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
 
   const count = flat.length + (older ? 1 : 0)
   const markInput = () => {
@@ -274,7 +274,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
               onFocus={() => setFocused(index)}
               className={cn('mx-auto w-full max-w-[736px] px-4', rowGap(item), index === count - 1 && 'pb-4', index === 0 && 'pt-4')}
             >
-              <TimelineRow flat={item} ctx={ctx} />
+              <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
             </div>
           )}
         </VList>
