@@ -6,6 +6,7 @@ toolchain go1.26.8
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
+	github.com/coder/acp-go-sdk v0.13.5
 	github.com/coder/websocket v1.8.14
 	github.com/containerd/errdefs v1.0.0
 	github.com/distribution/reference v0.6.0
@@ -15,6 +16,7 @@ require (
 	github.com/moby/moby/client v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/mutagen-io/mutagen v0.18.1
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/zricethezav/gitleaks/v8 v8.30.1
