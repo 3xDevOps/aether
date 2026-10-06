@@ -799,8 +799,8 @@ account, harness, and mode among the execution choices;
 `mission.replace-integrator` accepts any listed account and harness in `tui`
 or `acp`, so a swarm whose choices are all headless can still get an
 interactive integrator; `aether swarm replace-integrator` always sends `tui`. Both refuse, with `-32602` and `integrator harness <name> cannot
-launch in tui mode: <cause>`, a harness the integrator's run owner cannot
-start in `tui` on that account, such as one whose definition the run owner no
+launch in <mode> mode: <cause>`, a harness the integrator's run owner cannot
+start in that mode on that account, such as one whose definition the run owner no
 longer has, or the run owner's own member-defined harness on another
 member's account, where it never runs. Workers may
 still run headless. If the integrator's
