@@ -311,6 +311,7 @@ export interface SessionSources {
   events: Event[]
   room: RoomMessage[]
   memberName: (id: string) => string
+  paused: boolean
 }
 
 type Item =
@@ -354,7 +355,7 @@ function timelineRow(event: Event, name: (id: string) => string): SessionRow | n
     case 'co-author':
       return { ...base, kind: 'event', text: `${who} messaged the agent and is now a co-author` }
     case 'report':
-      return { ...base, kind: 'event', text: ['Agent report', p.outcome, p.summary].filter(Boolean).join(': ') }
+      return { ...base, kind: 'event', text: ['Agent report', p.outcome, p.summary].filter(Boolean).join(': '), report: true }
     default:
       return null
   }
@@ -388,7 +389,17 @@ function sameSteer(row: SessionRow, steer: RoomMessage): boolean {
     steer.actor_id === row.authorID && Math.abs(Date.parse(steer.created_at) - Date.parse(row.at)) < 120_000
 }
 
-export function rowsForRun({ run, events, room, memberName }: SessionSources): SessionRow[] {
+function liveRows(run: RunRecord, paused: boolean): SessionRow[] {
+  if (run.status !== 'running' || paused || run.pending_inputs?.length) return []
+  const at = run.activity?.at ?? run.stateChangedAt
+  const label = run.activity?.running ? `${run.activity.verb} ${run.activity.target}`.trimEnd() : 'Working'
+  return [
+    { kind: 'live', id: 'live', at, label },
+    { kind: 'terminal-note', id: 'terminal-note', at },
+  ]
+}
+
+export function rowsForRun({ run, events, room, memberName, paused }: SessionSources): SessionRow[] {
   const items: Item[] = [{
     at: run.created_at,
     order: -1,
@@ -472,5 +483,5 @@ export function rowsForRun({ run, events, room, memberName }: SessionSources): S
       title: inputTitle[request.kind],
     })
   }
-  return rows
+  return [...rows, ...liveRows(run, paused)]
 }

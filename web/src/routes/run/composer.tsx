@@ -9,7 +9,7 @@ import { formatKeys, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { ConfigOption } from '@/lib/session-types'
-import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { composerBlock, enhancedBlock, pillFor, pillHint, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
@@ -31,6 +31,7 @@ interface ComposerProps {
   /** The gate can keep the box unmounted, so focusing waits for it to mount. */
   autoFocus?: boolean
   dock?: React.ReactNode
+  onEscape: () => void
 }
 
 function Closed({ reason, action, dock, failure }: { reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
@@ -56,7 +57,7 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, placeholder, describedBy, menu, onKeyDown, combobox }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
@@ -64,6 +65,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
   onFocusChange: (focused: boolean) => void
   onSend: () => void
   onQueue?: () => void
+  onEscape: () => void
   placeholder: string
   describedBy: string
   menu?: React.ReactNode
@@ -113,13 +115,18 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
           onFocusChange(false)
         }}
         onChange={(event) => onChange(event.target.value, event.target.selectionStart)}
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => {
+          onKeyDown?.(event)
+          if (event.defaultPrevented || event.key !== 'Escape' || event.nativeEvent.isComposing || value.trim()) return
+          event.preventDefault()
+          onEscape()
+        }}
       />
     </div>
   )
 }
 
-function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange }: ComposerProps) {
+function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange, onEscape }: ComposerProps) {
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -132,18 +139,23 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, cap.hasMethod('run.relaunch') && run.mode === 'tui')
-  const hint = agent.localControl
-    ? 'You control this run: it goes to the agent now.'
+  const control = useImplicitControl(run, agent)
+  const hint = control.canAct
+    ? 'Sends to the agent’s terminal.'
     : 'Delivers in 45 s unless the controller decides sooner.'
   const error = uploadError ?? (room.errorFromComposer ? room.error : undefined)
 
-  const send = async () => {
+  const send = () => {
     const text = body.trim()
     if (!text || room.busy || uploading) return
-    if (await room.post({ kind: 'steer_request', body: text, attachments })) {
-      setBody('')
-      setAttachments([])
+    const post = async () => {
+      if (await room.post({ kind: 'steer_request', body: text, attachments })) {
+        setBody('')
+        setAttachments([])
+      }
     }
+    if (control.canAct) control.withControl(() => void post())
+    else void post()
   }
 
   const upload = async (file: File) => {
@@ -180,7 +192,8 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           value={body}
           onChange={setBody}
           onFocusChange={onFocusChange}
-          onSend={() => void send()}
+          onSend={send}
+          onEscape={onEscape}
           placeholder="Message the agent"
           describedBy={hintID}
         />
@@ -219,7 +232,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
             size="sm"
             hint={coarse ? undefined : `Send (${formatKeys('$mod+Enter')})`}
             disabled={!body.trim() || room.busy || uploading}
-            onClick={() => void send()}
+            onClick={send}
           >
             <ArrowUp />
             {room.busy ? 'Sending…' : 'Send'}
@@ -251,13 +264,14 @@ function useQueueHeld(active: boolean): boolean {
   return held
 }
 
-function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock }: ComposerProps) {
+function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock, onEscape }: ComposerProps) {
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const session = useStore((s) => s.acpSessions[run.id])
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const controllerID = useStore((s) => s.roomStatus[run.id]?.controller?.member_id)
+  const control = useImplicitControl(run, agent)
   const coarse = useMediaQuery(coarsePointer)
   const [body, setBody] = useState('')
   const [caret, setCaret] = useState(0)
@@ -280,7 +294,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     streamError: session?.streamError,
     sessionLive: session?.live ?? false,
     pending: session?.pending.length ?? 0,
-    hasLease: agent.localControl,
+    hasLease: control.canAct,
     controller: !controllerID ? null : controllerID === self.id ? 'self' : 'other',
   })
   const turnRunning = state?.turn_in_flight ?? false
@@ -332,7 +346,8 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     }
   }
 
-  const act = (chosen: Pill) => {
+  const act = (chosen: Pill) => control.withControl(() => perform(chosen))
+  const perform = (chosen: Pill) => {
     const lease = sessionLease(useStore, run.id)
     switch (chosen) {
       case 'resume':
@@ -413,6 +428,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           onQueue={() => {
             if (body.trim()) act(turnRunning ? 'queue' : 'send')
           }}
+          onEscape={onEscape}
           placeholder={turnRunning ? 'Message the agent while it works' : 'Message the agent, / for commands, @ for files'}
           describedBy={hintID}
           combobox={{ expanded: suggestions.length > 0, controls: listID, active: suggestions.length ? `${listID}-${current}` : undefined }}

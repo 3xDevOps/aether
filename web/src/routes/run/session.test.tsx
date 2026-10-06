@@ -132,13 +132,29 @@ describe('the Enhanced session view', () => {
     ])
     const card = await screen.findByRole('generic', { name: /Allow this command\? rm -rf build/ })
     expect(screen.getByText('Answer the request above to continue.')).toBeDefined()
+    expect(within(card).getAllByRole('button').map((b) => b.textContent)).toEqual(['Allow', 'Reject', 'Always Allow'])
     act(() => card.focus())
-    await userEvent.keyboard('2')
+    await userEvent.keyboard('1')
     await waitFor(() => expect(api.runInputAnswer).toHaveBeenCalledWith(
       'run_1', 'req_1', 'allow', { control_session_id: expect.stringMatching(/^acp-/), control_generation: 4 }, undefined,
     ))
     await userEvent.click(within(card).getByRole('button', { name: 'Reject' }))
     expect(api.runInputAnswer).toHaveBeenLastCalledWith('run_1', 'req_1', 'reject', expect.anything(), undefined)
+  })
+
+  it('points Details at the docked request instead of repeating it', async () => {
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [permission] }) }, [
+      item('turn_start', 1),
+      tool(1, 'x1', 'execute', 'rm -rf build', 'pending'),
+      item('request', 1, { request: permission }),
+    ])
+    expect(await screen.findByText('Waiting for your approval: rm -rf build')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Show details' }))
+    const needs = within(within(await screen.findByRole('dialog', { name: 'Run details' })).getByRole('region', { name: 'Needs you' }))
+    expect(needs.queryByRole('generic', { name: /Allow this command\?/ })).toBeNull()
+    fireEvent.click(needs.getByRole('button', { name: '1 request, shown below the timeline' }))
+    await waitFor(() => expect(document.activeElement?.id).toBe('session-request-docked'))
   })
 
   it('sends a form answer with its values', async () => {
@@ -214,11 +230,24 @@ describe('the Enhanced session view', () => {
     expect(eventRenders.get('Finished in 2s')).toBe(before)
   })
 
-  it('offers Take control instead of the box when the viewer has no lease', async () => {
-    open()
+  it('offers Take control instead of the box when someone else holds the run', async () => {
+    open({ controller_member_id: bob.id })
     const session = acpSocket().open({ has_control: false }, [])
     await userEvent.click(await screen.findByRole('button', { name: 'Take control' }))
     expect(session.socket.frames().at(-1)).toMatchObject({ type: 'control', write: true })
+  })
+
+  it('lets the owner of a run nobody controls send in one step, taking control first', async () => {
+    vi.mocked(api.runInject).mockClear().mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'sent', actor_id: alice.id, body: 'go', created_at: new Date().toISOString() } } as never)
+    open({ controller_member_id: '' })
+    const session = acpSocket().open({ has_control: false }, [])
+    await userEvent.type(await screen.findByRole('combobox', { name: 'Message the agent' }), 'go')
+    await userEvent.click(screen.getByRole('button', { name: /Send/ }))
+    const request = session.socket.frames().at(-1) as { type: string; write: boolean; request_id: number }
+    expect(request).toMatchObject({ type: 'control', write: true })
+    expect(api.runInject).not.toHaveBeenCalled()
+    session.send({ type: 'control', request_id: request.request_id, ok: true, has_control: true, control_generation: 5 })
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), { steer: false, lease: expect.objectContaining({ control_generation: 5 }) }))
   })
 
   it('shows the adapter failure with its stderr and the two ways on', async () => {

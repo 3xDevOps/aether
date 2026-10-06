@@ -1,5 +1,5 @@
 import type { SessionItem } from '@/lib/session-types'
-import { appendItems, liveLabel, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { appendItems, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
 beforeEach(resetItems)
@@ -72,11 +72,22 @@ describe('session rows from the item log', () => {
   })
 
   it('names the running tool, a streaming thought, or plain work as the live row', () => {
-    const open = (items: SessionItem[]) => liveLabel(turnOf([item('turn_start', 1), ...items], false))
+    const open = (items: SessionItem[]) => liveActivity(turnOf([item('turn_start', 1), ...items], false))?.label
     expect(open([tool(1, 'r', 'read', 'Read a.go', 'in_progress', { locations: [{ path: 'a.go' }] })])).toBe('Reading a.go')
     expect(open([item('thought', 1, { message: { role: 'assistant', message_id: 't', text: 'hm' } })])).toBe('Thinking')
     expect(open([say(1, 'user', 'go')])).toBe('Working')
-    expect(liveLabel(turnOf([item('turn_start', 1), item('turn_end', 1)]))).toBeNull()
+    expect(liveActivity(turnOf([item('turn_start', 1), item('turn_end', 1)]))).toBeNull()
+  })
+
+  it('says a tool call waits for approval while its permission is pending', () => {
+    const asked = { id: 'p1', kind: 'permission' as const, title: 'rm -rf build', status: 'pending' as const, tool_call_id: 'x1' }
+    const call = tool(1, 'x1', 'execute', 'rm -rf build', 'pending')
+    const waiting = liveActivity(turnOf([item('turn_start', 1), call, item('request', 1, { request: asked })], false))
+    expect(waiting).toEqual({ label: 'Waiting for your approval: rm -rf build', waiting: true })
+    const answered = liveActivity(turnOf([item('turn_start', 1), call, item('request', 1, { request: asked }), item('request', 1, { request: { ...asked, status: 'answered', answer: 'allow' } })], false))
+    expect(answered).toEqual({ label: 'Running rm -rf build', waiting: false })
+    const question = { id: 'q1', kind: 'question' as const, title: 'Which database?', status: 'pending' as const }
+    expect(liveActivity(turnOf([item('turn_start', 1), item('request', 1, { request: question })], false))).toEqual({ label: 'Waiting for your answer', waiting: true })
   })
 })
 

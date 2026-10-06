@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { inputHint, inputTitle } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
 import type { Approval, RoomMessage } from '@/lib/types'
@@ -89,11 +89,12 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
   )
 }
 
-export function NeedsYouCards({ run, agent, room, nav }: {
+export function NeedsYouCards({ run, agent, room, nav, docked }: {
   run: RunRecord
   agent: AgentTerminal
   room: RunRoom
   nav: RunNavigation
+  docked: boolean
 }) {
   const members = useStore((s) => s.members)
   const { inputs, sessionRequests, approvals, steers, questions } = useRunRequests(run)
@@ -107,14 +108,18 @@ export function NeedsYouCards({ run, agent, room, nav }: {
     setDeciding(approval.id)
     api.approvalDecide(run.id, approval.id, approve).then(
       (decided) => useStore.getState().decideApproval(decided.workspace_id, decided.id, decided.decision, decided.decided_by ?? '', decided.decided_at ?? ''),
-      (err) => toast.error(`${approve ? 'Approve' : 'Deny'} failed: ${message(err)}`),
+      (err) => toast.error(`${approve ? 'Approve' : 'Deny'} failed: ${errorSentence(err)}`),
     ).finally(() => setDeciding(null))
   }
 
   return (
     <div className="flex flex-col gap-2">
-      {sessionRequests.map((request) => (
-        <SessionRequestCard key={request.id} id={requestCardID.input(request.id)} runID={run.id} request={request} agent={agent} />
+      {docked && sessionRequests.length > 0 ? (
+        <Button variant="link" size="sm" className="self-start" onClick={nav.focusRequest}>
+          {sessionRequests.length === 1 ? '1 request' : `${sessionRequests.length} requests`}, shown below the timeline
+        </Button>
+      ) : sessionRequests.map((request) => (
+        <SessionRequestCard key={request.id} id={requestCardID.input(request.id)} run={run} request={request} agent={agent} />
       ))}
       {inputs.map((input) => (
         <RequestCard

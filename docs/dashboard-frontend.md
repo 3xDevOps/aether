@@ -559,10 +559,10 @@ What gives way first:
   prompt's actions sit on their own row so long diagnostics never hide them.
 - **The sidebar** keeps the run list scrollable between its fixed header and
   its navigation rows and footer, from 220px wide up.
-- **The run header** truncates its title to one line, then drops the branch,
-  owner and agent from the state line; the mode toggle leaves below 720px of
-  column, where the view switch moves to its own row (see
-  [Header](#header)).
+- **The run header** truncates its title to one line; the state line drops
+  the branch, then the owner, then the agent's name, keeping its glyph and
+  the mode, and below 16rem the mode word as well. The view switch always
+  sits on its own row (see [Header](#header)).
 - **The board** stacks its three columns into one list on narrow screens and
   places them side by side from the `lg`/1024px breakpoint (see
   [Board](#board)).
@@ -814,7 +814,7 @@ both show:
 | Condition | Action |
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
-| Agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
+| Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Teammate's message waiting for the controller | **Review message** |
@@ -894,7 +894,8 @@ first that applies:
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
 | Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
-| Parked at `needs-attention` | owner | Agent idle for 3 min / No activity for 12 min |
+| Enhanced turn ended (`acp`, parked at `needs-attention` without a stall) | owner | Waiting for your reply |
+| Parked at `needs-attention` (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed finish (`outcome_unseen`) | owner | Finished, review the result |
 
 A condition that applies to someone else leaves the run Working with "Waiting
@@ -1213,19 +1214,14 @@ agent's last terminal title, else the task's first line cut at 120
 characters, with a lock for a protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
-the branch (click copies it) and the owner. A container query drops the
-branch and owner, then the agent, as the column narrows. The full task and
-the run record are in Details.
+the branch (click copies it) and the owner. Container queries on the state
+line drop the branch first, then the owner, then the agent's name (the glyph
+stays), and only on a phone-width column the mode word; the reason truncates
+before any of them. The full task and the run record are in Details.
 
 The actions, in order:
 
-1. **Run mode** (`mode-switch.tsx`), a Standard / Enhanced toggle, only on a
-   desktop-width column and only for an agent `agent.list` reports as
-   switchable. It calls `run.mode.switch` with the lease the tab holds; while
-   the switch runs the state line reads "Switching to Enhanced…", and a
-   refusal is a toast, `Switch failed: <error>`. Only a running agent can
-   switch.
-2. The state's one primary action, the only filled button on the frame. It is
+1. The state's one primary action, the only filled button on the frame. It is
    the label the condition names in `lib/needs-you.ts`, the same one the board
    card and sidebar row show, performed inside the frame: **Approve**
    resolves the approval in place, **Reply** focuses the Session composer,
@@ -1236,16 +1232,31 @@ The actions, in order:
    page. On the Terminal view there is no terminal action in the header; the
    toolbar has **Take control**. Session rows and Details cards that send the
    member elsewhere use secondary buttons.
-3. **Show details** / **Hide details** (`Mod+.`).
-4. **More** (`components/run-actions.tsx`, an icon button on a phone): every
+2. **Show details** / **Hide details** (`Mod+.`).
+3. **More** (`components/run-actions.tsx`, an icon button on a phone): every
    run verb from `lib/commands.ts` except **Send a message to the agent…**,
-   which the composer replaces, then **Hand off…**, **Captures…** and **Raw
-   events…**, then **Close run…**, **Kill run** and **Delete run** after a
-   separator. Kill, Delete and **Free container…** confirm first.
+   which the composer replaces, then **Hand off…**, the mode switch,
+   **Captures…** and **Raw events…**, then **Close run…**, **Kill run** and
+   **Delete run** after a separator. Kill, Delete and **Free container…**
+   confirm first.
+
+The mode switch (`mode-switch.tsx`) is **Switch to Enhanced…** or **Switch
+to Standard…**, shown only for a live run of an agent `agent.list` reports
+as `switchable`. It confirms what happens, then calls `run.mode.switch` with
+the lease the tab holds; while the switch runs the item and the state line
+read "Switching to Enhanced…". The dashboard decides ahead what it can: with
+`enhanced_installed` false the item reads **Enhanced adapter not installed ·
+Set up** and opens Agents. A refusal's `data.reason` is kept for the run's
+current status: `session_not_reported` disables the item with **Available
+after the agent's first turn**, `adapter_not_installed` shows the setup
+line, and `not_switchable` hides the item. Every error toast goes through
+`errorSentence` (`lib/format.ts`), which drops the leading RPC method and Go
+package names (`run.mode.switch: scheduler: `) and keeps the server's
+sentence.
 
 The view switch is a segmented `tablist` named "Run views" with manual
-activation; below 720px of column it moves to its own row under the header.
-On a phone with the composer focused the header keeps only the title line.
+activation, on its own 32px row under the header at every width. On a phone
+with the composer focused the header keeps only the title line.
 
 ### Session view
 
@@ -1260,8 +1271,12 @@ then kept live by sync), room messages, the run record and its pending inputs:
 expanding to verb-first entries), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
 session." when the run has no agent terminal; a teammate question offers
-**Reply**, the owner's own question is a plain message), `event` and
-`finished`. Request titles and that copy live in `lib/run-requests.ts`, shared
+**Reply**, the owner's own question is a plain message), `event`,
+`finished`, and while the run works with no pending input a `live` row (the
+run's `activity`, "Reading src/billing.js", else "Working") and a
+`terminal-note` row, **Live detail is in the Terminal.** with **Open
+terminal**. An "Agent report" event is dropped while the report's agent
+message is shown. Request titles and that copy live in `lib/run-requests.ts`, shared
 with Details. A timeline message that matches a room message is shown once.
 **Show older messages** at the top pages room history back 100 messages at a
 time, and a failed history read shows the server's error with **Retry**. The
@@ -1274,7 +1289,9 @@ from `next_seq`, which a backward page sets to the head. The list is
 **Send**) posts a room `steer_request` with the lease the tab holds; its rules
 are in [Run control](terminal.md#run-control). A refused send or image upload
 shows the error above the textarea (`role="alert"`, **Dismiss**); Details
-shows only the failures of its own actions.
+shows only the failures of its own actions. **Hide agent messages** sits on
+its own row above the list. `Esc` in an empty composer focuses the list's
+viewport; the next `Esc` is the run's `leave-run`.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#the-session-item-log) instead.
@@ -1307,7 +1324,9 @@ languages), `thinking`, `work` (folded by kind; expanded entries and their
 detail - command, output tail, `DiffBlock` - splice into the same list,
 and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
 `plan`, `changed-files`, `answered`, `event` (notices, mode changes, a new
-agent session, an inbox wake), `finished` and `agent-message`. A person's
+agent session, an inbox wake), `finished` and `agent-message`. The `live`
+row reads "Waiting for your approval: <command>" (or "Waiting for your
+answer") with the amber dot while a request is pending. A person's
 message is matched to the room message that carried it for its author; one
 not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
@@ -1324,11 +1343,17 @@ touch only the pill sends. Footer menus set mode, model and effort with
 `run.acp.set_option`; `/` completes the agent's commands and `@` paths from
 the Files tree cache. It closes with one line of reason while switching, for a
 Background run, while connecting, while a request is pending (keeping
-**Interrupt** for the lease holder), or without the lease (**Take control**).
-Pending requests dock above it one at a time
-(`routes/run/session-requests.tsx`), the same cards Details lists; `1`-`4`
-pick an option while a card has focus, and the header's **Answer** focuses the
-docked card. `routes/run/session-failure.tsx` shows an adapter failure with
+**Interrupt** for the lease holder), or while another session holds the lease
+(**Take control**). `useImplicitControl` (`agent-terminal.ts`) lets the owner
+of a run nobody controls act in one step on any screen: Send, the Standard
+composer's Send and a request's options request the lease and run the action
+once it is held (given up after 10 seconds). Pending requests dock above it
+one at a time (`routes/run/session-requests.tsx`), ordered allow-once first
+and allow-always last by ACP `kind`; `1`-`4` pick an option while a card has
+focus, `1` never an allow-always one, and the header's **Answer** focuses the
+docked card on every screen. While Session shows the dock, Details' **Needs
+you** shows one link, "1 request, shown below the timeline", that closes a
+Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
 
@@ -1339,7 +1364,9 @@ the selected shell under one toolbar, a 32px strip (44px on touch): the
 terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
 `ControlButton` (click to take a free lease, hold five seconds to request an
-occupied one) and the connection word only while the attach is not live.
+occupied one; **Release** is a ghost button) and the connection word only
+while a live run's attach is not live. A finished run reads "Container
+removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
 run with no agent terminal, such as an Enhanced run, shows "No agent
 terminal" and the shell controls. The frame renders one `TakeoverDialog`

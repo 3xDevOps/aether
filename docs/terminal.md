@@ -78,7 +78,11 @@ which opened terminals on fallback metrics.
 
 A run's agent terminal is the **Terminal** view of the run: open a run from
 the sidebar, the board or the palette, then pick **Terminal** in the view
-switch (`[` and `]` cycle the views). A Standard run opens on it.
+switch (`[` and `]` cycle the views), the row under the run header. A
+Standard run opens on it. Its **Session** view lists messages, notes and the
+agent's tool calls; while the agent works it ends with what the agent is
+doing now ("Reading src/billing.js", from its reported activity) and **Live
+detail is in the Terminal.** with **Open terminal**.
 
 An [Enhanced run](enhanced-runs.md) has no agent terminal: its server-side
 PTY is the container's login shell (`aether attach` reaches it), and the
@@ -210,7 +214,11 @@ live, or after a failed presence read carries **(last known)**. Before the
 first answer it reads **Checking control…**, and **Control unknown** if
 presence cannot be read, with **Presence unavailable:** and the server's
 error on the line under the toolbar. The connection word (**Connecting**,
-**Reconnecting**, **Offline**) shows only while the attach is not live. A
+**Reconnecting**, **Offline**) shows only while a live run's attach is not
+live; a finished run reads **Container removed · read-only** (**Container
+stopped · read-only** for a kept container) in muted text instead.
+**Release** is a quiet button, so it never competes with the run's own
+action. A
 member without the `steer` permission sees **You can watch this run but not
 type in it.** under the toolbar. **In control** and **Watching** are also
 listed in the run's **Details** panel.
@@ -250,10 +258,11 @@ The Session view's composer sends a message to the agent: type it and press
 **Ctrl+Enter** (**Cmd+Enter** on macOS) or **Send**; on a touch screen
 **Send** is the only way, and Enter inserts a newline. The paperclip attaches
 images. A message from the current controller session, with its current
-lease, is delivered to the PTY at once; the composer says so (**You control
-this run: it goes to the agent now.**). A message from anyone else, or to a
-run with no controller, waits 45 seconds (**Delivers in 45 s unless the
-controller decides sooner.**), with the countdown on its row (**Delivers in
+lease, is delivered to the PTY at once; the composer says so (**Sends to the
+agent's terminal.**). The owner of a run nobody controls gets the same: **Send**
+takes the lease first, then sends. A message from anyone else waits 45
+seconds (**Delivers in 45 s unless the controller decides sooner.**), with
+the countdown on its row (**Delivers in
 32s**). A send the server refuses keeps the draft and shows the server's
 error above the composer. During the countdown the controller sees the
 message in **Details > Needs you** with **Approve** and **Deny**; anyone else
@@ -278,8 +287,9 @@ or the run belongs to a swarm), **Notes** and the run's facts. A note is for
 people only: the agent never sees it. Type it in **Add a note for people on
 this run** and select **Add**; it is posted as a `comment`. A `question`
 message from a teammate appears in **Needs you** for the run owner with a
-reply field; **Reply** posts a correlated `reply`. The owner's own question
-shows in the Session view as a note with no action. The run snapshot counts
+reply field; **Reply** posts a correlated `reply`. Every question also
+appears under **Notes**, marked **question**. The owner's own question shows
+in the Session view as a note with no action. The run snapshot counts
 unanswered questions from anyone but the owner, so the run is in the owner's
 **Needs you** before anyone opens it. The question does not change the run's
 wire status.

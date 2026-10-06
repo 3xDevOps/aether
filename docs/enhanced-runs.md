@@ -97,9 +97,16 @@ one line ("Read 2 files, ran 1 command and edited 1 file"); click it for one
 line per call with its duration, and click a call for the command, the end of
 its output or its diff. The agent's plan, the files a turn changed (each opens
 **Changes**), notices and a **Finished** line per turn sit in between, and
-messages between agents show inline (**Hide agent messages** turns them off).
-While a turn runs, one moving line says what the agent is doing now. **Show
-earlier** reads older items 200 at a time.
+messages between agents show inline (**Hide agent messages**, above the
+timeline, turns them off). While a turn runs, one moving line says what the
+agent is doing now; while it waits on you it reads "Waiting for your
+approval: <command>" or "Waiting for your answer" with an amber dot. When a
+turn ends without a request, the run waits for your reply: the board, the
+sidebar and the header say **Waiting for your reply** and the header's
+**Reply** focuses the composer. "Agent idle" and "No activity" are kept for
+Standard runs and for real stalls. **Show earlier** reads older items 200 at
+a time. `Esc` in an empty composer moves focus to the timeline; `Esc` again
+leaves the run.
 
 The composer under the timeline sends with `Mod+Enter`; on a touch screen the
 button is the only way, and Enter adds a line. Its button changes with the
@@ -120,17 +127,23 @@ The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`); `/` lists the agent's commands and `@` completes a
 path in the run's checkout. Sending, answering and changing options need the
 run's control lease: the owner's desktop tab takes it when it first shows
-Session and nobody holds it, and the composer offers **Take control**
-otherwise.
+Session and nobody holds it. On any screen, the owner of a run nobody
+controls sends or answers in one step: the button takes the lease, then
+acts. The composer offers **Take control** only while another session
+holds it.
 
 A pending request docks above the composer, one at a time with `1/N`, and
 the composer stays shut until it is answered; **Interrupt** stays, to stop
-the turn and cancel the request instead. **Approve**-style options are
-the filled button; `1` to `4` pick an option while the card has focus, and
-the header's **Answer** focuses it. A form question shows its fields; a link
-request shows the URL with **Copy link** and **Open**. Details lists the same
-cards under **Needs you**. An answered request stays in the timeline as one
-line, such as "Approved: run `go test`".
+the turn and cancel the request instead. Options are ordered allow-once
+first and allow-always last, whatever order the agent sends; allow-once is
+the filled button. `1` to `4` pick an option while the card has focus (`1`
+never picks an allow-always option), and the header's **Answer** focuses
+it. A form question shows its fields, labelled by each property's `title`,
+else its `description`, else its key; a link request shows the URL with
+**Copy link** and **Open**. While Session shows the docked card, Details
+says "1 request, shown below the timeline" under **Needs you** and links to
+it; on other views Details shows the cards. An answered request stays in
+the timeline as one line, such as "Approved: run `go test`".
 
 When the adapter fails or exits, the view shows the error and the end of its
 stderr with two actions. **Retry Enhanced** pauses and resumes the run, which
@@ -281,9 +294,17 @@ The server method is `run.mode.switch` with `mode` `acp` or `tui`
 ([local-gateway.md](local-gateway.md#enhanced-run-methods)). It needs
 **Steer**. While someone holds the run's control lease, only that session
 can switch; the CLI holds none, so it switches only a run nobody controls.
-In the dashboard the run header's **Standard | Enhanced** control does the
-same with the tab's lease; it appears only for a `switchable` agent, and
-the state line names the mode otherwise. A Background run never switches:
+In the dashboard **More › Switch to Enhanced…** (or **Switch to
+Standard…**) does the same with the tab's lease after a confirmation that
+says the agent restarts in the other mode with the same conversation. The
+item appears only for a live run of a `switchable` agent. It names why it
+cannot work instead of failing: **Enhanced adapter not installed · Set up**
+(opens **Agents**) while `enhanced_installed` is false, and **Available after
+the agent's first turn** after the server refused with `session_not_reported`.
+While the switch runs, the state line reads "Switching to Enhanced…". A
+failed switch shows the server's sentence in a toast, without the
+`run.mode.switch:` and Go package prefixes. A Background run never
+switches:
 
 ```
 scheduler: invalid run state transition: a background run cannot switch modes

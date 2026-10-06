@@ -9,9 +9,10 @@ import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
 import type { SessionOption, SessionRequest, SessionToolCall } from '@/lib/session-types'
-import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
 import { sessionLease } from '@/store/session-stream'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +53,12 @@ export function AnsweredText({ request, command }: { request: SessionRequest; co
   )
 }
 
+const optionRank = (option: SessionOption) => (option.kind === 'allow_once' ? 0 : option.kind === 'allow_always' ? 2 : 1)
+
+export function orderedOptions(options: SessionOption[]): SessionOption[] {
+  return [...options].sort((a, b) => optionRank(a) - optionRank(b))
+}
+
 function optionVariant(option: SessionOption, options: SessionOption[]): 'primary' | 'secondary' {
   const primary = options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.id === 'accept') ?? options[0]
   return option === primary ? 'primary' : 'secondary'
@@ -89,28 +96,31 @@ function useToolCall(runID: string, id: string | undefined): SessionToolCall | u
   })
 }
 
-export function SessionRequestCard({ runID, request, agent, position, id, className }: {
-  runID: string
+export function SessionRequestCard({ run, request, agent, position, id, className }: {
+  run: RunRecord
   request: SessionRequest
   agent: AgentTerminal
   position?: { index: number; total: number; step: (delta: number) => void }
   id?: string
   className?: string
 }) {
+  const runID = run.id
   const { busy, error, answer } = useAnswer(runID, request)
   const call = useToolCall(runID, request.tool_call_id)
+  const control = useImplicitControl(run, agent)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [focused, setFocused] = useState(false)
-  const options = request.options ?? []
-  const canAnswer = agent.localControl
+  const options = orderedOptions(request.options ?? [])
+  const canAnswer = control.canAct
   const incomplete = (option: SessionOption) => request.kind === 'question' && option.id === 'accept' && missingRequired(request.schema, values)
   const pick = (index: number) => () => {
     const option = options[index]
     if (!option || !canAnswer || incomplete(option)) return
-    void answer(option.id, option.id === 'accept' && request.kind === 'question' ? values : undefined)
+    control.withControl(() => void answer(option.id, option.id === 'accept' && request.kind === 'question' ? values : undefined))
   }
+  const keyed = (index: number) => options[index]?.kind !== 'allow_always' || index > 0
   useKeybindings('request', focused ? {
-    'request-option-1': pick(0),
+    'request-option-1': keyed(0) ? pick(0) : () => {},
     'request-option-2': pick(1),
     'request-option-3': pick(2),
     'request-option-4': pick(3),
@@ -157,7 +167,7 @@ export function SessionRequestCard({ runID, request, agent, position, id, classN
                 size="sm"
                 variant={optionVariant(option, options)}
                 disabled={!canAnswer || busy !== null || incomplete(option)}
-                hint={focused ? `Press ${index + 1}` : undefined}
+                hint={focused && keyed(index) ? `Press ${index + 1}` : undefined}
                 onClick={pick(index)}
               >
                 {busy === option.id ? 'Sending…' : option.name}
@@ -178,8 +188,8 @@ export function SessionRequestCard({ runID, request, agent, position, id, classN
 
 export const dockedRequestID = 'session-request-docked'
 
-export function RequestDock({ runID, requests, agent, className }: {
-  runID: string
+export function RequestDock({ run, requests, agent, className }: {
+  run: RunRecord
   requests: SessionRequest[]
   agent: AgentTerminal
   className?: string
@@ -193,7 +203,7 @@ export function RequestDock({ runID, requests, agent, className }: {
       <SessionRequestCard
         key={request.id}
         id={dockedRequestID}
-        runID={runID}
+        run={run}
         request={request}
         agent={agent}
         position={{ index: current, total: requests.length, step: (delta) => setIndex((current + delta + requests.length) % requests.length) }}

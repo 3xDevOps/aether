@@ -66,7 +66,8 @@ export function FormFields({ schema, values, onChange }: {
   return (
     <div className="flex flex-col gap-2">
       {fieldsOf(schema).map(([name, field]) => {
-        const label = `${field.title ?? name}${required.has(name) ? ' (required)' : ''}`
+        const label = `${field.title ?? field.description ?? name}${required.has(name) ? ' (required)' : ''}`
+        const help = field.title ? field.description : undefined
         if (field.type === 'boolean') {
           return (
             <label key={name} className="flex items-center gap-2 text-ui">
@@ -76,11 +77,11 @@ export function FormFields({ schema, values, onChange }: {
           )
         }
         if (field.enum) {
-          return <EnumField key={name} label={label} help={field.description} options={field.enum} value={values[name] as string | undefined} onChange={(value) => set(name, value)} />
+          return <EnumField key={name} label={label} help={help} options={field.enum} value={values[name] as string | undefined} onChange={(value) => set(name, value)} />
         }
         const numeric = field.type === 'number' || field.type === 'integer'
         return (
-          <FormField key={name} label={label} help={field.description}>
+          <FormField key={name} label={label} help={help}>
             <Input
               type={numeric ? 'number' : 'text'}
               value={String(values[name] ?? '')}

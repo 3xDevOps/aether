@@ -180,7 +180,14 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
     case 'work':
       return <WorkRow row={row} runID={ctx.runID} />
     case 'live':
-      return <LiveActivityRow>{row.label}</LiveActivityRow>
+      return <LiveActivityRow waiting={row.waiting}>{row.label}</LiveActivityRow>
+    case 'terminal-note':
+      return (
+        <p className="flex min-h-6 items-center gap-1 pl-4 text-ui-sm text-muted">
+          Live detail is in the Terminal.
+          {ctx.hasAgentTerminal && <Button variant="link" size="sm" onClick={ctx.openTerminal}>Open terminal</Button>}
+        </p>
+      )
     case 'plan':
       return <PlanCard entries={row.entries} />
     case 'changed-files':

@@ -92,7 +92,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
 }
 
 function Notes({ run, room, inset, draft }: { run: RunRecord; room: RunRoom; inset: boolean; draft: { text: string } | null }) {
-  const notes = useStore((s) => s.roomMessages[run.id] ?? emptyMessages).filter((m) => m.kind === 'comment')
+  const notes = useStore((s) => s.roomMessages[run.id] ?? emptyMessages).filter((m) => m.kind === 'comment' || m.kind === 'question')
   const [body, setBody] = useState('')
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -113,6 +113,7 @@ function Notes({ run, room, inset, draft }: { run: RunRecord; room: RunRoom; ins
             <li key={note.id} className="flex flex-col gap-0.5 text-ui-sm">
               <span className="flex min-w-0 items-center gap-1.5 text-muted">
                 <Person id={note.actor_id} />
+                {note.kind === 'question' && <span className="shrink-0">· question</span>}
                 <RelativeTime at={note.created_at} className="ml-auto shrink-0 tabular-nums" />
               </span>
               <span className="break-words whitespace-pre-wrap text-ui text-text">{note.body}</span>
@@ -215,7 +216,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
       )}
       <Section id="details-needs-you" title="Needs you" count={waiting} inset={inset}>
         {waiting > 0
-          ? <NeedsYouCards run={run} agent={agent} room={room} nav={nav} />
+          ? <NeedsYouCards run={run} agent={agent} room={room} nav={nav} docked={view === 'session'} />
           : <ConditionCard run={run} view={view} agent={agent} nav={nav} />}
       </Section>
       <AgentMessages run={run} inset={inset} />

@@ -5,7 +5,7 @@ import type { TerminalReadSurface } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
@@ -84,7 +84,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
         `run:${runID}`,
         uri,
         (port) => toast.success(`OAuth callback ready on localhost:${port}`),
-        (err) => toast.error(`OAuth callback forward failed: ${message(err)}`),
+        (err) => toast.error(`OAuth callback forward failed: ${errorSentence(err)}`),
       )
     },
   })
@@ -164,3 +164,31 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
 }
 
 export type AgentTerminal = ReturnType<typeof useAgentTerminal>
+
+const implicitControlWindowMs = 10_000
+
+export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
+  const self = useSelf()
+  const holder = useStore((s) =>
+    run.controller_member_id !== undefined ? run.controller_member_id || undefined : s.roomStatus[run.id]?.controller?.member_id)
+  const implicit = !agent.localControl && run.member_id === self.id && holder === undefined && agent.steerable && !agent.controlUnavailable
+  const queued = useRef<(() => void) | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => {
+    if (!agent.localControl || !queued.current) return
+    const act = queued.current
+    queued.current = null
+    clearTimeout(timer.current)
+    act()
+  }, [agent.localControl])
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const withControl = (act: () => void) => {
+    if (agent.localControl) return act()
+    if (!implicit) return
+    queued.current = act
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => { queued.current = null }, implicitControlWindowMs)
+    agent.session.takeControl()
+  }
+  return { canAct: agent.localControl || implicit, withControl }
+}

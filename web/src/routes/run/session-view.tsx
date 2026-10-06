@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
-import { liveLabel, rowsOfTurn, type SessionRow } from '@/store/session-rows'
+import { liveActivity, rowsOfTurn, type SessionRow } from '@/store/session-rows'
 import { deliveryOf, readSessionLog, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
 
@@ -60,8 +60,8 @@ function enhancedRows(session: AcpSession | undefined): SessionRow[] {
   if (!session) return []
   const rows = session.turns.flatMap(rowsOfTurn)
   const open = session.turns.at(-1)
-  const live = session.live ? liveLabel(open) : null
-  if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, label: live })
+  const live = session.live ? liveActivity(open) : null
+  if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
   return rows
 }
 
@@ -70,15 +70,17 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const events = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]?.events))
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyRoom)
   const members = useStore((s) => s.members)
+  const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
   const rows = useMemo(() => {
     const base = enhanced
       ? withSteers(enhancedRows(session), room)
-      : rowsForRun({ run, events: events ?? [], room, memberName: (id) => members[id]?.display_name ?? id })
+      : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => members[id]?.display_name ?? id })
     if (!showMessages) return base
-    return byTime(base, messages.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
-  }, [enhanced, session, room, run, events, members, messages, showMessages])
+    const reported = messages.some((m) => m.kind === 'report')
+    return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, messages.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
+  }, [enhanced, session, room, run, events, members, messages, showMessages, paused])
   return { rows, session }
 }
 
@@ -198,7 +200,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
 
   const dock = enhanced && session && session.pending.length > 0 && (
     <RequestDock
-      runID={run.id}
+      run={run}
       requests={session.pending}
       agent={agent}
       className="max-md:max-h-[40dvh]"
@@ -207,9 +209,17 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {hasMessages && (
+        <div className="mx-auto flex w-full max-w-[736px] shrink-0 justify-end px-4 pt-1">
+          <Button size="sm" variant="ghost" aria-pressed={!showMessages} onClick={() => setShowMessages(!showMessages)}>
+            {showMessages ? 'Hide agent messages' : 'Show agent messages'}
+          </Button>
+        </div>
+      )}
       <div
         ref={viewport}
-        className="relative min-h-0 flex-1"
+        tabIndex={-1}
+        className="relative min-h-0 flex-1 outline-none"
         onWheelCapture={markInput}
         onTouchMoveCapture={markInput}
         onKeyDownCapture={markInput}
@@ -232,13 +242,6 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
                 {roomError}
               </Callout>
             )}
-          </div>
-        )}
-        {hasMessages && (
-          <div className="absolute top-2 right-4 z-10">
-            <Button size="sm" variant="ghost" aria-pressed={!showMessages} onClick={() => setShowMessages(!showMessages)}>
-              {showMessages ? 'Hide agent messages' : 'Show agent messages'}
-            </Button>
           </div>
         )}
         <VList
@@ -283,7 +286,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
         </div>
       )}
-      <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} />
+      <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>
   )

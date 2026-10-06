@@ -27,7 +27,7 @@ describe('session rows', () => {
       event('run.agent', { kind: 'tool_call', tool: 'Read', tool_use_id: 't3', detail: 'src/db.ts' }, '2026-08-14T10:03:03Z'),
       event('run.agent', { kind: 'tool_result', tool_use_id: 't3', is_error: true }, '2026-08-14T10:03:04Z'),
     ]
-    const [start, work] = rowsForRun({ run: toRecord(run()), events, room: [], memberName })
+    const [start, work] = rowsForRun({ run: toRecord(run()), events, room: [], memberName, paused: false })
     expect(start).toMatchObject({ kind: 'event', text: 'Run started' })
     expect(work).toMatchObject({
       kind: 'work',
@@ -55,7 +55,7 @@ describe('session rows', () => {
       created_at: '2026-08-14T10:05:00Z', deliver_after: '2026-08-14T10:05:45Z',
     })
     const events = [event('workspace.timeline', { kind: 'steer', message: 'add a test' }, '2026-08-14T10:04:01Z', bob.id)]
-    const users = rows({ run: toRecord(run()), events, room: [steer, queued], memberName }).filter((row) => row.kind === 'user')
+    const users = rows({ run: toRecord(run()), events, room: [steer, queued], memberName, paused: false }).filter((row) => row.kind === 'user')
     expect(users).toEqual([
       { kind: 'user', authorID: bob.id, body: 'add a test', delivery: 'Sent', deliverAfter: undefined, failure: undefined },
       { kind: 'user', authorID: bob.id, body: 'and docs', delivery: 'Queued', deliverAfter: '2026-08-14T10:05:45Z', failure: undefined },
@@ -72,7 +72,7 @@ describe('session rows', () => {
       event('workspace.timeline', { kind: 'pause' }, '2026-08-14T10:03:00Z', alice.id),
       event('workspace.timeline', { kind: 'handoff', message: bob.id }, '2026-08-14T10:07:00Z', alice.id),
     ]
-    expect(rows({ run: toRecord(run()), events, room, memberName })).toEqual([
+    expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events, room, memberName, paused: false })).toEqual([
       { kind: 'event', text: 'Run started' },
       { kind: 'event', text: 'Paused by Alice' },
       { kind: 'note', authorID: bob.id, body: 'looks good' },
@@ -83,23 +83,33 @@ describe('session rows', () => {
 
   it('shows the owner\'s own question as a note with no request', () => {
     const own = roomMessage({ id: 'q1', kind: 'question', actor_id: alice.id, body: 'anyone know the port?', created_at: '2026-08-14T10:05:00Z' })
-    expect(rows({ run: toRecord(run()), events: [], room: [own], memberName }).at(-1)).toEqual({
+    expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events: [], room: [own], memberName, paused: false }).at(-1)).toEqual({
       kind: 'note', authorID: alice.id, body: 'anyone know the port?', question: true,
     })
   })
 
+  it('ends a working run with what the agent is doing and where to watch it live', () => {
+    const working = { ...toRecord(run()), activity: { verb: 'Reading', target: 'src/billing.js', at: '2026-08-14T10:03:00Z', running: {} } }
+    expect(rows({ run: working, events: [], room: [], memberName, paused: false }).slice(-2)).toEqual([
+      { kind: 'live', label: 'Reading src/billing.js' },
+      { kind: 'terminal-note' },
+    ])
+    expect(rows({ run: toRecord(run()), events: [], room: [], memberName, paused: false }).at(-2)).toEqual({ kind: 'live', label: 'Working' })
+    expect(rows({ run: working, events: [], room: [], memberName, paused: true }).at(-1)).toEqual({ kind: 'event', text: 'Run started' })
+  })
+
   it('ends with the agent\'s pending requests and the finish', () => {
     const waiting = toRecord(run({ pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }))
-    expect(rows({ run: waiting, events: [], room: [], memberName }).at(-1)).toEqual({
+    expect(rows({ run: waiting, events: [], room: [], memberName, paused: false }).at(-1)).toEqual({
       kind: 'request', answer: 'input', title: 'The agent asks for permission',
     })
     const failed = toRecord(run({ status: 'failed', reason: 'agent exited 1', finished_at: '2026-08-14T10:09:00Z' }))
-    expect(rows({ run: failed, events: [], room: [], memberName }).at(-1)).toEqual({
+    expect(rows({ run: failed, events: [], room: [], memberName, paused: false }).at(-1)).toEqual({
       kind: 'finished', text: 'Failed: agent exited 1', tone: 'failed',
     })
     const recorded = [event('run.status', { to: 'completed' }, '2026-08-14T10:09:00Z')]
     const done = toRecord(run({ status: 'completed' }))
-    expect(rows({ run: done, events: recorded, room: [], memberName }).filter((row) => row.kind === 'finished')).toEqual([
+    expect(rows({ run: done, events: recorded, room: [], memberName, paused: false }).filter((row) => row.kind === 'finished')).toEqual([
       { kind: 'finished', text: 'Finished', tone: 'done' },
     ])
   })

@@ -42,7 +42,8 @@ export type SessionRow =
   | { kind: 'assistant'; id: string; at: string; text: string; streaming: boolean }
   | { kind: 'thinking'; id: string; at: string; text: string }
   | { kind: 'work'; id: string; at: string; summary: string; entries: WorkItem[] }
-  | { kind: 'live'; id: string; at: string; label: string }
+  | { kind: 'live'; id: string; at: string; label: string; waiting?: boolean }
+  | { kind: 'terminal-note'; id: string; at: string }
   | { kind: 'plan'; id: string; at: string; entries: { content: string; status?: string }[] }
   | { kind: 'changed-files'; id: string; at: string; files: ChangedFile[] }
   | {
@@ -56,7 +57,7 @@ export type SessionRow =
       reply?: { authorID: string; body: string }
     }
   | { kind: 'answered'; id: string; at: string; request: SessionRequest; command?: string }
-  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone }
+  | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone; report?: true }
   | { kind: 'finished'; id: string; at: string; text: string; tone: Tone }
   | { kind: 'agent-message'; id: string; at: string; messageID: string }
 
@@ -326,9 +327,15 @@ export function rowsOfTurn(turn: Turn): SessionRow[] {
   return rows
 }
 
-export function liveLabel(turn: Turn | undefined): string | null {
+export interface LiveActivity {
+  label: string
+  waiting: boolean
+}
+
+export function liveActivity(turn: Turn | undefined): LiveActivity | null {
   if (!turn || turn.closed || !turn.items.some((item) => item.kind === 'turn_start')) return null
   const running = new Map<string, SessionToolCall>()
+  const asking = new Map<string, SessionRequest>()
   let last: SessionItem | undefined
   for (const item of turn.items) {
     if (item.kind === 'tool_call' && item.tool_call) {
@@ -336,13 +343,23 @@ export function liveLabel(turn: Turn | undefined): string | null {
       if (toolStatus(call) === 'running') running.set(call.id, call)
       else running.delete(call.id)
     }
+    if (item.kind === 'request' && item.request) {
+      if (item.request.status === 'pending') asking.set(item.request.id, item.request)
+      else asking.delete(item.request.id)
+    }
     if (item.kind !== 'usage' && item.kind !== 'commands' && item.kind !== 'config_options') last = item
   }
+  const request = [...asking.values()].at(-1)
+  if (request?.kind === 'permission') {
+    const call = request.tool_call_id ? running.get(request.tool_call_id) : undefined
+    return { label: `Waiting for your approval: ${call ? toolTarget(call) : request.title}`, waiting: true }
+  }
+  if (request) return { label: 'Waiting for your answer', waiting: true }
   const current = [...running.values()].at(-1)
-  if (current) return toolLabel(current, 'running')
-  if (last?.kind === 'thought' && !last.message?.complete) return 'Thinking'
+  if (current) return { label: toolLabel(current, 'running'), waiting: false }
+  if (last?.kind === 'thought' && !last.message?.complete) return { label: 'Thinking', waiting: false }
   if (last?.kind === 'message' && last.message?.role === 'assistant' && !last.message.complete) return null
-  return 'Working'
+  return { label: 'Working', waiting: false }
 }
 
 export function appendItems(turns: Turn[], items: SessionItem[]): Turn[] {

@@ -185,11 +185,11 @@ export function WorkDetail({ children }: { children: React.ReactNode }) {
   return <div data-slot="work-detail" className="flex flex-col gap-2 pt-1 pb-2 pl-10">{children}</div>
 }
 
-export function LiveActivityRow({ children }: { children: React.ReactNode }) {
+export function LiveActivityRow({ waiting = false, children }: { waiting?: boolean; children: React.ReactNode }) {
   return (
-    <div data-slot="live-row" className="flex h-6 min-w-0 items-center gap-2 text-ui-sm">
-      <StatusDot tone="working" pulse />
-      <span className="live-shimmer min-w-0 truncate">{children}</span>
+    <div data-slot="live-row" data-waiting={waiting || undefined} className="flex h-6 min-w-0 items-center gap-2 text-ui-sm">
+      <StatusDot tone={waiting ? 'needs-you' : 'working'} pulse={!waiting} />
+      <span className={cn('min-w-0 truncate', waiting ? 'text-text' : 'live-shimmer')}>{children}</span>
     </div>
   )
 }

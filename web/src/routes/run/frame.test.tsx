@@ -6,7 +6,8 @@ import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import { useStore } from '@/store'
-import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -67,7 +68,7 @@ describe('run frame', () => {
     const views = screen.getByRole('tablist', { name: 'Run views' })
     expect(within(views).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('heading', { level: 1, name: 'rewrite the checkout flow' })).toBeDefined()
-    expect(await screen.findByText('Claude Code · Standard')).toBeDefined()
+    await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Claude Code · Standard'))
     expect(StubSocket.opened).toHaveLength(1)
   })
 
@@ -128,6 +129,56 @@ describe('run frame', () => {
   })
 })
 
+describe('switching the mode from More', () => {
+  async function openMore() {
+    const trigger = screen.getByRole('button', { name: 'More' })
+    trigger.focus()
+    await userEvent.keyboard('{Enter}')
+    return within(await screen.findByRole('menu'))
+  }
+  const claude = (over = {}) => vi.mocked(api.agentList).mockResolvedValue([
+    agentInfo({ display_name: 'Claude Code', switchable: true, enhanced_installed: true, ...over }),
+  ])
+
+  it('confirms what happens, then switches', async () => {
+    claude()
+    vi.mocked(api.runModeSwitch).mockResolvedValueOnce(run({ mode: 'acp', acp: true }))
+    open()
+    await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
+    fireEvent.click((await openMore()).getByRole('menuitem', { name: 'Switch to Enhanced…' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.getByText(/restarts in Enhanced mode with the same conversation/)).toBeDefined()
+    fireEvent.click(dialog.getByRole('button', { name: 'Switch to Enhanced' }))
+    await waitFor(() => expect(api.runModeSwitch).toHaveBeenCalledWith('run_1', 'acp', undefined))
+  })
+
+  it('names the missing adapter instead of failing', async () => {
+    claude({ enhanced_installed: false })
+    open()
+    await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
+    expect((await openMore()).getByRole('menuitem', { name: /Enhanced adapter not installed · Set up/ })).toBeDefined()
+  })
+
+  it('disables the item with the reason after an early refusal', async () => {
+    claude()
+    vi.mocked(api.runModeSwitch).mockRejectedValueOnce(new ApiError(200, 'run.mode.switch: scheduler: invalid run state transition: the agent has not reported its session yet', -32002, { reason: 'session_not_reported' }))
+    open()
+    await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
+    fireEvent.click((await openMore()).getByRole('menuitem', { name: 'Switch to Enhanced…' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Switch to Enhanced' }))
+    await waitFor(() => expect(api.runModeSwitch).toHaveBeenCalled())
+    const item = (await openMore()).getByRole('menuitem', { name: /Available after the agent’s first turn/ })
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('offers no switch for an agent that cannot move a running session', async () => {
+    claude({ switchable: false })
+    open()
+    await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
+    expect((await openMore()).queryByRole('menuitem', { name: /Switch to/ })).toBeNull()
+  })
+})
+
 describe('the header primary action', () => {
   it('sends a Standard permission to the terminal', () => {
     open({ status: 'needs-attention', pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }, 'session')
@@ -172,6 +223,15 @@ describe('run details', () => {
     const facts = panel.getByRole('region', { name: 'Details' })
     expect(within(facts).getByText('Owner')).toBeDefined()
     expect(within(facts).getByText('aether/run-1-checkout')).toBeDefined()
+  })
+
+  it('lists a teammate question among the notes', async () => {
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [roomMessage({ id: 'q_1', kind: 'question', actor_id: bob.id, body: 'which port?' })] })
+    open()
+    const panel = await details()
+    const notes = within(panel.getByRole('region', { name: 'Notes' }))
+    expect(await notes.findByText('which port?')).toBeDefined()
+    expect(notes.getByText('· question')).toBeDefined()
   })
 
   it('shows a needs-you condition without a request as one card with its action', async () => {
@@ -220,7 +280,7 @@ describe('the session composer', () => {
     open({}, 'session')
     attached(true)
     const box = screen.getByRole('textbox', { name: 'Message the agent' })
-    expect(screen.getByText('You control this run: it goes to the agent now.')).toBeDefined()
+    expect(screen.getByText('Sends to the agent’s terminal.')).toBeDefined()
     await userEvent.type(box, 'run the tests')
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
@@ -236,6 +296,17 @@ describe('the session composer', () => {
     useStore.setState({ route: { name: 'run', params } })
     render(<View params={params} />)
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message the agent' })))
+  })
+
+  it('unwinds Escape from an empty composer to the timeline, then to the board', async () => {
+    open({}, 'session')
+    const box = screen.getByRole('textbox', { name: 'Message the agent' })
+    act(() => box.focus())
+    await userEvent.keyboard('{Escape}')
+    expect(document.activeElement).not.toBe(box)
+    expect(useStore.getState().route.name).toBe('run')
+    await userEvent.keyboard('{Escape}')
+    expect(useStore.getState().route.name).toBe('board')
   })
 
   it('says a message waits for delivery when the viewer does not control the run', () => {
