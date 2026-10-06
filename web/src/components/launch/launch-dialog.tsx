@@ -187,7 +187,6 @@ export function LaunchDialog() {
     if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness) {
       throw new Error('Enter an objective and choose an integrator agent.')
     }
-    // mission.create refuses an integrator that is not Standard.
     const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: 'tui' }
     const workerChoices = workers.map((choice): MissionExecutionChoice => {
       const info = agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness)
