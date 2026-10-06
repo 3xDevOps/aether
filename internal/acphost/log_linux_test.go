@@ -19,11 +19,11 @@ func TestLogRecoversFromAShortWrite(t *testing.T) {
 	_, size, _ := l.state()
 
 	var old syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
+	if err = syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
 		t.Fatal(err)
 	}
 	limited := syscall.Rlimit{Cur: uint64(size) + 10, Max: old.Max}
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limited); err != nil {
+	if err = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limited); err != nil {
 		t.Skipf("cannot limit file size: %v", err)
 	}
 	err = l.Append(&Item{Kind: KindNotice, Notice: &Notice{Title: strings.Repeat("x", 100)}})
@@ -35,7 +35,7 @@ func TestLogRecoversFromAShortWrite(t *testing.T) {
 	}
 
 	appendN(t, l, 1, KindUsage)
-	if err := l.Close(); err != nil {
+	if err = l.Close(); err != nil {
 		t.Fatal(err)
 	}
 	l, err = OpenLog(path)
