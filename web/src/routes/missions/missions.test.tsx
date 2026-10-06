@@ -157,6 +157,7 @@ describe('swarm detail', () => {
   it('orders its sections and keeps internals behind Technical details', async () => {
     seed({ runs: { run_integrator: toRecord(integrator()) } })
     await mount(showing({}, { questions: [missionQuestion({ answer: 'guest', answered_at: '2026-08-14T10:02:00Z', answered_by_member_id: bob.id })], tasks: [missionTask()], attempts: [attempt()] }))
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Questions from the integrator', 'Tasks', 'Agent messages', 'Integration'])
     const regions = screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))
     expect(regions.filter((name) => name !== 'Candidate review')).toEqual(['Swarm', 'Questions from the integrator', 'Tasks', 'Agent messages', 'Integration'])
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('coordinate checkout work')
