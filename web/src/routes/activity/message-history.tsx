@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Search } from '@/components/icons'
 import { MessageRow } from '@/components/messages/message-row'
@@ -10,7 +10,7 @@ import type { Api } from '@/lib/api'
 import type { RunMessage } from '@/lib/types'
 import { VirtualList } from '@/routes/activity/virtual-list'
 import { useStore } from '@/store'
-import { loadMessagePage, type MessageScope, messageScopeKey, scopeMessages } from '@/store/messages'
+import { loadMessagePage, type MessageScope, messageScopeKey, scopeMessages, useMessageList } from '@/store/messages'
 
 export interface MessageFilters {
   sender: string
@@ -57,9 +57,7 @@ export function MessageHistory({
   const [reading, setReading] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    void loadMessagePage(useStore, client, scope)
-  }, [client, scope])
+  useMessageList(useStore, client, scope)
 
   const needle = query.trim().toLowerCase()
   const shown = useMemo(

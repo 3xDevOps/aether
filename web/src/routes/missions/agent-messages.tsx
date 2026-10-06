@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { MessageSquare } from '@/components/icons'
 import { MessageRow, Participants, type ParticipantLabel } from '@/components/messages/message-row'
@@ -12,6 +12,7 @@ import { useStore } from '@/store'
 import {
   groupMessages,
   loadMessagePage,
+  useMessageList,
   messageScopeKey,
   type MessageGroup,
   type MessageScope,
@@ -90,9 +91,7 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
   const [showAll, setShowAll] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
-  useEffect(() => {
-    void loadMessagePage(useStore, client, scope)
-  }, [client, scope])
+  useMessageList(useStore, client, scope)
 
   const groups = useMemo(() => groupMessages(messages).reverse(), [messages])
   const shown = showAll ? groups : groups.slice(0, collapsedGroups)

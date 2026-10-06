@@ -16,7 +16,7 @@ import { flattenRows, rowGap, TimelineRow, type FlatRow, type RowContext } from 
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { loadMessagePage, messageScopeKey } from '@/store/messages'
+import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
 import { liveLabel, rowsOfTurn, type SessionRow } from '@/store/session-rows'
 import { deliveryOf, readSessionLog, rowsForRun, type AcpSession } from '@/store/sessions'
@@ -178,9 +178,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
   useEffect(() => {
     if (live && !enhanced) void readSessionLog(useStore, api, run)
   }, [live, enhanced, run.id, run.workspace_id])
-  useEffect(() => {
-    void loadMessagePage(useStore, api, { kind: 'run', workspaceID: run.workspace_id, runID: run.id })
-  }, [run.workspace_id, run.id])
+  useMessageList(useStore, api, { kind: 'run', workspaceID: run.workspace_id, runID: run.id })
 
   const pendingCount = session?.pending.length ?? 0
   const hadPending = useRef(false)

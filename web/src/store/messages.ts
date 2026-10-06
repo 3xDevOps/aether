@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { RunMessage } from '@/lib/types'
@@ -51,6 +52,7 @@ export interface MessagesSlice {
   setMessagePage: (scope: MessageScope, messages: RunMessage[], nextBefore: string | undefined, older?: boolean) => void
   applyMessageAcked: (messageID: string, ackedAt: string) => void
   setMessageError: (scope: MessageScope, error?: string) => void
+  dropMessageList: (key: string) => void
 }
 
 /** A list read can be older than an ack event already applied. */
@@ -94,6 +96,15 @@ export const createMessagesSlice: SliceCreator<MessagesSlice> = (set) => ({
     }),
   setMessageError: (scope, error) =>
     set((state) => ({ messageErrors: { ...state.messageErrors, [messageScopeKey(scope)]: error } })),
+  dropMessageList: (key) =>
+    set((state) => {
+      const { [key]: dropped, ...messageLists } = state.messageLists
+      const { [key]: _error, ...messageErrors } = state.messageErrors
+      if (!dropped) return { messageErrors }
+      const kept = new Set(Object.values(messageLists).flatMap((list) => list.ids))
+      const runMessages = Object.fromEntries(Object.entries(state.runMessages).filter(([id]) => kept.has(id)))
+      return { messageLists, messageErrors, runMessages }
+    }),
 })
 
 export function scopeMessages(state: MessagesSlice, scope: MessageScope): RunMessage[] {
@@ -118,6 +129,27 @@ export async function loadMessagePage(store: RootStore, client: Api, scope: Mess
     // An empty list still hears coord.message events, which re-read it.
     if (!store.getState().messageLists[messageScopeKey(scope)]) store.getState().setMessagePage(scope, [], undefined)
   }
+}
+
+const viewers = new Map<string, number>()
+
+/** Every coord.message re-reads each held list it belongs to, so a list is
+ * held only while something on screen shows it. */
+export function useMessageList(store: RootStore, client: Api, scope: MessageScope): void {
+  const key = messageScopeKey(scope)
+  useEffect(() => {
+    const release = () => {
+      if (!viewers.has(key)) store.getState().dropMessageList(key)
+    }
+    viewers.set(key, (viewers.get(key) ?? 0) + 1)
+    void loadMessagePage(store, client, scope).then(release)
+    return () => {
+      const left = viewers.get(key)! - 1
+      if (left > 0) viewers.set(key, left)
+      else viewers.delete(key)
+      release()
+    }
+  }, [store, client, key])
 }
 
 export type MessageGroup =

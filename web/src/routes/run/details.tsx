@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
-import { loadMessagePage, messageScopeKey, type MessageScope } from '@/store/messages'
+import { loadMessagePage, messageScopeKey, useMessageList, type MessageScope } from '@/store/messages'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 const emptyMessages: RoomMessage[] = []
@@ -61,9 +61,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const error = useStore((s) => s.messageErrors[key])
   const [all, setAll] = useState(false)
   const [loading, setLoading] = useState(false)
-  useEffect(() => {
-    void loadMessagePage(useStore, api, { kind: 'run', workspaceID: run.workspace_id, runID: run.id })
-  }, [run.workspace_id, run.id])
+  useMessageList(useStore, api, scope)
   if (messages.length === 0 && !run.mission_id) return null
   const label = (id: string, other: RunRecord | undefined) => (id === run.id ? 'This run' : other ? runLabel(other) : id)
   const shown = all ? messages : messages.slice(-recentMessages)

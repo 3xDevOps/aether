@@ -249,9 +249,11 @@ row. A per-second countdown, such as a queued steer's delivery in the Run
 Room, is its own small component and re-renders only its text.
 
 The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
-swarm, or run scope, merged by message ID. A `coord.message` event carries no
-body, so every loaded scope the message belongs to re-reads its newest page;
-a scope whose first read failed is held empty so it re-reads too.
+swarm, or run scope, merged by message ID. A scope's list is held only while
+a view that shows it is mounted (`useMessageList`); the last one to unmount
+drops it and the messages no other list holds. A `coord.message` event
+carries no body, so every held scope the message belongs to re-reads its
+newest page; a scope whose first read failed is held empty so it re-reads too.
 `coord.message.acked` stamps the row. Both re-read the recipient run for its
 `unacked_messages`.
 

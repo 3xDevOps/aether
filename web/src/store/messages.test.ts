@@ -1,7 +1,8 @@
+import { renderHook, waitFor } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Event, RunMessage } from '@/lib/types'
 import { createRootStore } from '@/store'
-import { groupMessages, loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
+import { groupMessages, loadMessagePage, scopeMessages, useMessageList, type MessageScope } from '@/store/messages'
 import { applyEvent, hydrate } from '@/store/sync'
 import { fakeApi, run, workspace } from '@/test/fixtures'
 
@@ -26,6 +27,21 @@ const runScope: MessageScope = { kind: 'run', workspaceID: workspace.id, runID: 
 const ids = (messages: RunMessage[]) => messages.map((m) => m.id)
 
 describe('messages slice', () => {
+  it('holds a list while any viewer shows it and releases it with the last', async () => {
+    const store = createRootStore()
+    const client = fakeApi({ coordMessagesList: vi.fn(async () => ({ messages: [runMessage({ id: 'a' })] })) })
+    const first = renderHook(() => useMessageList(store, client, runScope))
+    const second = renderHook(() => useMessageList(store, client, { ...runScope }))
+    await waitFor(() => expect(ids(scopeMessages(store.getState(), runScope))).toEqual(['a']))
+
+    first.unmount()
+    expect(store.getState().messageLists['run:run_1']).toBeDefined()
+    second.unmount()
+    expect(store.getState().messageLists['run:run_1']).toBeUndefined()
+    expect(store.getState().runMessages).toEqual({})
+  })
+
+
   it('merges pages by id, oldest first, and pages back to exhaustion', () => {
     const store = createRootStore()
     const a = runMessage({ id: 'a', created_at: '2026-10-05T10:00:00.1Z' })
