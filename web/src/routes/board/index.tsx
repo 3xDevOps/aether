@@ -8,7 +8,7 @@ import { clearDonePlan, releaseFinishedPlan } from '@/lib/commands'
 import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { Column, type Placeholder } from '@/routes/board/column'
-import { agentDisplayNames, useAgents } from '@/routes/agents/use-agents'
+import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
@@ -22,7 +22,7 @@ export function Board() {
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const stacked = useMediaQuery(belowLg)
-  const agents = useAgents()
+  const { agents, error: agentsError } = useAgentList()
   const [showArchived, setShowArchived] = useState(false)
   const [focusedCard, setFocusedCard] = useState<Element | null>(null)
 
@@ -54,7 +54,7 @@ export function Board() {
   } else if (hydrated && total === 0) {
     body = (
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <EmptyBoard agents={agents} hiddenByMine={hiddenByMine} />
+        <EmptyBoard agents={agentsError === null ? agents : 'unknown'} hiddenByMine={hiddenByMine} />
       </div>
     )
   } else {

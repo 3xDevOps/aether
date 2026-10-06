@@ -5,7 +5,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { api, ApiError } from '@/lib/api'
 import { canLaunch } from '@/lib/commands'
 import { message } from '@/lib/format'
-import type { AgentsState } from '@/routes/agents/use-agents'
+import type { AgentInfo } from '@/lib/types'
 import { useStore } from '@/store'
 import type { OnboardingStep } from '@/store/ui'
 import { useCapability, useSelfRole } from '@/store/hooks'
@@ -15,7 +15,7 @@ const codeUnavailable = -32004
 
 type BaseCheck = { workspace: string; missing: boolean; error: string | null }
 
-export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentsState; hiddenByMine: boolean }) {
+export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | null | 'unknown'; hiddenByMine: boolean }) {
   const caps = useCapability()
   const role = useSelfRole()
   const hasWorkspace = useStore((s) => Object.keys(s.workspaces).length > 0)
@@ -61,7 +61,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentsState; hidd
       </EmptyState>
     )
   }
-  if (agents === 'loading') return null
+  if (agents === null) return null
   if (Array.isArray(agents) && !agents.some((agent) => agent.installed)) {
     return (
       <EmptyState

@@ -1,26 +1,11 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { enhancedSupported, label, ready, supportWords } from '@/components/agents/agent-copy'
 import { Ellipsis } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { StatusDot } from '@/components/ui/status-dot'
-import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
 import type { AgentInfo } from '@/lib/types'
-
-export function useAgentList(client: Api) {
-  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const reload = useCallback(() => {
-    setError(null)
-    client.agentList().then(setAgents, (err: unknown) => setError(message(err)))
-  }, [client])
-  useEffect(() => {
-    reload()
-  }, [reload])
-  return { agents, error, reload }
-}
 
 function facts(agent: AgentInfo): string {
   if (agent.installed !== true) return 'Not installed'

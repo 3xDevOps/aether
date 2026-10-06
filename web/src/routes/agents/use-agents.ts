@@ -1,28 +1,21 @@
-import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { useCallback, useEffect, useState } from 'react'
+import { api, type Api } from '@/lib/api'
+import { message } from '@/lib/format'
 import type { AgentInfo } from '@/lib/types'
-import { useCapability } from '@/store/hooks'
 
-export type AgentsState = AgentInfo[] | 'loading' | 'unknown'
-
-export function useAgents(): AgentsState {
-  const caps = useCapability()
-  const listable = caps.hasMethod('agent.list')
-  const [agents, setAgents] = useState<AgentsState>('loading')
+export function useAgentList(client: Api = api) {
+  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const reload = useCallback(() => {
+    setError(null)
+    client.agentList().then(setAgents, (err: unknown) => setError(message(err)))
+  }, [client])
   useEffect(() => {
-    if (!listable) return
-    let live = true
-    api
-      .agentList()
-      .then((list) => live && setAgents(list))
-      .catch(() => live && setAgents('unknown'))
-    return () => {
-      live = false
-    }
-  }, [listable])
-  return listable ? agents : 'unknown'
+    reload()
+  }, [reload])
+  return { agents, error, reload }
 }
 
-export function agentDisplayNames(agents: AgentsState): Record<string, string> {
-  return Array.isArray(agents) ? Object.fromEntries(agents.map((agent) => [agent.name, agent.display_name || agent.name])) : {}
+export function agentDisplayNames(agents: AgentInfo[] | null): Record<string, string> {
+  return Object.fromEntries((agents ?? []).map((agent) => [agent.name, agent.display_name || agent.name]))
 }
