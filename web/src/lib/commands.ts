@@ -230,9 +230,9 @@ export async function runReleaseFinished(
   const failures = errors.filter((error) => error !== undefined)
   const released = eligible.length - failures.length
   if (failures.length > 0) {
-    toast.error(`Released ${released}, ${failures.length} failed: ${failures[0]}`)
+    toast.error(`Freed ${released}, ${failures.length} failed: ${failures[0]}`)
   } else {
-    toast.success(`Released resources for ${released} ${released === 1 ? 'run' : 'runs'}`)
+    toast.success(`Freed the containers of ${released} ${released === 1 ? 'run' : 'runs'}`)
   }
 }
 
@@ -509,7 +509,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.release')) {
     list.push({
       id: 'release-finished',
-      label: 'Release finished resources...',
+      label: 'Free retained containers...',
       Icon: PackageX,
       perform: (d) => d.openDialog('release-finished'),
     })

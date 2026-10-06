@@ -20,6 +20,7 @@ import { useStore } from '@/store'
 const scopeNames: Record<KeyScope, string> = {
   global: 'Everywhere',
   run: 'In a run',
+  card: 'On a focused board card',
   request: 'On a request card',
   composer: 'In the composer',
 }

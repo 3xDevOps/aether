@@ -91,12 +91,12 @@ export function ReleaseFinishedConfirm({
         <DialogHeader>
           <DialogTitle>
             {n === 0
-              ? 'No finished runs hold resources'
-              : `Release resources for ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
+              ? 'No finished runs keep a container'
+              : `Free the retained containers of ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
           </DialogTitle>
           <DialogDescription>
             {n === 0 ? (
-              'Release acts on finished runs you may act on that still keep their container.'
+              'This acts on finished runs you may act on that still keep their container.'
             ) : (
               <>
                 Their retained containers will be removed and cannot be relaunched.
@@ -112,7 +112,7 @@ export function ReleaseFinishedConfirm({
           {n > 0 && (
             <Button disabled={running} onClick={onConfirm}>
               {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
-              Release {n}
+              Free {n}
             </Button>
           )}
         </DialogFooter>

@@ -38,14 +38,3 @@ export function onlineMembers(presence: PresenceEntry[]): string[] {
     ),
   ].sort()
 }
-
-/** Who currently holds an attach on a run. */
-export function watchersOf(presence: PresenceEntry[], runID: string): string[] {
-  return [
-    ...new Set(
-      presence
-        .filter((p) => p.state !== 'offline' && p.watching?.includes(runID))
-        .map((p) => p.member_id),
-    ),
-  ].sort()
-}

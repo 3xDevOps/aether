@@ -45,6 +45,8 @@ export const coarsePointer = '(pointer: coarse)'
 
 export const belowSm = '(max-width: 639px)'
 
+export const belowLg = '(max-width: 1023px)'
+
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`
 

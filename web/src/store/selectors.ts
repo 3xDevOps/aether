@@ -1,4 +1,4 @@
-import type { StateContext } from '@/lib/needs-you'
+import type { NeedsYouID, StateContext } from '@/lib/needs-you'
 import {
   groupLabel,
   groupOf,
@@ -21,6 +21,7 @@ export interface RunRow {
   run: RunRecord
   state: PresentationState
   reason: string
+  needsYou?: NeedsYouID
   group: RunGroup
   waitingSince: string
   owner?: Member
@@ -78,6 +79,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       run,
       state: shown.state,
       reason: shown.reason,
+      needsYou: shown.needsYou?.id,
       group: groupOf(shown.state),
       waitingSince: shown.needsYou?.since(run, ctx) ?? run.stateChangedAt,
       owner: ctx.members[run.member_id],
@@ -86,12 +88,14 @@ export function runRows(ctx: StateContext): RunRow[] {
   return rows
 }
 
-function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow | undefined {
+// Without a listed integrator the oldest worker stands in, so workers never list on their own.
+function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow {
   const integrators = rows.filter((row) => row.run.mission_role === 'integrator')
   const mission = ctx.missions[rows[0].run.mission_id ?? '']
   return (
     integrators.find((row) => row.run.id === mission?.current_integrator_run_id) ??
-    integrators.sort((a, b) => b.run.created_at.localeCompare(a.run.created_at))[0]
+    integrators.sort((a, b) => b.run.created_at.localeCompare(a.run.created_at))[0] ??
+    [...rows].sort((a, b) => a.run.created_at.localeCompare(b.run.created_at))[0]
   )
 }
 
@@ -130,8 +134,7 @@ export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
   }
   for (const members of swarms.values()) {
     const root = swarmRoot(members, ctx)
-    if (!root) trees.push(...members.map((row) => ({ ...row, children: [] })))
-    else trees.push(swarmTree(root, members.filter((row) => row !== root)))
+    trees.push(swarmTree(root, members.filter((row) => row !== root)))
   }
   return trees
 }

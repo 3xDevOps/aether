@@ -873,23 +873,17 @@ function MissionConflictDiagnostics({
 function MissionConflictWarning({ run }: CardSlotProps) {
   const diagnostics = useMissionConflictDiagnostics(run.id)
   if (!diagnostics.length) return null
-  const label = `Mission conflict warnings: ${diagnostics.length}`
+  const label = `Swarm conflict warnings: ${diagnostics.length}`
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={label}
-          title={label}
-          className="gap-1 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1 text-state-needs-attention coarse:h-11 coarse:min-h-11 coarse:min-w-11 coarse:px-1"
-        >
-          <TriangleAlert className="size-3.5" aria-hidden />
-          {diagnostics.length}
+        <Button variant="link" size="sm" hint={label}>
+          <TriangleAlert />
+          {diagnostics.length} {diagnostics.length === 1 ? 'conflict' : 'conflicts'}
         </Button>
       </PopoverTrigger>
-      <PopoverContent aria-label="Mission conflict warnings" onClick={(event) => event.stopPropagation()}>
-        <p className="mb-2 font-medium">Mission conflicts</p>
+      <PopoverContent aria-label="Swarm conflict warnings">
+        <p className="mb-2 font-medium">Swarm conflicts</p>
         <div className="flex flex-wrap items-center gap-2">
           <MissionConflictDiagnostics run={run} showDetails />
         </div>
@@ -898,24 +892,11 @@ function MissionConflictWarning({ run }: CardSlotProps) {
   )
 }
 
-function MissionRunChip({ run }: CardSlotProps) {
-  const summaryRecords = useStore((state) => state.missions)
-  const summaries = useMemo(() => Object.values(summaryRecords), [summaryRecords])
-  const detailRecords = useStore((state) => state.missionDetails)
-  const details = useMemo(() => Object.values(detailRecords), [detailRecords])
-  const mission =
-    [...details.map((detail) => detail.mission), ...summaries].find((candidate) =>
-      candidate.current_integrator_run_id === run.id ||
-      details.some((detail) =>
-        detail.mission.id === candidate.id &&
-        (detail.attempts ?? []).some((attempt) => attempt.run_id === run.id),
-      ),
-    )
-  if (!mission) return null
-  return <Badge>Mission</Badge>
+function SwarmRole({ run }: CardSlotProps) {
+  if (!run.mission_role) return null
+  return <span>{run.mission_role === 'integrator' ? 'Integrator' : 'Worker'}</span>
 }
-registerSlot('card:chips', 'mission-diagnostics', MissionConflictDiagnostics)
-registerSlot('card:warnings', 'mission-diagnostics', MissionConflictWarning)
 
-registerSlot('card:badges', 'missions', MissionRunChip)
+registerSlot('card:meta', 'swarm-role', SwarmRole)
+registerSlot('card:meta', 'mission-diagnostics', MissionConflictWarning)
 registerRoute('missions', MissionRoute)

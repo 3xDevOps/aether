@@ -1,4 +1,4 @@
-import { FileWarning, TriangleAlert } from 'lucide-react'
+import { TriangleAlert } from 'lucide-react'
 import { Fragment } from 'react'
 import { registerSlot, type CardSlotProps } from '@/components/slots'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -62,22 +62,16 @@ function basename(path: string): string {
 function ConflictWarning({ run }: CardSlotProps) {
   const peers = useStore((s) => s.overlaps[run.id])
   if (!peers?.length) return null
-  const label = `File overlap warnings: ${peers.length} other run${peers.length === 1 ? '' : 's'}`
+  const label = `Files also changed by ${peers.length} other run${peers.length === 1 ? '' : 's'}`
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={label}
-          title={label}
-          className="gap-1 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1 text-state-needs-attention coarse:h-11 coarse:min-h-11 coarse:min-w-11 coarse:px-1"
-        >
-          <FileWarning className="size-3.5" aria-hidden />
-          {peers.length}
+        <Button variant="link" size="sm" hint={label}>
+          <TriangleAlert />
+          {peers.length} {peers.length === 1 ? 'overlap' : 'overlaps'}
         </Button>
       </PopoverTrigger>
-      <PopoverContent aria-label="File overlap warnings" onClick={(event) => event.stopPropagation()}>
+      <PopoverContent aria-label="File overlap warnings">
         <p className="mb-2 font-medium">Overlapping files</p>
         <div className="flex flex-wrap items-center gap-2">
           <ConflictChips run={run} />
@@ -87,5 +81,4 @@ function ConflictWarning({ run }: CardSlotProps) {
   )
 }
 
-registerSlot('card:chips', 'conflict', ConflictChips)
-registerSlot('card:warnings', 'conflict', ConflictWarning)
+registerSlot('card:meta', 'conflict', ConflictWarning)

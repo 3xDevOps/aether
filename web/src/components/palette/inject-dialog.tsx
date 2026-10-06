@@ -17,7 +17,7 @@ import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
 
-function deliveryLabel(result: RoomPostResult): string {
+export function deliveryLabel(result: RoomPostResult): string {
   switch (result.receipt ?? result.message.state) {
     case 'queued':
       return 'queued'

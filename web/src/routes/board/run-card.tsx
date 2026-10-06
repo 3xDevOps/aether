@@ -1,289 +1,108 @@
-import { Archive, ChevronDown, Copy, GitBranch, GitCommit, Shield } from 'lucide-react'
-import { memo, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import { Slot, type CardSlotName } from '@/components/slots'
-import { RunInputIndicator } from '@/components/run-input-indicator'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { memo, useState } from 'react'
+import { Slot } from '@/components/slots'
+import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { Avatar } from '@/components/ui/avatar'
+import { Card, CardControls, CardTitle } from '@/components/ui/card'
+import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { copyText } from '@/lib/clipboard'
-import { deletesInLabel, timeAgo } from '@/lib/format'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
-import { cn, focusRing } from '@/lib/utils'
-import { HarnessGlyph } from '@/routes/board/harness-glyph'
-import { mapCardHeight } from '@/routes/board/map-layout'
-import { MemberAvatar } from '@/routes/board/member-avatar'
+import { StateLine, type Tone } from '@/components/ui/status-dot'
+import { deletesInLabel } from '@/lib/format'
+import { runLabel } from '@/lib/status'
+import type { MissionPhase } from '@/lib/types'
+import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
+import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useRunInput } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
 import type { SwarmSummary } from '@/store/selectors'
 
-const lifecycleLabel: Record<RunRecord['status'], string> = {
-  queued: 'Queued',
-  provisioning: 'Provisioning',
-  running: 'Running',
-  'needs-attention': 'Needs attention',
-  completed: 'Completed',
-  merged: 'Merged',
-  abandoned: 'Abandoned',
-  failed: 'Failed',
-  interrupted: 'Interrupted',
+const phaseWord: Record<MissionPhase, string> = {
+  planning: 'Swarm planning',
+  active: 'Swarm active',
+  completed: 'Swarm completed',
+  cancelled: 'Swarm cancelled',
 }
 
-/**
- * Branch text and slot controls opt out of the article's pointer surface so
- * selecting or copying a branch never opens the run. Memoised: a reducer
- * replaces only the record of the run that changed.
- */
-export const RunCard = memo(function RunCard({
-  run,
-  state,
-  reason,
-  swarm,
-  workspaceName,
-  variant = 'cards',
-}: {
-  run: RunRecord
-  state: PresentationState
-  reason: string
-  swarm?: SwarmSummary
-  workspaceName?: string
-  variant?: 'cards' | 'map'
-}) {
-  const owner = useStore((s) => s.members[run.member_id])
+export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardCard; agentName?: string }) {
+  const { run } = card
   const navigate = useStore((s) => s.navigate)
-  const branchRef = useRef<HTMLSpanElement>(null)
-  const [expanded, setExpanded] = useState(false)
-  const detailsId = useId()
-  const input = useRunInput(run)
-  const unansweredCount = input.questions
-  const questionAction =
-    unansweredCount > 0
-      ? `${unansweredCount} unanswered ${
-          unansweredCount === 1 ? 'question' : 'questions'
-        } - open Run Room to answer`
-      : ''
-  const finishedQuestion =
-    Boolean(questionAction) &&
-    (run.status === 'completed' ||
-      run.status === 'merged' ||
-      run.status === 'abandoned' ||
-      run.status === 'failed' ||
-      run.status === 'interrupted')
-  const deletesLabel =
-    run.archived_at && run.deletes_at ? deletesInLabel(run.deletes_at) : ''
-  // A failed run's lifecycle reason goes below an unanswered question, never in its place.
-  const summary = useStore((s) =>
-    questionAction || s.approvalsByRun[run.id]?.[0]?.action || input.summary || run.reason || '',
-  )
-  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
-    const target = event.target
-    if (
-      target instanceof Element &&
-      target.closest('button, a, input, select, textarea, [data-run-navigation-exempt]')
-    ) {
-      return
-    }
-    if (window.getSelection()?.isCollapsed === false) {
-      return
-    }
-    navigate('terminal', { runId: run.id })
-  }
-
-  const disclosure = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-label={`${expanded ? 'Hide' : 'Show'} details for ${runLabel(run)}`}
-      aria-expanded={expanded}
-      aria-controls={expanded ? detailsId : undefined}
-      onClick={variant === 'cards' ? () => setExpanded((open) => !open) : undefined}
-      className="ml-auto h-[22px] min-h-[22px] shrink-0 px-1.5 text-xs"
-    >
-      Details
-      <ChevronDown className={cn('size-3', expanded && 'rotate-180')} aria-hidden />
-    </Button>
-  )
-  const details = expanded && (
-    <div className="space-y-3 text-xs" data-run-navigation-exempt>
-      {variant === 'cards' && (
-        <h3 className="break-words text-sm font-medium">{runLabel(run)}</h3>
-      )}
-      {run.task.trim() && run.task.trim() !== runLabel(run) && (
-        <p className="whitespace-pre-wrap break-words text-muted-foreground">{run.task.trim()}</p>
-      )}
-      {summary && (
-        <p className="whitespace-pre-wrap break-words">{summary}</p>
-      )}
-      {finishedQuestion && (
-        <p className="break-words text-muted-foreground">
-          Lifecycle: {lifecycleLabel[run.status]}{run.reason ? ` - ${run.reason}` : ''}
-        </p>
-      )}
-      {questionAction && !finishedQuestion && run.reason && (
-        <p className="whitespace-pre-wrap break-words text-muted-foreground">{run.reason}</p>
-      )}
-      {run.branch && (
-        <div className="flex items-start gap-1 text-muted-foreground">
-          <GitBranch className="mt-1 size-3.5 shrink-0" aria-hidden />
-          <span ref={branchRef} className="min-w-0 flex-1 break-all select-text font-mono">
-            {run.branch}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            label={`Copy branch ${run.branch}`}
-            onClick={() => void copyText(run.branch, branchRef.current)}
-          >
-            <Copy className="size-3" aria-hidden />
-          </Button>
-        </div>
-      )}
-      {run.last_commit && (
-        <p className="flex items-start gap-1 text-muted-foreground">
-          <GitCommit className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 break-all select-text">
-            {run.last_commit} · committed <RelativeTime at={run.last_commit_at ?? run.created_at} />
-          </span>
-        </p>
-      )}
-      <p className="break-words text-muted-foreground">
-        Owner: {owner?.display_name ?? run.member_id} · Harness: {run.harness} ({run.mode})
-      </p>
-      <p className="text-muted-foreground">
-        Created <RelativeTime at={run.created_at} />
-        {run.started_at && <> · started <RelativeTime at={run.started_at} /></>}
-        {' · '}{stateLabel[state].toLowerCase()} <RelativeTime at={run.stateChangedAt} />
-      </p>
-      <CardSlot name="card:chips" run={run} />
-      <CardSlot name="card:footer" run={run} />
-    </div>
-  )
+  const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
+  const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
+  const additions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'additions'))
+  const deletions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'deletions'))
+  const [replying, setReplying] = useState(false)
+  const action = cardAction(card, approval)
+  const needsYou = card.group === 'needs-you'
+  const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
+  const tone: Tone = needsYou ? 'needs-you' : card.state
+  const reason = card.swarm ? swarmReason(card, mission?.phase) : archivedReason(card)
+  const owner = card.owner?.display_name ?? run.member_id
 
   return (
-    <Dialog open={variant === 'map' && expanded} onOpenChange={setExpanded}>
-      <article
-        data-run-id={run.id}
-        onClick={handleCardClick}
-        style={{ borderLeftColor: owner?.color, height: variant === 'map' ? mapCardHeight : undefined }}
-        className={cn(
-          'group min-w-0 cursor-pointer border border-l-2 border-border bg-background transition-colors duration-100 hover:bg-toolbar-hover motion-reduce:transition-none',
-        )}
-      >
-        <div className="flex min-w-0 flex-col gap-0.5 px-3 py-1">
-          <div className="flex h-[22px] min-w-0 items-center gap-1 coarse:h-11">
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
-              <StateChip state={state} />
-              <RunInputIndicator run={run} />
-              {run.protected && (
-                <span
-                  role="img"
-                  aria-label="Protected: only the owner or an admin can steer or kill this run"
-                  title="Protected: only the owner or an admin can steer or kill this run"
-                  className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground"
-                >
-                  <Shield className="size-3.5" aria-hidden />
-                </span>
-              )}
-              {deletesLabel && (
-                <span title="Archived" className="shrink-0">
-                  <Badge>
-                    <Archive className="size-3" aria-hidden />
-                    {deletesLabel}
-                  </Badge>
-                </span>
-              )}
-              <CardSlot name="card:badges" run={run} />
-            </div>
-            <CardSlot name="card:warnings" run={run} />
-            {variant === 'map' ? <DialogTrigger asChild>{disclosure}</DialogTrigger> : disclosure}
-          </div>
-          <button
-            type="button"
-            aria-label={runLabel(run)}
-            onClick={() => navigate('terminal', { runId: run.id })}
-            className={cn(focusRing, 'h-10 min-w-0 shrink-0 text-left text-sm leading-5')}
-          >
-            <span className="line-clamp-2 break-words font-medium">
-              {runLabel(run)}
-            </span>
-          </button>
-          <p
-            className={cn(
-              'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 coarse:line-clamp-1',
-              reasonBorder[state],
-              state === 'needs-you' ? 'text-foreground/85' : 'text-muted-foreground',
-            )}
-          >
-            {workspaceName && <span className="text-muted-foreground">{workspaceName} · </span>}
+    <Popover open={replying} onOpenChange={setReplying}>
+      <PopoverAnchor asChild>
+        <Card data-run-id={run.id} selected={replying}>
+          <StateLine tone={tone} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
             {reason}
-          </p>
-          {swarm && <p className="text-xs text-muted-foreground">{swarmCounts(swarm)}</p>}
-          <div className="flex h-5 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
-            <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
-            <span className="min-w-0 truncate" title={owner?.display_name ?? run.member_id}>{owner?.display_name ?? run.member_id}</span>
-            <RelativeTime at={run.stateChangedAt} className="ml-auto shrink-0 tabular-nums" title={timestamps(run, state)} />
+          </StateLine>
+          <CardTitle onOpen={() => openCard(card, navigate)}>{title}</CardTitle>
+          <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-ui-sm text-muted">
+            {card.swarm ? (
+              <span className="min-w-0 truncate">{swarmCounts(card.swarm)}</span>
+            ) : (
+              <>
+                <AgentGlyph agent={run.harness} />
+                <span className="min-w-0 truncate">{agentName ?? run.harness}</span>
+              </>
+            )}
+            <Avatar name={owner} color={card.owner?.color} />
+            {additions !== undefined && deletions !== undefined && (
+              <span className="shrink-0 tabular-nums">
+                <span className="text-diff-add">+{additions}</span> <span className="text-diff-del">−{deletions}</span>
+              </span>
+            )}
+            {card.workspaceName && <span className="min-w-0 truncate">{card.workspaceName}</span>}
+            {!card.swarm && (
+              <CardControls className="empty:hidden">
+                <Slot name="card:meta" run={run} />
+              </CardControls>
+            )}
+            {action && (
+              <CardControls className="invisible ml-auto group-focus-within/card:visible group-hover/card:visible coarse:visible">
+                <CardActionButton card={card} action={action} approval={approval} onReply={() => setReplying(true)} />
+              </CardControls>
+            )}
           </div>
-        </div>
-        {variant === 'cards' && expanded && (
-          <div id={detailsId} className="cursor-auto border-t border-border px-3 py-3" data-run-navigation-exempt>
-            {details}
-          </div>
-        )}
-      </article>
-      {variant === 'map' && (
-        <DialogContent id={detailsId} aria-describedby={undefined}>
-          <DialogTitle className="break-words pr-8">{runLabel(run)}</DialogTitle>
-          {details}
-        </DialogContent>
-      )}
-    </Dialog>
+        </Card>
+      </PopoverAnchor>
+      {replying && <ReplyComposer card={card} title={title} onDone={() => setReplying(false)} />}
+    </Popover>
   )
 })
 
-const reasonBorder: Record<PresentationState, string> = {
-  'needs-you': 'border-state-needs-you/60',
-  working: 'border-border',
-  paused: 'border-state-paused/60',
-  done: 'border-state-done/60',
-  failed: 'border-state-failed/60',
+function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
+  if (card.state === 'needs-you') return card.reason
+  if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
+  return phase ? phaseWord[phase] : 'Swarm'
+}
+
+function archivedReason(card: BoardCard): string {
+  const { run } = card
+  if (!run.archived_at || !run.deletes_at) return card.reason
+  return `${card.reason}, ${deletesInLabel(run.deletes_at)}`
+}
+
+function diffTotal(files: { additions: number; deletions: number }[] | undefined, key: 'additions' | 'deletions') {
+  return files?.reduce((sum, file) => sum + file[key], 0)
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {
-  return [
-    counts.working > 0 && `${counts.working} working`,
-    counts.needsYou > 0 && `${counts.needsYou} needs you`,
-    counts.done > 0 && `${counts.done} done`,
-    counts.failed > 0 && `${counts.failed} failed`,
-  ].filter(Boolean).join(' · ') || 'No workers yet'
-}
-
-function StateChip({ state }: { state: PresentationState }) {
   return (
-    <Badge tone={state} aria-label={stateLabel[state]}>
-      {stateLabel[state]}
-    </Badge>
+    [
+      counts.needsYou > 0 && `${counts.needsYou} needs you`,
+      counts.working > 0 && `${counts.working} working`,
+      counts.done > 0 && `${counts.done} done`,
+      counts.failed > 0 && `${counts.failed} failed`,
+    ]
+      .filter(Boolean)
+      .join(' · ') || 'No workers yet'
   )
-}
-
-/** Slot content may contain its own links or buttons. */
-function CardSlot({ name, run }: { name: CardSlotName; run: RunRecord }): ReactNode {
-  return (
-    <span data-run-navigation-exempt className={cn('flex items-center gap-1 empty:hidden', name === 'card:badges' || name === 'card:warnings' ? 'shrink-0' : 'flex-wrap')}>
-      <Slot name={name} run={run} />
-    </span>
-  )
-}
-
-function timestamps(run: RunRecord, state: PresentationState): string {
-  return [
-    `Created ${timeAgo(run.created_at)}`,
-    run.started_at ? `started ${timeAgo(run.started_at)}` : null,
-    `${stateLabel[state].toLowerCase()} ${timeAgo(run.stateChangedAt)}`,
-  ]
-    .filter(Boolean)
-    .join(' · ')
 }

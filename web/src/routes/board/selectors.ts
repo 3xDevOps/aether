@@ -6,13 +6,7 @@ import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
 import { isArchivable, type RunRecord } from '@/store/runs'
-import {
-  listedRuns,
-  runGroups,
-  type RunRow,
-  type RunTree,
-  type RunsInput,
-} from '@/store/selectors'
+import { listedRuns, runGroups, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
 
@@ -65,10 +59,6 @@ export function useBoard(): BoardData {
   const workspace = useStore((s) => s.activeWorkspace)
   const mineOnly = useStore((s) => s.mineOnly)
   return useMemo(() => board({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
-}
-
-export function cardRuns(cards: BoardCard[]): RunRow[] {
-  return cards.flatMap((card) => [card, ...(card.swarm?.members ?? [])])
 }
 
 function candidates(runs: RunRecord[], workspaces: Record<string, Workspace>): RunActionCandidate[] {

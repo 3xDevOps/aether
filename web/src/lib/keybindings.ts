@@ -50,6 +50,9 @@ export const keybindings = [
     label: 'Toggle Run Room (from the terminal or room composer)',
   },
   { id: 'leave-run', keys: 'Escape', scope: 'run', label: 'Leave a run for the board' },
+  { id: 'card-approve', keys: 'a', scope: 'card', label: "Approve the focused card's request" },
+  { id: 'card-reply', keys: 'r', scope: 'card', label: "Reply to the focused card's agent" },
+  { id: 'card-open', keys: 'o', scope: 'card', label: 'Open the focused card' },
 ] as const satisfies readonly Keybinding[]
 
 export type KeybindingID = (typeof keybindings)[number]['id']
