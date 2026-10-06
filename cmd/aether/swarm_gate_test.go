@@ -26,10 +26,10 @@ func TestSwarmGateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		"removed approve":            {args: []string{"approve", "m1"}, want: `unknown swarm command "approve"`},
 		"removed request-changes":    {args: []string{"request-changes", "m1", "split it"}, want: `unknown swarm command "request-changes"`},
 		"removed reject":             {args: []string{"reject", "m1"}, want: `unknown swarm command "reject"`},
-		"answer without question":    {args: []string{"answer", "m1", "main"}, want: "usage: aether swarm answer <mission-id> --question <question-id>"},
+		"answer without question":    {args: []string{"answer", "m1", "main"}, want: "usage: aether swarm answer <swarm-id> --question <question-id>"},
 		"answer empty stdin":         {args: []string{"answer", "m1", "--question", "q1", "-"}, want: "answer on stdin is empty"},
-		"cancel with extra argument": {args: []string{"cancel", "m1", "now"}, want: "usage: aether swarm cancel <mission-id>"},
-		"replace without agent":      {args: []string{"replace-integrator", "m1"}, want: "usage: aether swarm replace-integrator <mission-id> --agent <harness>"},
+		"cancel with extra argument": {args: []string{"cancel", "m1", "now"}, want: "usage: aether swarm cancel <swarm-id>"},
+		"replace without agent":      {args: []string{"replace-integrator", "m1"}, want: "usage: aether swarm replace-integrator <swarm-id> --agent <agent>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Every gate command reaches withControl only after validation,

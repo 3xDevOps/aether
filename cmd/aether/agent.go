@@ -72,8 +72,8 @@ type agentAddOptions struct {
 func parseAgentAdd(args []string) (agentAddOptions, error) {
 	fs := flag.NewFlagSet("agent add", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	tui := fs.String("tui", "", "interactive command template")
-	headless := fs.String("headless", "", "headless command template")
+	tui := fs.String("tui", "", "Standard mode command template")
+	headless := fs.String("headless", "", "Background mode command template")
 	acp := fs.String("acp", "", "Agent Client Protocol server command")
 	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
 	name, err := parseLeadingArg(fs, args)

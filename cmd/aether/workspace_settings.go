@@ -17,7 +17,7 @@ func workspaceSettings(args []string) error {
 	fs := flag.NewFlagSet("workspace settings", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	steer := fs.String("steer-others", "", "who may steer and kill other members' runs: everyone or admins-only")
+	steer := fs.String("steer-others", "", "who may message, control and kill other members' runs: everyone or admins-only")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return fmt.Errorf("usage: aether workspace settings [--workspace <name-or-id>] [--steer-others everyone|admins-only]")
 	}
@@ -86,9 +86,9 @@ func parseSteerOthers(v string) (string, error) {
 // with what it means in the same breath.
 func describeSteerOthers(v string) string {
 	if v == domain.SteerOthersAdminsOnly {
-		return "admins-only (only a run's owner and admins may steer or kill it)"
+		return "admins-only (only a run's owner and admins may message, control or kill it)"
 	}
-	return "everyone (collaborators may steer and kill each other's runs)"
+	return "everyone (collaborators may message, control and kill each other's runs)"
 }
 
 func printWorkspaceSettings(ws protocol.Workspace) {

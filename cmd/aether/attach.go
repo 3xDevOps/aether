@@ -77,7 +77,7 @@ func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool, sh
 	if err != nil {
 		return nil, 0, err
 	}
-	fmt.Fprintln(os.Stderr, "aether: you cannot steer this run; attached read-only, keystrokes are ignored")
+	fmt.Fprintln(os.Stderr, "aether: you cannot control this run; attached read-only, keystrokes are ignored")
 	return stream, ack.Replay, nil
 }
 
@@ -90,7 +90,7 @@ func describeAttachEnd(err error) error {
 	}
 	switch exit.Status {
 	case protocol.AttachExitSteerRevoked:
-		return errors.New("detached: you can no longer steer this run (its owner, protection, the workspace policy, or your role changed); aether attach --read-only still shows it")
+		return errors.New("detached: you can no longer control this run (its owner, protection, the workspace policy, or your role changed); aether attach --read-only still shows it")
 	case protocol.AttachExitMembershipRevoked:
 		return errors.New("detached: your membership was removed or is pending approval again")
 	}

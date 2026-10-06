@@ -18,7 +18,7 @@ var terminalTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 func init() {
 	register(command{
 		name:  "terminal",
-		short: "open or manage the member environment terminal",
+		short: "open or manage your Environment terminal",
 		run:   runTerminal,
 	})
 }

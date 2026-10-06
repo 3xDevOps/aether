@@ -11,7 +11,7 @@ import (
 func init() {
 	register(command{
 		name:  "env",
-		short: "save or reset the member environment",
+		short: "save or reset your Environment",
 		run:   runEnv,
 	})
 }

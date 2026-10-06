@@ -934,7 +934,7 @@ aether runs
 aether pull <run-id>
 ```
 
-`aether runs` shows the run reaching `needs-attention` within seconds, and the
+`aether runs` shows the run reaching `needs-you` within seconds, and the
 pulled branch carries a commit adding `result.txt`. That is the full path -
 container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 

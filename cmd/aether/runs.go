@@ -18,12 +18,12 @@ import (
 func init() {
 	register(command{
 		name:  "runs",
-		short: "list runs (--attention: idle runs; --archived: only archived)",
+		short: "list runs (--attention: runs that need you; --archived: only archived)",
 		run:   runRuns,
 	})
 }
 
-// needsAttention selects the execution status displayed as Idle, not the
+// needsAttention selects the needs-attention execution status, not the
 // independent set of outstanding input requests.
 func needsAttention(r protocol.Run) bool {
 	return r.Status == string(domain.RunNeedsAttention)
@@ -46,7 +46,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 	if archived {
 		fifthColumn = "DELETES"
 	}
-	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tHARNESS\tMEMBER\t"+fifthColumn+"\tTITLE\tTASK"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\t"+fifthColumn+"\tTITLE\tTASK"); err != nil {
 		return err
 	}
 	for _, r := range runs {
@@ -70,16 +70,23 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 			}
 		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, r.Status, r.Harness, memberName(r.MemberID), fifth, title, task); err != nil {
+			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), fifth, title, task); err != nil {
 			return err
 		}
 	}
 	return tw.Flush()
 }
 
+func displayStatus(r protocol.Run) string {
+	if needsAttention(r) {
+		return "needs-you"
+	}
+	return r.Status
+}
+
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	attention := fs.Bool("attention", false, "list only idle runs (needs-attention status)")
+	attention := fs.Bool("attention", false, "list only runs that need you (wire status needs-attention)")
 	archived := fs.Bool("archived", false, "list only archived runs, with their deletion date")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -137,7 +144,7 @@ func runRuns(args []string) error {
 		// The notice goes to stderr so it never lands in a pipeline reading
 		// the table, and it is skipped when the table already is the answer.
 		if waiting > 0 && !*attention && !*archived {
-			_, _ = fmt.Fprintf(os.Stderr, "\n%s idle: aether runs --attention\n",
+			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting for you: aether runs --attention\n",
 				plural(waiting, "run"))
 		}
 		return nil

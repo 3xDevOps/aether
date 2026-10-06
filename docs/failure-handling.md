@@ -207,16 +207,16 @@ kept and the create error names it. Which error you get depends on whether
 the scheduler wrote the run row before failing:
 
 ```
-mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>: <cause>
-mission <mission-id> exists but its integrator run <run-id> failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <harness> or from the Missions page, or read it with aether swarm show <mission-id>: <cause>
+swarm <swarm-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <swarm-id>: <cause>
+swarm <swarm-id> exists but its integrator run <run-id> failed to start; replace it with aether swarm replace-integrator <swarm-id> --agent <agent> or from its swarm page, or read it with aether swarm show <swarm-id>: <cause>
 ```
 
 With no run row, mission reconciliation retries the launch of the reserved
 run on its periodic pass and logs each failure as `mission: recover
 integrator` with the mission ID and the cause. Repeating `mission.create`
 with the same contents and idempotency key also retries the launch, and
-returns the same mission. The Missions page shows `The integrator run has not
-started.` for that mission, and `aether swarm show <mission-id>` prints the
+returns the same mission. The swarm page shows `The integrator run has not
+started.` for that swarm, and `aether swarm show <swarm-id>` prints the
 error as `launch error:`.
 `mission.show` and `mission.list` carry the last launch error in
 `integrator_launch_error` and the time it was first seen in

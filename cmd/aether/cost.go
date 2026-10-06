@@ -75,6 +75,6 @@ func unmeteredNote(total protocol.CostRollup) string {
 		}
 		return fmt.Sprintf("all %d runs metered", total.Runs)
 	}
-	return fmt.Sprintf("%d of %d runs are unmetered (their harness reports no usage): the totals above are a floor, not the real spend",
+	return fmt.Sprintf("%d of %d runs are unmetered (their agent reports no usage): the totals above are a floor, not the real spend",
 		total.Unmetered, total.Runs)
 }

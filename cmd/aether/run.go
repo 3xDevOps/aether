@@ -24,7 +24,7 @@ func runRun(args []string) error {
 		return runSwitch(args[1:])
 	}
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	mode := fs.String("mode", "standard", launchModeHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")

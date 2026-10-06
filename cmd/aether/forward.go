@@ -16,7 +16,7 @@ import (
 func init() {
 	register(command{
 		name:  "forward",
-		short: "forward a run or environment terminal port to localhost",
+		short: "forward a run or Environment port to localhost",
 		run:   runForward,
 	})
 }

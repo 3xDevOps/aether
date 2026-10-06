@@ -13,7 +13,7 @@ const githubUsage = "usage: aether github connect"
 func init() {
 	register(command{
 		name:  "github",
-		short: "connect the member environment to GitHub",
+		short: "connect your Environment to GitHub",
 		run:   runGitHub,
 	})
 }

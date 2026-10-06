@@ -304,7 +304,7 @@ server with no admin has no way back. **A role change lands on connections
 that are already open**, not at next login: the role is re-read from the
 store on every request, so a demotion takes effect mid-session. A live write
 attach is re-checked every few seconds and dropped when steer goes away -
-`detached: you can no longer steer this run` - and `aether attach
+`detached: you can no longer control this run` - and `aether attach
 --read-only` still shows the terminal afterwards. `member remove` first stops
 and destroys that member's environment terminal, then deletes the member row
 and erases their member home. If cleanup fails, the command returns the
@@ -596,14 +596,14 @@ commit captured at launch.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with conflict warnings. Prints a notice when any run is idle (`needs-attention`); `--attention` lists that execution status, not all runs needing input. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
+| `aether runs` | Every run you can see, colored by owner, with conflict warnings. The `needs-attention` wire status prints as `needs-you`, and a notice counts those runs; `--attention` lists only them, not every run waiting on an input request. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
-| `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
+| `aether inject <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
-| `aether delete <run>` | Stop the run if it is live, then remove its checkout, transcript, evidence, and run records. Needs the same permission as `kill`. A published run branch stays in the workspace repo and the timeline keeps the history. |
+| `aether delete <run>` | Stop the run if it is live, then remove its checkout, transcript, captures, and run records. Needs the same permission as `kill`. A published run branch stays in the workspace repo and the timeline keeps the history. |
 | `aether archive <run>` / `unarchive <run>` | Hide a finished run from the board and default `aether runs`, or restore it. Needs the same permission as `kill`; only a merged, abandoned, failed, or interrupted run can be archived. Archiving itself removes nothing; the server deletes the run on the printed date. See [failure-handling.md](failure-handling.md) for what the checkout TTL GC reclaims sooner. |
-| `aether protect` / `unprotect <run>` | Limit steering and killing one run to its owner and admins, whatever the workspace policy says. |
+| `aether protect` / `unprotect <run>` | Limit messaging, controlling and killing one run to its owner and admins, whatever the workspace policy says. |
 | `aether handoff <run> <member>` | Transfer ownership and notification routing immediately. The recipient needs no acceptance handshake; Aether records the actor and both owners and captures handoff context. The agent account and its cost attribution do not change. |
 | `aether close <run> --outcome merged\|abandoned` | Record the finish outcome and clear a finished run off the attention board after its automatic evidence capture. |
 | `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any steer-holder can. `--all` includes decided requests. |
@@ -611,9 +611,9 @@ commit captured at launch.
 | `aether cost --runs` | Token spend per member and per run. |
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
-| `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or environment terminal port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
+| `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or Environment port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
 | `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
-| `aether github connect` | Finish connecting GitHub after `gh auth login` in your environment terminal: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
+| `aether github connect` | Finish connecting GitHub after `gh auth login` in your Environment: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
 | `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the checkout Origin run checkouts use for pushing review branches. Needs the push capability. |
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |

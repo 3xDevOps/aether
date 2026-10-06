@@ -16,17 +16,17 @@ import (
 func init() {
 	register(command{
 		name:  "swarm",
-		short: "create, follow, and cancel swarms (missions with an integrator run)",
+		short: "create, follow, and cancel swarms (an integrator run and its workers)",
 		run:   runSwarm,
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--mode standard|enhanced] [--account <member-id>] [--worker <harness>[:standard|enhanced|background]]... [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--account <member-id>] [--worker <agent>[:standard|enhanced|background]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
-	"   or: aether swarm show <mission-id>\n" +
-	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
-	"   or: aether swarm cancel <mission-id>\n" +
-	"   or: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
+	"   or: aether swarm show <swarm-id>\n" +
+	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
+	"   or: aether swarm cancel <swarm-id>\n" +
+	"   or: aether swarm replace-integrator <swarm-id> --agent <agent> [--account <member-id>]"
 
 func runSwarm(args []string) error {
 	if len(args) == 0 {
@@ -84,12 +84,12 @@ func swarmCreate(args []string, stdin io.Reader) error {
 // a typo never costs a round trip or a stored mission.
 func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fs := flag.NewFlagSet("swarm create", flag.ExitOnError)
-	agent := fs.String("agent", "", "integrator harness name")
+	agent := fs.String("agent", "", "integrator agent name")
 	mode := fs.String("mode", "standard", "integrator mode: standard (tui) or enhanced (acp)")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	var workers stringList
-	fs.Var(&workers, "worker", "allow workers on this harness, harness[:mode] with mode "+launchModeHelp+" (repeatable, default standard)")
+	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode] with mode "+launchModeHelp+" (repeatable, default standard)")
 	objective, err := parseLeadingArg(fs, args)
 	if err != nil || *agent == "" {
 		return swarmSpec{}, errors.New(swarmUsage)
@@ -139,7 +139,7 @@ func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	}
 	mode, err := parseLaunchMode(name)
 	if harness == "" || err != nil {
-		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want harness or harness:mode, mode %s)", spec, launchModeHelp)
+		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want agent or agent:mode, mode %s)", spec, launchModeHelp)
 	}
 	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
 }
@@ -247,7 +247,7 @@ func cell(s string) string {
 
 func swarmShow(args []string) error {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: aether swarm show <mission-id>")
+		return errors.New("usage: aether swarm show <swarm-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		res, err := showSwarm(c, args[0])

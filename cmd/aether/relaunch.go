@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:  "relaunch",
-		short: "reopen a retained Done run",
+		short: "reopen a finished run that still keeps its container",
 		run:   runRelaunch,
 	})
 }

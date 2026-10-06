@@ -20,7 +20,7 @@ func swarmTarget(args []string, usage string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-const swarmAnswerUsage = "usage: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-"
+const swarmAnswerUsage = "usage: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-"
 
 func swarmAnswer(args []string, stdin io.Reader) error {
 	missionID, questionID, answer, err := parseSwarmAnswer(args, stdin)
@@ -81,7 +81,7 @@ func answerSwarmQuestion(c *protocol.Client, w io.Writer, missionID, questionID,
 
 func swarmCancel(args []string) error {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: aether swarm cancel <mission-id>")
+		return errors.New("usage: aether swarm cancel <swarm-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		return cancelSwarm(c, os.Stdout, args[0], cli.NewControlSessionID())
@@ -99,7 +99,7 @@ func cancelSwarm(c *protocol.Client, w io.Writer, missionID, key string) error {
 	return nil
 }
 
-const swarmReplaceUsage = "usage: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
+const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--account <member-id>]"
 
 func swarmReplaceIntegrator(args []string) error {
 	missionID, rest, err := swarmTarget(args, swarmReplaceUsage)
@@ -107,7 +107,7 @@ func swarmReplaceIntegrator(args []string) error {
 		return err
 	}
 	fs := flag.NewFlagSet("swarm replace-integrator", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness of the new integrator (runs in tui mode)")
+	agent := fs.String("agent", "", "agent of the new integrator (runs in Standard mode)")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: the current integrator's)")
 	if err := fs.Parse(rest); err != nil {
 		return err

@@ -11,7 +11,7 @@ import (
 func init() {
 	register(command{
 		name:  "inject",
-		short: "inject a steering message into a run",
+		short: "send a message to a run's agent",
 		run:   runInject,
 	})
 }

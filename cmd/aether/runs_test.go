@@ -28,21 +28,21 @@ func TestRenderRuns(t *testing.T) {
 	}{
 		{
 			name: "default hides archived runs",
-			want: "ID  STATUS           HARNESS  MEMBER  OVERLAP        TITLE      TASK\n" +
-				"r1  running          claude   m1                     Title one  task one\n" +
-				"r2  needs-attention  claude   m2      a.go with bob  Title two  task two\n",
+			want: "ID  STATUS     AGENT   MEMBER  OVERLAP        TITLE      TASK\n" +
+				"r1  running    claude  m1                     Title one  task one\n" +
+				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
 		},
 		{
 			name:      "--attention hides archived runs",
 			attention: true,
-			want: "ID  STATUS           HARNESS  MEMBER  OVERLAP        TITLE      TASK\n" +
-				"r2  needs-attention  claude   m2      a.go with bob  Title two  task two\n",
+			want: "ID  STATUS     AGENT   MEMBER  OVERLAP        TITLE      TASK\n" +
+				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
 		},
 		{
 			name:     "--archived shows only archived runs with the DELETES header and a literal deletion value",
 			archived: true,
-			want: "ID  STATUS     HARNESS  MEMBER  DELETES               TITLE        TASK\n" +
-				"r3  abandoned  claude   m3      2026-09-20T00:00:00Z  Title three  task three\n",
+			want: "ID  STATUS     AGENT   MEMBER  DELETES               TITLE        TASK\n" +
+				"r3  abandoned  claude  m3      2026-09-20T00:00:00Z  Title three  task three\n",
 		},
 	}
 	for _, tc := range cases {

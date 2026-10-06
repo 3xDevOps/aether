@@ -75,7 +75,7 @@ func runTemplate(args []string) error {
 
 func templateSave(args []string) error {
 	fs := flag.NewFlagSet("template save", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
 	mode := fs.String("mode", "background", launchModeHelp)
 	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
