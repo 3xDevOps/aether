@@ -105,9 +105,9 @@ describe('agents page', () => {
     mount()
     await flush()
 
-    expect(screen.queryByRole('form', { name: 'Git identity' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Git identity/ }))
-    expect(screen.getByRole('form', { name: 'Git identity' })).toBeDefined()
+    expect(screen.queryByRole('form', { name: 'Git identity' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Set it in Profile' })).toBeDefined()
     expect(screen.getByRole('button', { name: /^GitHub/ })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
     expect(screen.getByRole('region', { name: 'Agent config files' })).toBeDefined()

@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ProfileImport } from '@/components/profile-import'
+import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { Api } from '@/lib/api'
 import type { GitHubConnectResult } from '@/lib/types'
+import { ProfileDialog } from '@/routes/members/personal'
 import { GitHubSection } from '@/routes/onboarding/github-connect'
-import { GitIdentityForm } from '@/routes/onboarding/git-identity'
 import type { Capability } from '@/store/hooks'
 
 function Extra({ title, summary, open, children }: { title: string; summary: string; open?: boolean; children: ReactNode }) {
@@ -34,11 +35,16 @@ export function AgentExtras({
   github: GitHubConnectResult | null
   onConnectGitHub: () => void
 }) {
+  const [profile, setProfile] = useState(false)
   return (
     <div className="flex min-w-0 flex-col">
       {identity && caps.hasMethod('member.git') && (
         <Extra title="Git identity" summary="The author of your agents' commits">
-          <GitIdentityForm client={client} caps={caps} />
+          <p className="text-ui text-text">
+            Your agents commit as the name and email in your Profile.{' '}
+            <Button variant="link" onClick={() => setProfile(true)}>Set it in Profile</Button>
+          </p>
+          <ProfileDialog open={profile} onOpenChange={setProfile} client={client} />
         </Extra>
       )}
       <Extra title="GitHub" summary="Push branches and open pull requests as you" open={github !== null}>
