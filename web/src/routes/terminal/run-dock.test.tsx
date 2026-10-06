@@ -197,3 +197,14 @@ it.each(['detach', 'rejection'])('drops the unsent remainder of a paste after %s
   expect(api.devTerminalStop).not.toHaveBeenCalled()
   view.unmount()
 })
+
+it('lists shells once on open and reads control for the tab that list selects', async () => {
+  const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
+  await waitFor(() => expect(api.devControlStatus).toHaveBeenCalledWith({
+    run_id: 'run_1', surface: { kind: 'terminal', id: process.terminal_id, incarnation: process.incarnation },
+  }))
+  await act(async () => { await Promise.resolve() })
+  expect(api.devTerminalList).toHaveBeenCalledTimes(1)
+  expect(api.devControlStatus).toHaveBeenCalledTimes(1)
+  view.unmount()
+})

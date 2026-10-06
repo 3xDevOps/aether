@@ -86,30 +86,42 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
   const reportError = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : String(cause))
   }, [])
-  // One status pass while the run is open: the shell list, then who controls
-  // the active tab. The dock's own actions refresh at once, so the interval
-  // only has to catch what other members and the agent did.
+  // Who controls the active tab. Read from a ref by the interval below, so a
+  // tab switch reads it once without re-listing shells or restarting the
+  // interval; an answer for a target the dock has left is dropped.
+  const ownerTarget = useRef<{ runID: string; tab: string; incarnation?: string }>({ runID: '', tab: '' })
+  const readOwner = useCallback(async () => {
+    const target = ownerTarget.current
+    if (!target.tab || !target.incarnation) return
+    const result = await api.devControlStatus({
+      run_id: target.runID, surface: { kind: 'terminal', id: target.tab, incarnation: target.incarnation },
+    })
+    if (ownerTarget.current === target) setOwner(result.controller)
+  }, [])
   useEffect(() => {
+    ownerTarget.current = { runID, tab: activeTab ?? '', incarnation }
     setOwner(null)
+    readOwner().catch(reportError)
+    return () => { ownerTarget.current = { runID: '', tab: '' } }
+  }, [runID, activeTab, incarnation, readOwner, reportError])
+  // One status pass while the run is open: the shell list, then the owner.
+  // The dock's own actions refresh at once, so the interval only has to
+  // catch what other members and the agent did.
+  useEffect(() => {
     let cancelled = false
     let timer: number | undefined
-    const poll = async () => {
+    const poll = async (owner: boolean) => {
       if (document.visibilityState === 'visible') {
         try {
           await refresh()
-          if (activeTab && incarnation) {
-            const result = await api.devControlStatus({
-              run_id: runID, surface: { kind: 'terminal', id: activeTab, incarnation },
-            })
-            if (!cancelled) setOwner(result.controller)
-          }
+          if (owner) await readOwner()
         } catch (cause) { if (!cancelled) reportError(cause) }
       }
-      if (!cancelled) timer = window.setTimeout(poll, statusPollMs)
+      if (!cancelled) timer = window.setTimeout(() => void poll(true), statusPollMs)
     }
-    void poll()
+    void poll(false)
     return () => { cancelled = true; refreshRevision.current++; clearTimeout(timer) }
-  }, [refresh, activeTab, incarnation, runID, reportError])
+  }, [refresh, readOwner, reportError])
   const paused = useStore((s) => s.pausedRuns[runID] ?? run?.paused)
   const pauseKnown = paused !== undefined
   const canOpenShell =
