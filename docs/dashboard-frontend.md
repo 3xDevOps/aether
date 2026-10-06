@@ -787,6 +787,16 @@ Removal also repairs the selection and open route before any refresh awaits.
   rule on a run the client has never seen.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
+- **`run.agent` events set a run's `activity`** (`{verb, target, at}` on
+  the run record, `src/store/activity.ts`), so a state line can say
+  "Reading src/auth.ts" without opening a socket to the run. A tool call
+  sets the present tense with the call's detail (file, command, task) or the
+  tool name as the target; the tool result that follows turns it past tense
+  ("Read", "Ran", "Edited") or `Failed`; a subagent reads "Delegating". Only
+  runs whose harness has an adapter emit these events, so `activity` is
+  optional everywhere. An event about a run the client has not loaded is
+  dropped rather than fetched, and a run re-read keeps its activity, since
+  no snapshot carries it.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, and `local`

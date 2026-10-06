@@ -1,21 +1,27 @@
 import type { Run, RunInputRequest, RunStatus } from '@/lib/types'
+import { nextActivity, type AgentPayload, type RunActivity } from '@/store/activity'
 import type { SliceCreator } from '@/store/slice'
 
 /** A run plus its last execution-status change time, for sorting and acknowledgments. */
 export type RunRecord = Run & {
   reason?: string
   stateChangedAt: string
+  /** Client-side only: what the agent did last, from `run.agent` events. */
+  activity?: RunActivity
 }
 
 export function toRecord(run: Run, previous?: RunRecord): RunRecord {
   const carry = previous && previous.status === run.status
-  return {
+  const record: RunRecord = {
     ...run,
     reason: run.reason ?? (carry ? previous.reason : undefined),
     stateChangedAt: carry
       ? previous.stateChangedAt
       : (run.finished_at ?? run.started_at ?? run.created_at),
   }
+  // No snapshot carries activity, so a re-read must not erase it.
+  if (previous?.activity) record.activity = previous.activity
+  return record
 }
 
 /** `records` without the runs `keep` rejects; the same object when none is. */
@@ -48,6 +54,7 @@ export interface RunsSlice {
   /** Clears `outcome_unseen`: the owner has opened the run. */
   applyOutcomeSeen: (runID: string) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
+  applyAgentEvent: (runID: string, payload: AgentPayload, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
   applyRunArchived: (
@@ -130,6 +137,15 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
           [runID]: { ...current, last_commit: commit, last_commit_at: time },
         },
       }
+    }),
+
+  applyAgentEvent: (runID, payload, time) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current) return {}
+      const activity = nextActivity(current.activity, payload, time)
+      if (activity === current.activity) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, activity } } }
     }),
 
   applyRunTitle: (runID, title) =>

@@ -20,6 +20,7 @@ import type {
   ServerUpdatePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
+import type { AgentPayload } from '@/store/activity'
 import { batchNotifications } from '@/store/batch'
 import { pausedFromTimeline } from '@/store/board'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
@@ -498,6 +499,11 @@ export async function applyEvent(
       })
       break
     }
+    case 'run.agent':
+      // Activity is a hint for the state line: an event about a run this
+      // client has not loaded is not worth a fetch.
+      store.getState().applyAgentEvent(ev.run_id, (ev.payload ?? {}) as AgentPayload, ev.time)
+      break
     case 'server.update': {
       store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
       break
