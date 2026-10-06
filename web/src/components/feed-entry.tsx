@@ -35,7 +35,7 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
             </Badge>
           </span>
           <span className="col-start-2 min-w-0 break-words leading-5 text-foreground/90 select-text">
-            {describe(event)}
+            {describeEvent(event)}
           </span>
           {run && (
             <button
@@ -86,6 +86,7 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
       <RunName id={p.from_run_id} /> → <RunName id={p.to_run_id} /> · {String(p.kind ?? 'message')}
     </span>
   ),
+  'mission.changed': () => '',
   'coord.message.acked': (p) => (
     <span>
       <RunName id={p.to_run_id} /> acknowledged <code>{String(p.message_id ?? '')}</code>
@@ -109,7 +110,7 @@ function RunName({ id }: { id: unknown }) {
   )
 }
 
-function describe(event: Event): ReactNode {
+export function describeEvent(event: Event): ReactNode {
   if (!Object.hasOwn(describers, event.type)) return ''
   return describers[event.type as EventType]((event.payload ?? {}) as Record<string, unknown>)
 }

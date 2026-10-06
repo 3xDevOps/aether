@@ -26,6 +26,7 @@ export const eventLabel = {
   'workspace.evidence_packet': 'Evidence packet',
   'coord.message': 'Agent message',
   'coord.message.acked': 'Agent message acknowledged',
+  'mission.changed': 'Swarm changed',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel
