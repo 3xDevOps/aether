@@ -17,7 +17,7 @@ import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
 export function Board() {
-  const { columns, archivedCards } = useBoard()
+  const { columns, archivedCards, hiddenByMine } = useBoard()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
@@ -58,7 +58,7 @@ export function Board() {
   } else if (hydrated && total === 0) {
     body = (
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <EmptyBoard agents={agents} />
+        <EmptyBoard agents={agents} hiddenByMine={hiddenByMine} />
       </div>
     )
   } else {
