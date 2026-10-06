@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -12,9 +11,6 @@ import (
 const runSwitchUsage = "usage: aether run switch <run-id> --mode standard|enhanced"
 
 func runSwitch(args []string) error {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return errors.New(runSwitchUsage)
-	}
 	runID := args[0]
 	fs := flag.NewFlagSet("run switch", flag.ExitOnError)
 	mode := fs.String("mode", "", "standard (tui) or enhanced (acp)")

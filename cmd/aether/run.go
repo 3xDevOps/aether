@@ -20,7 +20,7 @@ func init() {
 }
 
 func runRun(args []string) error {
-	if len(args) > 0 && args[0] == "switch" {
+	if len(args) > 1 && args[0] == "switch" && !strings.HasPrefix(args[1], "-") {
 		return runSwitch(args[1:])
 	}
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
