@@ -17,6 +17,8 @@ export interface RunActivity {
 export interface AgentPayload {
   kind?: string
   tool?: string
+  /** Set by an Enhanced run, whose `tool` is an ACP tool kind such as `execute`. */
+  verb?: string
   tool_use_id?: string
   detail?: string
   is_error?: boolean
@@ -51,10 +53,12 @@ export function nextActivity(
       const tool = payload.tool ?? ''
       const call: ToolCall = payload.kind === 'subagent'
         ? { tenses: delegating, target: payload.detail || tool }
-        : {
-            tenses: toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`, `Used ${tool || 'a tool'}`],
-            target: payload.detail || tool,
-          }
+        : payload.verb
+          ? { tenses: [payload.verb, payload.verb], target: payload.detail ?? '' }
+          : {
+              tenses: toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`, `Used ${tool || 'a tool'}`],
+              target: payload.detail || tool,
+            }
       const running = payload.tool_use_id
         ? { ...previous?.running, [payload.tool_use_id]: call }
         : previous?.running

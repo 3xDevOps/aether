@@ -46,8 +46,9 @@ type Config struct {
 	// OnInputs reports the complete set of pending requests whenever it
 	// changes and once a restored session opens; an empty set clears them.
 	OnInputs func(pending []domain.RunInputRequest)
-	// OnActivity reports what the agent is doing, at most once a second.
-	OnActivity func(verb, target string)
+	// OnActivity reports the ACP tool kind the agent is using, "think" while
+	// it thinks, at most once a second.
+	OnActivity func(kind, target string)
 }
 
 // Receipt says what happened to a prompt.
@@ -579,20 +580,20 @@ func (s *Session) armFlush() {
 	})
 }
 
-func (s *Session) activityLocked(verb, target string) {
+func (s *Session) activityLocked(kind, target string) {
 	if s.cfg.OnActivity == nil {
 		return
 	}
 	now := time.Now()
 	if wait := s.actAt.Add(time.Second).Sub(now); wait > 0 {
-		s.actNext = &[2]string{verb, target}
+		s.actNext = &[2]string{kind, target}
 		if s.actTimer == nil {
 			s.actTimer = time.AfterFunc(wait, s.flushActivity)
 		}
 		return
 	}
 	s.actAt = now
-	s.callback(func() { s.cfg.OnActivity(verb, target) })
+	s.callback(func() { s.cfg.OnActivity(kind, target) })
 }
 
 func (s *Session) flushActivity() {

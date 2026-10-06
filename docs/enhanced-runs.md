@@ -99,6 +99,12 @@ with the reason `enhanced turn failed: <error>`; it is not a turn end, so a
 reported outcome waits for the next turn that ends normally. Any frame from
 the agent counts as activity for stall detection.
 
+What the agent is doing reaches the dashboard's state line as a `run.agent`
+`tool_call` event, at most once a second: `tool` is the ACP tool kind
+(`read`, `edit`, `execute`, `think`, ...), `verb` its present-tense word
+(`Reading`, `Running`, `Thinking`, or `Using` for a kind without one), and
+`detail` the call's first file path or title.
+
 ## Mail
 
 Agent mail ([coordination.md](coordination.md)) reaches an enhanced run

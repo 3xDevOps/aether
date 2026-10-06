@@ -304,7 +304,7 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		OnInputs: func(pending []domain.RunInputRequest) {
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})
 		},
-		OnActivity: func(verb, target string) { d.activity(entry, verb, target) },
+		OnActivity: func(kind, target string) { d.activity(entry, kind, target) },
 	})
 	if err != nil {
 		d.stopExec(exec)
@@ -617,11 +617,13 @@ func (d *acpDriver) report(run domain.RunID, report agentstatus.Report) {
 	}
 }
 
-func (d *acpDriver) activity(entry *supervised, verb, target string) {
+func (d *acpDriver) activity(entry *supervised, kind, target string) {
 	d.s.publish(context.Background(), events.Event{
 		WorkspaceID: entry.workspaceID,
 		RunID:       entry.runID,
-		Payload:     events.AgentEventPayload{Kind: events.AgentToolCall, Tool: verb, Detail: truncateRunes(target, 200)},
+		Payload: events.AgentEventPayload{
+			Kind: events.AgentToolCall, Tool: kind, Verb: acphost.ToolVerb(kind), Detail: truncateRunes(target, 200),
+		},
 	})
 }
 

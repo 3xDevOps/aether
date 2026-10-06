@@ -29,7 +29,7 @@ const (
 type projector struct {
 	emit     func(Item)
 	arm      func()
-	activity func(verb, target string)
+	activity func(kind, target string)
 
 	text  *openText
 	tools map[string]*toolState
@@ -55,7 +55,7 @@ type toolState struct {
 	skipped       int
 }
 
-func newProjector(emit func(Item), arm func(), activity func(verb, target string)) *projector {
+func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
 	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState)}
 }
 
@@ -85,7 +85,7 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 		k := KindMessage
 		if kind == "agent_thought_chunk" {
 			k = KindThought
-			p.activity("Thinking", "")
+			p.activity("think", "")
 		}
 		p.chunk(k, "assistant", deref(u.MessageId), u.Content)
 	case "tool_call":
@@ -325,7 +325,7 @@ func (p *projector) tool(id string, patch toolPatch) {
 		len(st.output) >= toolOutputGrowth || st.skipped+1 >= toolSkipLimit {
 		p.emitTool(st)
 		if !final {
-			p.activity(toolVerb(c.ToolKind), toolTarget(c))
+			p.activity(c.ToolKind, toolTarget(c))
 		}
 		return
 	}
@@ -433,7 +433,7 @@ func unifiedPatch(path string, oldText *string, newText string) (string, bool) {
 	return cutTail(patch, maxDiffBytes)
 }
 
-func toolVerb(kind string) string {
+func ToolVerb(kind string) string {
 	switch kind {
 	case "read":
 		return "Reading"

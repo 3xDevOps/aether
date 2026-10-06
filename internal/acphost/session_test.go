@@ -163,7 +163,7 @@ func TestToolCallMerge(t *testing.T) {
 	rec.mu.Lock()
 	activity := rec.activity
 	rec.mu.Unlock()
-	if len(activity) == 0 || activity[0] != [2]string{"Running", "/workspace/main.go"} || len(activity) > 2 {
+	if len(activity) == 0 || activity[0] != [2]string{"execute", "/workspace/main.go"} || len(activity) > 2 {
 		t.Fatalf("activity not throttled to one a second: %v", activity)
 	}
 }

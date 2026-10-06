@@ -326,6 +326,9 @@ type AgentEventPayload struct {
 	// Tool is the tool name for tool_call and subagent kinds; empty for
 	// tool_result (the harness's result records carry only the ID).
 	Tool string `json:"tool,omitempty"`
+	// Verb is the present-tense word for Tool, set when Tool is an ACP
+	// tool kind rather than a harness tool name.
+	Verb string `json:"verb,omitempty"`
 	// ToolUseID correlates a tool_result with its originating tool_call
 	// or subagent event.
 	ToolUseID string `json:"tool_use_id,omitempty"`

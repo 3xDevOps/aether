@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -664,5 +665,33 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 	}
 	if e.sched.IdleEnhanced(standard.ID) || e.rt.byName(string(standard.ID)).spec.Env[coordtransport.EnhancedEnv] != "" {
 		t.Fatal("a standard run is treated as enhanced")
+	}
+}
+
+func TestEnhancedActivityNamesTheToolKindAndItsWord(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := domain.RunID("run-activity")
+	sub, err := e.bus.Subscribe(t.Context(), events.SubscribeOptions{
+		Filter: events.Filter{Run: run, Types: []events.Type{events.TypeAgentEvent}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Close() }()
+	entry := &supervised{runID: run, workspaceID: e.ws.ID}
+	for _, want := range []events.AgentEventPayload{
+		{Kind: events.AgentToolCall, Tool: "read", Verb: "Reading", Detail: "/workspace/main.go"},
+		{Kind: events.AgentToolCall, Tool: "think", Verb: "Thinking"},
+	} {
+		e.sched.acp.activity(entry, want.Tool, want.Detail)
+		select {
+		case got := <-sub.Events():
+			if got.Payload != want {
+				t.Fatalf("activity payload %#v, want %#v", got.Payload, want)
+			}
+		case <-time.After(waitTimeout):
+			t.Fatal("no activity event")
+		}
 	}
 }

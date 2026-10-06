@@ -200,9 +200,9 @@ func (r *recorder) config(c Config) Config {
 		r.mu.Unlock()
 		r.inputsCh <- p
 	}
-	c.OnActivity = func(verb, target string) {
+	c.OnActivity = func(kind, target string) {
 		r.mu.Lock()
-		r.activity = append(r.activity, [2]string{verb, target})
+		r.activity = append(r.activity, [2]string{kind, target})
 		r.mu.Unlock()
 	}
 	return c

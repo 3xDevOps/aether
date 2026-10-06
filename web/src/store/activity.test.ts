@@ -50,6 +50,20 @@ describe('run activity', () => {
     expect(store.getState().lastSeq).toBe(8)
   })
 
+  it('shows the word an Enhanced run sends for an ACP tool kind', async () => {
+    const store = createRootStore()
+    store.setState({ workspaces: { [workspace.id]: workspace } })
+    store.getState().setRuns([run()])
+    const client = fakeApi()
+    const activity = () => store.getState().runs.run_1.activity
+
+    await applyEvent(store, agentEvent(1, { kind: 'tool_call', tool: 'execute', verb: 'Running', detail: 'go test ./...' }), client)
+    expect(activity()).toMatchObject({ verb: 'Running', target: 'go test ./...' })
+
+    await applyEvent(store, agentEvent(2, { kind: 'tool_call', tool: 'think', verb: 'Thinking' }), client)
+    expect(activity()).toMatchObject({ verb: 'Thinking', target: '' })
+  })
+
   it('ends the call a result names when tool calls interleave', async () => {
     const store = createRootStore()
     store.setState({ workspaces: { [workspace.id]: workspace } })
