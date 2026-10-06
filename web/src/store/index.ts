@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { clampTerminalFontSize } from '@/lib/term-font'
+import { batched } from '@/store/batch'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
@@ -97,7 +98,7 @@ type PersistedState = Partial<ReturnType<typeof persistedUi>>
  */
 export function createRootStore() {
   return create<RootState>()(
-    persist(
+    batched(persist(
       (...a) => ({
         ...createServerSlice(...a),
         ...createWorkspacesSlice(...a),
@@ -171,7 +172,7 @@ export function createRootStore() {
         // Only view preferences survive a reload; server data is re-hydrated.
         partialize: persistedUi,
       },
-    ),
+    )),
   )
 }
 

@@ -20,6 +20,7 @@ import type {
   ServerUpdatePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
+import { batchNotifications } from '@/store/batch'
 import { pausedFromTimeline } from '@/store/board'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
@@ -750,7 +751,8 @@ export function connect(store: RootStore, client: Api = api): () => void {
     })
   }
 
-  const drain = async () => {
+  // Listeners hear one change per drained burst rather than one per write.
+  const drain = () => batchNotifications(store, async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
       if (await applyEvent(store, ev, client)) {
@@ -765,7 +767,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       void load()
       return
     }
-  }
+  })
 
   const pump = () => {
     chain = chain.then(drain).catch(ignore)

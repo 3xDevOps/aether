@@ -671,6 +671,12 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **Events are applied one at a time, in sequence order**, each fully resolved
   before the next begins. The cursor is a single number, so it must never move
   past an event still waiting on a fetch.
+- **Listeners hear one change per burst.** The queue drains inside
+  `batchNotifications` (`src/store/batch.ts`): every `set()` applies at once,
+  so `getState()` and the cursor rules above are unchanged, but subscribers -
+  React included - are notified once when the queue is empty, or after one
+  animation frame when a fetch holds the drain open longer. A burst of 200
+  events renders once, not 200 times.
 - **The stream subscribes live on the first connect** (the fetch behind it
   provides the current state) and **replays from the highest applied `seq` on
   reconnect**, with jittered backoff. An event at the cursor is ignored, so a
