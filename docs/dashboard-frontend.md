@@ -2087,7 +2087,14 @@ the app in the run, not the phone or laptop. No debugging/CDP endpoint is
 exposed to the dashboard.
 
 Opening the tab reads status, pages and ownership; it does not create a
-session. Before a page is selected, the URL field and **Open browser** are the
+session. A run that is not running has no browser; every read answers
+`-32002` (HTTP 409) with the reason, which the pane shows:
+
+```
+dev.browser.status: scheduler: the run has no live environment: the run is completed and its container is gone
+```
+
+Before a page is selected, the URL field and **Open browser** are the
 primary path to launching explicitly. A selected page exposes **Go**, **Back**,
 **Forward** and **Reload page** beside the URL. **Browser tools** contains the
 secondary page, viewport, capture, reconnect and destructive controls.

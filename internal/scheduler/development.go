@@ -29,6 +29,8 @@ type LiveRun struct {
 	Env         []string
 }
 
+var ErrNoLiveEnvironment = errors.New("scheduler: the run has no live environment")
+
 func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPaused bool) (LiveRun, error) {
 	var live LiveRun
 	if s.superCtx != nil && s.superCtx.Err() != nil {
@@ -38,8 +40,11 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 	if err != nil {
 		return live, err
 	}
+	if run.Status.Terminal() {
+		return live, fmt.Errorf("%w: the run is %s and its container is gone", ErrNoLiveEnvironment, run.Status)
+	}
 	if run.Status != domain.RunRunning && run.Status != domain.RunNeedsAttention {
-		return live, errors.New("run has no live development environment")
+		return live, fmt.Errorf("%w: the run is %s", ErrNoLiveEnvironment, run.Status)
 	}
 	s.mu.Lock()
 	e := s.runs[id]
@@ -50,7 +55,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 			return live, err
 		}
 		if sc.RunID != string(id) || sc.ContainerID == "" || sc.KillRequested || sc.ExitObserved || sc.DestroyPending || sc.Retained || (sc.Paused && !allowPaused) {
-			return live, errors.New("recorded development environment is unavailable or paused")
+			return live, fmt.Errorf("%w: the recorded container is stopping, gone or paused", ErrNoLiveEnvironment)
 		}
 		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(id))
 		if err != nil {
@@ -72,7 +77,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 	}
 	if e.containerID == "" || e.killRequested || e.finalizing || e.destroyPending || e.retained || (e.paused && !allowPaused) {
 		s.mu.Unlock()
-		return live, errors.New("run development environment is unavailable or paused")
+		return live, fmt.Errorf("%w: the container is stopping, gone or paused", ErrNoLiveEnvironment)
 	}
 	if e.status != run.Status {
 		s.mu.Unlock()
