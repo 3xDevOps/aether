@@ -17,6 +17,7 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
     await page.getByLabel('Browser viewport').selectOption('390x844')
     await page.keyboard.press('Escape')
     await fixture.waitText('Viewport 390')
+    await expect(page.getByText('Live frame · 390 × 844')).toBeVisible()
   }
   await expect(page.getByText(/Live frame ·/)).toBeVisible()
   await expect(page.getByText(/You are driving/)).toBeVisible()

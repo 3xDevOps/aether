@@ -41,6 +41,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const active = useRef(true)
   const inputEpoch = useRef(0)
   const sendInput = useRef<(input: BrowserInput) => void>(() => {})
+  const repaintParked = useRef(() => {})
   const composing = useRef(false)
   const compositionTarget = useRef<{ frame: DevBrowserFrameMetadata; control: DevControlFence } | null>(null)
   const pointers = useRef(new Map<number, PointerGesture>())
@@ -78,6 +79,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     let acknowledged = false
     let failed = false
     let latest: BrowserFrame | null = null
+    let parked: BrowserFrame | null = null
     let decoding = false
     let sequence = 0
     const target = { run_id: props.runID, session_id: props.page.session_id, page_id: props.page.page_id, page_revision: props.page.page_revision }
@@ -111,8 +113,14 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
             const element = canvas.current
             const context = element?.getContext('2d')
             const observed = current.current.page
-            if (!element || !context || frame.metadata.page_revision < observed.page_revision ||
-              (frame.metadata.page_revision === observed.page_revision && frame.metadata.viewport_id !== observed.viewport_id)) continue
+            if (!element || !context || frame.metadata.page_revision < observed.page_revision) continue
+            // A frame can outrun the RPC that reports its new viewport, and the
+            // screencast sends nothing more for a still page.
+            if (frame.metadata.page_revision === observed.page_revision && frame.metadata.viewport_id !== observed.viewport_id) {
+              parked = frame
+              continue
+            }
+            parked = null
             element.width = frame.metadata.width
             element.height = frame.metadata.height
             context.drawImage(bitmap, 0, 0, element.width, element.height)
@@ -125,6 +133,12 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
         fail(`Browser image failed: ${message(cause)}`)
         socket.close()
       } finally { decoding = false }
+    }
+    repaintParked.current = () => {
+      if (!parked) return
+      latest ??= parked
+      parked = null
+      void paint()
     }
     socket.onopen = () => socket.send(JSON.stringify(target))
     socket.onmessage = (event: MessageEvent<unknown>) => {
@@ -153,6 +167,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       disposed = true
       active.current = false
       latest = null
+      parked = null
+      repaintParked.current = () => {}
       displayed.current = null
       clearInput()
       socket.close()
@@ -160,6 +176,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     // Revisions arrive in the stream; they are not new observation sessions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.runID, props.page.session_id, props.page.page_id, props.connection])
+  useEffect(() => repaintParked.current(), [props.page.page_revision, props.page.viewport_id])
 
   const send = (input: BrowserInput) => {
     const frame = displayed.current
