@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AddAgent } from '@/components/agents/add-agent'
-import { defaultMode, enhancedSupported, label } from '@/components/agents/agent-copy'
+import { defaultMode, enhancedSupported, label, ready } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
@@ -99,7 +99,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
                   agents={agents}
                   onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                   onRun={caps.hasMethod('run.launch') ? run : undefined}
-                  extra={(agent) => <DefaultMode agent={agent} />}
+                  extra={(agent) => ready(agent) && <DefaultMode agent={agent} />}
                   returnFocusTo={returnFocusTo}
                 />
               )}
