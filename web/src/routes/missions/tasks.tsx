@@ -9,6 +9,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { StateLine, type Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { plainReason } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionTask, MissionTaskScope } from '@/lib/types'
 import { useStore } from '@/store'
 import type { MissionDetail } from '@/store/missions'
@@ -65,7 +66,7 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
         <p key={`${diagnostic.kind}-${index}`} className="text-ui-sm text-state-needs-you">
           {diagnostic.kind.replaceAll('_', ' ')}:{' '}
           {diagnostic.unavailable
-            ? diagnostic.unavailable_why || diagnostic.detail || 'snapshot or evidence is unavailable'
+            ? plainReason(diagnostic.unavailable_why || diagnostic.detail || 'snapshot or evidence is unavailable')
             : diagnostic.paths.join(', ') || diagnostic.detail || 'No paths reported'}
           {diagnostic.peer_run_id && (
             <>
@@ -76,7 +77,7 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
         </p>
       ))}
       {errors.map((attempt) => (
-        <p key={attempt.id} className="text-ui-sm text-state-failed">{attempt.last_error}</p>
+        <p key={attempt.id} className="text-ui-sm text-state-failed">{plainReason(attempt.last_error ?? '')}</p>
       ))}
     </div>
   )

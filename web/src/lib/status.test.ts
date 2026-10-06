@@ -1,5 +1,5 @@
 import { awaitingReview } from '@/lib/needs-you'
-import { groupOf, presentRun, runLabel, stateLabel } from '@/lib/status'
+import { groupOf, plainReason, presentRun, runLabel, stateLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
@@ -47,7 +47,7 @@ describe('run presentation', () => {
     expect(shown({ status: 'completed' })).toEqual({ state: 'done', reason: 'Finished' })
     expect(shown({ status: 'merged' })).toEqual({ state: 'done', reason: 'Merged' })
     expect(shown({ status: 'abandoned' })).toEqual({ state: 'done', reason: 'Closed without merging' })
-    expect(shown({ status: 'failed', reason: 'agent exited 1' })).toEqual({ state: 'failed', reason: 'Failed: agent exited 1' })
+    expect(shown({ status: 'failed', reason: 'agent exited 1' })).toEqual({ state: 'failed', reason: 'Failed: Agent exited with code 1' })
     expect(shown({ status: 'interrupted' })).toEqual({ state: 'failed', reason: 'Interrupted' })
     expect(shown({ status: 'needs-attention' }).state).toBe('needs-you')
   })
@@ -91,5 +91,23 @@ describe('run presentation', () => {
     // A later transition the flag outlived is not an agent outcome to review.
     expect(awaitingReview({ status: 'merged', outcome_unseen: true })).toBe(false)
     expect(awaitingReview({ status: 'running', outcome_unseen: true })).toBe(false)
+  })
+})
+
+describe('plainReason', () => {
+  it.each([
+    ['agent reported success; retained container', 'Agent reported success'],
+    ['closed; retained container', 'Closed'],
+    ['worker finished; retained container', 'Worker finished'],
+    ['agent exited; results committed', 'Agent exited and its changes were committed'],
+    ['agent exited 1: relation "invoices" does not exist', 'Agent exited with code 1: relation "invoices" does not exist'],
+    ['retained container expired', 'Its container was removed when it expired'],
+    ['stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
+    ["the agent's turn ended: max_tokens", 'The agent hit its output limit'],
+    ['review retained evidence', "Review the worker's saved results"],
+    ['killed', 'Stopped'],
+    ['disk quota exceeded', 'disk quota exceeded'],
+  ])('reads %s', (reason, plain) => {
+    expect(plainReason(reason)).toBe(plain)
   })
 })
