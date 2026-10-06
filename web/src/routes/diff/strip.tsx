@@ -16,7 +16,9 @@ import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import type { PatchFile } from '@/routes/diff/parse'
 import { Counts } from '@/routes/diff/patch-view'
+import { PublishDialog } from '@/routes/diff/publish-dialog'
 import { ReviewLocallyDialog, useCanReviewLocally } from '@/routes/diff/review-commands'
+import { useCapability } from '@/store/hooks'
 import type { DiffSnapshot } from '@/store/diff'
 import type { RunRecord } from '@/store/runs'
 
@@ -56,6 +58,7 @@ export function SummaryStrip({
   onJump: (path: string) => void
   onCollapseAll: (collapsed: boolean) => void
 }) {
+  const caps = useCapability()
   const local = useCanReviewLocally(run)
   const [reviewing, setReviewing] = useState(false)
   const more = useRef<HTMLButtonElement>(null)
@@ -131,6 +134,7 @@ export function SummaryStrip({
             )}
           </MenuContent>
         </Menu>
+        {caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} />}
       </span>
       {local && <ReviewLocallyDialog run={run} open={reviewing} onOpenChange={setReviewing} returnFocus={more} />}
     </div>

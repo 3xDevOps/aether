@@ -6,7 +6,6 @@ import { api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
-import { NativeChanges } from '@/routes/diff/native-changes'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { FilePatch, largeFile } from '@/routes/diff/patch-view'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
@@ -64,7 +63,6 @@ export function ChangesView({ runID }: { runID: string }) {
   return (
     <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
       <Land run={run} />
-      {caps.hasMethod('run.git.status') && <NativeChanges key={runID} run={run} wrap={wrap} />}
       <SummaryStrip
         run={run}
         files={files}
