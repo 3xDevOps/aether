@@ -134,7 +134,7 @@ describe('activity feed', () => {
 
     expect(await screen.findByText(/waiting on a question/)).toBeDefined()
     const rows = screen.getAllByRole('listitem')
-    expect(rows[0].textContent).toContain('needs-attention')
+    expect(rows[0].textContent).toContain('Needs you: waiting on a question')
     expect(rows[1].textContent).toContain('pause')
     expect(within(rows[0]).getByRole('img', { name: bob.display_name }).getAttribute('style')).toContain('border-color')
     expect(windowsAsked(client)).toEqual([head - window])
@@ -172,7 +172,7 @@ describe('activity feed', () => {
     ])
     seed()
     render(<ActivityRoute params={{}} client={client} />)
-    expect(await screen.findByText('failed - v1.3.0 - checksum mismatch')).toBeDefined()
+    expect(await screen.findByText('Server update to v1.3.0 failed: checksum mismatch')).toBeDefined()
   })
 
   it('names both runs of an agent message and gives a delivery word only once it is known', async () => {
@@ -200,6 +200,21 @@ describe('activity feed', () => {
     expect(row.textContent).toContain('Acknowledged')
   })
 
+  it('folds taking and releasing control into one visit row per open', async () => {
+    const control = (seq: number, member: string): Event => ({
+      id: `evt_c${seq}`, seq, time: `2026-08-14T10:0${seq - 4190}:00Z`, workspace_id: workspace.id, run_id: 'run_1', actor_id: '', type: 'run.controller', payload: { member_id: member },
+    })
+    seed()
+    render(<ActivityRoute params={{}} client={feedApi([control(4191, alice.id), control(4192, ''), control(4193, bob.id), control(4194, bob.id)])} />)
+    expect(await screen.findByText(/Bob is viewing the run/)).toBeDefined()
+    const rows = within(screen.getByRole('region', { name: 'Activity feed' })).getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent?.replace(/^.*ago/, ''))).toEqual([
+      expect.stringContaining('Bob is viewing the run'),
+      expect.stringContaining('Alice viewed the run'),
+    ])
+    expect(screen.getByText('2 entries')).toBeDefined()
+  })
+
   it('shows each event type and payload as sent under Raw events', async () => {
     seed()
     render(<ActivityRoute params={{}} client={feedApi()} />)
@@ -224,7 +239,7 @@ describe('activity feed', () => {
     }))
     seed()
     render(<ActivityRoute params={{}} client={feedApi(long)} />)
-    await screen.findByText(/entry 1999$/)
+    await screen.findByText(/Entry 1999$/)
     const rows = screen.getAllByRole('listitem')
     expect(rows.length).toBeGreaterThan(5)
     expect(rows.length).toBeLessThan(100)
@@ -252,7 +267,7 @@ describe('activity feed', () => {
     await vi.waitFor(() => expect(windowsAsked(client)).toEqual([head - window, head - 2 * window]))
     await vi.waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3))
     const rows = screen.getAllByRole('listitem')
-    expect(rows[0].textContent).toContain('needs-attention')
+    expect(rows[0].textContent).toContain('Needs you: waiting on a question')
     expect(rows[2].textContent).toContain('resume')
   })
 })

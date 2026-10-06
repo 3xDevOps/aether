@@ -6,7 +6,7 @@ import { Menu, MenuCheckboxItem, MenuContent, MenuTrigger } from '@/components/u
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
-import { EventFeed } from '@/routes/activity/event-feed'
+import { EventFeed, feedItems } from '@/routes/activity/event-feed'
 import { ActivityFilter, agentMessages, type FilterField, type Option } from '@/routes/activity/filter'
 import { MessageHistory, type MessageFilters, noMessageFilters } from '@/routes/activity/message-history'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -26,10 +26,10 @@ export function ActivityRoute({ params, client = api }: RouteProps & { client?: 
   const members = useStore(useShallow((s) => Object.values(s.members)))
   const filters = useStore((s) => s.feedFilters)
   const setFilters = useStore((s) => s.setFeedFilters)
-  const count = useStore((s) => s.feed.length)
   const [messages, setMessages] = useState(false)
   const [messageFilters, setMessageFilters] = useState<MessageFilters>(noMessageFilters)
   const [raw, setRaw] = useState(false)
+  const count = useStore((s) => feedItems(s.feed, raw).length)
 
   useEffect(() => {
     if (filters.workspaceID) return

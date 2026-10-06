@@ -4,10 +4,16 @@ import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
-import { EventRow } from '@/routes/activity/event-row'
+import type { Event } from '@/lib/types'
+import { EventRow, VisitRow } from '@/routes/activity/event-row'
 import { VirtualList } from '@/routes/activity/virtual-list'
+import { type FeedItem, foldVisits } from '@/routes/activity/visits'
 import { olderFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
+
+export function feedItems(feed: readonly Event[], raw: boolean): FeedItem[] {
+  return raw ? feed.map((event) => ({ kind: 'event', event })) : foldVisits(feed)
+}
 
 export function EventFeed({ client, raw }: { client: Api; raw: boolean }) {
   const feed = useStore((s) => s.feed)
@@ -15,7 +21,7 @@ export function EventFeed({ client, raw }: { client: Api; raw: boolean }) {
   const loading = useStore((s) => s.feedLoading)
   const error = useStore((s) => s.feedError)
   const truncated = useStore((s) => s.feedTruncated)
-  const newestFirst = useMemo(() => [...feed].reverse(), [feed])
+  const newestFirst = useMemo(() => feedItems(feed, raw).reverse(), [feed, raw])
   const scroller = useRef<HTMLDivElement>(null)
 
   return (
@@ -31,7 +37,7 @@ export function EventFeed({ client, raw }: { client: Api; raw: boolean }) {
         <EmptyState title="Nothing here yet">Activity appears here as your team works in this workspace.</EmptyState>
       )}
       <VirtualList data={newestFirst} scrollRef={scroller}>
-        {(event) => <EventRow key={event.id} event={event} raw={raw} />}
+        {(item) => (item.kind === 'visit' ? <VisitRow key={item.id} visit={item} /> : <EventRow key={item.event.id} event={item.event} raw={raw} />)}
       </VirtualList>
       {(truncated || older) && (
         <div className="flex flex-col items-start gap-2 px-4 py-3">

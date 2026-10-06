@@ -1,13 +1,12 @@
 // Shared by the Activity view and a run's Raw events so the two feeds cannot drift.
 
-import { memo, type ReactNode } from 'react'
+import { memo } from 'react'
+import { describeEvent } from '@/components/event-words'
 import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { typeLabel, type EventType } from '@/lib/events'
-import { budgetStateLabel, money } from '@/lib/format'
+import { typeLabel } from '@/lib/events'
 import { runLabel } from '@/lib/status'
-import { modeLabel } from '@/routes/run/agent-name'
-import type { BudgetState, Event } from '@/lib/types'
+import type { Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
@@ -57,143 +56,3 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
     </li>
   )
 })
-
-// Keyed by `EventType` so a missing describer is a compile error.
-const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> = {
-  'run.status': (p) => join([p.to, p.reason]),
-  'run.input': (p) => Array.isArray(p.pending_inputs) && p.pending_inputs.length > 0
-    ? `${p.pending_inputs.length} outstanding input request${p.pending_inputs.length === 1 ? '' : 's'}`
-    : 'input requests resolved',
-  'run.deleted': () => 'record removed',
-  'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
-  'run.controller': (p) => (p.member_id ? <span><MemberName id={p.member_id} /> took control</span> : 'control released'),
-  'run.mode': (p) => modeLine(p),
-  'run.archived': (p) => (p.archived_at ? 'archived' : 'restored'),
-  'run.outcome_seen': () => 'owner opened the finished run',
-  'run.title': (p) => String(p.title ?? ''),
-  'run.agent': (p) => join([p.kind, p.tool, p.detail]),
-  'run.diff': (p) => suffix(fileCount(p.files), 'changed'),
-  'run.cost': (p) => `${p.input_tokens} in, ${p.output_tokens} out`,
-  'run.overlap': (p) => overlapLine(p.with),
-  'workspace.timeline': (p) => timelineLine(p),
-  'workspace.approval': (p) => join([p.action, p.decision]),
-  'workspace.presence': (p) => join([p.state]),
-  'workspace.budget': (p) => budgetLine(p),
-  'git.branch': (p) => join([p.branch, p.commit]),
-  'sync.conflict': (p) => suffix(fileCount(p.files), 'in conflict'),
-  'server.update': (p) => join([p.phase, p.version, p.detail]),
-  'workspace.room_message': (p) => join([p.kind, p.state, p.message_id]),
-  'workspace.evidence_packet': (p) => join([p.trigger, p.packet_id]),
-  'coord.message': (p) => (
-    <span>
-      <RunName id={p.from_run_id} /> → <RunName id={p.to_run_id} /> · {String(p.kind ?? 'message')}
-    </span>
-  ),
-  'mission.changed': (p) => <MissionName id={p.mission_id} />,
-  'coord.message.acked': (p) => (
-    <span>
-      <RunName id={p.to_run_id} /> acknowledged <code>{String(p.message_id ?? '')}</code>
-    </span>
-  ),
-}
-
-function RunName({ id }: { id: unknown }) {
-  const runID = typeof id === 'string' ? id : ''
-  const run = useStore((s) => s.runs[runID])
-  const navigate = useStore((s) => s.navigate)
-  if (!run) return <code>{runID}</code>
-  return (
-    <button
-      type="button"
-      onClick={() => navigate('run', { runId: run.id })}
-      className={cn(focusRing, 'hover:underline')}
-    >
-      {runLabel(run)}
-    </button>
-  )
-}
-
-function MemberName({ id }: { id: unknown }) {
-  const memberID = typeof id === 'string' ? id : ''
-  return useStore((s) => s.members[memberID]?.display_name) ?? memberID
-}
-
-function modeLine(p: Record<string, unknown>): string {
-  const mode = modeLabel[String(p.mode)] ?? String(p.mode ?? '')
-  if (p.switching) return `switching to ${mode}`
-  return p.reason ? `stayed ${mode}: ${String(p.reason)}` : `now ${mode}`
-}
-
-function MissionName({ id }: { id: unknown }) {
-  const missionID = typeof id === 'string' ? id : ''
-  const objective = useStore((s) => s.missions[missionID]?.objective)
-  return objective ? objective.split('\n')[0] : <code>{missionID}</code>
-}
-
-export function describeEvent(event: Event): ReactNode {
-  if (!Object.hasOwn(describers, event.type)) return ''
-  return describers[event.type as EventType]((event.payload ?? {}) as Record<string, unknown>)
-}
-
-function timelineLine(p: Record<string, unknown>): ReactNode {
-  if (p.kind !== 'report') return join([p.kind, p.message])
-  const outcome = boundedText(p.outcome, 64)
-  const summary = boundedText(p.summary, 512)
-  const nextAction = boundedText(p.next_action, 512)
-  const reportID = boundedText(p.report_id, 128)
-  const refs = Array.isArray(p.evidence_refs)
-    ? p.evidence_refs
-        .filter((ref): ref is string => typeof ref === 'string' && ref.length > 0)
-        .slice(0, 8)
-        .map((ref) => boundedText(ref, 128))
-    : []
-  return (
-    <span className="inline-flex max-w-full flex-wrap gap-x-2 gap-y-1">
-      {reportID && <span>Report: <code>{reportID}</code></span>}
-      {outcome && <span>Outcome: {outcome}</span>}
-      {summary && <span>Summary: {summary}</span>}
-      {nextAction && <span>Next action: {nextAction}</span>}
-      {refs.length > 0 && (
-        <span>
-          Evidence: {refs.map((ref, index) => (
-            <code key={`${ref}-${index}`} className="mr-1">{ref}</code>
-          ))}
-        </span>
-      )}
-    </span>
-  )
-}
-
-function boundedText(value: unknown, max: number): string {
-  if (typeof value !== 'string') return ''
-  return value.length > max ? `${value.slice(0, max)}…` : value
-}
-
-// An absent or empty `with` means the run's overlaps cleared.
-function overlapLine(peers: unknown): string {
-  if (!Array.isArray(peers) || peers.length === 0) return 'no longer overlapping'
-  return `${peers.length} ${peers.length === 1 ? 'run' : 'runs'} in the same files`
-}
-
-// The spend is a floor whenever a run went unmetered, so it is rendered as one.
-function budgetLine(p: Record<string, unknown>): string {
-  const spend = money.format(Number(p.spend_usd ?? 0))
-  const floor = Number(p.unmetered_runs ?? 0) > 0 ? '+' : ''
-  const cap = Number(p.limit_usd ?? 0)
-  const state = budgetStateLabel[p.state as BudgetState] ?? p.state
-  const of = cap > 0 ? ` of ${money.format(cap)}` : ''
-  return join([state, `${spend}${floor}${of}`, p.reason])
-}
-
-function suffix(count: string, tail: string): string {
-  return count ? `${count} ${tail}` : ''
-}
-
-function fileCount(files: unknown): string {
-  if (!Array.isArray(files)) return ''
-  return `${files.length} ${files.length === 1 ? 'file' : 'files'}`
-}
-
-function join(parts: unknown[]): string {
-  return parts.filter(Boolean).map(String).join(' - ')
-}
