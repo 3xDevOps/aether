@@ -34,6 +34,12 @@ var (
 
 const methodSteering = "_session/steering"
 
+// deliveryMarker is fed to the SDK ahead of the agent's output and never
+// sent on the wire. The SDK hands every notification to the handler with one
+// context, which it cancels only once the notifications read before the
+// connection ended have been handled; the marker's call captures it.
+const deliveryMarker = "_aether/delivery"
+
 // AgentInfo is what the agent advertised in initialize that the host acts on.
 type AgentInfo struct {
 	Name            string
@@ -113,6 +119,8 @@ type Conn struct {
 	events connEvents
 
 	info         AgentInfo
+	inbound      context.Context
+	inboundSet   chan struct{}
 	sessionID    atomic.Value
 	replaying    atomic.Bool
 	lastActivity atomic.Int64
@@ -127,16 +135,18 @@ type Conn struct {
 
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
 	c := &Conn{
-		w:        w,
-		logger:   logger,
-		events:   events,
-		pending:  make(map[string]*pendingRequest),
-		resolved: make(map[string]bool),
+		w:          w,
+		logger:     logger,
+		events:     events,
+		inboundSet: make(chan struct{}),
+		pending:    make(map[string]*pendingRequest),
+		resolved:   make(map[string]bool),
 	}
 	c.idle = sync.NewCond(&c.mu)
 	c.sessionID.Store("")
 	c.touch()
-	c.rpc = acp.NewConnection(c.handle, w, r)
+	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
+	c.rpc = acp.NewConnection(c.handle, w, io.MultiReader(marker, r))
 	c.rpc.SetLogger(logger)
 	return c
 }
@@ -148,6 +158,13 @@ func (c *Conn) LastActivity() time.Time { return time.Unix(0, c.lastActivity.Loa
 
 // Done is closed when the agent's output ends.
 func (c *Conn) Done() <-chan struct{} { return c.rpc.Done() }
+
+// delivered returns once the connection has ended and every notification
+// read before the end has been handled, or the SDK gave up waiting for them.
+func (c *Conn) delivered() {
+	<-c.inboundSet
+	<-c.inbound.Done()
+}
 
 func (c *Conn) closed() bool {
 	select {
@@ -340,6 +357,11 @@ func (c *Conn) listSessions(ctx context.Context, cwd, cursor string) ([]SessionS
 }
 
 func (c *Conn) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
+	if method == deliveryMarker {
+		c.inbound = ctx
+		close(c.inboundSet)
+		return nil, nil
+	}
 	c.touch()
 	switch method {
 	case acp.ClientMethodSessionUpdate:

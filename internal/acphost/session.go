@@ -201,8 +201,8 @@ func (s *Session) Info() AgentInfo { return s.conn.Info() }
 // Log is the run's item log, for history reads.
 func (s *Session) Log() *Log { return s.log }
 
-// Done is closed once the agent connection ended, the interruption (if any)
-// is recorded, and every callback has run.
+// Done is closed once the agent connection ended, everything the agent sent
+// and the interruption (if any) are recorded, and every callback has run.
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 // Close closes the agent's stdin. The adapter exits on EOF; Done follows
@@ -296,6 +296,11 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 
 func (s *Session) runTurn(blocks []acp.ContentBlock) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
+	if err != nil && s.conn.closed() {
+		// Record what the agent sent before it went away ahead of the
+		// interruption.
+		s.conn.delivered()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -550,6 +555,7 @@ func (s *Session) requestClosed(r Request) {
 // requests, cleared inputs and an idle state.
 func (s *Session) watch() {
 	<-s.conn.Done()
+	s.conn.delivered()
 	s.stop()
 	s.conn.drain()
 	s.mu.Lock()

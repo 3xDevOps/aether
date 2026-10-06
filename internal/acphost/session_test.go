@@ -559,6 +559,46 @@ func TestConnectionLossMidTurn(t *testing.T) {
 	}
 }
 
+// The SDK still hands queued notifications over after the agent's output
+// ends; every update the agent sent before exiting must be recorded, ahead of
+// the interruption.
+func TestUpdatesBeforeExitAreKept(t *testing.T) {
+	const n = 1000
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		for i := range n {
+			m.update(map[string]any{"sessionUpdate": "plan", "entries": []any{map[string]any{"content": fmt.Sprint(i), "priority": "high", "status": "pending"}}})
+		}
+		_ = m.stdout.Close()
+		<-call.ctx.Done()
+		return nil, nil
+	}
+	s, _ := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("session did not end")
+	}
+	log, err := OpenLog(s.cfg.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = log.Close() }()
+	its, err := log.ReadAfter(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(ofKind(its, KindPlan)); got != n {
+		t.Fatalf("recorded %d of %d plan updates sent before the agent exited", got, n)
+	}
+	if last := its[len(its)-1]; last.Kind != KindTurnEnd || last.StopReason != "interrupted" {
+		t.Fatalf("last item %+v, want the interrupted turn end", last)
+	}
+}
+
 func TestRestartClosesAnOpenTurn(t *testing.T) {
 	path := t.TempDir() + "/run.items.jsonl"
 	log, err := OpenLog(path)
