@@ -2,14 +2,16 @@
 
 Aether's conflict radar identifies active runs that edit the same files. When
 coordination is enabled, each run also gets a small, durable channel for
-communicating with radar-authorized runs; a current mission assignment may add
-server-authorized peers before any file overlap exists. The channel is advisory:
+communicating with radar-authorized runs. A swarm is one objective handled by
+a group of runs: an integrator run splits it into tasks and dispatches worker
+runs to do them. A current swarm assignment may add server-authorized peers
+before any file overlap exists. The channel is advisory:
 it does not lock files, pause work, or decide which change wins.
 
 Candidate verification and delivery is a separate authenticated service
 described in [integration.md](integration.md). Coordination records remain
 observations/evidence; they do not constitute an accepted submission, a
-frozen candidate revision, or a landed upstream change. The mission-policy
+frozen candidate revision, or a landed upstream change. The swarm-policy
 adapter exposes a narrow agent integration CLI only to the current integrator:
 `prepare`, `show`, `verify`, `request-delivery`, and `deliver`. Ordinary and
 worker runs do not receive these commands.
@@ -31,7 +33,7 @@ manual bridge, use the `/tmp` configuration example in
 
 Inside a container, the run directory appears at `/run/aether`. Only
 `coord3.sock` is served. A socket from an older wire version is not rebound;
-affected runs must be relaunched with the current server.
+affected runs must be reopened with the current server.
 
 The server also mounts one verified, read-only staged binary at both of these
 paths:
@@ -41,7 +43,7 @@ paths:
 /usr/local/bin/aether-internal
 ```
 
-The first path serves the hidden MCP entry point and the existing harness
+The first path serves the hidden MCP entry point and the existing agent
 lifecycle hook. The second path is the agent-facing coordination CLI. The
 coordination directory and both executable mounts are constructed by Aether,
 not requested by a run.
@@ -87,7 +89,7 @@ consumes the inbox. An admitted wake response is an input action; ordinary
 status is not. The CLI helper supplies its own 30-second default and always
 emits all four of its documented result fields.
 
-Mission-assigned runs additionally receive assignment-scoped `task.*` and `worker.*` methods
+Swarm runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
 `integration.prepare`, `integration.show`, `integration.verify`,
 `integration.request_delivery`, `integration.deliver`,
@@ -95,7 +97,7 @@ published by `coord.status`; the current integrator also receives exactly
 methods use the same run-authenticated socket but are not part of the base
 `coord.*` set.
 Every allow-list is derived from the current assignment, not from
-caller-supplied roles or identities. A mission authorizes its integrator
+caller-supplied roles or identities. A swarm authorizes its integrator
 and active worker runs as peers before any file overlap exists, on top of
 the radar active/grace authorization described below.
 
@@ -106,12 +108,12 @@ capabilities extend that baseline; they do not replace it. Development
 capabilities come from the live development service, not the assignment.
 The sender is never a parameter. An ordinary run can message
 only a peer in the same workspace that the radar currently marks as
-overlapping, or a peer in its ten-minute overlap grace period. A mission run
+overlapping, or a peer in its ten-minute overlap grace period. A swarm run
 can message those same radar peers plus its current assignment peers, so a
-worker that overlaps a run outside its mission can still answer the overlap
+worker that overlaps a run outside its swarm can still answer the overlap
 notice. Status lists the assignment peers first with `state: "mission"` even
 when no file overlap exists, carrying the overlapping files when the radar
-also reports one; radar peers outside the mission follow with `state:
+also reports one; radar peers outside the swarm follow with `state:
 "active"` or `"grace"`. Any other run is refused. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
@@ -146,9 +148,9 @@ also enforces these bounds:
 
 The method set is closed. Development operations use an explicit `dev.*`
 allow-list and are scoped to this run's development terminals, browser, control
-leases and captures; they cannot steer the primary harness. There is no generic
+leases and captures; they cannot send input to the run's own agent. There is no generic
 RPC command, Git engine, caller-selected run identity or socket override.
-Assignment-scoped task and worker methods still enforce the role, mission,
+Assignment-scoped task and worker methods still enforce the role, swarm,
 revision, generation, and current authority checks on the server.
 
 ## Delivery, acknowledgement, and retries
@@ -187,47 +189,47 @@ are four ways to notice mail:
    `aether-internal inbox --wait 30`. The current tool call receives the
    original attributed message and acknowledgement token; a native observer
    must not start an extra turn for that arrival.
-2. **A native wake can resume a live idle harness.** The loaded pi, OMP, and
+2. **A native wake can resume a live idle agent.** The loaded pi, OMP, and
    version-matched OpenCode integrations observe unread IDs with bounded
    helper waits and use their native session APIs for a follow-up. The
-   server admits that wake only for the current eligible TUI run.
+   server admits that wake only for the current eligible Standard run.
 3. **A boundary hook supplies context at the next native event.** Claude
    Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI command hooks do not
    watch an already-idle session. Mail arriving after their last hook waits
    for the next supported boundary or explicit inbox read.
-4. **An enhanced run is prompted by the server.** When mail arrives or a
+4. **An Enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox
    instruction, under the same admission as a native wake. Each set of new
    unread messages starts at most one such turn. Hooks stay silent in these runs
    (`AETHER_ENHANCED=1`); see [enhanced-runs.md](enhanced-runs.md#mail).
 
-See [per-harness setup and limits](harnesses.md#incoming-coordination-hooks).
+See [per-agent setup and limits](harnesses.md#incoming-coordination-hooks).
 All integrations add only a trusted instruction to read the inbox. They
 never acknowledge a batch or promote a peer's body into system/developer
 instructions. The agent reads the original, attributed payload through `inbox`.
 
 Hooks also direct agents with overlapping edits to `status`. Integrators are
-told to refresh `mission plan show` and `worker list` when the mission phase,
+told to refresh `mission plan show` and `worker list` when the swarm phase,
 open-question count, or integrator generation changes. Those APIs remain
 authoritative; no terminal notice is required.
 
 Claude Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
 in the transcript, so their hooks announce each notice once per state: the
-unread message IDs, the mission state, and the overlapping files. A changed state is
+unread message IDs, the swarm state, and the overlapping files. A changed state is
 announced again; a Stop still blocks while mail is unread. The hook records
 what it announced in `$TMPDIR/aether-hook-<run>-<harness>.json`; a missing
 record repeats the notice. pi, OMP, and OpenCode add context per model call
 without keeping it, so their notices repeat.
 
-Every mission-worker report, whatever its outcome, is forwarded to the
+Every swarm worker's report, whatever its outcome, is forwarded to the
 current integrator as an ordinary inbox message: `from_run_id` is the
 reporting worker, `body` is its complete report summary, and `correlation_id`
 is the report ID. This message
 uses the same durable delivery and explicit acknowledgement as peer messages.
 If the inbox is full, the existing report-publication retry retains the work.
 
-Wake admission rechecks live run and mission authority, including protection,
+Wake admission rechecks live run and swarm authority, including protection,
 human takeover, current assignment/revision/generation, and submitted or
 settled attempts. A held run keeps its mail. Releasing a hold allows a later
 bounded observer response to admit still-unread mail; it does not restart an
@@ -236,40 +238,40 @@ boundary as human input, with a write bound of at most three seconds, not
 while holding control through the long wait. A hold committed first prevents
 dispatch; input already accepted before a later hold may still be processed.
 
-Mission revision and generation changes are serialized with the complete
+Swarm revision and generation changes are serialized with the complete
 wake-frame dispatch as well; checking authority once before writing is not
 enough. Inbox-consumer registration is also ordered against that final write:
 an earlier registered consumer keeps priority, but a consumer registered
 after an admitted frame cannot revoke the already-accepted wake.
-Mission/control admission is nonblocking for this optional action: if either
+Swarm/control admission is nonblocking for this optional action: if either
 boundary is busy, wake is suppressed rather than queued behind its holder.
 The receiver updates observed IDs without adding notified IDs, so a later
 bounded observation can reconsider mail without losing or acknowledging it.
 
-Opening a mission worker's dashboard terminal defaults to read-only viewing;
-viewing alone does not acquire human control. Use **Take control** to request
-write access and **Release** to return control. Ordinary owner terminals keep
-their existing automatic write behavior.
+Opening a swarm worker's terminal in the dashboard defaults to read-only
+viewing; viewing alone does not acquire human control. Use **Take control** to
+request write access and **Release** to return control. Ordinary owner
+terminals keep their existing automatic write behavior.
 
-Changing an attached read-only mirror to **Write** commits the mission
-takeover hold only after the
+Taking control of an attached read-only terminal (`Write=true` on the
+interactive control stream) commits the swarm takeover hold only after the
 live terminal is ready, inside the same admission boundary. An explicit
 release (`Write=false` on the interactive control stream) clears the hold
 only after read-only readiness succeeds. A failed transition retains the
 previous lease and hold; readiness is restored or the stream fails closed.
 Disconnecting or letting the control lease expire does **not** clear the
-durable mission hold, so it cannot silently re-enable native wake.
+durable swarm hold, so it cannot silently re-enable native wake.
 
 Native integrations also honor the owning session's Stop/abort and cancel
 stale helper results on shutdown or session replacement. They do not override
-approval waits. See the harness-specific resume behavior before relying on
+approval waits. See the agent-specific resume behavior before relying on
 automatic wake after a Stop.
 
 Missing, disabled, untrusted, unsupported, or failed integrations do not lose
-mail. Inspect the real harness error and read the inbox explicitly. There is
-no silent PTY fallback, attachment to an arbitrary running TUI, or automatic
-restart of an exited or closed run. Headless runs may use supported boundary
-hooks while alive, but do not receive native idle wake.
+mail. Inspect the real agent error and read the inbox explicitly. There is
+no silent PTY fallback, attachment to an arbitrary running terminal agent, or
+automatic restart of an exited or closed run. Background runs may use
+supported boundary hooks while alive, but do not receive native idle wake.
 
 Accepted messages, questions, and replies retain their originating run (see
 [Seeing agent messages](#seeing-agent-messages)). **Durable acceptance**, **an admitted wake**, and
@@ -282,7 +284,7 @@ For a native-trigger investigation, retain separate evidence of the send
 receipt/message ID, helper wake admission, native follow-up acceptance, the
 resulting model turn, and the agent's explicit inbox read and acknowledgement.
 A reply after a manually supplied prompt proves messaging, not an idle wake.
-Configured files or a helper-only check do not prove that the root harness
+Configured files or a helper-only check do not prove that the agent
 loaded the integration or received the turn.
 
 ## Seeing agent messages
@@ -315,7 +317,7 @@ Each row has `id`, `workspace_id`, `mission_id`, `from_run_id`, `to_run_id`,
 `acked_at`. `kind` is `message`, `question`, `reply`, or `report`: a worker
 report forwarded to its integrator lists as `report` and adds the report's
 `outcome`, `summary`, and `next_action`. `delivered_at` is when the
-recipient's harness first read the batch and `acked_at` when the agent
+recipient's agent first read the batch and `acked_at` when the agent
 acknowledged it; neither proves the model read the body.
 
 Two events follow the mail live. They come from a durable outbox, so a server
@@ -327,9 +329,11 @@ restart delays them rather than losing them, and neither carries the body:
 | `coord.message.acked` | recipient | `message_id`, `to_run_id`, `acked_at` |
 
 The dashboard's Activity feed shows `coord.message` as an **Agent message**
-row with the sender, recipient and kind, such as `Planner → Backend ·
-question`; `aether timeline` prints it as `<from-run> -> <to-run> ·
-question`. Neither shows the body. Bodies come from `coord.messages.list`:
+row: an icon for the kind, then sender → recipient and, once the message is
+loaded, its delivery word, such as `Planner → Backend · Delivered`. An
+acknowledgement shows as an **Agent message acknowledged** row.
+`aether timeline` prints the send as `<from-run> -> <to-run> · question`.
+Neither shows the body. Bodies come from `coord.messages.list`:
 the swarm page's **Agent messages** section lists a swarm's mail grouped by
 thread, with each body and its delivery word (`Sent`, `Delivered`,
 `Acknowledged`)
@@ -343,7 +347,7 @@ backward from `before_seq` (zero: the log head; pass the previous page's
 `older_seq`), always returning events oldest first. It accepts
 `mission_id`, which matches events of every run
 that has served the swarm, and its `run_id` filter also matches mail
-addressed to the run. The two mission filters differ: the timeline also
+addressed to the run. The two swarm filters differ: the timeline also
 shows mail a swarm run received from a run outside the swarm, which
 `coord.messages.list` omits because its sender carries no swarm stamp. A
 run snapshot's
@@ -427,17 +431,17 @@ its own task ID:
 Use the actual command from skill, not the example ID above. Read the returned
 task revision, objective, scope, exclusions, and evidence requirements before
 acting. Workers may read and propose; they must not spawn workers, accept tasks,
-or perform mission/integration operations. A worker's skill also tells it to
+or perform swarm or integration operations. A worker's skill also tells it to
 check the inbox after reading the task, before each commit, and before
 reporting, and that `status` lists its sibling workers. Ordinary runs have no
-mission authority. Help documents syntax, not permission.
+swarm authority. Help documents syntax, not permission.
 
 Every role gets `status`, `inbox`, and top-level help bootstrap commands.
 An integrator's skill states its role before its phase guidance: turn the
 objective into tasks for workers and coordinate them, not implement the
 objective itself. Integrators additionally get task/worker help, list
-commands using the current mission ID, integrator generation, and approved
-account/harness/mode choices.
+commands using the current swarm's mission ID, integrator generation, and
+approved account/agent/mode choices.
 Integration guidance appears only in `active`. Use the full
 status result for the current capability set.
 
@@ -455,12 +459,12 @@ need run state return `-32004` and exit with status 4 when the socket is not
 available. Message, question, reply, and report bodies read from flags, files,
 or standard input are capped at 4 KiB before a request is sent.
 
-`skill` prints one line with the inbox hook state for this run's harness,
+`skill` prints one line with the inbox hook state for this run's agent,
 named by `AETHER_HARNESS`. `skill --hooks` checks the standard hook
-configuration locations for every harness without changing them. It reports
+configuration locations for every agent without changing them. It reports
 configured, missing, invalid, disabled, or unverified installations and prints
 the matching file-export command, destination, merge instructions, and
-reload/trust steps. Install only the current harness.
+reload/trust steps. Install only the current agent's hooks.
 Configured on disk does not mean loaded or trusted. Explicit configuration
 paths, additional project ancestors, packages, and runtime overrides can be
 outside this bounded check.
@@ -476,19 +480,19 @@ aether-internal hook --help
 The files are embedded in the mounted binary, so installation needs no download.
 Exporting a file needs no socket. Merge JSON hook entries rather than replacing
 existing settings; copy extensions only after checking the destination.
-See [harness installation](harnesses.md#incoming-coordination-hooks) for each
+See [agent installation](harnesses.md#incoming-coordination-hooks) for each
 destination, and [authoring an integration](harness-integration.md) for an
-unsupported harness.
+unsupported agent.
 
 The supplied files invoke `aether-internal hook <harness> <event>`. Command hooks
-read native JSON on stdin and write that harness's native JSON response.
+read native JSON on stdin and write that agent's native JSON response.
 Extension hooks use event `context` and receive plain trusted context text.
-With no pending mail or applicable overlap/mission guidance, stdout is empty.
+With no pending mail or applicable overlap/swarm guidance, stdout is empty.
 A missing coordination socket also produces no output, so a user-level hook
 can stay installed outside Aether. An existing but broken socket or other
 failure returns nonzero and the actual error on stderr, never a success hint.
 Stop hooks request at most one continuation for pending mail or an integrator's
-final mission refresh, even with an empty inbox. Native repeat-stop guards
+final swarm refresh, even with an empty inbox. Native repeat-stop guards
 prevent a continuation loop; ordinary and worker runs with empty inboxes do
 not get a forced refresh.
 
@@ -519,7 +523,7 @@ for error handling and lifecycle requirements.
 
 ### Development terminals, browser and captures
 
-Development is independent of conflict coordination and mission assignment.
+Development is independent of conflict coordination and swarm assignment.
 Run `status` first: command help describes syntax, while `capabilities` is the
 live server allow-list. Every method in the following closed families has a
 thin typed CLI command:
@@ -574,8 +578,8 @@ app; `terminal stop` stops the owned process group.
 Browser startup is lazy and works on a standard **headless Ubuntu server**.
 There is no X11, Wayland, Xvfb, desktop session, host browser or disabled
 sandbox requirement. The isolated companion shares the run network namespace
-so an app's run-local URL is reachable; it does not mount the checkout, member
-home, credentials or Docker socket.
+so an app's run-local URL is reachable; it does not mount the checkout, the
+member's Environment home, credentials or Docker socket.
 
 ```sh
 aether-internal skill browser
@@ -628,14 +632,14 @@ cancellation still applies.
 Use the full loop: edit, run, observe, interact, correct, and verify the changed
 behavior. Browser snapshots/console/network and terminal output/screens are
 useful diagnostics but not image-based evidence. Open the screenshot artifact
-path with a harness image-consuming tool **only if one actually exists**. If
-the harness cannot read images, report that exact limitation and the checks
+path with the agent's image-reading tool **only if one actually exists**. If
+the agent cannot read images, report that exact limitation and the checks
 actually performed; never infer visual correctness from text alone. Transient
-captures require live **Steer** and backing-account access; they are not durable
+captures require the live `steer` permission and backing-account access; they are not durable
 evidence references.
 
 Before deleting captures, stopping the run or submitting a terminal worker
-report (including headless completion), explicitly retain the reviewed selection:
+report (including Background completion), explicitly retain the reviewed selection:
 
 ```sh
 printf '%s\n' '{"artifact_ids":["<capture_id>"],"verification_notes":"Observed behavior and verification limits","idempotency_key":"review-captures-1"}' |
@@ -643,7 +647,8 @@ printf '%s\n' '{"artifact_ids":["<capture_id>"],"verification_notes":"Observed b
 ```
 
 `artifact retain` returns `result.packet_id`. Read back that packet in the
-dashboard's evidence view, including its selected captures and notes, then pass
+run's **Captures** dialog (the run's **More** menu > **Captures…**), including
+its selected captures and notes, then pass
 the ID to the existing `report --evidence-ref <packet_id>`. Retention does not
 report an outcome or prove verification. Select 1–64 captures; optional notes
 must be valid UTF-8 and at most 4096 bytes. Retained and staged capture files
@@ -683,14 +688,14 @@ fork PR's **base repository/branch** and **head owner/branch** are distinct.
 Inspect them explicitly; do not push to a guessed mirror URL or rewrite origin
 implicitly. Inspect existing PR metadata before native `gh pr create`/update
 to avoid duplicate or wrong-base PRs. Follow the assignment's approval and
-mission integration boundaries; discovery does not authorize PR merging,
+swarm integration boundaries; discovery does not authorize PR merging,
 automatic screenshot publication, or disabling commit signing.
 
 Every pull request description ends with `Opened from Aether run <run id>`;
 `skill git` prints that line with the run's `run_id` from `status` filled in.
 The count of agent-made pull requests is derived from this line.
 
-Custom or argv-overridden harnesses still receive the staged CLI and run socket
+Custom or argv-overridden agents still receive the staged CLI and run socket
 but no guessed vendor startup flags. In taskless mode their authors must invoke
 `aether-internal skill` through their own native startup mechanism or manually.
 No fake task, permanent repository settings or implicit MCP registration is
@@ -732,10 +737,10 @@ are installed; a hint is not a read or an acknowledgement.
 
 ### Mission phases
 
-A mission is created in `planning`. The integrator asks the accountable human
+A swarm is created in `planning`. The integrator asks the accountable human
 a question only if the objective is genuinely ambiguous, proposes tasks, and
 runs `mission start`. No human approves the plan, and no worker starts before
-`mission start`. The phase is mission state; every method below is refused in
+`mission start`. The phase is swarm state; every method below is refused in
 the wrong phase with code `-32002`.
 
 | Phase | Worker dispatch | Integrator task mutations |
@@ -756,12 +761,12 @@ completed, cancelled: terminal
 ```
 
 `mission.cancel` is the human's stop button. It is not reachable from the run
-socket; the accountable human or an admin cancels from the swarm page's More menu or
-with `aether swarm cancel`. Cancelling stops every live worker and the
+socket; the accountable human or an admin cancels with **Cancel swarm…** in the
+swarm page's **More swarm actions** menu or with `aether swarm cancel`. Cancelling stops every live worker and the
 integrator run.
 
 Only the current integrator may use these commands, and only for its own
-mission:
+swarm:
 
 ```sh
 /usr/local/bin/aether-internal mission question ask \
@@ -791,7 +796,7 @@ while waiting.
 `mission start` is refused while a question is unanswered or when no task is
 proposed. It rechecks that the accountable human may still launch runs, then,
 in one transaction, accepts every proposed revision with the integrator run as
-the accepting run and moves the mission to `active`. While the mission is in
+the accepting run and moves the swarm to `active`. While the swarm is in
 `planning`, revising a task replaces the draft: the previous revision is
 superseded and the new one becomes current.
 
@@ -803,24 +808,26 @@ inbox as an ordinary message: `from_run_id` is the worker, `body` is the
 report summary, and `correlation_id` is the report ID; `worker list` shows the
 outcome. A worker whose run ends without reporting sends nothing, so check
 `worker list` before declaring completion. The integrator's hooks announce a
-changed mission phase or open-question count once; an enhanced integrator
+changed swarm phase or open-question count once; an Enhanced integrator
 is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries),
-and with the same mission-update instruction when its phase, open-question
+and with the same swarm-update instruction when its phase, open-question
 count or generation changes.
-The integrator is always interactive (`tui` or `acp`): `mission.create` and
-`mission.replace-integrator` refuse `headless` with `-32602` and
+The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
+`mission.create` and `mission.replace-integrator` refuse Background
+(`headless`) with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
-account, harness, and mode among the execution choices;
-`mission.replace-integrator` accepts any listed account and harness in `tui`
-or `acp`, so a swarm whose choices are all headless can still get an
-interactive integrator; `aether swarm replace-integrator` always sends `tui`. Both refuse, with `-32602` and `integrator harness <name> cannot
-launch in <mode> mode: <cause>`, a harness the integrator's run owner cannot
+account, agent, and mode among the execution choices;
+`mission.replace-integrator` accepts any listed account and agent in Standard
+or Enhanced, so a swarm whose choices are all Background can still get an
+interactive integrator; `aether swarm replace-integrator` always asks for
+Standard (`tui`). Both refuse, with `-32602` and `integrator harness <name> cannot
+launch in <mode> mode: <cause>`, an agent the integrator's run owner cannot
 start in that mode on that account, such as one whose definition the run owner no
-longer has, or the run owner's own member-defined harness on another
+longer has, or the run owner's own member-defined agent on another
 member's account, where it never runs. Workers may
-still run headless. If the integrator's
-harness has already exited, the line lands in the shell left on its terminal
+still run in Background. If the integrator's
+agent has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.
 
 Drop a pending revision without touching the task:
@@ -900,7 +907,7 @@ For a useful plan, also declare paths and evidence requirements:
 paths. Each evidence requirement has a non-empty `kind` and optional `detail`.
 Kinds name retained evidence sources, such as `transcript` or `git`, not test
 types. Describe the required test output in `detail`; do not use `test` as a kind.
-`depends_on` lists the IDs of tasks in the same mission whose output this task
+`depends_on` lists the IDs of tasks in the same swarm whose output this task
 needs. Until every one of them has an accepted submission for its current
 revision, `task show` reports the task as `blocked` with a `dependency` blocker
 naming the task, and `worker start` is refused with code `-32003` and a
@@ -931,7 +938,7 @@ Use a fresh key for each new operation, retaining it for uncertain retries.
 Workers may propose splits or revisions only under their assigned task scope;
 they cannot accept them or dispatch workers.
 
-Which of these the server accepts depends on the mission phase, as the table
+Which of these the server accepts depends on the swarm phase, as the table
 above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
 `accept` and `accept-submission` only in `active`; and nothing at all in
 `completed` or `cancelled`. `abandon` takes an optional
@@ -961,13 +968,13 @@ live attempt without relaunching it; an observation error or uncertain owner
 does not establish that execution started. Attempt state is not a model
 readiness signal: `running` does not prove that the model read its assignment.
 
-Worker completion and mission phase are separate: the mission stays `active`
+Worker completion and swarm phase are separate: the swarm stays `active`
 after every worker attempt finishes. It moves to `completed` only when the
 integrator reports success, which also stops any leftover workers. When a
-mission ends, a worker that already submitted is retained and its attempt
+swarm ends, a worker that already submitted is retained and its attempt
 recorded `completed`; every other live worker is killed and its attempt
 recorded `cancelled`. A success report before `mission start` is refused with
-code `-32002`, and so is one while a mission candidate holds an approved
+code `-32002`, and so is one while a swarm candidate holds an approved
 delivery request that has not run, has not expired, and no later delivery to
 the same ref replaced; the error names the `integration deliver` parameters. A read-only
 investigation with nothing to deliver reports success once its findings are
@@ -996,7 +1003,7 @@ run ID and question ID returned by the run's own status and inbox results.
 ### Integrator candidate integration
 
 A candidate freezes selected accepted revisions for combined verification and
-delivery. Only the current mission integrator may use these
+delivery. Only the current swarm integrator may use these
 agent commands:
 
 ```text
@@ -1016,7 +1023,7 @@ delete command.
 
 Use each command's `--help` for its required JSON fields. Prepare requires
 `target_ref`, `expected_target_revision`, and `idempotency_key`; the server
-resolves omitted workspace, mission, and accepted inputs. Explicit
+resolves omitted workspace, swarm, and accepted inputs. Explicit
 `submissions` select an ordered subset of current accepted revisions.
 
 Create parameter files in a writable location, not the read-only
@@ -1029,7 +1036,7 @@ aether-internal integration verify --params-file /tmp/aether-verify.json --json
 aether-internal integration request-delivery --params-file /tmp/aether-request.json --json
 ```
 
-Verification is asynchronous; poll `show` for its durable result. A mission
+Verification is asynchronous; poll `show` for its durable result. A swarm
 candidate needs no human delivery decision: once verification passes,
 `request-delivery` returns a request already approved on behalf of the
 accountable human, who must still hold Push on the workspace. Deliver it:
@@ -1038,14 +1045,14 @@ accountable human, who must still hold Push on the workspace. Deliver it:
 aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
 ```
 
-After delivery, report success; that completes the mission. If `prepare`
+After delivery, report success; that completes the swarm. If `prepare`
 reports a conflicted candidate, prepare and deliver an ordered subset of the
 accepted submissions that applies cleanly, then revise the conflicting task so
 a new worker redoes it from the advanced target, accept its submission, and
 prepare that submission.
 
-Other mission work may continue, but changing the accepted submission set
-invalidates an older candidate's mission binding. A replacement integrator
+Other swarm work may continue, but changing the accepted submission set
+invalidates an older candidate's swarm binding. A replacement integrator
 may continue a candidate when the accepted set is unchanged.
 
 After an uncertain outcome, retry the same parameters and mutation identity.
@@ -1069,7 +1076,7 @@ verification evidence and exact delivery.
 summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
-Terminal worker reports wait for concurrent mission operations to leave admission
+Terminal worker reports wait for concurrent swarm operations to leave admission
 before returning the receipt; ordinary lock contention is not a report conflict.
 The receipt is not task acceptance: a success report without required user
 evidence leaves the task in **Review**.
@@ -1077,62 +1084,63 @@ evidence leaves the task in **Review**.
 **Success and failure are terminal**: a run holds one terminal report. After
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
-report. Relaunching the run (**Reopen run** under the run's **More** menu,
+report. Reopening the run (**Reopen run** under the run's **More** menu,
 or `aether relaunch <run>`) supersedes the terminal report, including one
 whose evidence capture failed and was never accepted, so the reopened agent
 can report again under a new idempotency key; the superseded report's key
 then fails with `CodeConflict`, as does a report whose evidence capture was
-still running when the relaunch landed. **Blocked is nonterminal**: a run may file any
+still running when the reopen landed. **Blocked is nonterminal**: a run may file any
 number of blocked reports, before or after one another.
 
 What a report does depends on the run:
 
-- **Ordinary run** (no mission assignment). Success or failure finishes the
+- **Ordinary run** (no swarm assignment). Success or failure finishes the
   run once the agent's turn ends: Aether commits the work (`aether:` for
   success, `wip:` for failure), publishes the run branch, and records
   `completed` or `failed`, which moves the run out of **Working**. The turn
   ends when the agent reports itself waiting with no input request
   open; a permission or question prompt is not the end of the turn,
   and the run finishes once it is answered. A report that reaches the server
-  after the turn already ended finishes the run at once. A harness without a
+  after the turn already ended finishes the run at once. An agent without a
   status reporter never says its turn ended, so there the first
-  `--poll-interval` check two minutes after the report finishes the run; a
-  harness with one is finished by the turn end alone, however long the agent
-  keeps working, unless the run stalled into `needs-attention` by that check,
+  `--poll-interval` check two minutes after the report finishes the run; an
+  agent with one is finished by the turn end alone, however long it
+  keeps working, unless the run stalled into Needs you (`needs-attention`) by
+  that check,
   which then finishes it. A run with an input request open is never
   finished by the check; it waits for the owner's answer. A finish that fails
   is retried by the same check two minutes later. If the agent process exits
   first, the run takes the reported status, whatever its exit code, even when
   the report reaches the server after the exit or was made while the run was
-  still starting; a report a relaunch superseded never changes the run. The
+  still starting; a report a reopen superseded never changes the run. The
   commit the exit already published keeps the exit's `aether:` or `wip:`
-  prefix, and the run's status and report are the record. A TUI run keeps its
-  paused container for relaunch, exactly like a closed run, with the reason
+  prefix, and the run's status and report are the record. A Standard run keeps
+  its paused container so it can be reopened, exactly like a closed run, with the reason
   `agent reported success; retained container` or
-  `agent reported failure; retained container`; a headless run, or a TUI run
-  with a negative `--run-container-ttl`, records `agent reported success` or
+  `agent reported failure; retained container`; a Background run, or a
+  Standard run with a negative `--run-container-ttl`, records `agent reported success` or
   `agent reported failure`. The finished run carries `outcome_unseen: true`
   until its owner opens it (`run.seen`) or a status change such as Close or
-  relaunch clears it. A Close or Kill that lands first wins, and Close still
+  a reopen clears it. A Close or Kill that lands first wins, and Close still
   re-labels a finished run as merged or abandoned. Blocked moves the run to
-  `needs-attention` with the reason `blocked: <summary>` the next time its turn ends
-  (or it stalls, on a harness without a status reporter), until the agent
+  Needs you (`needs-attention`) with the reason `blocked: <summary>` the next
+  time its turn ends (or it stalls, on an agent without a status reporter), until the agent
   resumes; an input request does not show it. The newest blocked
   report decides the reason: an older one the server retries delivering after
   it changes nothing.
-- **Mission worker.** Success submits the attempt and the server then pauses
+- **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason
   `worker finished; retained container`. Failure does the same without
   treating the attempt as a task result. A finished worker is never
-  relaunched, and its outcome is left for the integrator to review rather
+  reopened, and its outcome is left for the integrator to review rather
   than marked unseen. Capacity is released only after execution has stopped
   and retention/evidence cleanup has settled. Blocked is a durable
   observation: it does not stop the worker or submit the task. A worker may
   file several blocked reports and still report success or failure after
   them.
-- **Mission integrator.** Success completes an `active` mission and stops
+- **Swarm integrator.** Success completes an `active` swarm and stops
   any leftover workers; it is refused in `planning`. Failure leaves the
-  mission in its phase, so a human can recover it with Replace integrator.
+  swarm in its phase, so a human can recover it with Replace integrator.
   Either way the integrator run then finishes like an ordinary run once its
   turn ends. Report success only after the verified candidate is delivered,
   or, with nothing to deliver, once the findings are gathered.
@@ -1148,7 +1156,7 @@ Reports publish durable timeline/evidence records, not terminal keystrokes.
 The integrator reads `worker list` and `worker inspect --attempt-id` for
 attempt outcomes; a blocked worker's report is additionally forwarded to its
 ordinary inbox with the worker's attribution. Use `inbox --wait 30` while
-actively coordinating, then refresh durable mission/worker state before
+actively coordinating, then refresh durable swarm/worker state before
 waiting again or declaring completion.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
@@ -1160,7 +1168,7 @@ environment snapshot and does not claim that the reported work was verified.
 If capture or durable storage fails, the outcome is not accepted, and the
 runtime resources remain recoverable.
 
-Mission submission acceptance distinguishes source availability from
+Swarm submission acceptance distinguishes source availability from
 completeness. A readable retained transcript satisfies a `transcript`
 requirement even when it reaches the 16 MiB cap. `mission.show` exposes that
 source as `available: true, truncated: true`; it is partial evidence, not a
@@ -1201,8 +1209,8 @@ changing the socket protocol.
 `coord.report` is the durable worker outcome described above. It is exposed
 through `aether-internal report` and the MCP tool `aether_report`.
 
-`run.report` is different. It is the harness lifecycle hook that updates the
-run's transient `working` or `waiting` status. Harness callbacks invoke it by
+`run.report` is different. It is the agent lifecycle hook that updates the
+run's transient `working` or `waiting` status. Agent callbacks invoke it by
 running `/opt/aether/aether-server report <harness>` over the same run socket.
 It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
@@ -1220,18 +1228,18 @@ The scheduler applies a report as part of its durable publication, so a
 server restart or a temporarily unreachable run is retried, not lost.
 
 Coordination also does not provide a universal inbound terminal hook. When a
-human steers a run, Aether delivers the request through the harness's
-serialized PTY input path and records the delivery separately.
+human messages a Standard run, Aether delivers the message through the
+agent's serialized PTY input path and records the delivery separately.
 
 ## Retention and shutdown
 
-Active runs, explicitly closed TUI runs, and completed mission runs keep their
+Active runs, explicitly closed Standard runs, and completed swarm runs keep their
 socket, unread mailbox, and timeline entries through a server restart.
 Completed workers retain their exact paused (or already exited) container,
 checkout, row, and member account for `--run-container-ttl` (default 7 days).
-The dashboard run detail, transcript, diff, evidence, and worker inspection
-surfaces remain available; retention does not grant live input or wake authority.
-Completed workers cannot be relaunched, including after a human relabels their
+The run's dashboard view, transcript, Changes, Captures, and worker inspection
+remain available; retention does not grant live input or wake authority.
+Completed workers cannot be reopened, including after a human relabels their
 outcome. Explicit Kill, Delete, and worker cancellation still destroy the
 container; a negative TTL requests immediate cleanup. Recovery rebinds
 `coord3.sock` for retained runs. When a run's container is destroyed,
@@ -1239,6 +1247,6 @@ Aether releases the coordination directory and retires the run's unread mail
 after any required evidence capture has completed; the messages stay listed
 until the run is deleted. With `--conflict-coordination=false`, runs
 still receive their identity socket and per-launch discovery hint.
-`coord.status` reports the live method allow-list; conflict and mission
+`coord.status` reports the live method allow-list; conflict and swarm
 operations remain disabled rather than inheriting authority from the socket.
 The conflict radar itself remains active.

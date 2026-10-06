@@ -371,7 +371,7 @@ go test ./internal/runrepo
 ```
 
 This suite exercises native Git and native `gh` against an isolated TLS API
-fixture. It does not replace Docker, authenticated GitHub, or real-harness
+fixture. It does not replace Docker, authenticated GitHub, or real-agent
 acceptance.
 
 Verify rejection of a changed symbolic HEAD and expected branch OID, including
@@ -406,12 +406,12 @@ and WebView behavior were exercised; viewport emulation does not prove those.
 - Let a run agent own an app surface, explicitly take it over as a human,
   confirm stale agent input is rejected, then release/reacquire it. A second
   terminal and the browser must remain independently controlled; the primary
-  harness's mission hold must remain intact.
+  agent's swarm hold must remain intact.
   Hold browser input across release, revocation and controller disconnect;
   confirm server-side cleanup and refusal of replacement control if cleanup
   fails. Observer disconnect must not clear a live controller's input.
 - Confirm read/capture/stream and write authorization on both gateways,
-  including a member without Steer, backing-account revocation, lifecycle
+  including a member without the `steer` permission, backing-account revocation, lifecycle
   stop/pause, stale control generations, and reconnect after server restart.
   Browser loss must not silently replace an authenticated session.
 - Exercise real Git status/diff and an explicit selected-path commit in the
@@ -423,7 +423,7 @@ and WebView behavior were exercised; viewport emulation does not prove those.
   Retain reviewed captures and bounded notes before headless report/cleanup,
   read back the packet and download its exact bytes using `evidence_packet_id`.
   Confirm workspace View can read retained evidence while private transient
-  access still requires Steer/account-use. Exercise queued revocation and busy
+  access still requires `steer`/account-use. Exercise queued revocation and busy
   publication admission with explicit retry, retained-plus-staged quotas,
   transient deletion, and the separate capture-time and later packet Git
   boundaries. Keep credential entry out of recordings and confirm nothing
@@ -437,12 +437,12 @@ and WebView behavior were exercised; viewport emulation does not prove those.
   Record which vendors, image identities, gateways and phone were exercised,
   and any missing prerequisites or unexercised rows.
 
-Public CI has no authenticated real-harness credentials. Its deterministic
+Public CI has no authenticated real-agent credentials. Its deterministic
 fake agents and scripted `claude`, `pi`, or `omp` fixtures prove their stated
 broker/transport paths, **not two genuine vendor loops**. No-login vendor
 smokes prove argument acceptance and login failure, not authenticated work.
 A skipped test, unavailable Docker daemon, fake runtime, or absent phone is
-an explicit coverage gap, never a passing real-harness or phone acceptance.
+an explicit coverage gap, never a passing real-agent or phone acceptance.
 
 ## Local configuration in tests
 
@@ -542,7 +542,7 @@ required. The fixture reports directory modes, read-only mounts from the
 kernel's mount table, EROFS on attempted writes, and tool results over a real
 attach. The daemon's mount view is checked alongside those observations.
 
-`TestIntegrationMissionCompositionInDocker` composes mission dispatch,
+`TestIntegrationMissionCompositionInDocker` composes swarm dispatch,
 proactive coordination, accepted retained submissions, combined verification,
 a delivery request approved without a human decision, and exact delivery. It
 also checks failed verification, stale-target rejection, and integrator
@@ -558,21 +558,22 @@ inspection.
 
 `web/e2e/run-room.spec.ts` sends structured request snapshots through the
 staged reporter in a real container. Both members' browsers must add and
-clear the request; the owner's run reads **Needs you** while it is open
-and the other member's reads **Working**. The callback payloads
-are scripted fixtures, not evidence of a live vendor harness emitting them.
+clear the request; while it is open the owner's run header reads
+**Question: answer in the terminal** and the other member's reads
+**Waiting for** the owner. The callback payloads are scripted fixtures, not
+evidence of a live vendor agent emitting them.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container
 user before creating the container, and an unprivileged test process can
 only chown to itself.
 
-### The real-harness smoke tests
+### The real-agent smoke tests
 
 `internal/harness/smoke_integration_test.go` launches the vendors' actual
 CLIs and checks that the argv Aether ships is still the argv they accept.
 Nothing else catches a vendor renaming a flag or refusing a combination it
-used to allow: a change like that breaks every run of that harness and no
+used to allow: a change like that breaks every run of that agent and no
 amount of internal testing sees it coming.
 
 `TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
@@ -598,7 +599,7 @@ AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN=aether-smoke:local \
 The `_NOLOGIN` images must carry no credentials. The other smoke tests -
 `TestSmokeClaude`, `TestSmokeOpencode`, `TestSmokeCodexFlags` - drive the
 agent far enough to produce output, so they need an image that *does* carry
-that harness's login state, named by `AETHER_SMOKE_IMAGE_<NAME>`. CI has no
+that agent's login state, named by `AETHER_SMOKE_IMAGE_<NAME>`. CI has no
 such credentials, so those stay a manual check. Every one of them skips when
 its variable is unset, and the no-login test skips as a whole rather than
 reporting a pass with nothing run.
@@ -698,7 +699,7 @@ edit a live production hook, credentials, trust state or disable settings to
 obtain evidence. Record the managed launch arguments separately from manual
 file inspection; see [activation](harnesses.md#installation-and-activation).
 
-1. Finish or block outstanding harness todos and confirm no native retry,
+1. Finish or block outstanding agent todos and confirm no native retry,
    approval prompt or pending input remains. End the normal model turn without
    a terminal worker report, active `inbox --wait`, polling loop or scheduled
    prompt. Observe at least two 30-second receiver waits with no new model turn.
@@ -714,8 +715,8 @@ file inspection; see [activation](harnesses.md#installation-and-activation).
    In a separate round, leave mail unread through completion and require one
    deferred native wake after successful cleanup and fresh admission.
 4. Test frozen batches separately: read a batch without acknowledging it, send
-   steering, and read again. The old batch must repeat. Acknowledge its token
-   only after handling it; the next batch must expose the steering. This is
+   another message, and read again. The old batch must repeat. Acknowledge its
+   token only after handling it; the next batch must expose the new message. This is
    expected inbox behavior, not evidence of a missed native wake.
 5. Exercise approval waits, Stop, protection/takeover and release, replacement,
    duplicate manual/managed loading, rejected native input and process exit.
@@ -726,13 +727,14 @@ Capture session/root identity, generation, message IDs, acknowledgement,
 helper admission, native turn boundaries and visible output. A final-looking
 assistant message, hidden inbox pointer, status reporter event, or empty inbox
 alone cannot identify the initiator. OMP's own todo/retry continuation may
-encounter legitimate integrator mission-refresh context; that context does
+encounter legitimate integrator swarm-refresh context; that context does
 not start the turn. Name missing instrumentation and unexercised cases.
 
-In the actual dashboard, open an owned mission-worker terminal without touching
+In the actual dashboard, open an owned swarm worker's terminal without touching
 control: it must remain a read-only mirror and request no write lease. Explicit
 **Take control** must acquire through its acknowledged control response;
-**Release control** must return to viewing, including after navigation. Check
+**Release** (**Release control** on the swarm page) must return to viewing,
+including after navigation. Check
 ordinary and integrator owner defaults, phone mirrors, foreign/protected runs
 and stale generations separately. The authoritative control/hold contract is
 in [Run control](terminal.md#run-control), not duplicated by a
@@ -959,7 +961,7 @@ do not substitute a development-server measurement for either.
 Compare the same browser, viewport, pointer mode and datasets on both
 revisions: 50 and 500 runs, with short tasks and varied natural-prose tasks
 around 1,600 characters. Keep complete task bodies in the fixtures: the palette
-scores only each run's label, branch, harness, workspace name and ID with
+scores only each run's label, branch, agent (`run.harness`), workspace name and ID with
 cmdk's default scorer, and long tasks must not slow a keystroke past 16 ms.
 Record synthetic fixtures separately from live workspace data, and keep
 fixtures and raw traces outside the source tree.
@@ -981,53 +983,58 @@ a bottleneck; they do not prove the shipped behavior or its speed.
 This inventory describes authored scenarios and their report attachments, not
 evidence that they have been executed or passed on a particular checkout.
 
-The committed visual references use a production export in Chromium with a
-read-only synthetic API, not a real PTY, agent or browser companion:
-[wide Board](media/dashboard-board-wide.png),
-[phone Board](media/dashboard-board-phone.png),
-[docked Room](media/dashboard-room-docked.png) and
-[phone Room](media/dashboard-room-phone.png). They show layout and focus
-surfaces; the server-backed scenarios below verify interaction with real
-runtime state.
-
 | Spec | Scenario |
 | --- | --- |
-| `board-card` | A run whose agent reports an idle turn lands in Needs you; its **Reply** stays hidden until the card is hovered, sits above the card's open target, and posts through `run.inject` into the run's room history (`run.room.list`); `o` on the focused card opens the run - hit testing and hover only a real browser does |
-| `onboarding-first-member` | A fresh server through the four steps: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
-| `onboarding-second-member` | A collaborator joining on an invite code, onto a workspace someone else seeded: Repository offers no way to add a workspace, the workspace is picked rather than created, the source status sits under Advanced, and a mirrored workspace says its server copy is pending and offers no push |
-| `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on Enhanced from `enhanced_default` before the adapter is installed, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to Run. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output |
-| `onboarding-github` | The Agent step's Connect GitHub screen, opened from its GitHub disclosure, against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
-| `onboarding-configuration` | An explicit browser directory import from the Agent step's collapsed Agent config files disclosure: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
-| `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the harness exits, and explicitly closing the run; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
+| `account-sharing` | One member shares their agent account from **Profile > Account sharing** with a teammate. Before the share, the teammate's **New run** offers no account choice; after it, choosing the shared account lists the agents installed in the owner's home and disables each one the owner has no login for, with a status sentence naming the missing logins. The owner's already running Environment prompts **Stop environment**. Once the owner has a login, the teammate's run launches with the owner's login mounted, and **Details** shows the teammate as Owner and the sharer under Agent account |
+| `activity` | A real run's log in Activity: one **Filter** popover narrowing to Run status, **Raw events** from the page's More menu printing wire types and payloads, and **Show** > Agent messages switching to the empty agent-message history with its search box. A second scenario creates a swarm over RPC, sends real agent messages between its runs, and narrows them by search and to one **Thread** |
+| `admin-pages-focus` | Keyboard focus through admin pages: the Members and Devices tabs keep focus on activation, Escape from **Invite…** returns focus to it, and the Manage workspaces row's **More actions** menu and its **Delete…** confirm both return focus to the row button |
+| `agent-outcome` | An agent that reports success lands in **Needs you** reading "Finished, review the result", offers **Review** on hover and opens on Changes; opening it clears the server's unseen outcome and the card moves to Finished |
+| `board-card` | A run whose agent reports an idle turn lands in Needs you; its **Reply** stays hidden until the card is hovered, sits above the card's open target, and posts through `run.inject` into the run's message history (`run.room.list`); `o` on the focused card opens the run - hit testing and hover only a real browser does |
+| `candidate-delivery` | Two retained runs reviewed in **More > Captures… > Candidate review**: packets selected, a candidate prepared and its combined patch loaded, a source-mutating verification fenced as `source_changed` with **Request delivery** disabled, a passing verification in a real container, delivery requested, **Approve delivery** disabled while offline, then approved and delivered after a reload, landing the exact candidate revision. Reloading a delivered candidate reopens its receipt without delivering again. A second scenario prepares a conflicted candidate and applies only the selected resolution, leaving the other file conflicted until its own resolution is applied. Attachments: `candidate delivery review and landed receipt`, `candidate review with one selected conflict resolution` |
+| `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. **Browser tools** owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |
+| `development-terminal/shared-terminal.spec.ts` | A TUI an agent starts in a named development terminal while the container is still provisioning: a second, phone-sized viewer of the same member cannot stop it, control moves by **Take control** (with its confirm) and **Release**, alternate-screen Unicode output and protocol responses reach both viewers, **Take a screenshot** captures the terminal with its metadata, and **Stop this shell** ends the process. Attachments: `shared-alternate-screen`, `shared-terminal-capture`, `shared-terminal-capture-metadata` |
+| `keyboard-focus` | Escape closes a dialog or the sidebar footer menu on a run without leaving the run; focused shell controls paint the app's outline with computed style and 3:1 contrast against the actual background; the sidebar resizes by pointer delta and by keyboard, and at its minimum width keeps Search, New run and Mine inside it |
+| `mission-candidate-review` | A swarm created from **Swarms > New swarm** with a shell-fixture integrator: the integrator's question answered from **Questions for you** and folded to `Answered by`, a task proposed and started without a human plan gate, a worker taken with **Take control** on its run and freed with **Release control** on the swarm page, and, without a reload, the worker's report listed under **Agent messages** and the integrator-prepared candidate shown read-only under **Integration**. Attaches `mission candidate progress surface` |
+| `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on Enhanced from `enhanced_default` before the adapter is installed, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to **Run Codex**. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output |
+| `onboarding-configuration` | An explicit browser directory import from the Agent step's collapsed **Agent config files** disclosure: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
+| `onboarding-first-member` | A fresh server through the steps Connect, Repository, Agent and First run: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
+| `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the agent exits, and closing the run as **Merged** from **More > Close run…**; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
+| `onboarding-github` | The Agent step's **Connect GitHub** screen, opened from its GitHub disclosure, against the member's own environment container, in two acts. First with no gh in it: the screen says "There is no gh in your Environment", names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: "The login command is ready in your Environment" - the state, because the command block alone is also what a failed check shows - the stub's own log proving the terminal typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
 | `onboarding-navigation` | Back from every step and the header's jump to a reached step, with the workspace and the connected clone still settled on the way through, and picking the same workspace again keeping its clone |
+| `onboarding-second-member` | A collaborator joining on an invite code, onto a workspace someone else created: Repository offers no way to add a workspace and the workspace is picked rather than created. A local-only workspace is seeded by the collaborator's push, with the push command under Advanced; a mirrored workspace says its server copy is pending outside Advanced, shows its source under Advanced, and offers no push |
+| `palette-navigation` | The command palette at a short touch viewport with 25 workspaces: the active option is announced and kept scrolled into view through Home, End and arrows, filtering and clearing restore browse order, a workspace deleted mid-search drops out live, Enter opens the chosen workspace (named in the top bar), Tab stays inside the dialog and Escape returns focus to Search |
+| `reconnect` | The events socket dropped until the sidebar reads Offline, then a `visibilitychange` reopening it to Live at once instead of waiting out the backoff; and a rejected gateway token reading "This dashboard link has expired" with the gateway's own refusal, not a network guess |
+| `remote-development-git/github.spec.ts` | Opt-in real GitHub publication; see [Headless browser and remote-development acceptance](#headless-browser-and-remote-development-acceptance). Attaches `safe-github-acceptance-evidence` |
+| `remote-development-git/import.spec.ts` | **Import repository** from Manage workspaces against a real HTTPS source: the outcome reads `Created: yes`, and **Continue to Repository** opens Workspace Source with the observed commit pending until **Adopt candidate**; a failed fetch keeps the created workspace, offers no second import and leads to the same repair dialog. It needs network access to `AETHER_E2E_GIT_SOURCE_URL` (default `https://github.com/3xDevOps/Aether.git`) |
+| `remote-development-git/native.spec.ts` | On the real standard image: **Changes > Publish…** commits only a selected path while unrelated staging survives, reports `Index updated: no` against a real `index.lock`, pushes the reviewed branch to a local bare remote, shows the native `gh` failure without erasing the push, and rejects a non-fast-forward without forcing. It needs the root server shown in [Headless browser and remote-development acceptance](#headless-browser-and-remote-development-acceptance): under an unprivileged server the run checkout is owned by your uid, and Git in the root standard image refuses it as "dubious ownership" |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
+| `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration with the token gone and `?run=<id>` kept, a reload reopens it, Settings pushes `?page=settings`, back returns to the run, and Escape leaves for the Board with a bare address |
+| `run-evidence.spec.ts` | Retained finish evidence after run cleanup through **More > Captures…**: retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape returning focus to More |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
-| `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it. An owner opening a run on Changes and Session leaves its control free, and takes it once Terminal is shown |
-| `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration with the token gone and `?run=<id>` kept, a reload reopens it, Settings pushes `?page=settings`, back returns to the run, and Escape leaves for the board with a bare address |
-| `run-room.spec.ts` | Two members on separate gateways share notes in Details, send moderated messages from the Session composer (the controller denies one and approves another from Details > Needs you; the sender's rows read the countdown, then Denied and Sent), and transfer occupied control. Details is a 320px panel beside the terminal, not an overlay: header and toolbar controls stay hit-testable, and `Mod+.` hiding it widens the PTY, showing it narrows it again. More supports keyboard dismissal and focus return. The scenario attaches `desktop-run-details` and `desktop-run-observer` screenshots |
-| `run-evidence.spec.ts` | Retained finish evidence after run cleanup through **More > Captures**: retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape returning focus to More |
-| `terminal-tools` | The Board has no terminal; the Environment view's terminal opens on request with a real environment container. The **Tools** menu lists find, copy, paste and upload at every width and from the keyboard; a touch viewport gets 44px rows. The scenario searches from the menu at two widths and on touch, checks `Ctrl+=` zoom across reload, native `Ctrl+Shift+V` paste, `Ctrl+Shift+F` search and new shell output after leaving the view and coming back |
-| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: shared-grid growth, the same pinned row and relative pixel offset through shared font zoom, return-live in mirror mode and reattach; a large redraw archive opens at a bounded current screen rather than replaying older output |
-| `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
-| `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
-| `window-sizing` | The updates dialog, opened from the sidebar's notice row, at the smallest window `desktop/main.js` allows and at one smaller browser viewport: every prompt's actions stay on screen, bounded technical output does not push the dialog away, and the sidebar stays whole behind it |
-| `files-browser.mobile.spec.ts` | At a phone viewport, opening a real repository file from the tree, then **Browse** opening the tree as a side sheet and a second file from it; the editor's workspace base, live-run and member-configuration writes, the commit dialog and the folded Run checkouts and Agent config groups are covered by `routes/files/files.test.tsx` |
-| `activity` | A real run's log in Activity: one **Filter** popover narrowing to Run status, **Raw events** printing wire types and payloads, and **Show** > Agent messages switching to the real `coord.messages.list` history with its search box |
-| `templates` | A template saved over RPC listed as one row, **Schedule…** from its row menu setting a cron the real server answers with the next launch, and **Launch** opening the run |
+| `run-room.spec.ts` | Two members on separate gateways share notes in Details, send moderated messages from the Session composer (the controller denies one and approves another from Details > Needs you; the sender's rows read the countdown, then Denied and Sent), see a reported native question as "Question: answer in the terminal" for the owner and "Waiting for" the owner for the other member, and transfer occupied control. Details is a 320px panel beside the terminal, not an overlay: header and toolbar controls stay hit-testable, and `Mod+.` hiding it widens the PTY, showing it narrows it again. More supports keyboard dismissal and focus return. The scenario attaches `desktop-run-details` and `desktop-run-observer` screenshots |
+| `run-session` | An Enhanced run's Session view against acpmock; see [The real-agent smoke tests](#the-real-agent-smoke-tests) |
+| `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it. Busy screens show current output again after a trip to the Board; an owner returning within the reconnect window keeps control; and an owner opening a run on Changes and Session leaves its control free, taking it once Terminal is shown |
 | `sidebar-drawer.spec.ts` | In a 600px desktop window, the sidebar sheet opened from the top bar answers `Mod+B` itself, returns focus to the opener and hands the palette back once it closes |
-| `keyboard-focus` | Escape closes a dialog or the sidebar footer menu on a run without leaving the run; the sidebar resizes by pointer and keyboard and keeps its controls inside 220px; focused shell controls paint the app's outline with computed style and contrast against the actual background |
-| `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. Browser tools owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |
+| `templates` | A template saved over RPC listed as one row, **Schedule…** from its row's More menu setting a cron the real server answers with the next launch, and **Launch** opening the run |
+| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: shared-grid growth, the same pinned row and relative pixel offset through shared font zoom, return-live in mirror mode and reattach; a large redraw archive opens at a bounded current screen rather than replaying older output |
+| `terminal-images` | **Terminal tools > Upload image…** in the Environment terminal and in a live run shell: previewing a PNG, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in the target shell; the path is safely quoted and not submitted until the test presses Enter |
+| `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
+| `terminal-tools` | The Board has no terminal; the Environment page's terminal opens on request with a real environment container. **Terminal tools** lists find, copy, paste and upload at every width and from the keyboard; a touch viewport gets 44px rows. The scenario searches from the menu at two widths and on touch, checks `Ctrl+=` zoom across reload, native `Ctrl+Shift+V` paste, `Ctrl+Shift+F` search and new shell output after leaving the page and coming back |
+| `window-sizing` | The Updates dialog, opened from the sidebar's update row, at the smallest window `desktop/main.js` allows and at one smaller browser viewport: every prompt's actions stay on screen and in place through Updating…, Rebuilding… and each end state, bounded technical output does not push the dialog away, and the sidebar stays whole behind it |
 
-`activity`, `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
-`onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-deep-link`, `run-provisioning`, `run-switch`, `run-room.spec.ts`,
-`run-evidence.spec.ts`, `run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
-`run-evidence.mobile.spec.ts`, `shell-drawer.mobile.spec.ts`,
-`development-browser/browser.spec.ts`, `templates`, `terminal-geometry`, `terminal-images`
-and `terminal-tools` need a
-reachable Docker daemon and skip without one. That skip is specific to the
-dashboard suite: `make test-integration` requires its real Docker setup and
-fails when Docker is unavailable. The rest need only git, except
+`account-sharing`, `activity`, `agent-outcome`, `board-card`,
+`candidate-delivery`, `development-browser/browser.spec.ts`,
+`development-terminal/shared-terminal.spec.ts`, `keyboard-focus`,
+`onboarding-agents`, `onboarding-github`, `onboarding-first-run`'s launch
+scenario, `remote-development-git/github.spec.ts`, `run-attach-retry`,
+`run-deep-link`, `run-evidence.spec.ts`, `run-provisioning`,
+`run-room.spec.ts`, `run-session`, `run-switch`, `templates`,
+`terminal-geometry`, `terminal-images`, `terminal-streaming` and
+`terminal-tools` need a reachable Docker daemon and skip without one.
+`mission-candidate-review` and `remote-development-git/native.spec.ts` also
+need Docker but fail without it instead of skipping. That skip is specific to
+the dashboard suite: `make test-integration` requires its real Docker setup
+and fails when Docker is unavailable. The rest need only git, except
 `window-sizing`, which needs neither: it starts a gateway of its own rather
 than taking the `aether` fixture, because the CLI half of `update.check` is
 answered on the member's own machine and no server is involved.
@@ -1067,17 +1074,17 @@ covered - WebKit is not installed.
 | Spec | Scenario |
 | --- | --- |
 | `files-browser.mobile.spec.ts` | On a phone, opening Files through the top bar's sidebar sheet, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
-| `onboarding-link.mobile.spec.ts` | The Connect step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px from the repository page, opened through a Manage workspaces row menu, the page has no horizontal overflow and its heading and introductory text stay inside the viewport |
+| `onboarding-link.mobile.spec.ts` | The Connect step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px from the repository page, opened from the Manage workspaces row's **More actions > Repository**, the page has no horizontal overflow and its heading and introductory text stay inside the viewport |
 | `shell-drawer.mobile.spec.ts` | On a phone, the sidebar as a modal sheet: it opens from the top bar, its rows are finger-sized, and tapping a run closes the sheet onto that run with focus on its heading, the top bar naming it and no page overflow |
-| `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell a sheet from a centred box opening as a full-width sheet along the bottom edge, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
+| `dialog-anchor.mobile.spec.ts` | On a phone, a template's Delete confirm, opened from the template row's More menu and short enough to tell a sheet from a centred box, opening as a full-width sheet along the bottom edge; the launch form, opened from **New run** in the top bar (the unnamed `banner` landmark), keeping its Launch button on screen on a viewport as short as a soft keyboard leaves; and a launch refusal sitting below the Mode choice with Launch still more than half the sheet wide |
 | `swarm.mobile.spec.ts` | On a phone, a swarm created over RPC with a shell-fixture integrator: its card names the question, the detail repeats the objective in the body, the question is answered from its own card and folds to an `Answered by` row at least 44px tall, and two messages from a real worker fold into `2 messages` and expand, with no sideways scroll |
-| `toast-clearance.mobile.spec.ts` | On a phone, a toast settling 8px clear of the bottom edge, which is what `sonner` needs `mobileOffset` for |
+| `toast-clearance.mobile.spec.ts` | On a phone, deleting a template from its row's More menu and the resulting toast settling 8px clear of the bottom edge, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile.spec.ts` | On a phone, protecting a real run through the header's More menu, keeping the selected Browser, Session and Changes views fully visible in the switch after touch navigation, then reading the changes: menu items are finger-sized, protection shows by the title, the first file sits right under the Changes strip, and a file section wider than the screen scrolls sideways only once wrap is off |
-| `run-room.mobile.spec.ts` | The Details bottom sheet leaves the desktop-controlled PTY geometry unchanged, contains keyboard focus and returns it to the Details button. A short tap on Take control does not request occupied control. Separate scenarios read Captures as a full-width sheet and use two real sessions to deny incoming control over Details and Captures: the decision remains visible and keyboard/pointer-operable at 390×524 and across the 700→960 breakpoint, then restores the interrupted focus and note draft without transferring control. Screenshots: `phone-run-details`, `phone-captures`, and `holder-over-{details,captures}-{390,700}` |
+| `run-room.mobile.spec.ts` | The Details bottom sheet leaves the desktop-controlled PTY geometry unchanged, contains keyboard focus and returns it to **Show details**. A short tap on Take control does not request occupied control. Separate scenarios read Captures as a full-width sheet and use two real sessions to deny incoming control over Details and Captures: the decision remains visible and keyboard/pointer-operable at 390×524 and across the 700→960 breakpoint, then restores the interrupted focus and note draft without transferring control. Screenshots: `phone-run-details`, `phone-captures`, and `holder-over-{details,captures}-{390,700}` |
 | `run-evidence.mobile.spec.ts` | Captures at 390x600 with coarse-pointer touch input: open them from More, tap through Patch and Summary, read retained file content, and close with focus returned to More. The scenario attaches `short phone evidence sheet` |
 | `development-browser/browser.mobile.spec.ts` | Shared login and live app update on a phone viewport, control handoff, cancellation of Reset session from Browser tools without losing the login, expanded browser input, Chromium composition and multi-touch without horizontal page overflow. The scenario attaches `phone shared app`; viewport and CDP input do not prove a physical phone keyboard |
-| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
-| `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome: the top bar in view with its sidebar button and New run |
+| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control by holding **Take control** in the run's presence controls and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
+| `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome: the top bar in view with its sidebar button and New run. A second scenario sets a 59px `--safe-top` inset: the top bar grows by it rather than moving down, Search sits below it, and the command palette drops with it |
 
 The installed window itself is not in the suite. Chromium exposes no
 `display-mode` override - not through `emulateMedia`, not through CDP's
@@ -1109,10 +1116,10 @@ phone (`docs/dashboard-frontend.md` has that path).
 The phone specs need git; `shell-drawer.mobile.spec.ts`,
 `run-views.mobile.spec.ts`, `run-room.mobile.spec.ts`,
 `run-evidence.mobile.spec.ts`, `terminal-phone.mobile.spec.ts` and
-`development-browser/browser.mobile.spec.ts` also need Docker,
-because they open a real run,
-and skip without it. Run them alone
-against the binaries `make build` produced:
+`development-browser/browser.mobile.spec.ts` also need Docker, because they
+open a real run, and skip without it. `swarm.mobile.spec.ts` drives its
+integrator's CLI through `docker exec` and fails without Docker. Run them
+alone against the binaries `make build` produced:
 
 ```sh
 cd web && bunx playwright test --project=mobile

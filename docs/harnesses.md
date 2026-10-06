@@ -1,23 +1,24 @@
-# Agent harnesses
+# Agents
 
-A **harness** is one agent CLI and everything Aether needs to know to launch
-it: how to start it in interactive and headless mode, where its login state
+An **agent** is one coding CLI and everything Aether needs to know to launch
+it: how to start it in Standard and Background mode, where its login state
 lives, where its configuration lives, and which environment variables carry an
-API key. The registry is `internal/harness`, a map and a few functions - not a
-plugin system.
+API key. The code calls this definition a harness; the registry is
+`internal/harness`, a map and a few functions - not a plugin system.
 
 Two rules shape everything below:
 
 1. **Aether installs an agent only when a member asks.** The member runs the
-   displayed vendor install command in their environment terminal, or asks
-   the server to run it there (`agent.install`). The command should install
+   displayed vendor install command in their **Environment** - their own
+   persistent container shell, opened with `aether terminal` or from the
+   dashboard - or asks the server to run it there (`agent.install`). The command should install
    the executable into `~/.local/bin`. Once a shipped agent is installed
    there, Aether keeps it current; see
    [Updates before launch](#updates-before-launch).
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
    Credentials remain in the member home; an explicit account share mounts
-   the harness's login path (the **Login state** column below) from that home
+   the agent's login path (the **Login state** column below) from that home
    into a recipient's run, a whole directory for `omp`, and no other
    credential. For the read-only subscription quota
    indicator, the server may read supported native Claude Code and Codex
@@ -27,9 +28,9 @@ Two rules shape everything below:
 
 The quota reader supports native OAuth subscription logins for Claude Code and
 Codex only. API-key logins, `pi`, `omp`, `opencode`, `fake`, and deployment
-custom harnesses are not quota sources. The dashboard explains an unsupported
+custom agents are not quota sources. The dashboard explains an unsupported
 source rather than treating missing usage as zero. Native vendor
-reauthentication remains a member action in the environment terminal; Aether
+reauthentication remains a member action in the Environment; Aether
 does not refresh or rewrite OAuth files.
 
 ### Subscription quota
@@ -53,11 +54,11 @@ window has passed without a new measurement.
 
 | `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced | Switch |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes | adapter `@agentclientprotocol/claude-agent-acp@0.86.0` | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes | adapter `@agentclientprotocol/codex-acp@2.1.1` | no |
-| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes | adapter `pi-acp@0.0.34` | no |
-| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no | native (`omp acp`) | yes |
-| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no | native (`opencode acp`) | no |
+| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes, native installer | adapter `@agentclientprotocol/claude-agent-acp@0.86.0` | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes, npm | adapter `@agentclientprotocol/codex-acp@2.1.1` | no |
+| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, npm | adapter `pi-acp@0.0.34` | no |
+| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, vendor script | native (`omp acp`) | yes |
+| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | yes, vendor script | native (`opencode acp`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` | no |
 
@@ -82,9 +83,9 @@ that runs in the owner's own omp sessions, and the owner's extensions run in
 the recipient's run; share an `omp` account only with someone you would give
 your home to ([security.md](security.md#account-sharing)).
 
-The `config.roots` response carries the selected harness's effective
+The `config.roots` response carries the selected agent's effective
 `credential_names` and `runtime_ignores`. Credential names include shared
-denials and the harness's `DenyNames`; they match any path component
+denials and the agent's `DenyNames`; they match any path component
 case-insensitively. `*.pem` is also excluded. Runtime paths match exact
 root-relative paths or component prefixes case-sensitively; trailing slashes
 are presentation-only. Both lists apply before browser byte reads, including
@@ -92,13 +93,17 @@ when the selected directory has been renamed. They cannot be overridden in
 the browser. A server without credential metadata must be upgraded before
 this importer can prepare a selection.
 
-The **Env setup** column marks harnesses that can participate in agent setup:
-the dashboard can open the member's environment terminal for installation and
-login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
-launchable for runs but is not offered in that setup flow.
+The **Env setup** column says how an agent installs into the member's
+Environment. Every shipped agent carries a vendor install command
+(`InstallScript`): **Set up** on the Agents page or onboarding's Agent step
+runs it through `agent.install`, then types the agent's login command into
+the Environment. `fake` and custom agents have none; install their executable
+into `~/.local/bin` yourself in `aether terminal`. The local gateway's
+`env.harnesses` check of this machine's `PATH` covers only `claude`, `codex`
+and `pi` (`harness.SetupHarnesses`).
 
 The **Enhanced** column is how the agent serves the Agent Client Protocol
-(ACP): JSON-RPC over the agent's stdio, through which an enhanced run reads
+(ACP): JSON-RPC over the agent's stdio, through which an Enhanced run reads
 the agent's messages, tool calls, and permission requests instead of its
 terminal. [enhanced-runs.md](enhanced-runs.md) covers launching and
 operating one; [Enhanced mode adapters](#enhanced-mode-adapters) covers
@@ -133,10 +138,10 @@ one step:
 aether agent add claude --enhanced
 ```
 
-types the agent's install command followed by that line into the environment
-terminal (or prints it when no terminal opens). The server RPC
+types the agent's install command followed by that line into the
+Environment (or prints it when no terminal opens). The server RPC
 `agent.install` with `{"name":"claude","enhanced":true}` runs the same
-command in the member's environment terminal, starting it if needed, waits
+command in the member's Environment, starting it if needed, waits
 up to 10 minutes, and answers with the last 8 KiB of output, the exit
 status, and whether the agent and its adapter now resolve. The dashboard's
 agent setup calls it. One install runs per member at a time. It first waits
@@ -147,7 +152,7 @@ install fails with `timeout: not found` and exit status 127.
 
 The pre-launch update brings an installed adapter to its pinned version after
 the agent's own update, through the same staged exchange as `codex`. It never
-installs a missing one: a member who never asked for enhanced mode downloads
+installs a missing one: a member who never asked for Enhanced mode downloads
 nothing. On another member's shared account, a launch that borrows the
 owner's installation borrows the owner's adapter with it, read-only.
 
@@ -169,8 +174,8 @@ identity socket, including when conflict coordination is disabled. Member
 terminals and verification containers do not inherit a run identity.
 Staging failure refuses creation rather than silently omitting the CLI.
 
-No harness receives an automatic Aether MCP registration flag or config.
-Supported harnesses receive a short native per-launch discovery hint;
+No agent receives an automatic Aether MCP registration flag or config.
+Supported agents receive a short native per-launch discovery hint;
 `aether-internal skill` loads live capability and assignment guidance.
 Containers without run identity receive only general guidance, not borrowed
 authority. OpenCode's discovery configuration does not depend on the optional
@@ -193,27 +198,27 @@ because the CLI will not start without it. It is applied after the
 workspace's own variables, so a workspace cannot leave the agent unable to
 run. See the launch table below for why `claude` needs one. Optional reporter
 environment (OpenCode V1's `OPENCODE_CONFIG_CONTENT`) is not a required
-**Launch env** value; see "Status reporting" for its interactive-only scope.
+**Launch env** value; see "Status reporting" for its Standard-only scope.
 
 Fixed launch values replace workspace values of the same name. Native
 OpenCode coordination has version-specific merge/discovery behavior,
 described under [managed loading](#managed-native-loading).
 
-- **TUI.** Container PID 1 supervises the harness and opens a login shell after
-  any normal harness exit. Exiting that shell opens another, so the run and
+- **Standard (`tui`).** Container PID 1 supervises the agent and opens a
+  login shell after any normal agent exit. Exiting that shell opens another, so the run and
   container remain `running` until an explicit Close, Kill, or Delete, or until
   the agent's own success or failure report finishes the run (see
   [Report an outcome](coordination.md#report-an-outcome)).
-- **Headless.** The harness is the container's main process. When it exits,
+- **Background (`headless`).** The agent is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
-  and is never relaunchable. `codex`, `omp` and `opencode` run their
+  and can never be reopened. `codex`, `omp` and `opencode` run their
   background task over ACP instead when their ACP server is installed, and
   finish the same way after its one turn; Claude keeps `claude -p` because
   its adapter runs on the Claude Agent SDK
   ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
-Close a TUI run explicitly:
+Close a Standard run explicitly:
 
 ```sh
 aether close <run> --outcome merged
@@ -226,8 +231,9 @@ default is `168h` (7 days); `0` uses that default. A negative value
 disables retention and cleans up immediately. Kill and Delete remain immediate
 cleanup operations.
 
-Relaunch is available only for a retained TUI run - closed, or finished by its
-agent's report - while its retention deadline has not passed:
+Reopen (`aether relaunch`) is available only for a retained Standard or
+Enhanced run - closed, or finished by its agent's report - while its
+retention deadline has not passed:
 
 ```sh
 aether relaunch <run>
@@ -235,7 +241,7 @@ aether relaunch <run>
 
 It resumes the same row, container, checkout, member account, and coordination
 surfaces; it performs no new launch, checkout, container, branch, or disk-floor
-admission. Expired or unavailable runs cannot relaunch. A deployment-supplied
+admission. Expired or unavailable runs cannot be reopened. A deployment-supplied
 argv override receives no registry-only flags, because nothing checks that the
 override is still the registered CLI. See [failure-handling.md](failure-handling.md).
 
@@ -246,7 +252,7 @@ Coordination uses the durable run mailbox, not terminal keystrokes. An
 tells Aether what the agent is doing. They are separate even when both load
 through the same native extension/plugin mechanism.
 
-| Integration | Launch profile | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
+| Agent CLI | `--agent` | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | yes | no | yes | `claude.json` |
 | Codex | `codex` | yes | no | yes | `codex.json` |
@@ -257,15 +263,15 @@ through the same native extension/plugin mechanism.
 | Copilot CLI | custom definition required | yes | no | with `ACPArgs` | `copilot.json` |
 | Gemini CLI | custom definition required | yes | no | with `ACPArgs` | `gemini.json` |
 | Cursor CLI | custom definition required | yes | no | with `ACPArgs` | `cursor.json` |
-| Fake | scheduler test profile | explicit inbox only | no | with `ACPArgs` | none |
-| Other/custom | deployment/member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
+| Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
+| Other/custom | deployment or member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
 
 “Yes” requires the matching integration to be loaded and executing in the
 owning live session. It is not a promise that a copied file, a registry
-profile, or a status reporter activates inbox delivery. Native idle wake is
-for eligible TUI runs, not a way to restart headless or exited processes.
+entry, or a status reporter activates inbox delivery. Native idle wake is
+for eligible Standard runs, not a way to restart Background or exited processes.
 
-**Enhanced run wake** needs no asset: in an enhanced run the server sends the
+**Enhanced run wake** needs no asset: in an Enhanced run the server sends the
 idle ACP session at most one prompt per set of new unread messages
 ([enhanced-runs.md](enhanced-runs.md#mail)). The container sets
 `AETHER_ENHANCED=1`, and there every `aether-internal hook` exits without
@@ -277,7 +283,7 @@ prompt; stop this receiver`.
 ### Installation and activation
 
 Inside the run, inspect configuration and export the asset for **only the
-current harness**:
+current agent**:
 
 ```sh
 aether-internal skill --hooks
@@ -320,11 +326,11 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `pi`, `omp`, and `opencode` profiles, Aether stages native
-mailbox assets for **coordinated, task-bearing TUI launches**. Taskless,
-headless, disabled-coordination, and custom/overridden argv launches do not
+For the shipped `pi`, `omp`, and `opencode` agents, Aether stages native
+mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
+Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
-where the harness supports them; a boundary hook in a headless process does
+where the agent supports them; a boundary hook in a Background process does
 not grant it idle wake.
 
 For pi, the server stages `/run/aether/aether.ts` and adds
@@ -549,7 +555,7 @@ session event.
 
 ### Copilot CLI inbox integration
 
-Copilot CLI is integration-only, not a built-in launch profile. Export
+Copilot CLI is not a shipped agent; only its inbox hooks ship. Export
 `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
 `$COPILOT_HOME/hooks/aether.json`), alternatively
 `.github/hooks/aether.json`. Quit and restart in the intended trusted
@@ -563,7 +569,7 @@ There is no later-idle wake.
 
 ### Gemini CLI inbox integration
 
-Gemini CLI is integration-only. Export `gemini.json`; merge into
+Gemini CLI is not a shipped agent. Export `gemini.json`; merge into
 `~/.gemini/settings.json`, or `.gemini/settings.json` for the project.
 `GEMINI_CLI_HOME` is the **parent** of `.gemini`, not that directory itself.
 Fully exit and restart Gemini, then inspect `/hooks list`.
@@ -577,7 +583,7 @@ boundary hooks, not an idle receiver.
 
 ### Cursor CLI inbox integration
 
-Cursor CLI is integration-only. Export `cursor.json`; merge into
+Cursor CLI is not a shipped agent. Export `cursor.json`; merge into
 `~/.cursor/hooks.json` or `.cursor/hooks.json`. Use `/quit` or `/exit`,
 restart in the intended workspace, respect workspace trust, and inspect
 `/logs` while exercising an interactive boundary. `CURSOR_CONFIG_DIR` and
@@ -593,12 +599,12 @@ continuation. There is no later-idle wake.
 
 ### Fake inbox support
 
-`fake` is a deterministic scheduler/test harness, not a vendor integration.
+`fake` is a deterministic scheduler/test agent, not a vendor CLI.
 It receives the run-mounted CLI and identity socket, but has no shipped
 context hook, status reporter, trust UI, or native wake API. When coordination
 is enabled, it must read and acknowledge the inbox explicitly.
 
-### Custom and unlisted harnesses
+### Custom and unlisted agents
 
 A launch definition only supplies argv; it does not prove a CLI has loaded
 an inbox integration. Export `generic.sh` for a plain-stdout native context
@@ -618,7 +624,7 @@ explicitly acknowledges its returned token. Sending, hinting, and native
 API acceptance are not acknowledgement or proof the model read anything.
 
 Protection and human takeover suppress new wake admission without losing
-mail. Current run/mission authority is checked again when the server
+mail. Current run/swarm authority is checked again when the server
 dispatches the admitted response, not from a cached eligibility flag.
 A wake already accepted before a later hold may still be processed. Native
 receivers cancel stale session generations and respect Stop/abort and
@@ -626,7 +632,7 @@ approval waits; none starts a dead process or attaches to an arbitrary TUI.
 Without a loaded working integration, use explicit inbox reads; there is no
 silent terminal fallback.
 
-Native receiver errors appear in the harness warning UI or stderr. Only
+Native receiver errors appear in the agent's own warning UI or stderr. Only
 recoverable helper/transport failures get bounded backoff; unsupported
 protocols and nonretryable helper errors stop observation rather than spinning.
 After exhausting helper retries, pi/OMP require a reload/restart; OpenCode
@@ -636,7 +642,7 @@ without marking the rejected IDs notified or blindly resending. Fix the
 underlying error first; reloading never erases or acknowledges durable mail.
 
 Command stop hooks may request one continuation for pending mail or an
-integrator's final mission refresh, even with an empty inbox. Native
+integrator's final swarm refresh, even with an empty inbox. Native
 repeat-stop guards prevent loops. Automatic hook checks have a separate
 bounded allowance, so they cannot consume explicit coordination capacity.
 See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries)
@@ -648,12 +654,12 @@ The reporter sets execution: `running`, or `needs-attention` for settled,
 failed, and stalled execution. An input request is separate: it requires an
 unresolved, correlated question, form, extension dialog, or permission
 request, and a `running` run can have one open. The dashboard folds both into
-its run state; see
+its run state and shows `needs-attention` or an open request as **Needs you**; see
 [dashboard-frontend.md](dashboard-frontend.md#run-state). Turn end,
 silence, notification text, and a question in the final response do not
 establish a pending request.
 
-A harness with a **Status** entry can run a command on its own lifecycle
+An agent with a **Status** entry can run a command on its own lifecycle
 events. Aether points each one at the staged server binary inside the
 container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
@@ -780,22 +786,22 @@ Source contracts: [Claude command hooks](https://code.claude.com/docs/en/hooks),
 and [OMP 18.3.1 extension events](https://github.com/can1357/oh-my-pi/blob/v18.3.1/packages/coding-agent/src/extensibility/extensions/types.ts).
 
 `codex` only says when a turn ends. It never says a new one started, so its
-run comes back to `running` the way a harness with no reporter does: on
+run comes back to `running` the way an agent with no reporter does: on
 agent output or a file change. Everything drawn in the terminal counts
 there, the echo of your own typing included, so a long prompt typed into a
 parked `codex` run can read as `running` before you send it. `claude`, `pi`
 and `omp` report both ends, and their runs stay parked until the agent
-itself says it is working again - a TUI repainting while you type is not
-work.
+itself says it is working again - a terminal repainting while you type is
+not work.
 
 Execution and the current pending-request set are persisted separately, so
 both survive an Aether server restart for a still-live run. The server emits
 `run.input` only when the request set changes; it does not replay old input
-deltas as new opens. Actual run termination/relaunch clears the old
+deltas as new opens. Actual run termination or reopen clears the old
 lifetime's requests. See [failure-handling.md](failure-handling.md).
 
-For a harness with a **Status** of `-`, nothing changes: the run is judged
-on silence alone and parks at `needs-attention` after `--stall-threshold`
+For an agent with a **Status** of `-`, nothing changes: the run is judged
+on silence alone and parks at `needs-attention` (Needs you) after `--stall-threshold`
 with a reason that leads with `stalled:`. See
 [failure-handling.md](failure-handling.md).
 
@@ -809,14 +815,14 @@ The following disable or exclude automatic reporting:
 - **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
   the run identity socket, canonical CLI and discovery remain available.
 - **An argv override.** A `--harness-definitions` entry that redefines a
-  shipped harness drops the status arguments, status environment, and
+  shipped agent drops the status arguments, status environment, and
   taskless discovery mechanism - nothing checks the overridden command is
   still that CLI.
 - **Truthy `OPENCODE_PURE` in the workspace environment.** `1` or
   case-insensitive `true` disables OpenCode's external plugins, Aether's
   included; `0` and `false` do not. Aether preserves the member's choice.
   With plugins disabled, the run still launches but reports nothing and is
-  judged on silence like a harness with no reporter.
+  judged on silence like an agent with no reporter.
 - **V2 plugin directives.** `plugins: ["-aether-status"]` excludes the
   managed V2 reporter without excluding the mailbox; `["-*"]` excludes both.
 
@@ -836,24 +842,25 @@ it. For configuration needed in both paths, use a file named by
 `OPENCODE_CONFIG`, which Aether does not set. Do not assume V1 and V2 plugin
 configuration schemas are interchangeable.
 
-## Steering delivery
+## Message delivery
 
-Human/member steering is separate from automated mailbox wake. The latter
-uses the native APIs above and never falls back to this PTY path.
+A message a member sends to a Standard run's agent is separate from automated
+mailbox wake. The latter uses the native APIs above and never falls back to
+this PTY path.
 
-`run.inject` writes a message, then the harness's submit sequence, to the
+`run.inject` writes a message, then the agent's submit sequence, to the
 run agent's PTY. Most TUIs send the message on one Enter (`\r`); `opencode`
-accepts steered text into its editor on the first Enter and sends on the
-second, so its profile ends the write with `\r\r`. The sequence lives in the
-harness profile (`SteerSubmit` in `internal/harness`), not in the caller:
+accepts the text into its editor on the first Enter and sends on the
+second, so its entry ends the write with `\r\r`. The sequence lives in the
+registry (`SteerSubmit` in `internal/harness`), not in the caller:
 the scheduler and the coordination radar both resolve it from the run's
-harness before writing. Aether records the delivery only after the complete
+agent before writing. Aether records the delivery only after the complete
 stdin write succeeds and renders the attribution without terminal control
 bytes.
 
-Only `claude` has a **structured-output adapter** today, so its headless runs
+Only `claude` has a **structured-output adapter** today, so its Background runs
 produce typed tool-call and token events. Everything else degrades to the PTY
-transcript plus the diff timeline, which is always enough. Adding an adapter is
+transcript plus the recorded file changes, which is always enough. Adding an adapter is
 [adapters.md](adapters.md). A background run over ACP has the session item
 log instead, and the adapter does not read it.
 
@@ -863,32 +870,32 @@ log instead, and the adapter does not read it.
 interactive TUI in a
 persistent server-side PTY: `aether attach <run>` puts you in it from the
 CLI, and the dashboard navigates there automatically on launch. Container
-PID 1 supervises the TUI process and, after any normal harness exit, opens a
+PID 1 supervises the TUI process and, after any normal agent exit, opens a
 login shell; exiting that shell opens another. The run and container remain
 `running` until an explicit Close, Kill, or Delete. A signal or other
-non-normal harness failure records `failed` and cleans up without a
+non-normal agent failure records `failed` and cleans up without a
 replacement shell.
 `--mode background` (wire name `headless`) runs the agent's
 machine-readable mode as a one-shot:
 on exit Aether commits and publishes the branch, records `completed` or
-`failed`, and destroys the container immediately. Headless runs never open a
-replacement shell and are not relaunchable. For `codex`, `omp` and
+`failed`, and destroys the container immediately. Background runs never open a
+replacement shell and cannot be reopened. For `codex`, `omp` and
 `opencode` with their ACP server installed, the one-shot is a single ACP
 turn instead ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
 `--mode enhanced` (wire name `acp`) runs the agent over the Agent Client
-Protocol in the tui container shape: the supervised PID 1 runs a login shell
-and the agent's ACP server runs beside it. It retains on Close and relaunches
-like tui; see [enhanced-runs.md](enhanced-runs.md).
+Protocol in the Standard container shape: the supervised PID 1 runs a login shell
+and the agent's ACP server runs beside it. It is retained on Close and
+reopens like Standard; see [enhanced-runs.md](enhanced-runs.md).
 
-The task prompt is optional in tui and acp mode: launch without one and you land in
+The task prompt is optional in Standard and Enhanced mode: launch without one and you land in
 the agent's interactive TUI with an empty composer, exactly as if you had
 started the CLI yourself, and type the first prompt there. Every argv token
 that carries the prompt is then dropped, so `opencode --prompt={task}` leaves
-whole rather than dangling an empty flag. Headless mode has no interactive
-surface, so it still requires a task. An enhanced run without a task waits
+whole rather than dangling an empty flag. Background mode has no interactive
+surface, so it still requires a task. An Enhanced run without a task waits
 for the first message.
 
 Task-bearing and taskless launches use the same capability-neutral discovery
@@ -917,10 +924,10 @@ The agent should run `aether-internal skill` before acting, then use the CLI
 for coordination. Report a terminal outcome only after the assigned work is
 finished. The co-author rule still asks the agent to read
 `/run/aether/co-authors` before each commit. Only the prompt
-the harness receives changes: the stored task, branch slug, and every CLI and
+the agent receives changes: the stored task, branch slug, and every CLI and
 dashboard surface keep what the member typed. See [coordination.md](coordination.md).
 
-Custom harnesses, `fake`, and argv-overridden shipped profiles do not receive
+Custom agents, `fake`, and argv-overridden shipped agents do not receive
 guessed vendor flags or a fabricated initial task. They still get the staged
 CLI and the run identity socket. Their authors must call `aether-internal
 skill` manually or through their own native taskless startup mechanism. Aether
@@ -932,7 +939,8 @@ short capability-neutral discovery, never a borrowed run identity.
 ### Agent development workflow
 
 `aether-internal status` reports the live capability allow-list.
-`aether-internal skill` preserves the mission/task/inbox/report workflow and
+`aether-internal skill` preserves the swarm (`aether-internal mission`),
+task, inbox and report workflow and
 offers `skill terminal`, `skill browser`, and native `skill git` only when the
 relevant development execution/observation capability is advertised. The Git
 topic does not claim that GitHub CLI, credentials, push permissions or image
@@ -974,7 +982,7 @@ observed viewport identity. Use `browser snapshot` for semantic nodes,
 `browser console`/`network` for diagnostics and `browser screenshot` for an
 image artifact. See [the complete commands and bootstrap contract](coordination.md#development-terminals-browser-and-captures).
 
-Only claim visible screenshot evidence after an actual image-consuming harness
+Only claim visible screenshot evidence after an actual image-consuming agent
 tool reads the returned artifact path. If no such tool exists, report that
 exact limitation and the text/DOM checks actually performed; text alone is
 not visual proof. Capture and verify before resource cleanup or a terminal
@@ -989,28 +997,30 @@ boundaries instead of automatically merging. See [native Git guidance](coordinat
 
 ### Launch argv
 
+| `--agent` | Standard (`tui`) | Background (`headless`) |
+| --- | --- | --- |
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `omp` | `omp --auto-approve {task}` | `omp -p --auto-approve {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
+
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
 root; that variable is a vendor internal, not a supported interface, and the
 vendor's own answer is to run the container as a non-root user. It is a
-stopgap until the standard image ships one. Environment terminals carry no
-harness, so they get none of this - the member's own shell is not launching
-an agent.
+stopgap until the standard image ships one. The Environment launches no
+agent, so it gets none of this.
 
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
 `--verbose` comes with it. If a launch fails with the CLI rejecting its own
 arguments, the installed CLI has drifted from the registry.
-Update the registry or install a compatible CLI in the member's environment
-terminal. The installed executable lives in that member's environment home.
+Update the registry or install a compatible CLI in the member's
+Environment. The installed executable lives in that member's home.
 An argv override replaces the shipped template wholesale, so a registry fix
 never reaches it: a deployment's `--harness-definitions` entry that redefines
-a shipped harness has to be updated on its own. It keeps the registry's key
+a shipped agent has to be updated on its own. It keeps the registry's key
 passthrough and launch env for that name, since neither is part of the
 command line.
 
@@ -1029,7 +1039,7 @@ chosen for it, else Enhanced when `enhanced_default` is set, else
 `default_mode`. **Install <agent>** calls `agent.install` with `enhanced` set
 when Enhanced is chosen, then shows the command's output, and on failure
 **Install failed** with the exit status. Once the agent is installed the
-environment terminal opens with its login command typed (`claude` then
+Environment terminal opens with its login command typed (`claude` then
 `/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`).
 **Check** reads `agent.list` again and shows **Installed**, **Enhanced
 installed** and **Login found** or **No login found**, from `installed`,
@@ -1071,14 +1081,15 @@ account, and the server refuses such a launch.
 `aether agent add <name> --enhanced` also installs a shipped agent's
 [enhanced-mode adapter](#enhanced-mode-adapters).
 
-For an unshipped name the command asks for interactive and headless launch
-templates first (`<name> {task}` and `<name> -p {task}` by default); `--acp
-<argv>` records the command that serves ACP, split on spaces; a shipped name
-refuses it. Install the
+For an unshipped name the command takes the Standard and Background
+templates from `--tui <argv>` and `--headless <argv>`, or prompts
+`TUI command [<name> {task}]:` and `Headless command [<name> -p {task}]:`;
+`--acp <argv>` records the command that serves ACP, split on spaces; a
+shipped name refuses it. Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
 complete its login.
 
-The environment terminal has no browser. Open the URL it prints in your own
+The Environment has no browser. Open the URL it prints in your own
 browser. In the dashboard, clicking an OAuth URL with a loopback redirect
 starts the matching callback forward before the authorization page opens. With
 the CLI, start it explicitly before completing the browser flow:
@@ -1091,9 +1102,7 @@ Device-code flows do not need a callback forward.
 
 ### Setup details
 
-The login commands below run in the environment terminal:
-
-Three things to know:
+The login commands below run in the Environment. Three things to know:
 
 - **There is no browser in the container.** Open the printed URL on the machine
   running `aether gui` or the CLI.
@@ -1179,7 +1188,7 @@ use that file.
 
 ### `fake`
 
-The deterministic test harness. It has no login and no fixed command: the
+The deterministic test agent. It has no login and no fixed command: the
 server reads its argv from the `AETHER_FAKE_AGENT` environment variable at
 launch time, so it runs whatever you name - typically a script committed to the
 repo, since the run's checkout is mounted at `/workspace`.
@@ -1192,7 +1201,7 @@ The `{task}` placeholder expands to the run's task text; omit it if the
 script does not need it.
 
 This is how the [quickstart](quickstart.md#prove-the-plumbing-without-an-agent-subscription)
-proves the whole lifecycle without any vendor account, and it is the harness
+proves the whole lifecycle without any vendor account, and it is the agent
 the end-to-end tests drive.
 
 ### Custom agents
@@ -1209,15 +1218,16 @@ Custom launch definitions come from two places, resolved in this order:
    the reserved names `custom` and `fake` cannot be registered.
 
 A member's own definition runs only on that member's own account. On a
-shared account, only a shipped harness or a server-wide definition is
+shared account, only a shipped agent or a server-wide definition is
 launched, and its `CredentialPaths` are the login paths the share mounts from
 the owner's home. A launch is refused when a credential path is the home
 itself. A definition declares no install directories, so a recipient without
 its executable borrows only the owner's `~/.local/bin` and `~/.local/lib`.
 
 Both forms carry the same fields and pass the same validation. The
-administrator JSON is an object keyed by harness name. Each definition must
-name the executable and provide both interactive and headless argv. `{task}`
+administrator JSON is an object keyed by agent name. Each definition must
+name the executable and provide both Standard (`TUIArgs`) and Background
+(`HeadlessArgs`) argv. `{task}`
 is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
@@ -1226,7 +1236,7 @@ configured. Deny names are basenames only.
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,
 so an administrator definition is the only way to change one. A definition
-replaces the shipped profile rather than extending it, so it carries the
+replaces the shipped definition rather than extending it, so it carries the
 deny names too - omp keeps its provider keys in `agent.db`, which no
 generic denylist knows about:
 
@@ -1326,7 +1336,7 @@ An updater still running after 10 minutes is stopped and reported as
 dashboard does not stop an update.
 
 A newer CLI may migrate its own state in the member home on first start, and
-Aether does not roll an update back. Relaunching a retained run reuses its
+Aether does not roll an update back. Reopening a retained run reuses its
 container and does not update. `omp` and Claude Code keep the files of
 previous versions in the member home; Aether does not prune them.
 
@@ -1335,11 +1345,11 @@ To turn updates off for the whole server, start it with
 
 ## Agent configuration: import and Files
 
-Open **Agent config files** on the Agents page or in the command palette in
-either the local dashboard (`aether gui`) or the server-hosted dashboard. This permanent route is available whenever the
-gateway advertises `config.roots` and `config.import`; it needs no workspace
-or onboarding progress. Onboarding's Agent step offers the same importer
-behind the same disclosure.
+Expand **Agent config files** on the Agents page in either the local
+dashboard (`aether gui`) or the server-hosted dashboard; the command palette
+finds the Agents page by that name. The section appears whenever the gateway
+advertises `config.roots` and `config.import`, and needs no workspace or
+onboarding progress. Onboarding's Agent step shows the same section.
 
 Choose one directory such as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`
 with **Choose directory**. A hosted page can read a directory you explicitly
@@ -1427,8 +1437,8 @@ or symlinks, so a newly imported script may need `chmod` in the remote terminal.
 ![An interrupted import reports confirmed writes and the failure](media/configuration-incomplete.webp)
 
 The imported files are written into your authenticated member's persistent
-configuration home. That home is mounted read-write in your environment
-terminal and in runs you launch, so the change is immediately visible to
+configuration home. That home is mounted read-write in your Environment
+and in runs you launch, so the change is immediately visible to
 existing and future runs (an agent may need to reload its configuration). It
 is not an isolated per-run profile. A share of your account does not expose
 it, except the `~/.omp/agent` directory an `omp` share mounts: a recipient's
@@ -1455,7 +1465,7 @@ member's own home; an admin cannot select another member.
 For workspace files, **Commit to <branch>** makes a one-file commit on the
 workspace base branch and does not push upstream. Live-run writes change the
 run's uncommitted checkout. Workspace saves require **Push**; live-run saves
-require **Steer**. The [Files protocol](local-gateway.md#files-and-member-configuration)
+require the Steer capability. The [Files protocol](local-gateway.md#files-and-member-configuration)
 defines revision and concurrency rules.
 
 ### Manual profile commands
@@ -1479,7 +1489,7 @@ aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
 
-`profile push` reads the selected agent's local harness root and records a
+`profile push` reads the selected agent's local configuration root and records a
 content-addressed snapshot; `status` reports recorded snapshot metadata, not a
 live inventory of the home. Browser imports and **Files** edits do not create
 or update this CLI snapshot history. Configuration persists in the member HOME
@@ -1497,7 +1507,7 @@ restore: files absent from the chosen snapshot are not deleted. A run's snapshot
 pin is optional launch provenance, not a guarantee that its current home still
 matches those bytes. No path automatically synchronizes later local changes.
 
-## Adding a harness
+## Adding an agent
 
 The registry defines argv templates for both modes, credential/configuration
 roots, denylist, API-key passthrough, taskless discovery, status reporting,
@@ -1508,5 +1518,5 @@ An output adapter is optional; see [adapters.md](adapters.md).
 Inbox support is a separate capability: follow the
 [harness integration guide](harness-integration.md) for the durable CLI,
 boundary adapter, and optional native receiver. Only a version-matched
-native implementation should opt a shipped profile into managed mailbox
+native implementation should opt a shipped agent into managed mailbox
 loading; a custom argv override must not inherit that assumption.

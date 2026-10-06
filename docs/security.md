@@ -8,7 +8,7 @@ stances that are deliberate, so they are not repeatedly re-raised as findings.
 The container **is** the isolation boundary. Aether does not try to build a
 second sandbox inside it.
 
-- **Agents run as root by default.** A harness may map a run to a non-root
+- **Agents run as root by default.** An agent profile may map a run to a non-root
   UID/GID, but the default image runs as root and nothing in Aether forces
   otherwise.
 - **Docker's default capability set is retained deliberately.** Agents install
@@ -22,7 +22,7 @@ second sandbox inside it.
   the credentials mounted into it.
 
 Each member's persistent home is mounted as `$HOME` only into that member's
-own containers: their environment terminal and the runs they launch. An
+own containers: their environment and the runs they launch. An
 account share is the one exception, and it reaches only the owner's agent
 login, except that an `omp` share reaches the owner's whole `~/.omp/agent`;
 see [Account sharing](#account-sharing).
@@ -31,7 +31,7 @@ Real names and email addresses cross into the container with the run. The
 git identity of the member who launched it is baked into the container's
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*` at creation, and
 `/run/aether/co-authors` holds one `Co-authored-by: Name <email>` line per
-member who steered the run, readable by the agent like any other file under
+member who messaged the run, readable by the agent like any other file under
 the coordination mount. A merged branch credits a real upstream account only
 if it carries that account's address.
 
@@ -47,8 +47,8 @@ way.
 
 ### Account sharing
 
-Sharing your agent account with a member (**Share account** under **Your
-agent account** on **Members**, or `aether account share <member-id>`) lets
+Sharing your agent account with a member (**Share account** under **Agent
+account sharing** in **Profile**, or `aether account share <member-id>`) lets
 them launch runs on it from the launch dialog's **Account** picker (or
 `aether run --account <your-member-id>`), so they use your agent CLI
 subscription. The launcher remains the run owner and actor; usage and cost
@@ -56,7 +56,7 @@ are attributed to the selected account.
 
 A run always starts from its launcher's saved image, or the standard image,
 with the launcher's home as `$HOME`. Git identity, `.gitconfig`, the gh login,
-the signing key, SSH files, shell history, harness configuration (settings,
+the signing key, SSH files, shell history, agent configuration (settings,
 hooks, MCP servers, history), installed executables (except a borrowed agent
 installation, below), imported configuration, terminal image uploads, and the
 profile snapshot pin are all the launcher's.
@@ -64,19 +64,19 @@ Candidate verification started by a run's agent runs in the home that run's
 container mounts, which Aether records on the run when it is launched; a
 handoff (`aether handoff`) changes the run's owner but not that home, and
 verification does not need the run's container to still be alive. On a shared
-account, Aether additionally mounts that harness's login path from the
+account, Aether additionally mounts that agent's login path from the
 owner's home over the same path in the launcher's home, read-write. The
 **Login state** column of [harnesses.md](harnesses.md#shipped-harnesses) lists
 each path; for `claude` it is `~/.claude/.credentials.json`.
 
-When the launcher's home has no `~/.local/bin/<executable>` for the harness,
+When the launcher's home has no `~/.local/bin/<executable>` for the agent,
 the run borrows the owner's installation. The owner's `~/.local/bin` and, when
 it exists, `~/.local/lib` are mounted read-only at `~/.aether/account/bin` and
 `~/.aether/account/lib`, and `~/.aether/account/bin` is appended to the end of
-`PATH`. Each install directory the harness declares
+`PATH`. Each install directory the agent declares
 (`harness.Profile.InstallPaths`; `~/.local/share/claude` for `claude`) is
 mounted read-only at its own path. A borrowed login also gets the
-launcher's own copy of the harness's state file the CLI consults before
+launcher's own copy of the agent's state file the CLI consults before
 using a login (`harness.Profile.BorrowedState`; for `claude`,
 `hasCompletedOnboarding: true` in `~/.claude.json`, created with mode 0600 or
 rewritten in place, never replaced), so the CLI starts signed in rather than
@@ -122,7 +122,7 @@ both ways:
 
 Share an `omp` account only with someone you would give your home to.
 
-Only the shipped harnesses and server-wide definitions
+Only the shipped agents and server-wide definitions
 ([harnesses.md](harnesses.md#custom-agents)) declare a login path to share. A
 member's own definition (`aether agent add`) runs only on that member's own
 account; a launch of it on a shared account is refused:
@@ -187,15 +187,15 @@ owner's home; removing the volume does not delete the home.
 rename on every token refresh and writes in place only when the rename fails,
 so a refresh in the owner's own container would leave recipients' runs holding
 the old file. Once a member has shared their account, Aether therefore also
-mounts that file in place in the member's own runs and environment terminal,
+mounts that file in place in the member's own runs and environment,
 creating an empty file when none exists, so every writer updates the one file
 recipients' runs hold. The empty file is not a login: until the owner logs in,
 a recipient's `claude` launch is refused. A login file with another hard link
 is neither mounted in place nor shared. A container the owner started before
-sharing, typically the long-lived environment terminal, lacks that mount, so
-stop it and open it again. When the terminal is running at a first share, or
-its state cannot be read, **Members** says so and offers **Stop environment**; **Open** in the
-**Environment** view starts it again. From the CLI: `aether terminal stop`, then
+sharing, typically the long-lived environment, lacks that mount, so stop it
+and open it again. When the environment is running at a first share, or its
+state cannot be read, **Profile** says so and offers **Stop environment**;
+**Open** on the **Environment** page starts it again. From the CLI: `aether terminal stop`, then
 `aether terminal`. In a container with the mount, Claude's `/logout` revokes
 the login at Anthropic and reports success but cannot delete the file; the
 dead tokens are cleared on the next refresh. Members who share nothing are
@@ -214,28 +214,29 @@ taking the login back. If the owner starts a container with a different
 non-root uid while a recipient's run is live, the owner's container takes the
 login back and that run loses access to it. A profile push or rollback by the
 owner (`aether profile push`, `aether profile rollback`) re-owns every entry
-under that harness's profile root in the owner's home, the login included, to
+under that agent's profile root in the owner's home, the login included, to
 the uid:gid of the owner's home directory unless that is the server's own
 uid, and a recipient's live run with another uid loses access the same way.
 
-Revoking a grant blocks later launches and relaunches. It does not stop an
+Revoking a grant blocks later launches and reopens. It does not stop an
 already-running container or remove the login mounted into it. Stop those
-runs before revoking access when immediate removal matters: **Kill** in the
-run's header, or `aether kill <run-id>`.
+runs before revoking access when immediate removal matters: **Kill run** in
+the run header's **More** menu, or `aether kill <run-id>`.
 
 Containers created before shares were narrowed to the login path still mount
 the account owner's whole home until they end. They stay supervised, and
-relaunching one is refused:
+reopening one is refused:
 
 ```
 scheduler: invalid run state transition: run <run-id> predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new run
 ```
 
 Stop those runs, before or after upgrading, to end that exposure
-immediately: **Kill** in the run's header, or `aether kill <run-id>`.
+immediately: **Kill run** in the run header's **More** menu, or
+`aether kill <run-id>`.
 
 This narrows what an account share exposes. It does not change the role
-model: a collaborator can still steer another member's live run
+model: a collaborator can still message and control another member's live run
 ([teams.md](teams.md#roles)) and reach the home its container mounts, and a
 handoff transfers a run whose container keeps the home it was created with.
 The development terminal and run repository gates still also check access to
@@ -250,7 +251,7 @@ Connecting GitHub (`aether github connect`, see
 and the settings that use them, in the member home on the server:
 
 - **The gh token**, at `homes/<member>/.config/gh/hosts.yml`. `gh auth
-  login` runs inside the environment terminal container, which has no
+  login` runs inside the member's environment container, which has no
   keyring, so gh falls back to writing the token to that file in plain
   text.
 - **The signing key pair**, at `homes/<member>/.ssh/aether_signing` (mode
@@ -368,8 +369,8 @@ comes from its run socket, not a member ID in a request. Each app terminal
 and browser session has its own writer lease and resource incarnation;
 commands carry that lease's generation. A human can explicitly take over,
 which fences stale writes. An agent cannot force a takeover. Taking an app
-surface does not take the primary harness terminal or release its mission
-hold; primary-terminal control and mission dispatch retain their own rules.
+surface does not take the primary agent terminal or release its swarm
+hold; primary-terminal control and swarm dispatch retain their own rules.
 Held browser keys, buttons and touches are cleared server-side when the
 controller releases, loses authority or disconnects, and before replacement
 control is admitted. A cleanup failure fences new control rather than handing
@@ -393,7 +394,7 @@ The Chromium companion has a different policy from the agent container above:
   operations; Docker's stock AppArmor policy remains in place. There is no
   privileged, unconfined, `--no-sandbox`, Xvfb, or host-display fallback.
 - Its only bind mount is a private control directory. It cannot mount the
-  checkout, member home, signing keys, harness credentials, or Docker socket.
+  checkout, member home, signing keys, agent credentials, or Docker socket.
   It joins the run's network namespace, never host networking; this lets it
   reach the app's loopback ports without exposing a browser port on the host.
 - Playwright controls Chromium through a debugging **pipe**, not a CDP TCP
@@ -502,12 +503,12 @@ delivery use the existing **Push** capability. The service resolves the
 current member, workspace, run ownership, and candidate state itself. It
 rechecks the caller and the approved human approver at the actual delivery,
 so an old page, role change, or stale request cannot turn into authority.
-`integration.decide` is human-only, and an optional mission identifier is
+`integration.decide` is human-only, and an optional swarm identifier is
 context rather than a permission grant. The one delivery without a human
-decision is a mission integrator's: its request is recorded as approved by the
-mission's accountable human, who must hold Push when it is requested and again
-when it is delivered, and only while the mission is active. Cancelling the
-mission stops it.
+decision is a swarm integrator's: its request is recorded as approved by the
+swarm's accountable human, who must hold Push when it is requested and again
+when it is delivered, and only while the swarm is active. Cancelling the
+swarm stops it.
 
 Verification runs against a server-owned isolated candidate revision and a
 disposable verification tree; candidate inputs and retained evidence are not
@@ -554,7 +555,7 @@ member home and call fixed vendor HTTPS usage endpoints. This is server-side
 token use for status reporting, not credential extraction: Aether never copies
 the credential bytes, refreshes or rewrites native OAuth files, or sends tokens
 or provider response bodies to clients. API-key logins and unsupported
-harnesses do not become quota collectors. Account selection uses the same
+agents do not become quota collectors. Account selection uses the same
 explicit directional grant as launches; administrators do not gain implicit
 access, and membership/share authorization is checked before and after the
 provider read.
@@ -702,7 +703,7 @@ identify its callers.
 
 The shared Configuration importer prepares user-selected file metadata only
 after `config.roots` returns and a destination is known. The root's
-`credential_names` combines shared denials and the harness's `DenyNames`;
+`credential_names` combines shared denials and the agent's `DenyNames`;
 names match any component case-insensitively. Those names and `*.pem` files
 are filtered before browser reads. A missing credential list fails closed.
 Runtime/history paths use the selected root's `runtime_ignores`. Neither list
@@ -732,7 +733,7 @@ in the persistent member home the target container mounts as `$HOME`, not in a
 workspace checkout or source tree. The returned absolute path is the path visible inside the target
 container at its `$HOME`; the client cannot choose the destination or filename.
 An upload with no `run_id` targets the authenticated member's running
-environment terminal. A run target requires `Steer` and writes into the home
+environment. A run target requires `Steer` and writes into the home
 that run's container mounts: its launcher's, also on a shared account.
 
 These files follow member-home retention: stopping or resetting an environment
@@ -740,7 +741,7 @@ does not remove the home, so images remain until they are removed from that
 home or the member is deleted. A member-home bind mount is not part of
 `env.save`'s Docker image, so terminal images are not copied into the saved
 environment image. Like every file in that home, the images are readable in
-each container that mounts it: the member's environment terminal and the runs
+each container that mounts it: the member's environment and the runs
 they launch.
 
 ## Browser configuration and Files
@@ -817,7 +818,7 @@ requires the `Launch` capability and targets only the authenticated member's
 own home; an admin cannot select another member or account.
 
 The imported and edited files are in the member's shared read-write home,
-mounted into that member's environment terminal and the active and future
+mounted into that member's environment and the active and future
 runs they launch, including runs on a shared account. A member's account
 share does not expose them, except the `~/.omp/agent` directory an `omp`
 share mounts; otherwise only the agent login path is shared
@@ -1048,8 +1049,8 @@ operator-facing stances are these.
   may also be present for the optional bridge and lifecycle plumbing. Neither
   path authenticates a caller. The socket at `/run/aether/coord3.sock` is the
   run identity: a connection accepted there is treated as that run. An
-  identity-less environment terminal or container can use general help or
-  non-run skill guidance, but status, messaging, reporting, and mission
+  identity-less environment or container can use general help or
+  non-run skill guidance, but status, messaging, reporting, and swarm
   operations are unavailable.
 - **The mount is the authentication, so no token enters a container.** Each run
   gets its own socket; there is nothing inside the container to steal, and
@@ -1072,7 +1073,7 @@ operator-facing stances are these.
   internal read-only `coord.hook.status` endpoint, with the same run identity
   and status authorization but an independent bounded request budget.
   Malformed envelopes and unknown methods still consume the ordinary budget;
-  the hook endpoint cannot dispatch mutations. A mission-assigned run
+  the hook endpoint cannot dispatch mutations. A swarm-assigned run
   additionally receives only the current assignment's `task.*` and `worker.*`
   methods over that same run-authenticated socket; those methods are not a
   general control API. There is no `run.kill`, no Git access, and no other
@@ -1084,7 +1085,7 @@ operator-facing stances are these.
 - **A run can widen its own peer set, and the cap is what bounds it.** For
   ordinary runs, the overlap that authorizes a message is computed from the two
   runs' own diff snapshots, so a run that touches every tracked file is
-  reported as overlapping with every other run in the workspace. Mission
+  reported as overlapping with every other run in the workspace. Swarm
   assignments instead provide a server-derived peer set that may authorize
   active integrator and worker runs before file overlap; neither set is
   caller-selected, and both remain bounded. The server limits each run to 8

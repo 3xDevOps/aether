@@ -202,20 +202,23 @@ fallback is your display name at `<member-id>@aether.local`. The local
 dashboard shows these fields at the bottom of onboarding's **Connect** step,
 prefilled from this computer's `git config`; the hosted dashboard shows them at
 the top of **Repository**, prefilled from your member record. **Save identity**
-stores them. Change them later under **Agents → Git identity**, or inspect them
-with `aether member git`. Author identity is not repository authentication.
+stores them. Change them later in **Profile**, from the menu under your name at
+the bottom of the sidebar (**Agents → Git identity** links there), or inspect
+them with `aether member git`. Author identity is not repository
+authentication.
 
 ## 4. Create a workspace
 
-In the dashboard, open **Onboarding**. Its header lists four steps:
-**Connect**, **Repository**, **Agent** and **First run**. The local dashboard
-starts at **Connect**; the hosted dashboard has no machine-local link and
-starts at **Repository**, and opens onboarding for new members even when shared
+The dashboard opens **Onboarding** until you finish it; later, find it in the
+command palette (**Ctrl/Cmd+K**). Its header lists four steps: **Connect**,
+**Repository**, **Agent** and **First run**. The local dashboard starts at
+**Connect**; the hosted dashboard has no machine-local link and starts at
+**Repository**, and opens onboarding for new members even when shared
 workspaces already exist.
 
 A **workspace** is one repository and base branch, and the runs started from
 it. **Repository** lists your workspaces with **Use**, and offers two cards
-under **Add a workspace**: **Import repository** and **Create from local
+under **Add a workspace**: **Import a remote repository** and **From a local
 clone**. A member who is not an admin and finds no workspace sees **Ask an
 admin to add a workspace** and can still **Continue to Agent**. Once a
 workspace is chosen, **Change** returns to the list.
@@ -239,7 +242,7 @@ separate:
   checkouts. Remote import never infers it from the source URL; supply a
   writable repository or fork, or leave it blank.
 - **Native Git/`gh` credentials** and upstream write permission let a run push
-  and open a PR. Set them up in your environment terminal
+  and open a PR. Set them up in your **Environment**
   ([Connect GitHub](#connect-github)). Git author identity and agent vendor
   login are separate again.
 
@@ -247,14 +250,15 @@ separate:
 
 In **Onboarding → Repository** or **Manage workspaces**:
 
-1. Choose **Import repository** under **Import a remote repository**.
+1. Choose **Import repository** on the **Import a remote repository** card.
 2. Fill **Workspace name**, a credential-free HTTPS **Source URL**, and the
    actual **Source / base branch**. Set **Checkout Origin (optional)**
    separately if runs should publish upstream.
 3. Choose **Public HTTPS** under **Source authentication**, then **Import
    repository**. The server creates the workspace and fetches the source.
-4. Read **Import outcome**, then **Continue to Source control**. Review the
-   observed commit and generation, choose **Adopt candidate**, and confirm.
+4. Read **Import outcome**, then **Continue to Repository**, which opens
+   **Workspace Source**. Review the observed commit and generation, choose
+   **Adopt candidate**, and confirm.
    The first fetched candidate is not automatically accepted.
 
 CLI alternative for a new workspace; replace the repository and branch:
@@ -283,7 +287,7 @@ verified with the host administrator; do not blindly trust `ssh-keyscan`.
 GitHub uses Aether's pinned host key.
 
 1. Import creates the workspace and a public deploy key, without fetching.
-   Open **Continue to Source control**, then **Copy public key**.
+   Open **Continue to Repository**, then **Copy public key**.
 2. For GitHub, follow **Install this key in GitHub deploy keys**, or open the
    repository's **Settings → Deploy keys → Add deploy key**. Paste the key and
    leave **Allow write access** off. Other hosts need their corresponding
@@ -373,8 +377,8 @@ On the computer holding the clone, open the desktop app or run `aether gui`
 after [linking to the server](#3-link-from-your-machine).
 
 1. In **Onboarding → Repository** or **Manage workspaces**, choose **Create
-   from local clone**. Enter **Workspace name** and the clone's existing
-   **Base branch**, then **Create workspace**.
+   from local clone** on the **From a local clone** card. Enter **Workspace
+   name** and the clone's existing **Base branch**, then **Create workspace**.
 2. Under **Local clone**, enter the absolute **Repository path**, or use the
    desktop app's **Choose folder**, then **Add remote**. For a workspace you
    picked with **Use**, choose **Link local repository** first.
@@ -467,8 +471,8 @@ account, not to one workspace. **Set up** opens three numbered steps:
    command in your **environment**, the container Aether keeps for you on the
    server, followed by the pinned adapter when Enhanced is chosen. A failed
    command shows **Install failed** with the exit status and the command's
-   output. Once the agent is installed, the environment terminal opens with
-   its login command typed: `claude` then `/login`, `codex login`, `pi` then
+   output. Once the agent is installed, your Environment's terminal opens
+   with its login command typed: `claude` then `/login`, `codex login`, `pi` then
    `/login`, `omp`, or `opencode auth login`.
 3. **Check** reads `agent.list` again and shows **Installed**, **Enhanced
    installed**, and **Login found** or **No login found**. Aether only looks
@@ -488,9 +492,9 @@ command**, and an optional **Enhanced command** that serves the Agent Client
 Protocol. Install that executable into `~/.local/bin` from the terminal in its
 setup.
 
-The member home persists the executable and vendor login state across
-containers. See [the environment terminal guide](terminal.md) for tab and
-stop behavior.
+Your environment's home persists the executable and vendor login state across
+containers. The **Environment** page in the sidebar opens the same shell;
+[terminal.md](terminal.md) covers its tabs and **Stop environment**.
 
 No vendor login yet? [Prove the plumbing without an agent
 subscription](#prove-the-plumbing-without-an-agent-subscription) runs the
@@ -549,7 +553,7 @@ open; navigating within the dashboard preserves the result, but reloading
 loses the in-memory review.
 
 Imports overwrite matching files in your authenticated member's persistent
-home. They immediately affect that home in your environment terminal and
+home. They immediately affect that home in your Environment and
 active/future runs using that home; a running agent may need to reload. They do not
 rebuild the environment image, create an isolated per-run profile, or watch
 the local directory. A snapshot pin records launch provenance, not an
@@ -568,26 +572,27 @@ do not move the data directory or import credentials to repair configuration.
 
 ### Agent coordination hooks
 
-Coordination mail is durable: a successful send means stored, not read. An
-agent actively awaiting a reply should use `aether-internal inbox --wait 30`
-and explicitly acknowledge the batch only after handling it.
+**Agent messages** are what agents in different runs send each other. They
+are durable: a successful send means stored, not read. An agent actively
+awaiting a reply should use `aether-internal inbox --wait 30` and explicitly
+acknowledge the batch only after handling it.
 
 Loaded native pi, OMP, and version-matched OpenCode integrations can wake an
 eligible live idle session without terminal keystrokes. Native wake respects
 human protection, takeover, and Stop. Claude Code, Codex, Copilot CLI,
-Gemini CLI, and Cursor CLI command hooks instead announce mail at their next
-supported lifecycle boundary. Neither path restarts an exited run.
+Gemini CLI, and Cursor CLI command hooks instead announce new messages at
+their next supported lifecycle boundary. Neither path restarts an exited run.
 
 Inside a run, `aether-internal skill --hooks` checks configuration and prints
 setup instructions. **Configured is not loaded, trusted, or executed**:
-restart or reload as the harness requires and inspect its real hook/plugin
+restart or reload as the agent requires and inspect its real hook/plugin
 errors.
-See [per-harness setup](harnesses.md#incoming-coordination-hooks) for managed
+See [per-agent setup](harnesses.md#incoming-coordination-hooks) for managed
 loading, copyable files, versions, and disable controls; see
 [delivery and acknowledgement](coordination.md#delivery-acknowledgement-and-retries)
-for the runtime contract. An unlisted CLI can use the
-[unsupported-harness authoring guide](harness-integration.md) without adding
-a new daemon or terminal fallback.
+for the runtime contract. An unlisted CLI can follow
+[harness-integration.md](harness-integration.md) without adding a new daemon
+or terminal fallback.
 
 ### Connect GitHub
 
@@ -596,10 +601,11 @@ to the checkout Origin from step 4. Source deploy keys do not grant that
 permission, and enterprise policy may require additional authorization.
 
 In **Onboarding → Agent** or **Agents**, open **GitHub**, then **Connect
-GitHub**: it opens the environment terminal with the login command. **I've logged in** finishes
-setup and reports the account and registered signing key.
+GitHub**: it opens your Environment's terminal with the login command typed.
+**I've logged in** finishes setup and reports the account and registered
+signing key.
 
-From the CLI it is two commands. In the environment terminal:
+From the CLI it is two commands. In `aether terminal`:
 
 ```sh
 gh auth login --hostname github.com --git-protocol https --web \
@@ -663,7 +669,7 @@ aether gui
 
 This serves the dashboard from your own machine and opens a browser tab
 already carrying a per-process token. It rides your SSH key, so everything
-the CLI can do works from the page, plus local verbs like pulling a run
+the CLI can do works from the page, plus local actions like pulling a run
 branch into your clone. Leave it running; Ctrl-C stops the gateway and the
 token dies with it. `aether gui --url` prints the URL instead of opening a
 browser. See [local-gateway.md](local-gateway.md).
@@ -671,7 +677,9 @@ browser. See [local-gateway.md](local-gateway.md).
 On a tailnet, the server can host the dashboard instead, so a phone or any
 other tailnet device opens `https://<the server's MagicDNS name>/` with
 nothing installed and no token. Set `web-port` and restart the server; see
-[networking.md](networking.md#the-dashboard). Hosted onboarding supports remote
+[networking.md](networking.md#the-dashboard). On a phone the sidebar folds
+away: the top bar holds **Open sidebar** (with a dot when a run needs you),
+the current page's name, **Search** and **New run**. Hosted onboarding supports remote
 repository import, Git identity, agent setup, and configuration import/editing.
 It has no machine-local link, clone, push, or pull operations; those require
 the desktop app or `aether gui` on the computer holding the clone.
@@ -680,7 +688,7 @@ the desktop app or `aether gui` on the computer holding the clone.
 
 `aether gui` in a browser tab is the whole dashboard. If you would rather it
 lived in its own window - with desktop notifications and a dock badge when a
-run parks in `needs-attention`, plus `aether://run/<id>` deep links - build
+run needs you, plus `aether://run/<id>` deep links - build
 the desktop app. Answering **client** in step 1 already did this. Nothing has
 to be installed first - the CLI fetches its own Node.js copy when the machine
 has none, which makes the first build longer:
@@ -705,23 +713,27 @@ Two things to know:
   update the CLI, the window picks up the new dashboard without rebuilding the
   app.
 
-In the dashboard: a workspace switcher over the runs in scope, a board
-bucketed by what needs attention, a live terminal mirror per run, the diff
-timeline, the workspace feed. Read-only by default; typing into a run needs
-the steer capability, which as the owner you have.
+In the dashboard, the sidebar holds the workspace switcher, **New run**, your
+runs, and the pages: **Board**, **Swarms**, **Activity**, **Files**,
+**Environment**, **Agents** and **Templates**. The **Board** groups runs into
+**Needs you**, **Working** and **Finished**. A run opens on **Session**
+(Enhanced) or **Terminal** (Standard), with **Changes** and **Browser** beside
+them, and a **Details** panel holding **Needs you** and **Notes**. Watching is
+read-only by default; typing into a run needs the `steer` capability, which as
+the owner you have.
 
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.
 Detach without killing anything: the PTY lives on the server.
 
-To nudge a running agent without attaching:
+To message a running agent without attaching:
 
 ```sh
 aether inject <run-id> "also update the README"
 ```
 
-The message appears in the transcript as a banner in your member color, and
-everyone watching sees who said it.
+The message appears in the run's **Session** under your name, so everyone
+watching sees who sent it.
 
 ## 8. Review and publish the result
 
@@ -836,7 +848,7 @@ repository, and is a review destination for publishing the run branch (for
 example, to open a pull request); it is not the destination for a mirrored
 base update.
 
-Then close the run out so it leaves the attention board:
+Then close the run so it leaves **Needs you**:
 
 ```sh
 aether close <run-id> --outcome merged      # or --outcome abandoned
@@ -844,20 +856,23 @@ aether close <run-id> --outcome merged      # or --outcome abandoned
 
 Closing retains the exact TUI container, checkout, run row, member account and
 coordination surfaces for `--run-container-ttl` (default `7 days`). Before that
-retention expires, reopen the same run with:
+retention expires, reopen the same run with **Reopen run** in its **More**
+menu, or:
 
 ```sh
 aether relaunch <run-id>
 ```
 
-Relaunch does not create a new run or container and expired or unavailable runs
-cannot be relaunched. Kill and Delete remain immediate cleanup operations.
+Reopening does not create a new run or container, and expired or unavailable
+runs cannot be reopened. **Kill run** and **Delete run** remain immediate
+cleanup; **Free container…** removes the retained container early, after
+which the run cannot be reopened.
 
-Mission workers also retain their exact containers for the same default
+Swarm workers also retain their exact containers for the same default
 7 days after a success/failure report or container exit, without continuing
-work. Inspect their
-transcript, diff, evidence and worker details normally. Unlike explicitly
-closed ordinary TUI runs, completed workers cannot be relaunched.
+work. Inspect their Session, Changes, Captures and worker details normally.
+Unlike explicitly closed ordinary Standard runs, completed workers cannot be
+reopened.
 
 The local daemon is optional. It fetches server-owned run branches as agents
 commit and can push your local base branch in **local-only** workspaces. It
@@ -921,7 +936,7 @@ login. Step 7 (`aether gui`) works too if you want to watch.
 Launching it is the CLI's job, though. `fake` is a server-side registration
 rather than an executable installed in your account, and the local dashboard's
 two launch surfaces - the launch form and the wizard's **First run** step -
-offer only agents installed in the account, plus the `custom` harness a
+offer only agents installed in the account, plus the `custom` agent a
 deployment pins, so `fake` never appears in either.
 
 ```sh
@@ -934,7 +949,9 @@ aether runs
 aether pull <run-id>
 ```
 
-`aether runs` shows the run reaching `needs-you` within seconds, and the
+`aether runs` prints `ID`, `STATUS`, `AGENT`, `MEMBER`, `OVERLAP`, `TITLE`
+and `TASK` columns; within seconds the run's `STATUS` reads `needs-you` (the
+wire status `needs-attention`) and `AGENT` reads `fake`. The
 pulled branch carries a commit adding `result.txt`. That is the full path -
 container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 
@@ -977,8 +994,8 @@ go or the next `aether link` fails.
 
 - [install.md](install.md) - systemd, upgrades, data layout
 - [environments.md](environments.md) - member images, saving, resetting, and persistence
-- [environment-home.md](environment-home.md) - member home, installed agents, and migration
+- [environment-home.md](environment-home.md) - your environment's home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
-- [harnesses.md](harnesses.md) - login, configuration import, and launch definitions
+- [harnesses.md](harnesses.md) - agents: login, configuration import, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

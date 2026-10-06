@@ -13,9 +13,9 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | Face | Use | Source |
 | --- | --- | --- |
 | Inter (variable, Latin subset) | All UI text | `@fontsource-variable/inter`, one WOFF2 |
-| Saira 600 (Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
+| Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
 | JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
-| `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-mono`, `--font-code`) | system |
+| `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`) | system |
 
 Inter loads with `font-display: swap` behind `Inter Fallback`, Arial scaled
 to Inter's metrics, so the swap does not reflow text. Characters outside
@@ -31,42 +31,50 @@ The type scale, in `web/src/index.css`:
 | `text-prose` | 14/22 | Agent prose and rendered markdown |
 | `text-title` | 16/24, Saira 600 | Pane, dialog, step and empty-state headings |
 
+`text-avatar` (10px) is reserved for avatar initials. **Settings >
+Appearance > Text size** (Default, Large, Larger) sets `data-text-size` on
+the root, which raises every step of the scale and the title size;
+terminals keep their own zoom.
+
 Weights are 400 and 500, 600 for titles. Times, counts and `+a -d` use
-`tabular-nums`. No uppercase labels. `cn()` in `web/src/lib/utils.ts` knows
-the scale, so `cn('text-ui', 'text-muted')` keeps both classes. `text-title`
-sets its own family and weight; do not pair it with `font-*` classes. No
-surface uses `text-title` yet, so Saira loads and shows only once one does;
-until then headings render in Inter.
+`tabular-nums`. Labels are sentence case; nothing is uppercase. `cn()` in
+`web/src/lib/utils.ts` knows the scale, so `cn('text-ui', 'text-muted')`
+keeps both classes. `text-title` sets its own family and weight; do not pair
+it with `font-*` classes.
 
 ## Semantic palette
 
-`web/src/index.css` is authoritative. The theme preference is `system`,
-`light` or `dark`; `system` follows `prefers-color-scheme` live.
+`web/src/index.css` is authoritative: light values sit on `:root`, dark ones
+on `.dark`. The theme preference is `system`, `light` or `dark`; `system`
+follows `prefers-color-scheme` live.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
 | `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
-| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, phone top bar, window bar, code, browser chrome |
+| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, phone top bar, window bar, toolbars, code, browser chrome |
 | `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows and cards on canvas |
 | `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#262728` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
-| `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces only |
-| `--seam` | `border-seam` | black 8% | white 8% | Every border |
+| `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces, secondary buttons |
+| `--seam` | `border-seam` | black 8% | white 8% | Every border; the default border colour |
 | `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
-| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons |
-| `--accent-fill` | `bg-accent` | `#367f77` | `#367f77` | The one primary button, focus ring |
+| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs |
+| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
+| `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
 | `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
 
-The accent marks selection, focus, the one primary button per view and
-links, nothing else. Inside a selected row, secondary text uses `text-text`.
-A floating surface is `bg-raised`, a 1px seam and `shadow-overlay`
-(`0 8px 24px -12px`, black 18% light, 60% dark).
+`accent` is a fill for backgrounds and borders but the link colour for text;
+`bg-accent-hover` darkens the fill for a hovered primary button. The accent
+marks selection, focus, the one primary button per view and links, nothing
+else. Inside a selected row, secondary text uses `text-text`. A floating
+surface is `bg-raised`, a 1px seam and `shadow-overlay` (`0 8px 24px -12px`,
+black 18% light, 60% dark). Dialogs sit over `bg-scrim`.
 
 The five run states (see
 [dashboard-frontend.md](dashboard-frontend.md#run-state)), used on dots,
-state lines, callouts and diffs only:
+state lines, badges, callouts and request cards:
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
@@ -76,40 +84,76 @@ state lines, callouts and diffs only:
 | Done | `state-done` | `#1a7a36` | `#45c26a` |
 | Failed | `state-failed` | `#c8321f` | `#f05c4a` |
 
-Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark,
-for callouts and request cards; `bg-accent-soft` likewise. Diffs use
-`text-diff-add`/`text-diff-del` (the done and failed colours) and
-`bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
+Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
+`bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
+fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
+and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
 Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
 `-opencode`) appear only on the Agents page and the launch picker, through
 `AgentGlyph colored`.
 
-`web/src/design-system.test.ts` checks every text tier on every surface, the
-accent text, the states and the diff colours for 4.5:1, and control borders,
-`--icon-faint` and the agent colours on canvas for 3:1, in both themes.
+Member colours are the only arbitrary server data applied inline: avatar
+rings, the owner rail in run lists and member names on conflict chips.
+Identity colour never replaces run-state colour.
 
-Member colours are the only arbitrary server data applied inline, on avatars,
-attribution rails and the Map's owner boundaries. Identity colour never
-replaces run-state colour.
+## Primitives
 
-The pre-v2 names (`--background`, `--foreground`, `--card`, `--sidebar`,
-`--muted`, `--muted-foreground`, `--primary`, `--border`, `--input`,
-`--toolbar-hover`, `--destructive`, `--state-waiting`,
-`--state-needs-attention`, `--state-idle`) remain as aliases of these tokens
-until every screen is rebuilt; the old hover names (`--accent`, `--secondary`,
-`--toolbar-hover`) point at `--hover-chrome`. Do not use them in new code.
+`web/src/components/ui/` holds the shared primitives: `Button`, `Input`,
+`Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Menu`,
+`Popover`, `Tooltip`, `Dialog`, `AlertDialog`, `Command`, `Tabs`,
+`Collapsible`, `Card`, `ListRow`, `PaneHeader`, `SectionLabel`,
+`EmptyState`, `Callout`, `Badge`, `RequestCard`, `StatusDot` and
+`StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
+`Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `Separator`, `Toaster`,
+and the Session view's timeline rows and blocks. Reach for one before writing
+markup, and pass its `variant`, `size` or `tone` rather than restyling it.
+
+`Button` variants:
+
+| Variant | Look | Use |
+| --- | --- | --- |
+| `primary` (default) | `bg-accent`, `text-on-accent` | The one primary action in a view |
+| `secondary` | Seam border on `bg-raised` | Other actions |
+| `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
+| `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
+| `link` | Accent text, underline on hover | Inline actions that read as links |
+| `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
+
+Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square) and
+`icon-sm` (24px square); each grows to 44px on a coarse pointer. `link` and
+`quiet` have no height or padding of their own and widen their touch target
+to 44px. An `icon` or `icon-sm` button requires `label`, which becomes its
+accessible name and tooltip; `hint` puts a tooltip on any button.
 
 ## Enforcement
 
-`web/src/design-system.test.ts` scans `web/src` and fails on sizes outside
-the scale, Tailwind palette colours, `@heroui` imports, `lucide-react`
-imports outside `web/src/components/icons.ts`, lucide's alias names
-(`XIcon`, `Loader2`), the misspelled `state-attention`, `state-success` and
-`state-warn`, bare `<button>`, `opacity-*` in the sidebar and board, and
-restyling a `components/ui` primitive through `className`. Each rule carries a legacy list of files that predate it; a
-rebuilt file leaves the list, and the test fails if a listed file already
-complies.
+`web/src/design-system.test.ts` scans every non-test source file under
+`web/src` and fails on:
+
+| Rule | Fails on |
+| --- | --- |
+| Type scale | `text-xs` to `text-9xl`, `text-base`, or an arbitrary size such as `text-[13px]` |
+| Token colours | Tailwind palette colours (`bg-gray-100`, `text-white`) or arbitrary hex, `rgb`, `hsl` or `oklch` colours |
+| Sentence case | `uppercase`; a group heading is a `SectionLabel` |
+| No HeroUI | Any `@heroui/` import |
+| Icons through components/icons | A `lucide-react` import outside `web/src/components/icons.ts` |
+| One name per icon | lucide aliases such as `XIcon`, `Loader2`, `AlertTriangle` or `MoreHorizontal` |
+| No bare buttons | `<button` outside `components/ui/`; use `Button` |
+| No opacity on rows | `opacity-*` in `components/shell/` and `routes/board/`; a receding row uses `text-muted` |
+| Primitives are not restyled | A primitive given `text-`, `bg-`, `border-`, `rounded-`, `h-`, `min-h-` or padding classes through `className`, which is for layout only |
+| Token names | Colour names that are not tokens and render nothing: `background`, `foreground`, `card`, `popover`, `sidebar`, `primary`, `secondary`, `muted-foreground`, `destructive`, `input`, `ring`, `border`, `toolbar-hover`, `field`, and `state-attention`, `-success`, `-warn`, `-waiting`, `-needs-attention`, `-idle` |
+
+A rule can carry a legacy list of files that predate it; only no bare
+buttons and primitives are not restyled still have one. The test also fails
+when a listed file already complies, so the lists only shrink.
+
+The same file checks contrast in both themes: `text` and `text-muted` on
+every surface, `text` on `selection`, accent text on canvas and chrome,
+`on-accent` on the accent fill, `on-failed` on the failed fill, and the
+states and diff colours on canvas at 4.5:1; control borders, `icon-faint`
+and the agent colours on canvas at 3:1. It also checks that every `text-*`
+and `bg-*` class in `components/ui/` names a token defined in `index.css`.
 
 ## Icons
 
@@ -124,19 +168,16 @@ Use compact workbench geometry rather than landing-page ornament:
 - One sidebar, 260px by default and resizable from 220px to 400px; under
   768px a 48px top bar and the sidebar as a side sheet. The desktop window
   bar is 35px.
-- 44px view headers (`PaneHeader`), 56px for a run's two-line header, and
-  35px section headers; dock headers use a `min-h-9` strip whose
-  actions can wrap to another row; 28px list rows (44px coarse).
+- 44px view headers (`PaneHeader`), 56px for a run's header, 32px terminal
+  toolbars, 28px list rows and menu items (44px coarse).
 - 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
-  12px compact gutters.
-  Shared `Label` captions are block-level: stacked caption-to-field spacing
-  must measure 4px, including wrapped fields, rather than relying on margins
-  on inline text.
+  12px compact gutters. `Label` captions are block-level, so stacked
+  caption-to-field spacing measures 4px, including wrapped fields.
 - Two radii: `--radius-control` 4px (`rounded-sm`, `rounded-control`) for
   buttons, fields, chips, rows, code and keys; `--radius-panel` 6px
   (`rounded-md`, `rounded-lg`, `rounded-panel`) for cards, dialogs, menus,
-  popovers and callouts. `rounded-full` is for dots and avatars only.
+  popovers and callouts. `rounded-full` is for dots, radios and avatars only.
 - Only floating surfaces cast `shadow-overlay`; content panels have none.
   Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
@@ -149,34 +190,22 @@ Use compact workbench geometry rather than landing-page ornament:
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
 page never gains horizontal overflow; text and code may scroll inside their
-own surfaces. Shared buttons, inputs and selectors use 40-44px touch targets
-under `coarse:` while retaining desktop density. Floating menus stay inside
-the available viewport and scroll to their last action.
+own surfaces. Floating menus stay inside the available viewport and scroll to
+their last action. Route roots own the shell's bounded height; their content
+regions use `min-h-0` and vertical overflow.
 
-The run Browser uses shared 13px controls at 28px for mouse input and 44px
-for coarse pointers, including native selects. Before a page is selected,
-the URL field and **Open browser** are primary; a selected page adds
-Back/Forward/Reload and **Go**. **Browser tools** holds page and viewport
-selection, New page, Screenshot, Reconnect and the gated Close page/Reset
-session actions. These destructive actions use shared AlertDialog confirmations
-bound to the captured page/session and control authority, retain raw failures,
-and return focus to Browser tools when dismissed. Groups wrap without
-stretching the page.
+The run Browser view: before a page is selected, the URL field and **Open
+browser** are primary; a selected page adds **Back**, **Forward**, **Reload
+page** and **Go**. **Browser tools** holds page and viewport selection,
+**New page**, **Screenshot**, **Reconnect** and the gated **Close page** and
+**Reset session**, each behind an `AlertDialog` confirmation that keeps the
+raw failure and returns focus to **Browser tools** when dismissed.
 
-Run-terminal controller and viewer names stay in the existing toolbar, never
-in an extra presence row. Keep all viewers in a horizontally scrollable list.
-**Terminal tools** is a compact popover on narrow or touch panes; fine-pointer
-panes show inline tools from 42rem, or 70rem when attachment controls share
-the toolbar. The run shell strip keeps its own lease control plus **More**
-for Screenshot, Hide and confirmed Stop; it does not own the browser or
-primary run's lease. The environment dock promotes **Save environment**,
-with gated Forward port, Stop environment and Reset to standard in **More**.
-
-Route roots own the shell's bounded height; their content regions use
-`min-h-0` and vertical overflow. On phones Diff scrolls its local controls
-and patch together, so long fetch output cannot strand the patch. Files
-keeps its header actions on a two-column grid, and its touch-sized search
-panel scrolls independently without consuming the entire editor.
+The terminal toolbar holds the terminal tabs, **Tools** (a menu; a bottom
+sheet under 768px) and, at its end, who controls the terminal beside **Take
+control** or **Release** ([terminal.md](terminal.md)). A run shell adds
+**Shell actions**. The Environment page puts **Save environment** and
+**Environment actions** in its header.
 
 ## Shell, palette and focus
 
@@ -190,26 +219,26 @@ with opacity. Group headers are sentence-case 12px muted disclosure buttons
 with their count. The footer holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px the 48px top bar (`bg-chrome`) holds the sidebar button, with an
-amber dot while anything needs the viewer, the view title in 13/20 medium,
-**Search** and **New run**. That is the screen's filled button, so a page's
-own **New run** or **New swarm** is secondary on a phone. The sidebar opens as a left side sheet. Content
-views draw `PaneHeader`: the title in `text-title`, one optional muted line
-under it, and actions on the right. A connection problem is a failed-tone
-`StateLine`, in the header on desktop and under the top bar on a phone.
+Under 768px the 48px top bar (`bg-chrome`) holds the sidebar button, with a
+needs-you dot while anything needs the viewer, the view title in 13/20
+medium, **Search** and **New run**. When the page has its own primary action,
+the top bar's **New run** becomes a ghost `+` icon so the screen keeps one
+filled button. The sidebar opens as a left side sheet. Content views draw
+`PaneHeader`: the title in `text-title`, one optional muted line under it,
+and actions on the right. A connection problem is a failed-tone `StateLine`,
+in the header on desktop and under the top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
-compact rows. Theme is in **Settings → Appearance** and the footer menu, with
+compact rows. Theme is in **Settings > Appearance** and the footer menu, with
 explicit **System**, **Light** and **Dark** choices and matching palette
-commands. Appearance works on remote gateways too, while machine-local
-settings retain their capability gates.
+commands.
 
-`focusRing` and `field` remain signature-compatible shared utilities. Preserve
-their keyboard outline, inset behavior for full-bleed rows, readable
-placeholders, disabled and read-only states, menu roving focus, typeahead,
-portalling and viewport flipping. Shared primitives retain their props,
-events, refs and accessibility contracts.
+`focusRing` and `field` in `web/src/lib/utils.ts` are the shared focus and
+field styles. Preserve their keyboard outline, inset behavior for full-bleed
+rows, readable placeholders, disabled and read-only states, menu roving
+focus, typeahead, portalling and viewport flipping. Shared primitives retain
+their props, events, refs and accessibility contracts.
 
 The run header shows one primary action for the run's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
@@ -217,10 +246,9 @@ existing gates and confirmations. The view switch (Session, Terminal,
 Changes, Browser) is a segmented tab list. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
 never overlays the terminal on wide screens. The terminal toolbar is the
-single source for same-run controller controls, and protection stays by the
-title. One frame-owned holder decision dialog sits above every sheet and
-dialog. Request cards use the needs-you soft fill; the Session column is
-736px wide with no row borders.
+single place for same-run control. One run-owned holder decision dialog sits
+above every sheet and dialog. Request cards use the needs-you soft fill; the
+Session column is 736px wide with no row borders.
 
 ## Run state and motion
 
@@ -231,28 +259,22 @@ unchanged.
 `--duration-overlay` (120ms) and `--ease-out` are the overlay motion
 tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
 it, sheets slide in from their edge, and every one leaves at once. Panels
-change instantly. The `state-pulse` dot and the
-`live-shimmer` text sweep step through a few frames per cycle rather than
-tweening, and stop under `prefers-reduced-motion: reduce`, where the shimmer
-leaves plain muted text.
+change instantly. The `state-pulse` dot (the run header's working dot and the
+Session view's live row) and the `live-shimmer` text sweep step through a few
+frames per cycle rather than tweening, and stop under
+`prefers-reduced-motion: reduce`, where the shimmer leaves plain muted text.
 
-`StateIndicator` uses bouncing dots for working runs in cards, headers and
-lists. The labeled run-status chip reserves the full width of all three dots
-before its text; compact unlabeled surfaces keep the fixed dot box so state
-changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. Live local control has a 1px teal inset outline around the
-terminal, alongside the toolbar's **(this tab)** controller marker and
-**Release** action. The pointer-transparent outline uses `--accent-fill` without
-changing layout. It appears only with live, acknowledged writable control,
-outside replay and history reading.
-Acquisition and voluntary release propagate along the outline over 720ms,
-preserving the former initial speed and decelerating toward the endpoint.
-A control-lost takeover uses a 540ms red transition and 1440ms retraction:
-1980ms total, three times the former duration.
-An occupied five-second hold fills both control buttons diagonally in red and
-traces the holder's border red. Text above and below the fill edge uses the
-appropriate foreground independently. A seven-second holder decision follows.
-Under `prefers-reduced-motion: reduce`, ownership changes are instant,
-takeover fills and borders become static red indicators with countdowns, and
-working dots and sidebar pulses stop moving; labels retain the state meaning.
-Loading spinners and delayed skeletons remain functional feedback.
+Live local control draws a 1px `--accent-fill` outline around the terminal
+viewport, alongside the toolbar's **You control** and **Release**. The
+outline is pointer-transparent and does not change layout. It appears only
+with live, acknowledged writable control, outside replay and history
+reading. Acquisition and voluntary release propagate along it over 720ms,
+decelerating toward the endpoint. A control-lost takeover turns it red over
+540ms and retracts it over 1440ms. An occupied five-second hold fills **Take
+control** and the holder's **Release** diagonally in red and traces the
+holder's border red; text on either side of the fill edge keeps its own
+contrast. A seven-second holder decision follows. Under
+`prefers-reduced-motion: reduce`, ownership changes are instant and takeover
+fills and borders become static red indicators with countdowns; labels keep
+the state meaning. Loading spinners and delayed skeletons remain functional
+feedback.

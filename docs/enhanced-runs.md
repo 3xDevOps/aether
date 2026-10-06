@@ -111,10 +111,10 @@ turn:
 | **Steer** | a turn runs and the agent supports steering | joins the running turn |
 | **Queue** | a turn runs and you hold `Mod+Shift`, or the agent cannot steer | runs after this turn |
 | **Interrupt** | a turn runs and the box is empty | `run.acp.cancel`: stops the turn and cancels its requests |
+| **Resume** | the run is paused | resumes it |
 
 `Mod+Enter` does what the button says, and nothing while the box is empty, so
 it never interrupts; `Mod+Shift+Enter` always queues.
-| **Resume** | the run is paused | resumes it |
 
 The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`); `/` lists the agent's commands and `@` completes a
@@ -163,7 +163,8 @@ Answering, cancelling and changing options need **Steer** and the run's
 takes the lease on `/ws/acp/<run_id>` with the attach control fields
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
 
-Messages go through `run.inject` and the run's room messages as for any run. A message
+Messages go through `run.inject`, or `run.room.post` from the dashboard
+composer, as for any run. A message
 sent while no turn runs starts one and reports `outcome: "sent"` once the
 agent accepts it: its first update, or 1.5 s without a refusal. A prompt
 the agent refuses at once (an error such as `authRequired`) returns that
@@ -215,7 +216,7 @@ messages starts at most one turn, so an agent that ends its turn without
 reading its inbox is prompted again only when another message arrives. Mail
 is acknowledged only when the agent acks its inbox batch.
 
-An enhanced integrator is also prompted when its mission's phase,
+An enhanced integrator is also prompted when its swarm's phase,
 open-question count or generation changes, for example when a human answers
 its question, with the instruction its hooks would give:
 
@@ -223,7 +224,7 @@ its question, with the instruction its hooks would give:
 Mission update: run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id <mission-id> before waiting or declaring completion.
 ```
 
-The mission state when the integrator's session first opens is its baseline
+The swarm state when the integrator's session first opens is its baseline
 and prompts nothing; a change during its first turn, such as an answer to a
 question it just asked, prompts it when that turn ends. An enhanced
 container sets `AETHER_ENHANCED=1`, and every `aether-internal hook` an
@@ -347,8 +348,8 @@ gap. `/ws/acp` serves only a run that is Enhanced at the time.
 While the switch runs, the run snapshot carries `switching` (`tui` or
 `acp`), a `run.mode` event `{mode, previous, switching, reason:
 "Switching to Enhanced…"}` with `mode` and `switching` both the target
-announces it, and messages are refused, so a Run
-Room message reads `not_sent`. A second `run.mode` event `{mode, previous}`
+announces it, and messages are refused, so a message sent from the
+composer reads `not_sent`. A second `run.mode` event `{mode, previous}`
 ends it.
 
 **Failure.** A failed switch puts the previous mode back (the login shell and
@@ -384,7 +385,7 @@ favour API keys over the subscription login a member shares.
 
 Such a run has the enhanced container shape and session item log, and
 `/ws/acp/<run_id>` streams it while it works; its Session view has no
-composer ("Background runs take no input"). The task is the session's
+composer ("Background runs take no input."). The task is the session's
 only prompt, and the session starts in the agent's mode that acts without
 asking:
 

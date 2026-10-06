@@ -4,7 +4,7 @@ Aether's MCP bridge is an optional, manually configured in-container adapter
 for six existing coordination tools. The canonical agent interface is the
 `aether-internal` CLI, which is automatically available in every managed
 container and can load a version-matched skill on demand. The bridge is not the
-Release B orchestration interface and does not need to mirror its mission or
+Release B orchestration interface and does not need to mirror its swarm or
 worker-management surface.
 
 When coordination assets are available, the server stages verified executable
@@ -35,10 +35,10 @@ run-bound operations are unavailable.
 
 ## Manual registration and discovery
 
-Aether does not automatically register the MCP bridge, write a harness
-configuration, or append a harness-specific MCP flag. To use MCP voluntarily,
-create a user-managed configuration outside `/run/aether`, then point a
-harness that supports MCP configuration at it. For example:
+Aether does not automatically register the MCP bridge, write an agent
+configuration, or append an agent-specific MCP flag. To use MCP voluntarily,
+create a user-managed configuration outside `/run/aether`, then point an
+agent that supports MCP configuration at it. For example:
 
 ```sh
 cat >/tmp/aether-mcp.json <<'EOF'
@@ -48,14 +48,14 @@ claude --mcp-config /tmp/aether-mcp.json
 ```
 
 The example is manual, and the path is not written or managed by Aether. Other
-harnesses may use different configuration syntax. The staged MCP entry point
+agents may use different configuration syntax. The staged MCP entry point
 still reaches only the run socket belonging to the container.
 
-The canonical CLI remains available without MCP. A shell-capable harness can
+The canonical CLI remains available without MCP. A shell-capable agent can
 invoke `aether-internal` directly and request its live, version-matched skill
 on demand. A container or terminal without a run identity can use general
 help or the non-run skill guidance, but status, messaging, reporting, and
-mission operations return unavailable. Lack of manual MCP registration is not
+swarm operations return unavailable. Lack of manual MCP registration is not
 an overlap-only or notice-only mode.
 
 See [coordination.md](coordination.md) for the established CLI commands and
@@ -67,7 +67,7 @@ identity claim.
 The bridge exposes exactly six existing tools. Their parameters, receipts,
 authorization rules, limits, idempotency behavior, and durable storage map to
 the established v3 coordination methods. This is the bridge's complete
-surface; it does not expose Release B mission, task, worker, takeover, or
+surface; it does not expose Release B swarm, task, worker, takeover, or
 integrator-management commands.
 
 | MCP tool | v3 method | Parameters | Result |
@@ -123,9 +123,9 @@ responses preserve their own Aether codes, including `CodeDenied` (`-32001`),
 `CodeInvalidParams` (`-32602`). This keeps an operation failure actionable
 without tearing down the MCP session.
 
-The method set is closed. The bridge cannot invoke a control verb, steer a
-terminal, read Git, or access another run's transcript. Human steering still
-uses Aether's host-side serialized PTY input path; MCP is not an inbound
+The method set is closed. The bridge cannot invoke a control verb, type into a
+terminal, read Git, or access another run's transcript. Human messages still
+use Aether's host-side serialized PTY input path; MCP is not an inbound
 terminal hook.
 
 ## `run.report` is not `coord.report`
@@ -134,7 +134,7 @@ terminal hook.
 same evidence-before-acceptance behavior as `aether-internal report`.
 
 The staged binary at `/opt/aether/aether-server` also retains the separate
-harness lifecycle command:
+agent lifecycle command:
 
 ```sh
 printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
@@ -150,9 +150,9 @@ correlated pending input requests. A request-only update leaves execution
 unchanged. They are not an agent outcome, are not an MCP tool, and do not
 create a coordination report or evidence receipt. See
 [status reporting](harnesses.md#status-reporting) for request lifetimes.
-Harness callbacks are hidden lifecycle plumbing, not commands for an operator or
+Agent callbacks are hidden lifecycle plumbing, not commands for an operator or
 worker to run. The callback exits promptly even when status reporting is
-unavailable so it cannot block the harness.
+unavailable so it cannot block the agent.
 
 ## Staging, retention, and shutdown
 

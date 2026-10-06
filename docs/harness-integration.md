@@ -1,12 +1,12 @@
-# Integrating an unsupported harness
+# Integrating an unsupported agent
 
 An Aether **run** is a container and checkout with a server-owned identity.
-A **harness** is the CLI running there. A launch definition gets that CLI
+An **agent** is the CLI running there. A launch definition gets that CLI
 started; it does not automatically give the CLI an inbox hook or a native
-wake API. This guide connects an existing harness to Aether's durable inbox
+wake API. This guide connects an existing agent to Aether's durable inbox
 without inventing a second transport, daemon, or terminal-input fallback.
 
-For a shipped integration, use [per-harness setup](harnesses.md#incoming-coordination-hooks)
+For a shipped agent, use [per-agent setup](harnesses.md#incoming-coordination-hooks)
 instead. For a new launch definition, see [custom agents](harnesses.md#custom-agents).
 An inbox integration is separate from the optional
 [structured-output adapter](adapters.md) that populates the timeline.
@@ -37,7 +37,7 @@ expecting a reply: it receives the original attributed bodies and the batch's
 
 After the agent handles the batch, its next inbox call supplies the returned
 token with `--ack`, optionally with `--wait 30`. The batch is frozen until
-acknowledged: new mail, including steering, waits behind it. Reading again
+acknowledged: new mail, including messages from people, waits behind it. Reading again
 without `--ack` repeats that batch rather than refreshing it. Process and
 acknowledge each batch before waiting for newer instructions.
 
@@ -52,7 +52,7 @@ pretend an unsupported native API exists just to add automatic wake.
 
 ## Add a boundary hook first
 
-Find the harness's documented root/main-session context event. Confirm what
+Find the agent's documented root/main-session context event. Confirm what
 output it accepts: plain text, a JSON field, or an in-process return value.
 Register only for the owning session, not inherited child-agent events.
 
@@ -73,36 +73,36 @@ there is none. Outside a run, a missing socket is a successful no-op so a
 user-level boundary hook can remain installed. An existing but broken socket
 is an actual nonzero failure, with details on stderr.
 
-For installation, copy the exported asset to the harness's documented hook
+For installation, copy the exported asset to the agent's documented hook
 location and register that path at its context boundary. The temporary
 example above deliberately installs nothing. There is no universal config
-path for an unsupported harness. If its contract requires JSON, capture the
+path for an unsupported agent. If its contract requires JSON, capture the
 helper's stdout and serialize it into the **documented** native context
 field using the host's JSON serializer; do not shell-interpolate text into
 JSON or pass plain stdout as a JSON response. Preserve unrelated hooks,
 workspace trust, approval policy, and intentional disable settings.
 
 The helper does not return peer bodies. It supplies a canonical instruction
-to read `inbox`, plus applicable overlap/mission guidance. Peer bodies remain
+to read `inbox`, plus applicable overlap/swarm guidance. Peer bodies remain
 attributed data fetched through the inbox, never system/developer context.
 Empty stdout means no added context. Keep errors on stderr or the host's
 error surface, not in model context, and do not turn failures into success
 hints.
 
-Integrator mission-refresh guidance can appear even with an empty inbox. It
+Integrator swarm-refresh guidance can appear even with an empty inbox. It
 asks an integrator to read durable plan decisions and worker attempts; it
 does not itself schedule an OMP turn. An OMP todo reminder or native retry
 can independently continue a session and then encounter this guidance.
 Distinguish the initiating native event from the context added to that event;
-a final prose response is not a durable mission-state transition.
+a final prose response is not a durable swarm-state transition.
 
-A boundary hook **cannot wake a later-idle harness**. It runs only when the
+A boundary hook **cannot wake a later-idle agent**. It runs only when the
 host calls it. Do not put `generic.sh` on a timer or wrap it in a background
 polling loop and claim native support.
 
 ## Optional native idle wake
 
-Add wake only if the harness exposes a supported API to start a turn in a
+Add wake only if the agent exposes a supported API to start a turn in a
 specific live session and lifecycle events that let you cancel on Stop,
 shutdown, and session replacement. Busy-turn behavior must be documented.
 Busy follow-up queues can outlive the mail they announce: a foreground inbox
@@ -136,7 +136,7 @@ with these four fields, not the ordinary state-command `ok/result` envelope:
 | `wake_admitted` | The server accepted this wake response under current input authority. |
 | `context` | Trusted inbox-only instruction when admitted; empty otherwise. |
 
-The command does **not** itself call a harness API or wake a model. Calling
+The command does **not** itself call an agent API or wake a model. Calling
 it by hand proves only helper transport, not native integration. Ordinary
 `hook generic context` is also not an eligibility check for later dispatch.
 
@@ -177,8 +177,8 @@ root/session still owns it. A throw rolls back only the reservation still
 owned by that generation, preserving any newer Stop or session transition;
 surface the error and end that receiver pass without a permanent helper-fatal
 halt. Do not blindly resend or apply a native-send retry timer. Later eligible
-native activity—OMP context/agent/approval boundaries or pi successful idle
-settlement/manual compaction—can request fresh helper/server admission for
+native activity - OMP context/agent/approval boundaries or pi successful idle
+settlement/manual compaction - can request fresh helper/server admission for
 the same unread IDs. Stop still requires accepted human input to resume.
 OMP uses its owning public session's terminal `agent_end` and a detached
 `waitForIdle()` drain, then rechecks `isIdle()`; extension `agent_end` with
@@ -215,8 +215,8 @@ the receiver and clear any locally pending automatic turn; resume only at the
 host's documented user-resume boundary. Do not use a generic completion event
 as proof that an aborted turn should restart.
 
-The server is the authority for run and mission eligibility. It rechecks the
-current TUI run, protection, closing/exited state, current mission assignment,
+The server is the authority for run and swarm eligibility. It rechecks the
+current TUI run, protection, closing/exited state, current swarm assignment,
 revision/generation, takeover hold, and submitted/settled attempt state.
 An inbox consumer registered before the final wake-frame dispatch takes
 precedence. A receiver does not derive permission from old `status` output or
@@ -224,14 +224,14 @@ from the fact that IDs exist.
 
 The response containing `wake_admitted: true` is dispatched inside the same
 per-run control admission boundary as human input, with at most three seconds
-for the response write. Mission revision/generation mutations and inbox
+for the response write. Swarm revision/generation mutations and inbox
 consumer registration are serialized with that complete frame too. The
 server holds none of these admission boundaries during the long wait.
 If a hold or earlier inbox consumer wins admission, no wake is dispatched.
 If the frame is accepted first, a later hold or consumer cannot revoke that
 accepted input; the native turn may still process it. Native API acceptance
 does not prove model receipt or acknowledgement.
-Mission authorization and per-run control admission are nonblocking for
+Swarm authorization and per-run control admission are nonblocking for
 wake. Contention returns a non-admitted observation, not a queued dispatch:
 update observed IDs without adding notified IDs, then let the next bounded
 wait reconsider eligibility.
@@ -270,7 +270,7 @@ than transplanting pi's `sendMessage` call into another host.
 
 A copied file, a successful `skill` check, a status reporter event, or a
 standalone helper response is not evidence that a model turn ran. Verify
-with the actual supported harness in an isolated coordinated run:
+with the actual supported agent in an isolated coordinated run:
 
 1. Check the installed CLI version; inspect native hook/plugin load errors
    and normal trust/disable state. Exercise a real root context event.
@@ -291,5 +291,5 @@ with the actual supported harness in an isolated coordinated run:
    retry loops, leaked helper processes, automatic ack, or terminal fallback.
 
 Keep credentials and runtime state out of checked-in examples and fixtures.
-A launch profile, boundary adapter, and native receiver are separate support
-claims; document only the ones the real harness can satisfy.
+An agent profile, boundary adapter, and native receiver are separate support
+claims; document only the ones the real agent can satisfy.

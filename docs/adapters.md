@@ -1,6 +1,6 @@
-# Adding a harness or an adapter
+# Adding an agent or an adapter
 
-Two independent seams. A **harness profile** teaches Aether how to launch an
+Two independent seams. An **agent profile** teaches Aether how to launch an
 agent CLI - that is all most agents need. An **adapter** additionally turns the
 agent's machine-readable output into typed events. Adapters are optional by
 design: a run without one still has a full PTY transcript and a git-diff
@@ -10,7 +10,7 @@ Read [harnesses.md](harnesses.md) first for what already ships.
 
 ---
 
-## Part 1: the harness profile
+## Part 1: the agent profile
 
 Everything lives in `internal/harness/harness.go`. Adding an agent is adding
 one entry to the `profiles` map:
@@ -25,7 +25,7 @@ one entry to the `profiles` map:
 | `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `InstallPaths` | Home-relative directories the CLI's `~/.local/bin` launcher links into, outside `~/.local/bin` and `~/.local/lib`; `claude` names `.local/share/claude`, where its native installer puts the versions it links to. A recipient's run that borrows the owner's installation mounts each read-only from the owner's home at the same path. Leave empty for an npm install (under `~/.local/lib`) or a single binary in `~/.local/bin`. |
 | `BorrowedState` | A home-relative JSON file and the keys a launch that borrows this login sets in the launcher's copy when they are absent, so the CLI starts signed in with the owner's login instead of running first-time setup against an empty home. `claude` sets `hasCompletedOnboarding: true` in `.claude.json`, because Claude Code's setup wizard shows its sign-in step regardless of an existing login. The file is created with mode 0600 when missing, rewritten in place when it is a JSON object, and left alone otherwise. |
-| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Agent config files** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
+| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Agent config files** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the agent has no configuration root. |
 | `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so the browser excludes them before reads and upload. The server and manual profile path enforce the same names; `*.pem` is always denied. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
@@ -79,14 +79,14 @@ Rules that are easy to get wrong:
 
 - **An argv override must stay verbatim.** The scheduler drops the shipped
   taskless discovery and status wiring when a definition replaces a shipped
-  harness, because nothing checks that the override is still that CLI.
+  agent, because nothing checks that the override is still that CLI.
 
 Then add coverage in `internal/harness/harness_test.go` alongside the existing
 table-driven cases, and a row in the tables in
 [harnesses.md](harnesses.md) - a change that makes a doc wrong is not finished
 until the doc is fixed.
 
-That is the whole harness change. The scheduler resolves argv, mounts, run user
+That is the whole agent change. The scheduler resolves argv, mounts, run user
 and per-launch discovery/status assets from the profile; nothing else needs
 editing.
 
@@ -106,7 +106,7 @@ type Adapter interface {
 }
 ```
 
-Register a constructor in the `adapters` map keyed by harness name, and the
+Register a constructor in the `adapters` map keyed by agent name, and the
 `Manager` does the rest: it watches the bus for headless runs entering
 `running`, taps the run's PTY output, normalizes it into lines, feeds them to
 your adapter, and publishes whatever payloads come back under the run's
@@ -123,7 +123,7 @@ workspace and run IDs.
    not assume a line is JSON: check the first byte before unmarshalling, the
    way `internal/adapter/claude.go` does.
 3. **Stay stateless if you can.** A fresh adapter is constructed per run. If
-   you must correlate records - a tool result to its call - carry the harness's
+   you must correlate records - a tool result to its call - carry the agent's
    own IDs on the payload (`ToolUseID`) instead of keeping a map.
 4. **Summarize, do not transcribe.** `Detail` is a short human-readable line
    for the timeline, truncated by the adapter (the Claude adapter caps it at
@@ -139,24 +139,24 @@ Most adapter output is `events.AgentEventPayload`:
 | `AgentToolResult` | A tool invocation finished | `ToolUseID`, `IsError` |
 | `AgentSubagent` | The agent spawned a subagent | `Tool`, `ToolUseID`, `Detail` |
 | `AgentPause` | The agent is waiting on plan review or approval | `Detail` |
-| `AgentSession` | The harness's own session ID, surfaced on the timeline | `HarnessSessionID` |
+| `AgentSession` | The agent's own session ID, surfaced on the timeline | `HarnessSessionID` |
 
 Token usage is **not** an agent event: report it as `events.RunCostPayload` so
-it reaches the cost rollups and workspace budgets. A harness that reports no
+it reaches the cost rollups and workspace budgets. An agent that reports no
 usage leaves its runs marked unmetered, which `aether cost` and `aether budget`
 both say out loud.
 
-`AgentSession` carries the harness's own conversation ID, which is unrelated
+`AgentSession` carries the agent's own conversation ID, which is unrelated
 to any Aether scope. It is a timeline record only: Aether does not assign a
-conversation ID from it or use it to control relaunch. Emit it anyway - it is
-what an operator needs to find the conversation in the harness's own tooling.
+conversation ID from it or use it to control reopening a run. Emit it anyway - it is
+what an operator needs to find the conversation in the agent's own tooling.
 
 ### Testing
 
 Record a real stream and replay it. `internal/adapter/testdata/` holds two
-fixtures per harness-shaped case, and both matter:
+fixtures per agent-shaped case, and both matter:
 
-- `claude_clean.jsonl` - the raw stream as the harness documents it.
+- `claude_clean.jsonl` - the raw stream as the agent documents it.
 - `claude_tty.jsonl` - the same stream after a TTY has had its way with it.
 
 Assert on the payloads your adapter produces from each. A fixture-driven test

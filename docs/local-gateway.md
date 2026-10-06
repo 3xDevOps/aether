@@ -86,7 +86,7 @@ onboarding and workspace management on hosted gateways.
 When an agent prints an OAuth URL in the dashboard, click it. If the URL
 contains an HTTP loopback callback, the dashboard opens a blank browser tab,
 starts the local forward, and only then loads the authorization page. The
-forward targets the run or environment terminal where the link appeared.
+forward targets the run or the environment where the link appeared.
 
 The server gateway has no `forward.start` verb to do that with, and the
 callback port only exists on the machine that runs the forward, so opening
@@ -96,7 +96,7 @@ where the login will be finished, and a **Copy link** action:
 
 ```sh
 aether forward run:<run-id> <port>     # a link that appeared in a run's terminal
-aether forward terminal <port>         # a link in the environment terminal
+aether forward terminal <port>         # a link in your environment
 ```
 
 Links whose callback is not a loopback address open normally on both
@@ -228,7 +228,7 @@ means the server answers terminal queries; viewers must not send competing
 device replies. Writer ownership is fenced by surface, incarnation,
 `control_session_id` and `control_generation`. Viewer attach does not resize
 the app; resize and stop require explicit control. Development control changes
-use `dev.control.*` and reconnect, not interactive primary-harness attach.
+use `dev.control.*` and reconnect, not interactive primary-agent attach.
 
 Cancellation and authority revocation stop source work and close download
 readers before waiting for SSH status or close messages. A stalled SSH close
@@ -348,14 +348,14 @@ the per-feature files), unchanged by this transport, and every call passes
 the same capability and member-authorization checks regardless of transport.
 
 `run.list` and `run.get` include optional `mission_id`, `mission_role`, and
-`integrator_run_id` fields on each run snapshot. The current mission integrator
+`integrator_run_id` fields on each run snapshot. The current swarm integrator
 has role `integrator` and points to its own run ID; workers have role `worker`
-and point to that mission's current integrator, including finished and older
+and point to that swarm's current integrator, including finished and older
 attempts. Replacing the integrator changes that parent ID on worker snapshots
-and removes the mission fields from the replaced integrator. Ordinary runs
-omit all three fields. A worker linked to conflicting missions also omits
+and removes the swarm fields from the replaced integrator. Ordinary runs
+omit all three fields. A worker linked to conflicting swarms also omits
 them rather than choosing an arbitrary parent; repeated attempts within one
-mission retain that mission. These fields come from durable relationships,
+swarm retain that swarm. These fields come from durable relationships,
 not task text, and confer no authorization.
 
 #### Independent execution and input state
@@ -431,11 +431,11 @@ so an older `run.get`/`run.list` response cannot resurrect closed input.
 `Kill` permission as `run.kill`, but only releases a finished run's retained
 container and browser companion. It preserves the outcome, archive state,
 checkout, transcript and run record under their existing retention rules.
-The released session cannot be relaunched. A run that has become active is
+A run whose container was released cannot be reopened. A run that has become active is
 rejected with `-32002`; repeating a successful release is a no-op. Evidence
 capture or runtime cleanup errors are returned without claiming release.
-The dashboard offers this as **Release resources…** and, for the selected
-workspace including archived runs, **Free retained containers…**.
+The dashboard offers this as **Free container…** on one run and, for the
+selected workspace including archived runs, **Free retained containers…**.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
@@ -448,7 +448,7 @@ audit history.
 returning `{"ok":true}`. It permanently removes an inactive workspace and its
 server-side data, repository and mirror keys. It preserves member accounts,
 homes, local clones and upstream repositories. Revoke remote deploy keys
-separately. Active runs, pending runtime or mission work, configured schedules,
+separately. Active runs, pending runtime or swarm work, configured schedules,
 active candidate verification and unfinished delivery block deletion; the
 error names the blocker. In-flight control or Git operations return `-32003`
 instead of waiting behind them. Cleanup errors leave the workspace available
@@ -495,7 +495,7 @@ TUI run that retained its container and whose `--run-container-ttl` deadline
 has not passed: `merged` or `abandoned` after `run.close` (`reason` is
 `closed; retained container`), `completed` after the agent reported success
 (`agent reported success; retained container`), or `failed` after it reported
-failure (`agent reported failure; retained container`). Relaunch resumes the
+failure (`agent reported failure; retained container`). `run.relaunch` resumes the
 same run row in the same container and checkout; it does not create a new run
 or container and does not perform a new launch or disk-floor admission.
 
@@ -620,7 +620,7 @@ Authorization: Bearer <local-gateway-token>
 
 The response is `200` with the result object as the whole body. Every
 integration mutation is authenticated and re-authorized at the service
-boundary; a client cannot supply an actor, run identity, mission authority,
+boundary; a client cannot supply an actor, run identity, swarm authority,
 or push grant. A transport failure is handled by the existing local-gateway
 redial/retry policy, while a service denial, conflict, stale revision, or
 unavailable owned source remains the server's protocol error.
@@ -706,9 +706,9 @@ HOME, which can still write between the final check and rename.
 The browser uses the selected root's `runtime_ignores` metadata before
 reading or uploading any bytes. `runtime_ignores` contains exact,
 case-sensitive root-relative paths and component prefixes; trailing slashes
-are ignored for matching. These lists are per harness, so a runtime file
+are ignored for matching. These lists are per agent, so a runtime file
 ignored for Claude is not implicitly ignored for OMP or a member-defined
-custom harness. Known credential names wherever they occur in a path, and
+custom agent. Known credential names wherever they occur in a path, and
 every basename ending in `.pem`, remain filtered by the existing
 destination-independent credential policy. The browser keeps raw local file
 handles so it can recompute an import when the destination changes, and
@@ -963,8 +963,8 @@ or ask this method to read an arbitrary path.
   `HTTP 401: Bad credentials`, so the dashboard and the CLI can show what
   gh said rather than a summary. `signing_key` is the public key line and
   `fingerprint` its `SHA256:` fingerprint; the private key never leaves
-  the server. The dashboard's Agent step calls this after the member
-  finishes `gh auth login` in the terminal dock; see
+  the server. Onboarding's Agent step and the Agents page call this after the
+  member finishes `gh auth login` in the environment shell shown there; see
   [environment-home.md](environment-home.md#connect-github).
 
 ## `/local/v1` verbs
@@ -998,7 +998,7 @@ authority.
 | `sync.status` | `{}` | `{"sessions":[{"run_id":"...","state":"...","conflict":"..."\|null}]}` |
 | `daemon.install` | `{"server":"host:port","repo":"..."}` (`repo` defaults to the linked one; the unit gets the linked `--key`) | `{"unit_path":"...","note":"..."}` |
 | `daemon.status` | `{}` | `{"installed":bool,"unit_path":"..."}` |
-| `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable harnesses in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
+| `env.harnesses` | `{}` | `{"harnesses":[{"name":"claude","installed":bool},...],"searched":["/usr/local/bin",...],"warning":"...","repo_path":"..."}` - the setup-capable agents in order, with whether each executable is on this machine's `PATH`. The verb first widens the gateway's `PATH` from your login shell (`$SHELL -l -i`, bounded to 5 seconds), so agents installed through a shell profile or since the gateway started are found; `searched` is the resulting `PATH` as a list of folders (always present, may be empty); `warning` is present only when the login shell could not be asked, carrying that error verbatim (the standard folders `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, and `~/.bun/bin` were still checked); `repo_path` is the repository folder the saved link config knows, present only when exactly one is known, for prefilling the wizard's from-repo folder input |
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
@@ -1634,7 +1634,7 @@ resize, control, geometry, and acknowledgements.
    knowing another session's ID is insufficient. Acceptance or expiry grants
    only after the server atomically rechecks the captured holder generation
    and live connection, current requester authority, terminal readiness, and
-   mission admission. A raw CLI holder cannot answer the dashboard dialog;
+   swarm admission. A raw CLI holder cannot answer the dashboard dialog;
    the same deadline still applies. Either participant disconnecting, holder
    replacement/release, or lost run/member authority cancels the request.
    Reconnecting the same generation does not revive an old request.

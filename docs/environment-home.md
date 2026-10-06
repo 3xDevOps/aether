@@ -1,9 +1,10 @@
 # Member environment home
 
 Each member has one server-owned home directory under `<data>/homes/<member>`.
-Aether mounts it read-write as `$HOME` in the member's environment terminal and
-every run the member launches, including the run's shell tabs and runs on
-another member's shared agent account. Those containers also start from that
+Aether mounts it read-write as `$HOME` in the member's environment - the
+container shell on the dashboard's **Environment** page - and in every run
+the member launches, including the run's shell tabs and runs on another
+member's shared agent account. Those containers also start from that
 member's saved image, or the standard image when none is saved. A share of
 your own account exposes the launched agent's login to the recipient's runs
 and, when the recipient has no installation of that agent, your
@@ -22,8 +23,8 @@ The home is the member's durable environment:
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
   the signing settings
 
-Files outside the home live in the container layer. **Save environment** in the
-terminal turns that layer into your member image so later runs get it; see
+Files outside the home live in the container layer. **Save environment** on the
+**Environment** page turns that layer into your member image so later runs get it; see
 [environments.md](environments.md).
 
 ## Setting up an agent
@@ -43,8 +44,8 @@ runs only on your own account.
 In either dashboard, **Set up** on **Onboarding → Agent** or the **Agents**
 page compares Standard and Enhanced, then **Install <agent>** runs the install
 command in this home through `agent.install`, with the pinned adapter when
-Enhanced is chosen, and shows the command's output and any failure. The
-environment terminal then opens with the agent's login command typed, and
+Enhanced is chosen, and shows the command's output and any failure. Your
+environment then opens with the agent's login command typed, and
 **Check** reads `agent.list` back: **Installed**, **Enhanced installed**, and
 **Login found** when the agent's login file exists in this home. It does not
 save the environment image; the home already persists the install.
@@ -63,7 +64,7 @@ Choose an agent once:
 aether agent add <name>
 ```
 
-The command tells you what to run. Open the [environment terminal](terminal.md),
+The command tells you what to run. Open your [environment](terminal.md),
 install the agent into `~/.local/bin`, and complete the vendor login there:
 
 ```sh
@@ -92,14 +93,14 @@ Because the home is shared read-write, active runs can see the files too after
 their agent reloads. Both halves happen in the member home, so no run needs
 its own credentials.
 
-The login runs in your environment terminal, so that container needs
+The login runs in your environment, so that container needs
 `gh` 2.81.0 or newer - the release that added `gh auth status --json`,
 which is how the server reads your login back. The standard image ships a
 current one. An environment saved, or a standard image pulled, before the
 image started shipping gh has none; see [No gh in the
 environment](#no-gh-in-the-environment) below.
 
-Open the [environment terminal](terminal.md) and log in there:
+Open your [environment](terminal.md) and log in there:
 
 ```sh
 aether terminal
@@ -313,7 +314,7 @@ unsafe paths, symlink components, hardlinks, and nonregular files, while
 preserving directory and staged-file ownership.
 
 The import writes the authenticated member's own persistent home. Because that
-home is mounted read-write in the environment terminal and in every run the
+home is mounted read-write in your environment and in every run the
 member launches, imported or edited files are visible immediately, including
 to active runs; the agent may need to reload. It is not an isolated per-run
 profile, and a share of your agent account does not expose it, except the
@@ -342,7 +343,7 @@ defines revision and concurrency rules.
 
 On upgrade, legacy content in
 `<data>/homes/<member>/<harness>/<home-relative-path>` is moved to
-`<data>/homes/<member>/<home-relative-path>` for known harness names. Empty
-harness directories are removed. Existing files win if two paths conflict.
+`<data>/homes/<member>/<home-relative-path>` for known agent names. Empty
+per-agent directories are removed. Existing files win if two paths conflict.
 Old per-workspace executable snapshots are removed. The migration is
 idempotent and does not move files outside the member home root.
