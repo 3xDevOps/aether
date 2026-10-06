@@ -138,7 +138,7 @@ func newCoordStack(t *testing.T) *coordStack {
 
 // TestBridgeAgainstRealCoordination drives the spec's integration case end
 // to end: two agents, each on its own bridge, exchanging a message over
-// real sockets, with the send landing in the workspace timeline.
+// real sockets, with the send published as a typed coord.message event.
 func TestBridgeAgainstRealCoordination(t *testing.T) {
 	stack := newCoordStack(t)
 	sub, err := stack.bus.Subscribe(t.Context(), events.SubscribeOptions{
@@ -193,7 +193,12 @@ func TestBridgeAgainstRealCoordination(t *testing.T) {
 		t.Fatalf("second inbox = %+v, want empty", inbox)
 	}
 
-	waitForTimeline(t, sub, body)
+	ev := waitForMessageEvent(t, sub, sent.MessageID)
+	p := ev.Payload.(events.CoordMessagePayload)
+	if ev.RunID != stack.runB || p.WorkspaceID != stack.workspace ||
+		p.FromRunID != stack.runB || p.ToRunID != stack.runA || p.Kind == "" {
+		t.Fatalf("coord.message event = %+v payload %+v", ev, p)
+	}
 }
 
 // TestRealBatchRedeliversWhenTheResponseIsLost is the crash the whole
@@ -279,23 +284,23 @@ func messageCount(t *testing.T, res *mcp.CallToolResult) int {
 	return len(out.Messages)
 }
 
-// waitForTimeline waits for the timeline entry the service stamps every
-// message with, so the audit trail is part of the round trip rather than an
-// assumption about it.
-func waitForTimeline(t *testing.T, sub events.Subscription, body string) {
+// waitForMessageEvent waits for the coord.message event the service
+// publishes for every send, so the audit trail is part of the round trip
+// rather than an assumption about it.
+func waitForMessageEvent(t *testing.T, sub events.Subscription, messageID string) events.Event {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case ev, ok := <-sub.Events():
 			if !ok {
-				t.Fatal("event stream closed before the message reached the timeline")
+				t.Fatal("event stream closed before the coord.message event arrived")
 			}
-			if p, isTL := ev.Payload.(events.TimelinePayload); isTL && bytes.Contains([]byte(p.Message), []byte(body)) {
-				return
+			if p, isMsg := ev.Payload.(events.CoordMessagePayload); isMsg && p.MessageID == messageID {
+				return ev
 			}
 		case <-deadline:
-			t.Fatal("timed out waiting for the message to reach the workspace timeline")
+			t.Fatal("timed out waiting for the coord.message event")
 		}
 	}
 }
