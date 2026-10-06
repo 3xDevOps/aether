@@ -2148,10 +2148,12 @@ both what it renders and the overlap set the conflict chips read.
 - **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
   sticky header with a chevron, its path, a status word and `+a −d`. A file
   over 500 lines, a binary file and a deleted file start collapsed; the header
-  then also gives the line count. An opened file over 500 lines renders its
-  lines through `virtua` in a box of its own, so a large diff costs the rows
-  on screen rather than one DOM node per line. Lines carry old and new line
-  numbers, which `parse.ts` reads from the hunk headers.
+  then also gives the line count. Line counts here leave out hunk headers.
+  An opened file over 500 lines renders its lines through `virtua` in a box
+  of its own. A patch over 1,500 lines in total also mounts only the files
+  near the screen, so a large diff costs the rows on screen rather than one
+  DOM node per line. Lines carry old and new line numbers, which `parse.ts`
+  reads from the hunk headers.
 - **The path opens the file.** Clicking a file's path opens it in Files on
   the run's checkout (`routes/files/open.ts`): a Files tab for that run and
   path, then the Files route. It needs `files.tree`, a run the Files tree

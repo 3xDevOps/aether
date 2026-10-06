@@ -184,6 +184,20 @@ test('a file over 500 lines renders its hunks virtually once opened', () => {
   expect(within(small).getAllByText(/^\+row /)).toHaveLength(400)
 })
 
+test('the 500-line rule counts content lines, not hunk headers', () => {
+  const hunks = Array.from({ length: 10 }, (_, h) => [`@@ -${h * 100 + 1},0 +${h * 100 + 1},${h < 9 ? 50 : 45} @@`, ...Array.from({ length: h < 9 ? 50 : 45 }, (_, i) => `+row ${i}`)])
+  seed({ ...ready, patch: ['diff --git a/hunks.txt b/hunks.txt', '--- a/hunks.txt', '+++ b/hunks.txt', ...hunks.flat(), ''].join('\n') })
+  renderDiff()
+  expect(screen.getByRole('button', { name: 'Collapse hunks.txt' })).toBeTruthy()
+})
+
+test('a patch of many medium files mounts only the files near the screen', () => {
+  seed({ ...ready, patch: Array.from({ length: 10 }, (_, i) => added(`part${i}.txt`, 400)).join('') })
+  renderDiff()
+  expect(screen.getByRole('toolbar', { name: 'Changes' }).textContent).toContain('10 files')
+  expect(screen.queryAllByText(/^\+row /).length).toBeLessThan(1500)
+})
+
 test('a file path opens that file in Files on the run checkout', () => {
   seed(ready)
   useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })

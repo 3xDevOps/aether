@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -7,7 +8,7 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
-import { FilePatch, largeFile } from '@/routes/diff/patch-view'
+import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
 import { isLiveRun } from '@/routes/files'
 import { openInFiles } from '@/routes/files/open'
@@ -15,8 +16,10 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { initialDiff, intervalKey, type DiffSnapshot, type IntervalPatch } from '@/store/diff'
 
+const largePatch = 1500
+
 function collapsedByDefault(file: PatchFile): boolean {
-  return file.lines.length > largeFile || file.status === 'binary' || file.status === 'deleted'
+  return contentLines(file) > largeFile || file.status === 'binary' || file.status === 'deleted'
 }
 
 /** A snapshot shows the diff between its parent tree and its tree, not a filter
@@ -34,6 +37,7 @@ export function ChangesView({ runID }: { runID: string }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [current, setCurrent] = useState<string | null>(null)
   const ids = useId()
+  const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
   const snapshot = selected === null ? null : (state.snapshots.find((s) => s.time === selected) ?? null)
@@ -41,11 +45,11 @@ export function ChangesView({ runID }: { runID: string }) {
   const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
   const files = snapshot ? changed : cumulative
+  const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
   const error = snapshot ? interval?.error : state.error
   const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
   const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
-  const fileID = useCallback((path: string) => `${ids}-${files.findIndex((file) => file.path === path)}`, [ids, files])
 
   const toggle = useCallback((path: string, next: boolean) => setCollapsed((all) => ({ ...all, [path]: next })), [])
   const open = useCallback((path: string) => {
@@ -54,12 +58,28 @@ export function ChangesView({ runID }: { runID: string }) {
   const jump = useCallback((path: string) => {
     setCurrent(path)
     setCollapsed((all) => ({ ...all, [path]: false }))
-    requestAnimationFrame(() => document.getElementById(fileID(path))?.scrollIntoView({ block: 'start' }))
-  }, [fileID])
+    const index = files.findIndex((file) => file.path === path)
+    requestAnimationFrame(() => {
+      if (virtual) list.current?.scrollToIndex(index, { align: 'start' })
+      else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
+    })
+  }, [files, virtual, ids])
 
   if (!run) return <MissingRun />
 
   const canOpen = caps.hasMethod('files.tree') && isLiveRun(run)
+  const patchAt = (file: PatchFile, index: number) => (
+    <FilePatch
+      key={file.path}
+      id={`${ids}-${index}`}
+      file={file}
+      wrap={wrap}
+      lineNumbers
+      collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
+      onCollapsedChange={toggle}
+      onOpen={canOpen && file.status !== 'deleted' ? open : undefined}
+    />
+  )
   return (
     <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
       <Land run={run} />
@@ -90,18 +110,13 @@ export function ChangesView({ runID }: { runID: string }) {
       <div className="flex min-h-0 flex-1">
         {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
         <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-          {files.map((file) => (
-            <FilePatch
-              key={file.path}
-              id={fileID(file.path)}
-              file={file}
-              wrap={wrap}
-              lineNumbers
-              collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
-              onCollapsedChange={toggle}
-              onOpen={canOpen && file.status !== 'deleted' ? open : undefined}
-            />
-          ))}
+          {virtual ? (
+            <Virtualizer ref={list} data={files}>
+              {patchAt}
+            </Virtualizer>
+          ) : (
+            files.map(patchAt)
+          )}
           {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} />}
         </div>
       </div>

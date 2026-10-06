@@ -7,6 +7,10 @@ import type { FileStatus, PatchFile, PatchLine } from '@/routes/diff/parse'
 
 export const largeFile = 500
 
+export function contentLines(file: PatchFile): number {
+  return file.lines.filter((line) => line.kind !== 'hunk' && line.kind !== 'meta').length
+}
+
 const statusWord: Record<FileStatus, string> = {
   added: 'added',
   deleted: 'deleted',
@@ -53,7 +57,7 @@ export const FilePatch = memo(function FilePatch({
   const open = !onCollapsedChange || !collapsed
   const body = id ? `${id}-body` : undefined
   const gutter = lineNumbers ? `calc(${Math.max(String(lastLine(file)).length, 2)}ch + 1rem)` : undefined
-  const size = file.lines.filter((line) => line.kind !== 'hunk' && line.kind !== 'meta').length
+  const size = contentLines(file)
   return (
     <section id={id} aria-label={file.path} className="border-b border-seam">
       <header className="sticky top-0 z-10 flex h-8 min-w-0 items-center gap-2 border-b border-seam bg-chrome px-2 text-ui-sm coarse:h-11">
@@ -80,7 +84,7 @@ export const FilePatch = memo(function FilePatch({
         )}
         {statusWord[file.status] && <span className="shrink-0 text-muted">{statusWord[file.status]}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-3">
-          {!open && file.lines.length > largeFile && (
+          {!open && size > largeFile && (
             <span className="text-muted tabular-nums">{size} lines</span>
           )}
           <Counts additions={file.additions} deletions={file.deletions} />
@@ -88,7 +92,7 @@ export const FilePatch = memo(function FilePatch({
       </header>
       {open && (
         <div id={body} className={cn('font-code text-ui-sm', !wrap && 'overflow-x-auto overscroll-x-contain')}>
-          {file.lines.length > largeFile ? (
+          {size > largeFile ? (
             <VList data-slot="patch-lines" style={{ height: 'min(70dvh, 40rem)' }} data={file.lines}>
               {(line, i) => <Line key={i} line={line} wrap={wrap} gutter={gutter} />}
             </VList>

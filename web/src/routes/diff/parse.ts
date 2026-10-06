@@ -7,9 +7,7 @@ export type LineKind = 'add' | 'del' | 'context' | 'hunk' | 'meta'
 export interface PatchLine {
   kind: LineKind
   text: string
-  /** Line number in the old file: set on `del` and `context` lines. */
   old?: number
-  /** Line number in the new file: set on `add` and `context` lines. */
   new?: number
 }
 
