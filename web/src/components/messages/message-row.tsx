@@ -32,10 +32,12 @@ export function deliveryWord(message: Pick<RunMessage, 'delivered_at' | 'acked_a
 function Participant({ runID, label }: { runID: string; label?: ParticipantLabel }) {
   const run = useStore((s) => s.runs[runID])
   const navigate = useStore((s) => s.navigate)
+  const open = useStore((s) => s.route.name === 'run' && s.route.params.runId === runID)
   const name = label ? label(runID, run) : run && runLabel(run)
   if (!name) return <span className="font-code text-ui-sm text-muted">{runID}</span>
+  if (open) return <span className="max-w-64 min-w-0 shrink truncate text-ui text-muted">{name}</span>
   return (
-    <Button variant="link" className="max-w-64 min-w-0 shrink" title={name} onClick={() => navigate('run', { runId: runID })}>
+    <Button variant="quiet" className="max-w-64 min-w-0 shrink" title={name} onClick={() => navigate('run', { runId: runID })}>
       <span className="truncate">{name}</span>
     </Button>
   )
