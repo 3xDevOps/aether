@@ -65,6 +65,7 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
     }
   }
 
+  const recommended = choice === null && (caps.hasLocal('link.repo') ? 'local' : 'remote')
   const canImport = isAdmin && caps.hasMethod('workspace.import')
   const canAdd = isAdmin && caps.hasMethod('workspace.add')
   if (!canImport && !canAdd) return null
@@ -76,14 +77,14 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
         <h4 className="text-ui font-medium text-text">Import a remote repository</h4>
         <p className="flex-1 text-ui-sm text-muted">Public HTTPS, or private with a read-only deploy key. No local clone needed.</p>
         {canImport
-          ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
+          ? <Button size="sm" variant={recommended === 'remote' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot import repositories.</p>}
       </div>
       <div className={cn('flex flex-col items-start gap-2 rounded-panel border p-3', choice === 'local' ? 'border-accent' : 'border-seam')}>
         <h4 className="text-ui font-medium text-text">From a local clone</h4>
         <p className="flex-1 text-ui-sm text-muted">Create the workspace, then link your clone and push its base branch. History is never rewritten.</p>
         {canAdd
-          ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
+          ? <Button size="sm" variant={recommended === 'local' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot create workspaces.</p>}
       </div>
     </div>

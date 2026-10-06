@@ -90,6 +90,7 @@ export function AgentStep({
                 agents={agents}
                 onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                 returnFocusTo={returnFocusTo}
+                primary={installed ? undefined : agents[0].name}
                 onRun={(agent) => {
                   rememberLaunch(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
                   onNext()

@@ -34,12 +34,14 @@ export function AgentList({
   onRun,
   extra,
   returnFocusTo,
+  primary,
 }: {
   agents: AgentInfo[]
   onSetUp?: (agent: AgentInfo) => void
   onRun?: (agent: AgentInfo) => void
   extra?: (agent: AgentInfo) => ReactNode
   returnFocusTo?: string
+  primary?: string
 }) {
   const list = useRef<HTMLUListElement>(null)
   useEffect(() => {
@@ -69,7 +71,7 @@ export function AgentList({
               {(runnable || onSetUp) && (
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant={agent.name === primary ? 'primary' : 'secondary'}
                   data-agent-action={agent.name}
                   aria-label={`${runnable ? 'Run' : 'Set up'} ${name}`}
                   onClick={() => (runnable ? onRun(agent) : onSetUp?.(agent))}

@@ -2527,8 +2527,9 @@ wizard. See [teams.md](teams.md) for what the identity does once it is set.
 Repository's first line defines the word: a workspace is one repository and
 base branch, and the runs started from it. With no workspace chosen it lists
 the member's workspaces with **Use** and, for an admin whose gateway serves
-`workspace.import` or `workspace.add`, the two **Add a workspace** cards. A
-member who cannot add one and finds none gets **Ask an admin to add a
+`workspace.import` or `workspace.add`, the two **Add a workspace** cards,
+whose primary button is **Create from local clone** on a local gateway and
+**Import repository** on a hosted one. A member who cannot add one and finds none gets **Ask an admin to add a
 workspace** and **Continue to Agent**, because Agent setup does not depend on
 a workspace. Once a workspace is chosen the step shows it as one row with
 **Change**, then the **Local clone** section and one **Advanced** disclosure
@@ -2681,7 +2682,8 @@ mode** select per row, shown as "Default: Standard", which writes
 `launchDefaults` without changing which agent **New run** preselects. **Run**
 on the page opens **New run** on that agent; in onboarding it moves to First
 run with that agent preselected. The Agent step's primary action is
-**Continue** once any agent is installed and **Skip for now** before that.
+**Continue** once any agent is installed; before that it is the first
+agent's **Set up**, with **Skip for now** beside Back.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps. **Choose how runs
 show it** is `mode-comparison.tsx`: a `radiogroup` of two cards, side by side
