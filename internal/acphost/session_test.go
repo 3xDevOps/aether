@@ -463,6 +463,55 @@ func TestPromptsAreSerialized(t *testing.T) {
 	}
 }
 
+// An agent that answers a steer by starting its own turn already has the
+// input; sending it again as a prompt would deliver it twice.
+func TestSteerOutcomes(t *testing.T) {
+	for outcome, wantErr := range map[string]bool{"startedNewTurn": false, "somethingNew": true} {
+		t.Run(outcome, func(t *testing.T) {
+			m := newMockAgent(t, loadFixture(t, "codex"))
+			release := make(chan struct{})
+			var prompts int
+			m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+				m.mu.Lock()
+				prompts++
+				m.mu.Unlock()
+				<-release
+				return map[string]any{"stopReason": "end_turn"}, nil
+			}
+			m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
+				return map[string]any{"outcome": outcome}, nil
+			}
+			s, rec := startMock(t, m, Config{})
+			if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+				t.Fatal(err)
+			}
+			r, err := s.Prompt(context.Background(), textPrompt("steer"), true)
+			if wantErr {
+				if err == nil || !strings.Contains(err.Error(), outcome) {
+					t.Fatalf("got %+v %v, want an error naming %q", r, err, outcome)
+				}
+			} else if err != nil || r.Outcome != OutcomeInjected {
+				t.Fatalf("steer: %+v %v", r, err)
+			}
+			close(release)
+			rec.waitIdle(t)
+			m.mu.Lock()
+			n := prompts
+			m.mu.Unlock()
+			if n != 1 || s.State().Queued != 0 {
+				t.Fatalf("%d prompts sent, %d queued", n, s.State().Queued)
+			}
+			want := "firststeer"
+			if wantErr {
+				want = "first"
+			}
+			if got := messageText(items(t, s), "user"); got != want {
+				t.Fatalf("user messages %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestConnectionLossMidTurn(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {

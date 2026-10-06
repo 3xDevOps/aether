@@ -239,11 +239,20 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if outcome == OutcomeInjected {
+	switch outcome {
+	case OutcomeInjected:
 		s.userMessageLocked(blocks)
 		return Receipt{Outcome: OutcomeInjected}, nil
+	case "startedNewTurn":
+		// The agent ignored idleBehavior and ran the input as a turn of its
+		// own; it has the input, so re-sending it would deliver it twice.
+		s.userMessageLocked(blocks)
+		return Receipt{Outcome: OutcomeInjected}, nil
+	case "promptRequired":
+		// The turn ended before the steer reached the agent.
+	default:
+		return Receipt{}, fmt.Errorf("acphost: %s: unknown outcome %q", methodSteering, outcome)
 	}
-	// promptRequired: the turn ended before the steer reached the agent.
 	if s.closed {
 		return Receipt{}, ErrClosed
 	}
