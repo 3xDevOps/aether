@@ -31,7 +31,6 @@ export type AetherDesktop = {
   chooseFolder?: () => Promise<string>
 }
 
-/** The desktop bridge, or undefined in a browser tab. */
 export function desktopBridge(): AetherDesktop | undefined {
   return (window as Window & { aetherDesktop?: AetherDesktop }).aetherDesktop
 }

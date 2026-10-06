@@ -32,7 +32,7 @@ export function focusedWorkspace(state: RootState): string {
 }
 
 /**
- * Reads every workspace: the status bar's worst budget state and the queue
+ * Reads every workspace: the Team line's worst budget state and the queue
  * count are whole-deployment claims no subset can answer.
  */
 export async function refreshTeam(store: RootStore, client: Api = api): Promise<void> {
