@@ -35,7 +35,9 @@ The type scale, in `web/src/index.css`:
 Weights are 400 and 500, 600 for titles. Times, counts and `+a -d` use
 `tabular-nums`. No uppercase labels. `cn()` in `web/src/lib/utils.ts` knows
 the scale, so `cn('text-ui', 'text-muted')` keeps both classes. `text-title`
-sets its own family and weight; do not pair it with `font-*` classes.
+sets its own family and weight; do not pair it with `font-*` classes. No
+surface uses `text-title` yet, so Saira loads and shows only once one does;
+until then headings render in Inter.
 
 ## Semantic palette
 
