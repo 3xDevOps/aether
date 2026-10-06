@@ -52,7 +52,7 @@ async function closeFirstRun(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(header).toContainText('Merged')
-  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('closed; retained container')
+  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('Last reasonClosed')
   await expect(dialog).toHaveCount(0)
 }
 

@@ -77,7 +77,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(closeDialog).toBeVisible()
   await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(header).toContainText('Merged')
-  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('closed; retained container')
+  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('Last reasonClosed')
 })
 
 test('with no agent installed the first run sends you back to Agent', async ({
