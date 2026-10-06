@@ -1358,8 +1358,9 @@ scopes share keys, or one begins the other's sequence.
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
-The scopes are `global`, `run`, `request` and `composer`; when a key matches
-in two live scopes, the innermost wins. A binding without a handler does
+The scopes are `global`, `run`, `request` and `composer`; `request` and
+`composer` have no bindings yet. When a key matches in two live scopes, the
+innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
 keys are listed even from the board, where no run scope is on screen.
