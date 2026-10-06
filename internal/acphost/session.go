@@ -392,8 +392,16 @@ func (s *Session) State() State {
 	return st
 }
 
-// Subscribe returns the items after afterSeq and a channel of every item
-// appended from then on, with no gap between the two. A subscriber that
+// ReplayWindow is the most items a subscribe replays; older items are paged
+// with run.acp.history.
+const ReplayWindow = 200
+
+// ReplayStart is the cursor a subscribe replays from: afterSeq, or the start
+// of the newest ReplayWindow items when afterSeq is older than that.
+func ReplayStart(afterSeq, last int64) int64 { return max(afterSeq, last-ReplayWindow) }
+
+// Subscribe returns the items after ReplayStart(afterSeq) and a channel of
+// every item appended from then on, with no gap between the two. A subscriber that
 // falls more than subscriberBuffer items behind has its channel closed and
 // resubscribes from its last seq. The channel is closed when the session
 // ends or cancel is called.
@@ -418,6 +426,7 @@ func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error)
 			close(ch)
 		}
 	}
+	afterSeq = ReplayStart(afterSeq, last)
 	if afterSeq >= last {
 		return nil, ch, cancel, nil
 	}

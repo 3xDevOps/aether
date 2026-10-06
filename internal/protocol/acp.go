@@ -30,6 +30,7 @@ type ACPStreamResponse struct {
 	OK                bool            `json:"ok"`
 	Seq               int64           `json:"seq"`
 	Replay            int             `json:"replay"`
+	OldestSeq         int64           `json:"oldest_seq,omitempty"`
 	Epoch             int64           `json:"epoch"`
 	Live              bool            `json:"live"`
 	State             json.RawMessage `json:"state,omitempty"`

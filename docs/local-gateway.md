@@ -1753,6 +1753,13 @@ text.
    queued prompts, pending requests with their options, mode, config
    options, commands). A refusal carries `code` and `error` and closes 1008.
 
+   The replay is at most 200 items. When `after_seq` is 0, past the end of
+   the log, or more than 200 items behind, the server sends the newest 200
+   and sets `oldest_seq` to the first seq sent: start the timeline there
+   and page older items with `run.acp.history` (`before_seq` set to
+   `oldest_seq`). Otherwise it sends exactly the items after `after_seq`
+   and omits `oldest_seq`.
+
    ```json
    {"ok":true,"seq":431,"replay":19,"epoch":0,"live":true,
     "state":{"turn_in_flight":true,"queued":0,"pending":[],"mode":"auto"},
@@ -1763,7 +1770,7 @@ text.
    over 32 KiB is cut to its identity fields with `"truncated":true`;
    `run.acp.item` returns it whole. A cursor past the end of the log (the
    log was replaced) is answered with `{"reset":true,"epoch":1}` first:
-   drop what you hold and apply the replay from the start. Items are the
+   drop what you hold and apply the replay that follows. Items are the
    `acphost.Item` kinds `message`, `thought`, `tool_call`, `plan`, `request`,
    `mode_change`, `config_options`, `commands`, `usage`, `auth_status`,
    `session_info`, `notice`, `turn_start`, `turn_end` and `reset`; skip kinds

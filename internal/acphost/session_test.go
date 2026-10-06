@@ -736,6 +736,35 @@ func TestStartFailsWithTheAgentError(t *testing.T) {
 	}
 }
 
+// A fresh or far-behind viewer gets only the newest ReplayWindow items; one
+// inside the window gets exactly its gap.
+func TestSubscribeReplaysAtMostTheWindow(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		for i := range ReplayWindow + 100 {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": fmt.Sprint("t", i), "title": "read", "status": "completed"})
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	last := s.Log().LastSeq()
+	for _, after := range []int64{0, last - ReplayWindow - 50, last - 10} {
+		replay, _, cancel, err := s.Subscribe(after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		want := min(last-after, ReplayWindow)
+		if int64(len(replay)) != want || replay[0].Seq != last-want+1 || replay[len(replay)-1].Seq != last {
+			t.Fatalf("Subscribe(%d) replayed %d items from %d, want the %d up to %d", after, len(replay), replay[0].Seq, want, last)
+		}
+	}
+}
+
 // A viewer that subscribes while the agent streams sees every item once, in
 // order, split between the replay and the channel.
 func TestSubscribeHasNoGap(t *testing.T) {
@@ -755,7 +784,7 @@ func TestSubscribeHasNoGap(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-started
-	const after = 3
+	after := s.Log().LastSeq() - 5
 	replay, ch, cancel, err := s.Subscribe(after)
 	if err != nil {
 		t.Fatal(err)

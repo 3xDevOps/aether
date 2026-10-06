@@ -127,6 +127,7 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 	}
 	defer stream.Cancel()
 	ack.Seq, ack.Epoch, ack.Replay, ack.Live = stream.Seq, stream.Epoch, len(stream.Replay), stream.Items != nil
+	ack.OldestSeq = stream.OldestSeq
 	if stream.State != nil {
 		ack.State, _ = json.Marshal(stream.State)
 	}

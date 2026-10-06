@@ -128,3 +128,8 @@ and one run's log at 64 MiB, past which only requests, turn boundaries and
 notices are recorded. Anything an agent or a tool prints, a secret included,
 can be in it; [privacy.md](privacy.md#remote-development-data) covers who can
 read it.
+
+A dashboard that opens the run receives the newest 200 items and pages
+older ones with `run.acp.history`; one that reconnects at most 200 items
+behind receives only the items it missed
+([local-gateway.md](local-gateway.md#get-wsacprun_id)).

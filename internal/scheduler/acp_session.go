@@ -22,6 +22,9 @@ type ACPStream struct {
 	Reset bool
 	Epoch int64
 	Seq   int64
+	// OldestSeq is the first replayed seq when the replay does not continue
+	// from the viewer's cursor; the viewer pages older items from it.
+	OldestSeq int64
 	// Items carries every later item while the session is live. It is nil
 	// when no session is live, and closed when the session ends or the
 	// viewer falls too far behind; either way the viewer resubscribes.
@@ -45,6 +48,7 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 			state := sess.State()
 			out := ACPStream{Replay: replay, Reset: reset, Items: items, State: &state, Cancel: cancel, Seq: max(afterSeq, 0)}
 			out.Epoch, out.Seq = streamMark(sess.Log(), replay, out.Seq)
+			out.OldestSeq = oldestSeq(afterSeq, replay)
 			return out, nil
 		}
 		if !errors.Is(err, acphost.ErrClosed) {
@@ -61,11 +65,19 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 	if afterSeq > log.LastSeq() {
 		out.Reset, afterSeq = true, 0
 	}
-	if out.Replay, err = log.ReadAfter(afterSeq, 0); err != nil {
+	if out.Replay, err = log.ReadAfter(acphost.ReplayStart(afterSeq, log.LastSeq()), 0); err != nil {
 		return ACPStream{}, err
 	}
 	out.Epoch, out.Seq = streamMark(log, out.Replay, max(afterSeq, 0))
+	out.OldestSeq = oldestSeq(afterSeq, out.Replay)
 	return out, nil
+}
+
+func oldestSeq(afterSeq int64, replay []acphost.Item) int64 {
+	if len(replay) > 0 && (afterSeq <= 0 || replay[0].Seq > afterSeq+1) {
+		return replay[0].Seq
+	}
+	return 0
 }
 
 func streamMark(log *acphost.Log, replay []acphost.Item, seq int64) (int64, int64) {

@@ -398,3 +398,42 @@ func TestEnhancedRunAdapterFailureParksRun(t *testing.T) {
 		t.Fatalf("items %+v", items)
 	}
 }
+
+// With no session live, a fresh viewer gets the newest ReplayWindow items
+// and where they start; a viewer inside the window gets exactly its gap.
+func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	e.sched.acp.stopAdapter(t.Context(), run.ID)
+
+	log, err := acphost.OpenLog(e.pty.ItemLogPath(run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range acphost.ReplayWindow + 50 {
+		if err := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "n"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last := log.LastSeq()
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh, err := e.sched.ACPSubscribe(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Replay) != acphost.ReplayWindow || fresh.OldestSeq != last-acphost.ReplayWindow+1 || fresh.Seq != last {
+		t.Fatalf("fresh viewer: %d items, oldest %d, seq %d; want %d up to %d", len(fresh.Replay), fresh.OldestSeq, fresh.Seq, acphost.ReplayWindow, last)
+	}
+	gap, err := e.sched.ACPSubscribe(run.ID, last-10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gap.Replay) != 10 || gap.Replay[0].Seq != last-9 || gap.OldestSeq != 0 {
+		t.Fatalf("viewer inside the window: %d items from %d, oldest %d", len(gap.Replay), gap.Replay[0].Seq, gap.OldestSeq)
+	}
+}
