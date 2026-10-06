@@ -638,6 +638,16 @@ func TestStartFailsWithTheAgentError(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	// When the stored session could not be restored either, both reasons show.
+	m = newMockAgent(t, loadFixture(t, "codex"))
+	m.newErr = acp.NewAuthRequired(nil)
+	m.resume = func() *acp.RequestError { return &acp.RequestError{Code: -32603, Message: "resume broke"} }
+	m.load = func() *acp.RequestError { return &acp.RequestError{Code: -32603, Message: "load broke"} }
+	r, w = m.pipes()
+	_, err = Start(context.Background(), r, w, Config{LogPath: t.TempDir() + "/x.jsonl", Cwd: "/workspace", SessionID: m.sessionID(), Logger: discard})
+	if err == nil || !strings.Contains(err.Error(), "load broke") || !strings.Contains(err.Error(), "Authentication required") {
+		t.Fatalf("Start after a failed restore: %v", err)
+	}
 }
 
 // A viewer that subscribes while the agent streams sees every item once, in

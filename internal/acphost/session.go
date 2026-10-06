@@ -170,7 +170,7 @@ func (s *Session) open(ctx context.Context) error {
 	if s.cfg.SessionID == "" || restoreErr != nil {
 		var err error
 		if res, err = s.conn.newSession(ctx, s.cfg.Cwd, s.cfg.MCPServers); err != nil {
-			return err
+			return errors.Join(restoreErr, err)
 		}
 	}
 	s.mu.Lock()
