@@ -16,9 +16,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// TestIntegrationEnhancedMissionWake runs a swarm on real Docker whose worker
-// is an enhanced acpmock run. A message to the worker while its session is
-// idle starts a turn that carries the inbox instruction.
+// TestIntegrationEnhancedMissionWake runs a swarm on real Docker whose
+// integrator and worker are enhanced acpmock runs. Mail to either one while
+// its session is idle starts a turn that carries the inbox instruction: a
+// message to the worker, and the worker's report to the integrator.
 func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -29,12 +30,11 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	standard := protocol.MissionExecutionChoice{AccountMemberID: string(ada.ID), Harness: "fake", Mode: string(domain.LaunchTUI)}
 	enhanced := protocol.MissionExecutionChoice{AccountMemberID: string(ada.ID), Harness: "fake", Mode: string(domain.LaunchACP)}
 	params, _ := json.Marshal(protocol.MissionCreateParams{
 		WorkspaceID: string(env.ws.ID), Objective: "enhanced swarm", AccountableHumanID: string(ada.ID),
-		Integrator:       protocol.MissionIntegrator(standard),
-		ExecutionChoices: []protocol.MissionExecutionChoice{standard, enhanced},
+		Integrator:       protocol.MissionIntegrator(enhanced),
+		ExecutionChoices: []protocol.MissionExecutionChoice{enhanced},
 		IdempotencyKey:   "enhanced-swarm",
 	})
 	var created protocol.MissionCreateResult
@@ -42,7 +42,9 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 		t.Fatalf("mission.create status %d", status)
 	}
 	missionID, generation := created.Mission.ID, created.Mission.IntegratorGeneration
-	integrator := waitMissionSocket(t, filepath.Join(env.data, "coord", created.Mission.CurrentIntegratorRunID))
+	integratorRun := domain.RunID(created.Mission.CurrentIntegratorRunID)
+	integrator := waitMissionSocket(t, filepath.Join(env.data, "coord", string(integratorRun)))
+	waitTurns(ctx, t, env.srv, integratorRun, 1)
 
 	var proposed protocol.TaskMutationResult
 	if err := pacedCall(ctx, integrator, protocol.MethodTaskPropose, protocol.TaskProposeParams{
@@ -78,7 +80,18 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 		t.Fatalf("the worker's second turn is not the inbox wake: %+v", items)
 	}
 
-	for _, run := range []domain.RunID{worker, domain.RunID(created.Mission.CurrentIntegratorRunID)} {
+	workerSocket := waitMissionSocket(t, filepath.Join(env.data, "coord", string(worker)))
+	if err := pacedCall(ctx, workerSocket, protocol.MethodCoordReport, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "said pong", IdempotencyKey: "worker-report",
+	}, nil); err != nil {
+		t.Fatalf("worker coord.report: %v", err)
+	}
+	items = waitTurns(ctx, t, env.srv, integratorRun, 2)
+	if !woken(items, 1) {
+		t.Fatalf("the worker's report did not wake the integrator: %+v", items)
+	}
+
+	for _, run := range []domain.RunID{worker, integratorRun} {
 		if err := env.srv.sched.Kill(ctx, run, ada.ID); err != nil {
 			t.Fatalf("kill %s: %v", run, err)
 		}

@@ -103,14 +103,27 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 }
 
+func TestSwarmCreateEnhancedIntegrator(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "codex", "--mode", "enhanced"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	params := missionCreateParams("ws1", "mem1", spec, "key-1")
+	want := protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "acp"}
+	if params.Integrator != want || len(params.ExecutionChoices) != 1 || protocol.MissionIntegrator(params.ExecutionChoices[0]) != want {
+		t.Fatalf("mission.create params %+v, want an acp integrator among the choices", params)
+	}
+}
+
 func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"no agent":        {args: []string{"objective"}, want: "usage: aether swarm create"},
-		"bad worker mode": {args: []string{"objective", "--agent", "claude", "--worker", "codex:batch"}, want: `invalid --worker "codex:batch"`},
-		"empty worker":    {args: []string{"objective", "--agent", "claude", "--worker", ":tui"}, want: `invalid --worker ":tui"`},
+		"no agent":              {args: []string{"objective"}, want: "usage: aether swarm create"},
+		"bad worker mode":       {args: []string{"objective", "--agent", "claude", "--worker", "codex:batch"}, want: `invalid --worker "codex:batch"`},
+		"empty worker":          {args: []string{"objective", "--agent", "claude", "--worker", ":tui"}, want: `invalid --worker ":tui"`},
+		"background integrator": {args: []string{"objective", "--agent", "claude", "--mode", "background"}, want: "--mode must be standard or enhanced"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// swarmCreate reaches withControl only after validation, and no

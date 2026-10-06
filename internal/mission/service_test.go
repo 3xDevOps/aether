@@ -243,45 +243,49 @@ func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 	}
 }
 
-// A headless integrator exits after one turn, and nothing wakes an enhanced
-// one when a worker reports. Workers keep every mode.
-func TestNonTUIIntegratorIsRefused(t *testing.T) {
-	for _, tc := range []struct {
-		mode domain.LaunchMode
-		want string
-	}{
-		{domain.LaunchHeadless, "integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told"},
-		{domain.LaunchACP, "integrator mode must be tui: an enhanced integrator is not woken when a worker reports"},
-	} {
-		t.Run(string(tc.mode), func(t *testing.T) {
-			ctx := context.Background()
-			f := newMissionFixture(t)
-			choice := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(tc.mode)}
-			_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
-				WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-" + string(tc.mode),
-				Integrator:       protocol.MissionIntegrator(choice),
-				ExecutionChoices: []protocol.MissionExecutionChoice{choice},
-			})
-			var rpcErr *protocol.Error
-			if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != tc.want {
-				t.Fatalf("create = %v, want invalid params %q", err, tc.want)
-			}
-			missions, err := f.db.ListMissions(ctx, f.workspace.ID)
-			if err != nil || len(missions) != 1 {
-				t.Fatalf("missions after a refused create = %d (err %v), want only the fixture's", len(missions), err)
-			}
+// A headless integrator exits after one turn, so it could never be asked a
+// question or told of a decision. An enhanced one is woken by its mail.
+// Workers keep every mode.
+func TestIntegratorModes(t *testing.T) {
+	const refused = "integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told"
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	headless := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)}
+	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-headless",
+		Integrator:       protocol.MissionIntegrator(headless),
+		ExecutionChoices: []protocol.MissionExecutionChoice{headless},
+	})
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != refused {
+		t.Fatalf("create with a headless integrator = %v, want invalid params %q", err, refused)
+	}
+	missions, err := f.db.ListMissions(ctx, f.workspace.ID)
+	if err != nil || len(missions) != 1 {
+		t.Fatalf("missions after a refused create = %d (err %v), want only the fixture's", len(missions), err)
+	}
+	_, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+		MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration,
+		Integrator: protocol.MissionIntegrator(headless), IdempotencyKey: "replace-headless",
+	})
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != refused {
+		t.Fatalf("replace with a headless integrator = %v, want invalid params %q", err, refused)
+	}
+	if got := f.reloadMission(t).IntegratorGeneration; got != f.mission.IntegratorGeneration {
+		t.Fatalf("integrator generation after a refused replace = %d, want %d", got, f.mission.IntegratorGeneration)
+	}
 
-			_, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
-				MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration,
-				Integrator: protocol.MissionIntegrator(choice), IdempotencyKey: "replace-" + string(tc.mode),
-			})
-			if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != tc.want {
-				t.Fatalf("replace = %v, want invalid params %q", err, tc.want)
-			}
-			if got := f.reloadMission(t).IntegratorGeneration; got != f.mission.IntegratorGeneration {
-				t.Fatalf("integrator generation after a refused replace = %d, want %d", got, f.mission.IntegratorGeneration)
-			}
-		})
+	enhanced := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchACP)}
+	created, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-enhanced",
+		Integrator:       protocol.MissionIntegrator(enhanced),
+		ExecutionChoices: []protocol.MissionExecutionChoice{enhanced},
+	})
+	if err != nil {
+		t.Fatalf("create with an enhanced integrator: %v", err)
+	}
+	if created.Mission.Integrator.Mode != string(domain.LaunchACP) {
+		t.Fatalf("integrator mode %q, want acp", created.Mission.Integrator.Mode)
 	}
 }
 

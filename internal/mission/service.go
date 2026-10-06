@@ -932,11 +932,8 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if in.AccountMemberID == "" || in.Harness == "" || !mode.Valid() {
 		return domain.MissionIntegrator{}, errors.New("integrator account_member_id, harness, and valid mode are required")
 	}
-	switch mode {
-	case domain.LaunchHeadless:
-		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told")
-	case domain.LaunchACP:
-		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui: an enhanced integrator is not woken when a worker reports")
+	if !mode.Interactive() {
+		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told")
 	}
 	for _, c := range choices {
 		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode {
