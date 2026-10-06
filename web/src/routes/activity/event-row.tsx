@@ -59,7 +59,7 @@ export const EventRow = memo(function EventRow({ event, raw }: { event: Event; r
   const message = event.type === 'coord.message' || event.type === 'coord.message.acked'
   const kind = message ? ((event.payload as Partial<CoordMessagePayload>)?.kind ?? 'message') : ''
   return (
-    <div className="grid min-w-0 grid-cols-[0.625rem_1rem_minmax(0,1fr)_auto] items-start gap-x-2 px-4 py-1.5 text-ui [grid-template-areas:'dot_who_text_time'_'._._run_run'] hover:bg-hover sm:grid-cols-[6rem_0.625rem_1rem_minmax(0,1fr)_auto] sm:[grid-template-areas:'time_dot_who_text_run']">
+    <div className="grid min-w-0 grid-cols-[0.625rem_1rem_minmax(0,1fr)_auto] items-start gap-x-2 px-4 py-1.5 text-ui [grid-template-areas:'dot_who_label_time'_'._._text_text'_'._._run_run'] hover:bg-hover sm:grid-cols-[6rem_0.625rem_1rem_minmax(0,1fr)_auto] sm:[grid-template-areas:'time_dot_who_text_run']">
       <span className="pt-0.5 text-ui-sm text-muted tabular-nums [grid-area:time] max-sm:text-right">
         <RelativeTime at={event.time} />
       </span>
@@ -67,9 +67,9 @@ export const EventRow = memo(function EventRow({ event, raw }: { event: Event; r
       <span className="flex h-5 items-center [grid-area:who]">
         {message ? <MessageKindGlyph kind={kind} /> : actor ? <Avatar name={actor.display_name} color={actor.color} /> : null}
       </span>
-      <div className="min-w-0 break-words [grid-area:text]">
-        <span className="mr-2 text-muted" title={event.type}>{raw ? event.type : typeLabel(event.type)}</span>
-        <span className="text-text select-text">{body(event, raw)}</span>
+      <div className="min-w-0 break-words [grid-area:text] max-sm:contents">
+        <span className="mr-2 text-muted max-sm:[grid-area:label]" title={event.type}>{raw ? event.type : typeLabel(event.type)}</span>
+        <span className="min-w-0 text-text select-text max-sm:[grid-area:text]">{body(event, raw)}</span>
       </div>
       {run && !message && (
         <Button variant="ghost" size="sm" className="-my-0.5 max-w-56 min-w-0 justify-self-start [grid-area:run] max-sm:-ml-2" title={runLabel(run)} onClick={() => navigate('run', { runId: run.id })}>

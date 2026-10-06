@@ -2322,11 +2322,12 @@ questions and queued messages stay contextual to their run, in its Details
 - **Rows share one time column.** Each row is a grid: relative time, a state
   dot only on `run.status` (the run's new state), the actor's avatar or the
   message kind glyph, the type name with its description, and the run as a
-  quiet link. On a phone the time moves to the row's end and the run link
-  under the text. `coord.message` and `coord.message.acked` rows name sender
-  and recipient (`Backend → Planner`), never the payload's ids, and a
-  delivery word only once the message is in the messages slice; the event
-  alone does not say whether it was delivered.
+  quiet link. On a phone the type name shares the first line with the time,
+  and the description and run link take the full width under it.
+  `coord.message` and `coord.message.acked` rows name sender and recipient
+  (`Backend → Planner`), never the payload's ids, and a delivery word only
+  once the message is in the messages slice; the event alone does not say
+  whether it was delivered.
 - **The feed is virtualized.** `virtua` mounts only the rows near the
   viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
   row carries `aria-setsize` and `aria-posinset`, so a screen reader still
