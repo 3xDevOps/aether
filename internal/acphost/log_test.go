@@ -84,6 +84,9 @@ func TestLogReadsAndSurvivesRestart(t *testing.T) {
 	if err := l.Append(&Item{Kind: KindUsage}); err != ErrLogClosed {
 		t.Fatalf("append after delete: %v", err)
 	}
+	if _, err := l.ReadAfter(0, 0); err != ErrLogClosed {
+		t.Fatalf("read after delete: %v", err)
+	}
 }
 
 func TestLogRejectsCorruption(t *testing.T) {

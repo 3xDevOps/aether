@@ -137,9 +137,9 @@ func (l *Log) ReadAfter(seq int64, limit int) ([]Item, error) {
 	if limit > 0 && end-start > limit {
 		end = start + limit
 	}
-	buf, err := l.read(start, end)
+	f, from, to := l.span(start, end)
 	l.mu.Unlock()
-	return decodeItems(buf, err)
+	return readItems(f, from, to)
 }
 
 // ReadBefore returns up to limit items with Seq less than seq, oldest
@@ -151,35 +151,38 @@ func (l *Log) ReadBefore(seq int64, limit int) ([]Item, error) {
 	if limit > 0 && end > limit {
 		start = end - limit
 	}
-	buf, err := l.read(start, end)
+	f, from, to := l.span(start, end)
 	l.mu.Unlock()
-	return decodeItems(buf, err)
+	return readItems(f, from, to)
 }
 
-// read returns the lines of items start to end. Decoding happens outside
-// the lock so a long replay does not hold up appends.
-func (l *Log) read(start, end int) ([]byte, error) {
-	if l.f == nil {
-		return nil, ErrLogClosed
+// span locates the lines of items start to end. Lines never change once
+// appended, so they are read after l.mu is released: a long replay then
+// holds up neither appends nor the session lock an append runs under.
+func (l *Log) span(start, end int) (f *os.File, from, to int64) {
+	if l.f == nil || start >= end {
+		return l.f, 0, 0
 	}
-	if start >= end {
-		return nil, nil
-	}
-	from := l.offsets[start]
-	to := l.size
+	from, to = l.offsets[start], l.size
 	if end < len(l.offsets) {
 		to = l.offsets[end]
 	}
-	buf := make([]byte, to-from)
-	if _, err := l.f.ReadAt(buf, from); err != nil {
-		return nil, fmt.Errorf("acphost: read item log: %w", err)
-	}
-	return buf, nil
+	return l.f, from, to
 }
 
-func decodeItems(buf []byte, err error) ([]Item, error) {
-	if err != nil || len(buf) == 0 {
-		return nil, err
+func readItems(f *os.File, from, to int64) ([]Item, error) {
+	if f == nil {
+		return nil, ErrLogClosed
+	}
+	if from >= to {
+		return nil, nil
+	}
+	buf := make([]byte, to-from)
+	if _, err := f.ReadAt(buf, from); err != nil {
+		if errors.Is(err, os.ErrClosed) {
+			return nil, ErrLogClosed
+		}
+		return nil, fmt.Errorf("acphost: read item log: %w", err)
 	}
 	var items []Item
 	for line := range bytes.Lines(buf) {
