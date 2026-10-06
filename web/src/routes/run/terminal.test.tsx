@@ -1245,6 +1245,13 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('calls a finished run read-only rather than offline', () => {
+    const view = mount({}, { status: 'completed', finished_at: '2026-08-14T10:09:00Z' })
+    expect(screen.getByText('Container removed · read-only')).toBeDefined()
+    expect(screen.queryByText('Offline')).toBeNull()
+    view.unmount()
+  })
+
   it('waits out a missing session on a running run rather than failing it', () => {
     const view = mount()
     act(() => StubSocket.last().onopen?.())

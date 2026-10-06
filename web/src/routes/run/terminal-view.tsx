@@ -2,6 +2,7 @@ import { connectionLabel } from '@/components/shell/connection'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { isRetainedRun } from '@/lib/commands'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
 import { terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
@@ -31,9 +32,11 @@ function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string {
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)
   const { state } = agent.session
-  const showConnection = !agent.starting && state.connection !== 'live'
+  const ended = endedStatuses.includes(run.status)
+  const showConnection = !agent.starting && !ended && state.connection !== 'live'
   return (
     <div role="group" aria-label="Run presence" className="flex min-w-0 items-center gap-2">
+      {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
       {agent.steerable && <span className="min-w-0 truncate text-ui-sm text-muted">{summary}</span>}
       {agent.steerable && (

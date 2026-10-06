@@ -79,7 +79,7 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
         : 'Click to take free control. Hold for 5 seconds to request an occupied terminal. Release early or press Escape to cancel.'}
       type="button"
       size="sm"
-      variant={ownsControl ? 'primary' : 'secondary'}
+      variant={ownsControl ? 'ghost' : 'secondary'}
       aria-label={label}
       aria-disabled={unavailable || !ownsControl && takeover?.phase === 'review'}
       className="terminal-control-button shrink-0"
