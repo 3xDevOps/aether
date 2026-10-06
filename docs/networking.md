@@ -290,7 +290,7 @@ setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
 
 The dashboard ships a web app manifest, so a phone can keep it as an app
 instead of a tab. The installed app opens full screen with no browser chrome:
-the dashboard draws its own title bar and status bar, so nothing is lost.
+the dashboard draws its own top bar, so nothing is lost.
 
 - **Android.** Open the server URL in Chrome and pick **Install app** from the
   ⋮ menu.

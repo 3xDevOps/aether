@@ -208,10 +208,12 @@ it once for that side effect. The center view looks the current route up by
 name and renders it with `route.params`. Navigation is a store action -
 `navigate('terminal', { runId })` - rather than a URL router: Next supplies the
 document and static assets, while the dashboard remains one client screen and
-every surface uses the same action.
+every surface uses the same action. The route is mirrored in the address bar
+(see [URL state](#url-state)).
 
-The global `overview` route (`src/routes/overview.tsx`) remains the All runs
-view in the palette. Run-detail routes are Terminal, Browser, Diff and Events;
+The global `overview` route (`src/routes/overview.tsx`) is **All workspaces**:
+every run in every workspace, reached from the workspace switcher, `g` then
+`l` and the palette. Run-detail routes are Terminal, Browser, Diff and Events;
 there is no separate per-run Overview route.
 
 
@@ -296,12 +298,10 @@ The slots that exist:
 | `card:warnings` | `{ run }` | collapsed status-row controls beside Details |
 | `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
 | `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
-| `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
 
-The `statusbar` Slot is mounted once outside status details at every width,
-so its refresh and shortcut lifecycles stay alive while the popup is closed.
-Secondary team readouts have one home inside the persistent details popup.
-The command palette has one independent host in `AppShell`.
+`AppShell` mounts the shell-wide hosts once: the command palette, the launch
+and run forms, the shortcuts dialog, the updates dialog and the team refresh
+(`useTeamRefresh`).
 
 Card slot content may render its own links and buttons; the article's pointer
 handler ignores interactive descendants, so those controls stay interactive.
@@ -310,102 +310,111 @@ request indicator includes approvals rather than adding a second badge.
 
 ## Sidebar
 
-`src/components/shell/sidebar.tsx` owns the resizable workspace/run sidebar
-beside a 48px activity rail on desktop. The rail groups destinations under
-**Work** and **Workspace**, with **Admin** at the bottom and **Settings**
-always reachable. A labeled **More** menu takes overflow according to actual
-available height, not a fixed destination count. Capability gates, accessible
-labels, tooltips and the 2px active indicator remain shared with navigation.
-The adjacent sidebar defaults to 320px and is constrained to 320-520px. Older
-saved widths below the minimum are clamped when rendered. Runs, the Needs you
-count and the **Mine** toggle stay on one row; launch belongs in the titlebar.
-Open **Admin → Members** for account sharing. On a local `aether gui` gateway,
-**Admin → Onboarding** returns to setup; an unlinked gateway opens setup
-automatically.
+`src/components/shell/` is the shell: one sidebar and one content area. The
+sidebar (`sidebar.tsx`) is a `nav` named "Aether", 260px wide by default and
+resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
+**Hide sidebar** button in its header and Enter on its splitter hide it
+completely; the content view's header then shows **Open sidebar** at its left
+edge. Hiding or showing it hands focus to the control that reverses it. From
+top to bottom:
 
-The sidebar lists runs in three groups, **Needs you**, **Working** and
-**Finished** (see [Run state](#run-state)). Needs you lists every workspace;
-a row outside the selected workspace leads with that workspace's name.
-Working and Finished list the selected workspace, and only the viewer's own
-runs while **Mine** (`mineOnly`, persisted) is pressed. Board cards from
-another workspace lead with its name the same way.
+1. **Workspace switcher and search.** The switcher
+   (`workspace-switcher.tsx`) shows the active workspace's name and base
+   branch, and the total Needs you count across every workspace. Its menu
+   lists each workspace with its own count, **All workspaces** (the
+   `overview` route), **Manage workspaces** and **Repository** (the
+   workspace page). With one workspace and no `workspace.list` method it is a
+   plain label. The search button opens the command palette.
+2. **New run**, the only filled button in the shell (`n`).
+3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
+   **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
+   holding an `aria-expanded` disclosure button and its count. Finished starts
+   collapsed. Needs you lists every workspace; a row outside the selected
+   workspace leads with that workspace's name. Working and Finished list the
+   selected workspace, and only the viewer's own runs while **Mine**
+   (`mineOnly`, persisted) in the Working header is pressed.
+4. **Navigation**: Board, Swarms, Activity, Files, Environment, Agents and
+   Templates, then under a hairline Members (admins only) and Settings. The
+   current one carries `aria-current="page"`. Gates come from
+   `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
+   `palette` entries (Approvals, Agent config files, Devices, Manage
+   workspaces, Onboarding) are reached from the palette only.
+5. **One update notice row** when a CLI, server or desktop update exists, for
+   example "Aether 0.5.3 is available · Update"; see
+   [Update prompts](#update-prompts).
+6. **Footer**: the member's avatar and name and a connection dot, whose word
+   ("Live", "Reconnecting", "Offline") is in the button's name and tooltip.
+   Its menu holds **Profile** (the personal sections of Members: account
+   sharing and colour), **Keyboard shortcuts**, **Theme**, **Update…** when an
+   update exists, and a **Team** line with who is online and the spend
+   against workspace budgets.
 
-A swarm is a mission whose integrator coordinates worker runs. It is one row,
-its current integrator's, carrying an **Integrator** badge and the workers'
-counts ("3 working · 1 needs you · 2 done · 1 failed" on the board card).
-Only workers that need the viewer are listed under it, with indented tree guides; the
-swarm row then sits in Needs you. If an integrator is missing or archived,
-its visible workers remain top-level rows marked **Worker**.
+A run row is a 28px `ListRow` (44px on a coarse pointer): a shaped state dot,
+the title, and the agent's monochrome glyph. Its accessible name starts with
+the state word, then the workspace when it is another one, the title and the
+reason. Rows that do not need the viewer show their title in the muted colour.
+A Needs you row offers its answer on hover, focus and a coarse pointer:
+**Reply** for a question, **Review** for an unreviewed finish, otherwise
+**Open**; each goes to the view the condition names. The list is one tab stop
+(roving `tabindex`); Arrow keys, Home and End move within it, `j` and `k` move
+from anywhere, and `u` opens the next run that needs you, oldest first.
 
-Relationships come from the run snapshot's `mission_id`, `mission_role`, and
-`integrator_run_id`, not task text or the currently opened mission page.
-`mission.changed` coalesces background refreshes of those relationship fields,
-including when another workspace is selected, without blocking run-status
-events or overwriting newer run state. Reconnect hydration supersedes pending
-relationship requests without waiting for them; their late responses and
-errors cannot change the fresh snapshot. Replacing an integrator moves its
-workers under the replacement and removes the old run's badge. Older servers
-that omit these fields retain the flat list.
+A swarm is a mission whose integrator coordinates worker runs. It is one row
+showing the objective and the workers' counts ("3 working · 1 needs you");
+selecting it opens the swarm page. Only workers that need the viewer are
+listed under it, and the row then sits in Needs you. Relationships come from
+the run snapshot's `mission_id`, `mission_role` and `integrator_run_id`, not
+task text. `mission.changed` coalesces background refreshes of those fields
+without blocking run-status events or overwriting newer run state; reconnect
+hydration supersedes pending relationship requests. Older servers that omit
+the fields get a flat list.
 
-Every rendered group header is a disclosure button with its count: runs that
-need the viewer for Needs you, rows for the others. Finished starts collapsed;
-the other two start expanded.
+**Phone (under 768px).** `top-bar.tsx` is a 48px `banner`, padded by
+`--safe-top`: **Open sidebar** with an amber dot while anything needs you, the
+view's title, **Search** and **New run**. A connection problem is one line
+under it. The sidebar opens as a left side sheet, a `dialog` named "Aether"
+with the same contents; a tap outside, Escape or any navigation closes it, and
+navigation moves focus to the new view's heading. `Mod+B` closes it too,
+because it is the key that opened it; every other shell key stands down while
+it is open. On a phone the view's own header keeps only its actions, and its
+`h1` stays for screen readers.
 
-From 641px through 1000px the adjacent workspace/run pane collapses into the
-activity rail, which exposes **Expand sidebar** without changing the stored
-preference. The width handle remains a keyboard and pointer window splitter
-(see [Keyboard and focus](#keyboard-and-focus)).
+**Landmarks.** The skip link "Skip to content" is the first tab stop; the
+sidebar is `nav` "Aether" containing `region` "Runs"; the content is the one
+`main`, with one `h1` per view from `PaneHeader` (`tabIndex=-1`). After a route
+change focus moves to that `h1`, unless the view took focus for itself. Unit
+and end-to-end tests select by these names.
 
-At 640px and narrower there is no permanent rail or empty rail-width strip.
-The titlebar opener or `Mod+B` opens a modal drawer: a Radix `Dialog` over a
-scrim, dismissed by a tap outside, Escape or navigation, with focus trapped
-while open and restored to its invoker on closing. The rail travels inside
-the drawer beside the run list. Drawer state is transient, separate from the
-desktop collapse preference, and resets on navigation or a change across the
-phone breakpoint. There is no splitter in the drawer; the viewport bounds
-its combined rail and sidebar width.
+**Headers.** Every non-run view draws `ViewHeader`
+(`src/components/view-header.tsx`), a `PaneHeader` with the title in
+`text-title`, an optional one-line subtitle, the view's actions, the sidebar
+opener while the sidebar is hidden, and on desktop the connection problem in
+place of the subtitle.
 
-Being a dialog, the drawer also stands the shell's global keys down while it
-is open, the same way every other modal does (see
-[Keyboard and focus](#keyboard-and-focus)) - the palette, `n` and the `g`
-chords are unreachable until it closes. `Mod+B` is the exception: the drawer
-answers that one itself, because it is the key that opened it, and a member
-who opened the drawer from the keyboard must be able to close it the same
-way.
+### URL state
 
-- **The switcher sits above everything it scopes**, and appears only when there
-  is a choice: a single workspace renders as a plain label with its base branch
-  under it, because a picker with one option is a control that cannot be used.
-- **The runs come from `sidebarGroups`** in `src/store/selectors.ts`;
-  `listedRuns` is the flat list in group order for the other run surfaces.
-  An empty scope shows every run until hydration names a workspace.
-- **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
-- **The header badge counts runs that need the viewer, in every workspace**
-  (`useNeedsYouCount()`). A row with open requests also has a compact request
-  icon and count with its question/permission source in the accessible name
-  and tooltip.
-- **The header carries the Mine toggle, not another launch button.** It is
-  one button with `aria-pressed`.
-- **Board leads the activity rail**, with the active route marked by
-  `aria-current`. All runs remains a global route and palette destination,
-  not a duplicate rail entry. Scope-wide entries keep their method or
-  local-verb capability gates, including legacy-read behavior.
-- **The rail and palette share the scope-wide surface list** from
-  `src/lib/surfaces.ts`, so a surface cannot be named one thing in navigation
-  and another in the palette, and neither can forget its gate. Approvals
-  carries the pending count in its accessible name; the status bar keeps a
-  phone-only Approvals signal when the rail is not visible.
-- **A nav entry is named what the view it opens is titled**, including
-  `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
+`src/lib/url-state.ts` keeps the route in the query string. A run view is
+`?run=<id>`, with `&view=diff|browser|events` for the other tabs; any other
+view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page; the
+board is the bare address. The store starts on the route the address names
+(`initialRoute()`), `bindRouteToUrl` pushes a history entry per navigation,
+and back and forward navigate to the entry's route, so reload, back, `Esc`
+and a shared link agree. Other query parameters and the hash are kept; the
+token is removed on first load as before.
 
-## Configuration view
+`aether://run/<id>` still works unchanged: both shells load
+`<dashboard>?run=<id>`, which is that run's Terminal view. When the first
+hydration does not find the run, the dashboard opens the board instead, or
+onboarding for a member who has not finished it.
+
+## Configuration view## Configuration view
 
 The permanent `configuration` route renders the shared
 `src/components/profile-import.tsx` importer. It is available whenever
 `config.roots` and `config.import` are advertised, through both the local and
 server-hosted gateways, without a workspace or onboarding prerequisite.
 **Agents** provides a **Configuration** action, and `src/lib/surfaces.ts`
-exposes **Configuration** to both the navigation rail and command palette.
+lists it in the command palette as **Agent config files**.
 The local onboarding Agents step is an optional consumer of the same component.
 
 The browser directory picker grants access to the directory the user selects
@@ -475,28 +484,16 @@ snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
 
-## Title bar
+## Window bar
 
-`src/components/shell/title-bar.tsx` renders the browser and Electron
-title/command bar at 35px. The command center names the active workspace and
-opens the existing command palette through `togglePalette(true)`. It is the
-top edge of the shell, so it pads itself with `env(safe-area-inset-left/right)`
-against a landscape notch and grows by `--safe-top` under the status bar an
-installed iOS app paints over the page, padding its controls back below it.
-Every inset is 0 on a screen without one, and the Electron traffic light inset
-above wins where it applies.
-
-One filled **New run** action sits on the right when the member can launch and
-the gateway is connected. It opens the shared launch form in the selected
-workspace. The populated Board and sidebar do not repeat it; the empty Board
-keeps its contextual launch action. Native window controls remain far right.
-On phones the titlebar also provides the sidebar drawer opener.
-
-In Electron the window is frameless, so the SPA draws the bar and its native
-controls: on Windows and Linux, minimize, maximize/restore and close are wired
-to `window.aetherDesktop.controls`; macOS keeps its native traffic lights and
-the bar reserves 78px for them. The bar is `-webkit-app-region: drag` and
-every button is `no-drag`.
+The desktop window is frameless, so `src/components/shell/window-bar.tsx`
+draws a 35px drag strip at its top edge whenever `window.aetherDesktop`
+exists. On Windows and Linux it holds minimize, maximize/restore and close,
+wired to `window.aetherDesktop.controls`; on macOS it is the strip the native
+traffic lights sit in. The strip is `-webkit-app-region: drag` and its
+buttons are `no-drag`. `App.tsx` mounts it above the `ConnectionError` page
+too, so a total failure still lets the window move and close. A browser tab
+has no bridge and no strip.
 
 The bridge carries one more thing the SPA cannot do for itself:
 `window.aetherDesktop.chooseFolder()` opens the shell's native directory
@@ -509,27 +506,12 @@ caller can say what went wrong. It is optional on the type for the same
 reason `shellVersion` exists: a shell built by an older `aether gui build`
 does not have it.
 
-`App.tsx` mounts it above the whole app, the `ConnectionError` page included:
-that page replaces the workbench, while the titlebar and native controls
-remain available in a total failure state. Browser tabs have no Electron
-bridge but still show the command center.
-
-On the first desktop launch, `LaunchSplash` covers the window with the
-original shooting-star scene, Aether mark and VT323 wordmark. It stays for at
-least 600ms, leaves after hydration or failure, and has a 2500ms cap followed
-by a 260ms fade. The cap prevents a failed connection from holding the window
-controls indefinitely. Browser tabs, reloads in the same window session and
-`prefers-reduced-motion: reduce` skip it. See [styles.md](styles.md) for the
-scene's motion details.
-
 ## Window size and overflow
 
-The shell is a fixed column - title and command bar, update prompts, center
-view with its desktop rail/sidebar or phone drawer, and a status bar - and
-nothing in its own chrome scrolls sideways. The two bars are 35px and
-22px for a mouse and grow for a finger; see the tokens below. A control pushed
-past an edge is unreachable, not merely off screen, so every row states what
-gives way first.
+The shell is a fixed row - the sidebar and the content view - under the
+desktop window bar or the phone top bar, and nothing in its own chrome
+scrolls sideways. A control pushed past an edge is unreachable, not merely off
+screen, so every row states what gives way first.
 
 `desktop/main.js` sets `minWidth: 960` and `minHeight: 600`. That is the size
 the desktop rules are designed against; a browser tab has no such floor, so
@@ -540,27 +522,24 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   own width rather than a desktop-sized canvas scaled down.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
-  `env(safe-area-inset-*)`: the title bar sideways and downwards, the status
-  bar and its details popup downwards, the sidebar drawer on all three edges
-  it reaches, since it is the one surface that spans a screen corner to
-  corner, and the workbench row on the left, where a landscape notch can
-  cover content. The top inset is the one
-  a surface away from that edge also has to read, because an installed iOS app
-  asks for a `black-translucent` status bar and gets the whole screen: it is
-  `--safe-top` in `src/index.css`, and the title bar's height, the palette's
-  drop from under it and the side sheets' top padding all count it. A surface that pads itself keeps
-  painting to the edge and insets only what it holds, so the notch shows the
-  bar's own colour rather than a gap. Every inset is 0 where there is none, so
-  nothing guards them. Toasts sit above the status bar rather than against the
-  screen edge, so their offset adds the inset to the bar's own height - and it
-  has to be given to `sonner` twice, as `offset` and as `mobileOffset`,
-  because `sonner` swaps to the second below 600px and otherwise falls back to
-  a 16px default that lands inside the bar.
+  `env(safe-area-inset-*)`: the phone top bar sideways and downwards, the
+  sidebar sheet on all three edges it reaches, the sidebar on the left and the
+  content view on the right and bottom. The top inset is the one a surface
+  away from that edge also has to read, because an installed iOS app asks for
+  a `black-translucent` status bar and gets the whole screen: it is
+  `--safe-top` in `src/index.css`, and the top bar's height, the palette's
+  drop and the side sheets' top padding all count it. A surface that pads
+  itself keeps painting to the edge and insets only what it holds, so the
+  notch shows the bar's own colour rather than a gap. Every inset is 0 where
+  there is none, so nothing guards them. Toasts sit 8px above the bottom
+  inset, and the offset is given to `sonner` twice, as `offset` and as
+  `mobileOffset`, because `sonner` swaps to the second below 600px and
+  otherwise falls back to its own default.
 - `interactive-widget=resizes-content` - on a browser that honours it
   (Chrome and the Android WebView; iOS Safari does not), the soft keyboard
   shrinks the layout viewport instead of sliding the page under itself. That
-  is what every `dvh` in the app - dialogs, the palette, selects, menus, the
-  status popup - is already sized against, so they all shorten when the
+  is what every `dvh` in the app - dialogs, the palette, selects, menus - is
+  already sized against, so they all shorten when the
   keyboard opens. Nothing in the shell uses `vh`.
 - `themeColor` per `prefers-color-scheme` - the browser reads it before the
   SPA has applied the member's stored theme, so it follows the OS scheme
@@ -572,8 +551,9 @@ and activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
 constants there include `coarsePointer`, Tailwind's `belowSm` breakpoint and
 `phoneScreen`; the `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. Terminal utility controls respond to their
-pane's container width rather than the window width. The shell sidebar and
-titlebar share the inclusive 640px drawer boundary.
+pane's container width rather than the window width. The shell has one
+breakpoint: under 768px (`useIsMobile()`, Tailwind `max-md:`) the top bar and
+the sidebar sheet replace the sidebar.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -581,27 +561,21 @@ finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
 sizes, `Input`, `CommandItem`, `MenuItem`, the `CollapsibleTrigger`,
-the `Select` trigger and its options, the dialog close, the palette trigger and
-input, the status bar controls, the sidebar run rows and the sidebar's own
+the `Select` trigger and its options, the dialog close, the palette input,
+the top bar, the sidebar run and navigation rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
 Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
 
-**The two bars are tokens, not repeated numbers.** `--title-bar-height` and
-`--status-bar-height` are declared in `src/index.css` and redeclared once
-under `(pointer: coarse)`, where they become 48px and 44px so a 44px control
-fits inside them. A row that has to line up with a bar reads the token - the
-title bar and the sidebar's workspace switcher, the status bar with every
-control and readout in it, the command palette's drop from under the title
-bar - and so does every offset measured from one: the update banner cap and
-the toast offset. `--safe-top` is the third token of this kind: the top
-safe-area inset under a name, so that a surface measuring from the title bar
-can add the same amount the bar itself grew by. It carries a `0px` fallback
-because a bare `env()` in a browser without it would void every `calc()`
-height that reads it. Add a coarse size to a control in a fixed-height row
-only together with the row, or the control grows out of the bar that holds
-it.
+**The bars are tokens, not repeated numbers.** `--window-bar-height` (35px,
+the desktop drag strip) and `--top-bar-height` (48px, the phone top bar,
+border included) are declared in `src/index.css`, and every offset measured
+from the top bar reads the token - the palette's drop, the phone Run Room and
+evidence sheets. `--safe-top` is the top safe-area inset under a name, so that
+a surface measuring from the top bar can add the same amount the bar itself
+grew by. It carries a `0px` fallback because a bare `env()` in a browser
+without it would void every `calc()` height that reads it.
 
 Below `md` every centred dialog opens as a bottom sheet, full width and at
 most 85dvh, and scrolls inside itself, so its footer stays in reach of a thumb
@@ -612,37 +586,11 @@ layout viewport for the keyboard, so `useKeyboardInset()`
 browsers that resize. `md` is a width breakpoint, so
 a desktop window narrower than 768px is treated as a phone here too.
 
-- **Update notices** keep the message, status icon and action hierarchy visible.
-  Their actions become a narrow-screen grid and return to a desktop flex row;
-  technical output is bounded and expandable, and the dismiss control remains
-  keyboard reachable.
-- **The status bar** keeps connection state, shortcuts and its phone-only
-  Approvals signal outside a bounded, keyboard-reachable status-details popup.
-  Version, storage, local status, presence, budget and errors live in that
-  popup at every width; there is no duplicate Activity link or theme toggle.
-  The outer status Slot and team refresh lifecycle stay mounted once. Details
-  use a force-mounted `Collapsible` with closed-state hiding, not an overlay
-  that unmounts its readers. Escape and a pointer down outside dismiss it,
-  unless a dialog above owns the interaction; Escape dismisses details before
-  the shell can leave the current run (see
-  [Keyboard and focus](#keyboard-and-focus)).
-  The popup writes out the facts a pointer reads from a hover: the disk
-  breakdown, protocol version and what this machine is linked to. Tooltips
-  and `title` stay hints for a pointer, never the only copy of a fact.
-  **Usage** has one mounted reader in status details at every width.
-  It calls `account.usage` for the authenticated member, polls only
-  while the page is visible and live, and refreshes on reconnect, focus,
-  visibility and an explicit Refresh action. Opening the popover loads
-  `account.list` for the own/shared account selector; changing that selection
-  clears the previous values before reading the new account, and responses
-  from superseded selections are discarded. Claude and Codex are always
-  represented in the popover. The display uses only measured windows: an
-  expired reset window is omitted until a new measurement arrives, transport
-  failures mark saved values stale, and authorization failures clear them.
-  Older servers that report method-not-found are explained without a
-  retrying poll loop. Pi, OpenCode, OMP/custom harnesses, API-key usage and
-  billing history are explicitly outside this read-only surface; credentials
-  remain server-side.
+- **Update prompts** live in the updates dialog, which scrolls inside itself;
+  the sidebar carries one notice row. Technical output is bounded, and every
+  prompt's actions sit on their own row so long diagnostics never hide them.
+- **The sidebar** keeps the run list scrollable between its fixed header and
+  its navigation rows and footer, from 220px wide up.
 - **The run header** gives its first section two lines: the title, then state,
   harness/mode, the route's subtitle and **Task and details**. The title is the
   agent's last terminal title; a run without one uses its prompt's first line, cut at
@@ -657,11 +605,6 @@ a desktop window narrower than 768px is treated as a phone here too.
   columns on narrow screens and places them side by side from the
   `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
   keep state labels and run controls available (see [Board](#board)).
-- **The workspace/run sidebar** collapses from 641px through 1000px into the
-  48px activity rail, whose **Expand sidebar** does not change the stored
-  preference. At 640px and narrower the rail disappears from the main layout;
-  the titlebar opens a modal drawer containing rail and run list. A tap
-  outside, Escape or navigation dismisses it.
 
 ## Data flow
 
@@ -847,7 +790,7 @@ base64 in control JSON. The shared browser's observation-only WebSocket is
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
 server-hosted gateway sends no token; WhoIs authenticates each request.
 
-The disk gauge in status details renders when `server.info` carries a `disk`
+The disk gauge in Settings > Server renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
 `server.info`: `protocol.ServerInfoResult` is shared with the CLI and frozen,
 so the gateway serves the number on `GET /api/v1/disk` and the team reads
@@ -858,7 +801,7 @@ itself, and the gauge is labelled as that: it is the number that says whether
 the box is running out of room, and claiming it as Aether's own usage would
 be an invention.
 
-`account.usage` is the quota RPC used by the status-bar popover. Its params
+`account.usage` is the quota RPC used by **Usage** in Settings > Server. Its params
 are `{account_member_id?: string, refresh?: boolean}` and its result is
 `{account_member_id, providers}` with independently decoded Claude/Codex
 provider rows (`status`, `windows`, optional `plan`, `updated_at`, `retry_at`,
@@ -871,10 +814,9 @@ forever.
 
 ## Board
 
-`src/routes/board/` is the default center view, reached through the activity
-rail's **Board** home icon. Its header shows the active workspace, run count
-and a **Cards / Map** segmented layout control. The titlebar
-owns the primary New run action.
+`src/routes/board/` is the default center view, reached through the
+sidebar's **Board** row. Its header shows the run count and a **Cards / Map**
+segmented layout control. The sidebar owns the primary New run action.
 
 **Cards** arranges runs in the sidebar's three groups as columns, **Needs
 you**, **Working** and **Finished**, with the same scoping, ordering and
@@ -1168,10 +1110,9 @@ the run is a relaunchable TUI session. Released/expired runs no longer offer
 Release, while history remains available. The server checks the lifecycle
 again if a run changed after the command was displayed.
 
-- **The command palette** (`src/components/palette/`) opens from **Search runs
-  and commands** in the titlebar, `⌘K` on macOS or `Ctrl+K` elsewhere;
-  `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`,
-  independently of the status Slot, directly below the titlebar.
+- **The command palette** (`src/components/palette/`) opens from **Search** in
+  the sidebar or the phone top bar, `⌘K` on macOS or `Ctrl+K` elsewhere;
+  `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`.
   Navigation comes before run actions, so opening the palette initially
   selects **Open the board**, not a mutation. With an empty query the
   **Runs** group lists the first 50 runs in group order, Needs you first; a query
@@ -1182,8 +1123,8 @@ again if a run changed after the command was displayed.
   the run named by `route.params.runId`, on any run-detail tab; the board has
   no focused run. The "Go to" group uses the gated `src/lib/surfaces.ts` list.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
-  New run in the titlebar and the notice an empty Board shows in place of its
-  columns; scope-wide destinations in the rail and its More/Admin menus; and
+  New run in the sidebar and the notice an empty Board shows in place of its
+  columns; destinations in the sidebar's navigation rows; and
   the run action bar (`src/components/run-actions.tsx`) in every run-detail
   header, with at most two contextual labeled actions plus **More**.
 - **Appearance commands** are explicit: **Use system theme**, **Use light
@@ -1230,7 +1171,7 @@ request, so it follows the controller lease, 45-second queue, moderation, and
 receipt rules. The launch and message forms are a store dialog
 (`openPaletteDialog` on the `palette` slice) hosted by `AppShell` through
 `components/palette/dialogs.tsx`, so a button on any surface opens one by asking
-the store, with no dependence on the palette or the status bar being on screen.
+the store, with no dependence on the palette being on screen.
 The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
 knows only the other two. It lists the active
@@ -1349,8 +1290,8 @@ sweep is told to skip.
 [tinykeys](https://github.com/jamiebuilds/tinykeys) syntax (`$mod` is Cmd on
 Apple platforms and Ctrl elsewhere; a space separates the two presses of a
 sequence). The table drives the handlers, the tooltips (`shortcutLabel(id)`)
-and the shortcuts dialog behind the `?` trigger in the status bar, which
-groups it by scope and adds the keys a focused tab strip, splitter or terminal
+and the shortcuts dialog (`?`, or **Keyboard shortcuts** in the sidebar
+footer menu), which groups it by scope and adds the keys a focused tab strip, splitter or terminal
 owns itself. `keybindings.test.ts` fails when two bindings in overlapping
 scopes share keys, or one begins the other's sequence.
 
@@ -1358,10 +1299,12 @@ scopes share keys, or one begins the other's sequence.
 | --- | --- | --- |
 | `⌘K` / `Ctrl+K` | global | Open the command palette |
 | `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
-| `⌘B` / `Ctrl+B` | global | Toggle the workspace sidebar |
+| `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
 | `?` | global | Open the shortcuts dialog |
 | `n` | global | Launch a run |
-| `g` then `b`, `l`, `s`, `a`, `f`, `g`, `,` | global | Go to the board, all runs, missions, activity, files, agents, settings |
+| `u` | global | Open the next run that needs you |
+| `j` / `k` | global | Focus the next or previous run in the sidebar |
+| `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
 | `⌘Shift+M` / `Ctrl+Shift+M` | run | Toggle Run Room |
 | `Esc` | run | Leave a run for the board |
 
@@ -1425,14 +1368,6 @@ handled, so the shell ignores it: on a run, the first Escape closes the
 tooltip and the second leaves. Every other key reaches the shell as usual, and a
 tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
-
-The status bar's details popup is the other overlay outside Radix, and it
-dismisses itself, so it has to do by hand what Radix does for a dialog: its
-Escape listener captures, and marks the key handled. The shell's single-key
-listener was registered when the workbench mounted, long before the popup
-opened, so with both bubbling it would run first and leave the run.
-Capturing is what makes Escape dismiss the topmost thing and only that; an
-open dialog still wins, through the same `inModal` target guard.
 
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
 tab order, which is the point; the Styleguide rule below says why. The run
@@ -1594,7 +1529,7 @@ below the run header, capped at 420px and 40% of the available row. It does not
 overlay the terminal or its controls. The terminal toolbar owns same-run
 controller/presence facts and the header owns protection; Room does not repeat
 them on desktop. On a phone Room is a full-width modal sheet below the
-titlebar, retaining those contextual facts and containing keyboard focus.
+top bar, retaining those contextual facts and containing keyboard focus.
 Escape or the Room shortcut closes it and restores focus without discarding
 the draft. Both surfaces share server state: questions and queued steers
 contribute to the Run Room count; an unanswered question to the owner also
@@ -2311,10 +2246,11 @@ both what it renders and the overlap set the conflict chips read.
 `src/routes/team/` is presence, the shared approval inbox, the workspace
 activity feed and budgets - the four readouts of the team features
 (`internal/approvals`, `internal/timeline`, `internal/cost`). None of them owns
-a view of its own in the shell: they reach the run card and the status bar
-through the slots those surfaces expose, and the two full views are registry
-routes (`approvals`, `timeline`), reached from the sidebar nav and the palette
-like every other view, and gated on the same method the nav gates them on.
+a view of its own in the shell: watchers reach the run card through its
+slot, presence and spend are the **Team** line in the sidebar footer menu, and
+the two full views are registry routes (`approvals`, `timeline`): Activity is
+a sidebar row, Approvals is reached from the palette, and each is gated on the
+method it needs.
 
 The approval inbox is for agent permission and plan approvals. Run Room
 questions and queued steer requests stay contextual to their run. Unanswered
@@ -2350,8 +2286,8 @@ count, and neither creates a second action inbox.
   a run fetch does, for the cursor rule), and each is coalesced in
   `src/store/coalesce.ts`: per workspace, one in flight and one queued, so
   a burst of results or attaches costs two requests.
-  The hook is mounted from the status-bar contribution, the one surface that
-  is always on screen, which is also where the presence heartbeat lives
+  `AppShell` mounts the hook once, which is also where the presence
+  heartbeat lives
   (every 15 s, with the disk gauge read beside it). It also reads and beats
   on `onWake`, because a backgrounded tab freezes its timers and drops its
   socket: a phone returns with its presence already expired server-side (the
@@ -2363,14 +2299,14 @@ count, and neither creates a second action inbox.
   team settings. A deployment has a handful of them and they outlive every
   run in them. So `refreshTeam` reads all of them each time rather than
   splitting into a bounded recurring pass and a wide occasional one. Both
-  readouts it feeds ask a whole-deployment question anyway - the status bar
-  claims the worst budget state anywhere, and the badge claims the size of the
-  whole queue - and a workspace does not stop being over its cap or holding an
+  readouts it feeds ask a whole-deployment question anyway - the Team line
+  claims the worst budget state anywhere, and Needs you claims every pending
+  request - and a workspace does not stop being over its cap or holding an
   undecided request when its last run finishes, so no subset could answer
   either one. Failures leave the last good data in place.
 - **An unreadable queue says so.** `refreshInbox` keeps the first
-  per-workspace `approval.list` failure, and the inbox, the nav entry and the
-  status-bar chip report it rather than "Nothing is waiting on a decision.",
+  per-workspace `approval.list` failure, and the inbox and the footer menu's
+  Team line report it rather than "Nothing is waiting on a decision.",
   which over a failed read means "no agent is blocked". Workspaces that
   answered are still listed. Each read is stamped, so a slow failure cannot
   overwrite a newer good answer.
@@ -2434,13 +2370,13 @@ count, and neither creates a second action inbox.
   a **Filters** disclosure. Its caption counts the three that are set, so a
   feed narrowed by a filter the member cannot see is not read as an empty
   log.
-- **A budget warns, it never stops anything.** Status details show the spend
-  and the worst state any workspace is in (`ok`, `warn`, `exceeded`) - every
-  workspace, ones with nothing running included, which is what the wide read
-  above is for - and says so in those words, naming each workspace and its cap
-  in the tooltip. A spend that includes unmetered runs renders as a floor
+- **A budget warns, it never stops anything.** The Team line in the sidebar
+  footer menu shows the spend and the worst state any workspace is in (`ok`,
+  `warn`, `exceeded`) - every workspace, ones with nothing running included,
+  which is what the wide read above is for - and says so in those words. A spend that includes unmetered runs renders as a floor
   (`$1.20+`), because a harness with no adapter reports nothing.
-- **Workspace controls live on the workspace view, not the status bar.**
+- **Workspace controls live on the workspace view.** The workspace switcher's
+  **Repository** item opens it.
   `routes/workspace.tsx` is one workspace: its name, its base branch, its runs,
   and buttons for the budget (`budget.set`), the steering policy
   (`workspace.settings`) and, for admins, Source control. Each is gated by its
@@ -2458,8 +2394,8 @@ count, and neither creates a second action inbox.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write
-  it onto the stored `server.info`, which is what fills the status bar's disk
-  gauge.
+  it onto the stored `server.info`, which is what fills the disk gauge in
+  Settings > Server.
 
 ## Devices and invitations
 
@@ -2539,9 +2475,12 @@ their selection and any open deleted workspace or run.
 `src/routes/settings/` is available through every gateway. **Appearance**
 provides explicit **System**, **Light** and **Dark** choices, backed by the
 existing persisted theme preference and live system-scheme effect. The palette
-offers the same choices; the status bar has no theme-cycle control.
+and the sidebar footer menu offer the same choices.
 **Single-key shortcuts** turns the character keys of the keybinding table on
-or off (see [Keyboard and focus](#keyboard-and-focus)).
+or off (see [Keyboard and focus](#keyboard-and-focus)). **Server** names the
+server version and protocol, shows the disk gauge with what is filling it
+(worktrees, transcripts, database, repos, free space), and holds **Usage**,
+the subscription usage reader.
 
 Machine settings keep their exact local capability gates. The machine section
 requires `daemon.status` or `sync.status`; within it, the local link requires
@@ -2883,11 +2822,13 @@ screen once a workspace is chosen; "Prove the plumbing without an agent subscrip
 ## Update prompts
 
 `src/components/update-banner.tsx` is where the dashboard says a binary is out
-of date: it hosts the banners, with the CLI one in
-`src/components/cli-update-banner.tsx` and the pieces they share in
-`src/components/update-banner-shared.tsx`. It is mounted by `AppShell` above
-everything else, because an out-of-date binary is about the whole app rather
-than the view that happens to be open. The CLI and shell prompts read
+of date. `UpdateCenter`, mounted once by `AppShell`, runs the reads below and
+hosts the **Updates** dialog, which lists every prompt that applies, with the
+CLI one in `src/components/cli-update-banner.tsx` and the pieces they share in
+`src/components/update-banner-shared.tsx`. The sidebar shows one notice row
+from `useUpdateNotice()` - "Aether 0.5.3 is available · Update", "Server 0.5.3
+is available", "The desktop app is out of date" or "Server update in
+progress, terminals reconnect briefly" - and its **Update** opens the dialog. The CLI and shell prompts read
 `update.check` from the local gateway, because the dashboard can update only
 the machine running `aether gui`. The server prompt asks the linked server
 about itself and appears wherever the member is an admin.
@@ -2910,7 +2851,7 @@ about itself and appears wherever the member is an admin.
   an hour, so the re-checks cost the gateway one request to GitHub an hour
   at most; a failed one is cached for five minutes, so an unreachable GitHub
   is retried sooner. The answer goes on the `local` slice, which is also
-  what the status bar reads. A re-check that fails is swallowed, as the
+  what the notice row reads. A re-check that fails is swallowed, as the
   first read always was: it leaves the last good answer standing rather than
   blanking a banner that is already on screen, and the next re-check still
   runs. It reads `server.update_status` as well - any member may - and
@@ -3001,8 +2942,8 @@ about itself and appears wherever the member is an admin.
   verbatim and falls back to the manual commands. Every phase is a row in
   the activity feed too, filterable as *Server updates*.
 - **Everyone else gets one line.** A member who is not an admin sees
-  *server update scheduled, terminals will reconnect briefly* (or *applying*)
-  in status details while one is in flight, so a restart nobody explained
+  *Server update in progress, terminals reconnect briefly* in the sidebar's
+  notice row while one is in flight, so a restart nobody explained
   does not read as an outage. A server that does not answer costs the CLI
   banner nothing: `update.check` still returns the CLI half with the failure
   in `server_error`, because the CLI is a binary on this machine and a dead
@@ -3014,10 +2955,9 @@ about itself and appears wherever the member is an admin.
   when a re-check is what brings that release in. It silences the offer,
   not an update already moving: a scheduled or applying server comes back
   regardless, because that banner is why the server is about to restart.
-- **Status details carry the badge.** The `aether {version}` label gets a dot
-  when either update is available, and clicking it clears the dismissals so the
-  banner comes back. It remains reachable through **Show status details** at
-  every width, including after a banner was dismissed.
+- **The footer menu brings a dismissed prompt back.** **Update…** in the
+  sidebar footer menu appears while any update exists; it clears the
+  dismissals and opens the dialog.
 - **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
   but the Electron shell around it is whatever `aether gui build` last
   produced. That build records the complete CLI version and its executable
@@ -3043,14 +2983,13 @@ about itself and appears wherever the member is an admin.
 - **Typography and density.** Inter at 13px with 12px supporting copy, on
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
   terminal's alone; code uses the system monospace stack; VT323 remains only
-  the Aether wordmark and original startup. Use the
-  35/48/35/22/28/24px workbench geometry and avoid promotional titles or
-  oversized cards.
-- **Flat shell and palette host.** Use a 35px title/command bar, a 48px desktop
-  activity rail and adjacent 320-520px workspace/run sidebar. On phones the
-  rail belongs inside the transient drawer, not the main layout. Mount the
-  command palette once in `AppShell`; keep one outer status Slot and one
-  persistent status-details surface for live contributors.
+  the Aether wordmark. Use the 28px control and row, 44px pane header and
+  24px small-control geometry, and avoid promotional titles or oversized
+  cards.
+- **Flat shell and palette host.** One 220-400px sidebar beside the content
+  view; under 768px a 48px top bar and the sidebar as a side sheet. Mount the
+  command palette, the shortcuts dialog and the updates dialog once in
+  `AppShell`.
 - **Harness and state are separate.** The harness glyph says who is running;
   the state indicator or badge says what state. Board cards use a labeled
   state badge without a duplicate dot. The five presentation states are
@@ -3086,8 +3025,7 @@ about itself and appears wherever the member is an admin.
   `id`, so the control announces its purpose rather than only its current
   option.
 - **Disclosures normally unmount closed content.** `CollapsibleTrigger`
-  supplies the marker. The status bar uses `forceMount` with closed-state
-  hiding to retain its live contributors while the popup is closed.
+  supplies the marker.
 - **Status and metadata pills are `Badge`.** It takes a run-state `tone` or
   stays neutral. A `Badge` takes no `title` of its own, so a pill whose text
   can be clipped wears one on the span around it. Run and dock tab strips
@@ -3169,19 +3107,21 @@ verbatim gateway errors in assertions when they are part of the contract.
 `web/e2e/` is the layout and browser-behavior layer. Playwright drives a real
 browser against the local `aether gui` gateway and the server it proxies, while
 the same static bundle is also usable through the server-hosted gateway.
-`keyboard-focus` checks Escape ordering across an open dialog and run view and
-confirms that a focused control paints the app outline. `window-sizing` and
-`status-bar-sizing.spec.ts` exercise update notices and status controls at
-narrow and desktop dimensions.
+`keyboard-focus` checks Escape ordering across an open dialog, the footer menu
+and a run view and confirms that a focused control paints the app outline.
+`window-sizing` exercises the updates dialog at the smallest desktop window
+and below it. `run-deep-link` checks that the address follows navigation,
+survives a reload and agrees with back and Escape.
 
 The touch shell is driven by the `mobile` project, which
 [testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
-phone drawer, taps a run and finds the drawer gone with the run on screen;
+phone drawer, taps a run and finds the drawer gone with the run on screen and
+focus on its heading;
 `dialog-anchor.mobile.spec.ts` checks that a dialog short enough to tell the
 two apart sits at the top rather than the middle, and that the launch form
 keeps its footer on screen on a viewport as short as a keyboard leaves;
-and `toast-clearance.mobile.spec.ts` checks that a toast comes to rest above
-the status bar rather than on top of it. `run-views.mobile.spec.ts` steers a
+and `toast-clearance.mobile.spec.ts` checks that a toast comes to rest 8px
+clear of the bottom edge. `run-views.mobile.spec.ts` steers a
 real run from the header's labeled actions and More menu, then reads its diff.
 `sidebar-drawer.spec.ts` stays on the desktop project because its keyboard
 contract - `Mod+B` closing the drawer and the palette coming back once it is gone - needs
@@ -3204,7 +3144,7 @@ controls, close/reset identity fencing and raw refusals.
 `src/routes/settings/settings.test.tsx` covers universal Appearance without local
 RPCs.
 
-Use the browser workflow for real computed geometry, titlebar and activity-rail
+Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.
 Exercise both themes and narrow and desktop widths against the actual surface;
 do not pin CSS classes, source strings, token declarations or component
@@ -3227,7 +3167,7 @@ Then open `https://<the server's MagicDNS name>/` on a phone joined to the
 same tailnet. Expect hosted onboarding for a member who has not completed
 setup, even when other members have created workspaces; completed members
 start on the board. WhoIs already identifies the member. The machine-local
-Link step, link chip, update banner, pull, forward and sync controls are absent
+Link step, update notice, pull, forward and sync controls are absent
 because the descriptor carries no `local` verbs. Repository linking instead
 shows a local-client/CLI handoff. Settings remains available for Appearance.
 Files and configuration editing also remain available through the
@@ -3238,7 +3178,7 @@ emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
 Aether mark on a dark tile, and opening it should give a full-screen dashboard
-with the shell's own title bar and status bar, safe-area padding intact under
+with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:
 
@@ -3251,7 +3191,7 @@ Prerequisites and the refusals a bad tailnet setup produces are in
 
 The [Android app](install.md#android-app) is the same page in a WebView, so
 the same expectations hold there. It is worth checking separately for two
-things the browser does not exercise: whether the title bar and status bar
+things the browser does not exercise: whether the top bar and the content
 clear the system bars, which depends on the WebView forwarding safe-area
 insets, and whether the soft keyboard shortens the layout rather than covering
 it.

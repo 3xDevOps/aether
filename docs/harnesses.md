@@ -1300,7 +1300,7 @@ To turn updates off for the whole server, start it with
 
 ## Agent configuration: import and Files
 
-Open **Configuration** from the Agents page, the shared navigation rail, or
+Open **Configuration** from the Agents page or **Agent config files** in
 the command palette in either the local dashboard (`aether gui`) or the
 server-hosted dashboard. This permanent route is available whenever the
 gateway advertises `config.roots` and `config.import`; it needs no workspace

@@ -47,7 +47,7 @@ until then headings render in Inter.
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
 | `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
-| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Title bar, sidebar, headers, code, browser chrome |
+| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, phone top bar, window bar, code, browser chrome |
 | `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows and cards on canvas |
 | `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#262728` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
 | `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces only |
@@ -122,12 +122,12 @@ importing `lucide-react`.
 
 Use compact workbench geometry rather than landing-page ornament:
 
-- 35px title and command bar, 48px activity rail with 24px icons, and a
-  preferred 260px workspace/run sidebar constrained to 200-520px.
-- 35px view and section headers; the run detail's combined tab and action
+- One sidebar, 260px by default and resizable from 220px to 400px; under
+  768px a 48px top bar and the sidebar as a side sheet. The desktop window
+  bar is 35px.
+- 44px view headers (`PaneHeader`) and 35px section headers; the run detail's combined tab and action
   strip stays 36px, while dock headers use a `min-h-9` strip whose
-  actions can wrap to another row; 22px status rows and 22-28px list rows
-  according to real content.
+  actions can wrap to another row; 28px list rows (44px coarse).
 - 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
   12px compact gutters.
@@ -186,42 +186,29 @@ panel scrolls independently without consuming the entire editor.
 
 ## Shell, palette and focus
 
-Above 640px the shell keeps a persistent 48px activity rail, with **Work**
-and **Workspace** groups, capability gates, accessible labels and tooltips,
-and an active 2px indicator. A visibly labeled **More** menu holds destinations
-that do not fit the rail's measured available height; there is no fixed
-destination-count limit. **Admin** sits at the bottom beside the universally
-reachable **Settings** destination. All runs remains available through the
-global overview and palette, not as a second Board link in the rail.
+The shell is one sidebar beside the content view, with no icon rail, title
+bar, status bar or stacked banners. The sidebar is `bg-chrome` with a seam on
+its right; its rows are `ListRow`s with 16px muted icons, the open page in
+`bg-selection`. **New run** at its top is the only filled button in the shell.
+Run rows carry a shaped `StatusDot`, the title and a monochrome `AgentGlyph`;
+a row that does not need the viewer shows its title in `text-muted`, never
+with opacity. Group headers are sentence-case 12px muted disclosure buttons
+with their count. The footer holds the avatar, name and a connection dot; the
+update notice above it is one 12px muted line with an **Update** link.
 
-The adjacent workspace/run sidebar keeps its persisted splitter behavior and
-compact group rows. At 1000px and narrower it collapses into the rail without
-changing the stored preference. At 640px and narrower there is no permanent
-rail strip: the titlebar's **Expand sidebar** opens a transient modal drawer
-containing navigation and runs. **Mod+B** toggles it; closing restores focus,
-and navigation or crossing the phone breakpoint resets the drawer.
+Under 768px the 48px top bar (`bg-chrome`) holds the sidebar button, with an
+amber dot while anything needs the viewer, the view title in 13/20 medium,
+**Search** and **New run**. The sidebar opens as a left side sheet. Content
+views draw `PaneHeader`: the title in `text-title`, one optional muted line
+under it, and actions on the right. A connection problem is a failed-tone
+`StateLine`, in the header on desktop and under the top bar on a phone.
 
-The browser and Electron titlebar is a real 35px command center. It names the
-active workspace and opens the existing palette through `togglePalette(true)`.
-Its right side owns the filled **New run** action when connected and launchable,
-using the selected workspace; native window controls remain at the far right.
-Do not repeat that action in the sidebar or populated Board header; the empty
-Board's launch CTA remains. The command palette is mounted exactly once as an
-independent AppShell host, never as a hidden status-slot contributor. Quick
-input is top-centered directly under the titlebar, max 600px, with compact rows
-and no giant scrim-heavy card.
-
-The status Slot remains mounted once for team refresh and other live
-contributors, including shortcuts. At every width, secondary facts,
-version/storage, presence, budget and errors live in the bounded,
-keyboard-reachable status details popup. Connection and shortcuts remain
-outside it, with an Approvals signal on phones; do not duplicate Timeline
-navigation there. Wrapped readouts use a 1.5 line height; the status bar keeps its
-compact row geometry.
-Theme discovery belongs in **Settings → Appearance**, with explicit
-**System**, **Light** and **Dark** choices and matching palette commands,
-not a cycling status icon. Appearance works on remote gateways too, while
-machine-local settings retain their capability gates.
+The command palette is mounted exactly once in `AppShell` and opened from the
+**Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
+compact rows. Theme is in **Settings → Appearance** and the footer menu, with
+explicit **System**, **Light** and **Dark** choices and matching palette
+commands. Appearance works on remote gateways too, while machine-local
+settings retain their capability gates.
 
 `focusRing` and `field` remain signature-compatible shared utilities. Preserve
 their keyboard outline, inset behavior for full-bleed rows, readable
@@ -239,7 +226,7 @@ On desktop, **Run Room** is a real flex sibling beside the terminal and its
 dock, below the run header, capped at 420px or 40% of the available width.
 It never overlays that work area. The terminal toolbar is the single source
 for same-run controller/presence controls, and protection stays in the header.
-On phones Room is a full-width modal sheet below the titlebar, contains
+On phones Room is a full-width modal sheet below the top bar, contains
 keyboard focus and retains those metadata/control affordances. Closing restores
 focus without discarding the draft. One host-owned holder decision dialog
 serves the toolbar and phone Room's shared takeover gesture, above Room and
@@ -254,7 +241,7 @@ focuses a Room comment draft without sending it, preserving attachments and
 clearing steer correlation. Retention, expiry, partial-source disclosure and
 authority boundaries are unchanged.
 
-## Run state and startup motion
+## Run state and motion
 
 The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
 status vocabulary for a run's presentation state. Domain status enums remain
@@ -288,51 +275,3 @@ Under `prefers-reduced-motion: reduce`, ownership changes are instant,
 takeover fills and borders become static red indicators with countdowns, and
 working dots and sidebar pulses stop moving; labels retain the state meaning.
 Loading spinners and delayed skeletons remain functional feedback.
-
-The desktop first-launch splash is a finite branded handoff, not a loading
-screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay
-visible for at least 600ms and leave by the 2500ms cap, followed by a 260ms
-fade. The mark enters over 700ms. Shooting-star trails use opacity and
-`translate3d` only: the recovered 35, 42 and 30 degree trajectories run for
-1.35s, 1.55s and 1.7s with staggered entry. The splash is session-only,
-unmounts after the fade, and is skipped under
-`prefers-reduced-motion: reduce`.
-
-## Accessibility and component contracts
-
-The primitives in `web/src/components/ui/` are the only building blocks:
-`Button`, `Badge`, `StatusDot` and `StateLine`, `Callout`, `PaneHeader`,
-`Tabs`, `Menu`, `Dialog` (`center`, `side`, `bottom`), `AlertDialog`,
-`Popover`, `Tooltip`, `Toaster`, the fields (`Input`, `Textarea`, `Select`,
-`Checkbox`, `RadioGroup`, `FormField`), `ListRow`, `SectionLabel`,
-`EmptyState`, `Kbd`, `Code`, `Avatar`, `AgentGlyph`, `Spinner`, `Separator`,
-`Skeleton` and `RelativeTime`. Radix provides the behaviour; there is no
-other component library.
-
-An icon-only `Button` (`size="icon"` or `"icon-sm"`) requires `label`, which
-becomes its accessible name and its Tooltip; `hint` replaces the tooltip
-text on any button. A Tooltip opens after a 300ms hover, or at once when the
-keyboard moves focus to its control, not when a click or a script does. It
-points `aria-describedby` at the control and supplements rather than replaces
-an accessible name. Escape closes an open tooltip and, with the same press,
-the dialog or drawer under it; a shell binding on Escape, such as leaving a
-run, waits for the next press. Focusable controls
-use Tooltip descriptions instead of `title`; `title` remains for
-non-focusable paths, timestamps and breakdowns. Actor marks that need a name
-use `role="img"` and an `aria-label`, rather than leaving a named generic span.
-
-Below 768px (`MOBILE_MAX_WIDTH` and `useIsMobile()` in
-`web/src/lib/breakpoints.ts`) every centred dialog opens as a bottom sheet,
-and a menu with more than six items does too.
-
-Yes-or-no confirmations use the AlertDialog primitive, not a dismissible
-Dialog. `AlertDialogAction` is destructive unless the caller says otherwise.
-When a confirmation reports a failure, it prevents the default on that click
-and closes on the answer instead, so the refusal stays observable rather than
-being unmounted with the dialog. Controls that remain reachable while
-unavailable use `aria-disabled`, guard their own handlers and retain their tab
-stop instead of using `disabled`.
-
-Team status contributions use the 22px compact-row geometry. Presence derives
-online members from non-offline roster entries, while watcher marks use the
-same named actor avatars; an empty roster or watcher set contributes nothing.

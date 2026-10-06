@@ -390,7 +390,7 @@ button in its place. The banner then follows the phases live - scheduled,
 applying, restarting - and disappears once the server reports the new
 version. A failure shows the server's own error and the two commands below.
 Every phase is in the workspace activity feed as well, and a member who is
-not an admin sees a one-line notice in the status bar while an update is
+not an admin sees a one-line notice in the sidebar while an update is
 scheduled or applying, so the restart does not look like an outage. See
 [dashboard-frontend.md](dashboard-frontend.md#update-prompts).
 

@@ -508,8 +508,8 @@ replaces at every reattach.
 ### Disk pressure
 
 Four things grow without bound, and the dashboard's gauge covers all four
-(`GET /api/v1/disk`, shown in the status bar with the breakdown in its
-tooltip):
+(`GET /api/v1/disk`, shown in Settings > Server with the breakdown under
+it):
 
 | Growing | Reclaimed by |
 | --- | --- |

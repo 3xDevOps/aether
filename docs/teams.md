@@ -939,7 +939,7 @@ first if access must end immediately, with **Kill** in the run's header
 upgrade that narrowed shares to the login file still mounts the owner's whole
 home until it ends, and cannot be relaunched.
 
-The dashboard's bottom-left status bar reads the selected account's
+**Usage** in the dashboard's Settings > Server reads the selected account's
 subscription quota through the read-only `account.usage` RPC. An empty
 `account_member_id` means the caller's account; selecting another account
 requires the same explicit share as a launch, and an admin has no implicit
