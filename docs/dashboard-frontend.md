@@ -359,7 +359,9 @@ at the open run), and `u` opens the next run that needs you, oldest first.
 A swarm is a mission whose integrator coordinates worker runs. It is one row
 showing the objective and the workers' counts ("3 working · 1 needs you");
 selecting it opens the swarm page. Only workers that need the viewer are
-listed under it, and the row then sits in Needs you. Relationships come from
+listed under it, and the row then sits in Needs you. Workers never list on
+their own: a swarm whose integrator is missing or archived is rooted at its
+oldest worker (`swarmRoot` in `src/store/selectors.ts`). Relationships come from
 the run snapshot's `mission_id`, `mission_role` and `integrator_run_id`, not
 task text. `mission.changed` coalesces background refreshes of those fields
 without blocking run-status events or overwriting newer run state; reconnect
