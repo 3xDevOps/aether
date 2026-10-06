@@ -631,7 +631,9 @@ needed; a logged-out Codex skips at `session/new`.
 [Enhanced runs](enhanced-runs.md) are proven without a real agent:
 `internal/acphost/acpmock` replays conversations recorded from the real
 adapters and answers prompts by their text, so tests can drive a permission
-request (`ask permission`) or a turn that runs until cancelled (`wait`). The
+request (`ask permission`), a form question (`ask form`), a turn that runs
+until cancelled (`wait`) or a paced turn with a plan, tool calls, command
+output and a diff (`demo`). The
 scheduler's unit tests run it behind the fake runtime;
 `TestIntegrationEnhancedRunDocker` (scheduler) and
 `TestIntegrationEnhancedRunGateway` (server) build it as a static binary and
@@ -641,6 +643,17 @@ run it as the ACP server of a real container, the second through
 ```sh
 make test-integration INTEGRATION_PKGS='./internal/scheduler ./internal/server' \
   INTEGRATION_RUN='TestIntegrationEnhancedRun'
+```
+
+`web/e2e/run-session.spec.ts` drives the dashboard's Session view against
+the same agent: the e2e fixture `installACPMock` builds it (`go build`, so
+the e2e host needs Go) into the member's `~/.local/bin` and registers it as
+the member agent `mock`. The spec launches an Enhanced run, watches the
+stream, answers a permission with the digit key, expands a work entry's
+diff and interrupts a turn:
+
+```sh
+make build && (cd web && bunx playwright test run-session.spec.ts)
 ```
 
 [Mode switching](enhanced-runs.md#switching-a-running-agent) is proven the

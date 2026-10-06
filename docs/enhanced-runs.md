@@ -88,15 +88,67 @@ The run's **Terminal** tab is that login shell, not the agent: use it to log
 the agent in, inspect the checkout, or run commands next to the agent
 ([terminal.md](terminal.md)).
 
+## The Session view
+
+An Enhanced run opens on its **Session** view: the session item log as one
+timeline, newest at the bottom. Your messages are filled blocks; the agent's
+replies are plain text with formatted code. Consecutive tool calls fold into
+one line ("Read 2 files, ran 1 command and edited 1 file"); click it for one
+line per call with its duration, and click a call for the command, the end of
+its output or its diff. The agent's plan, the files a turn changed (each opens
+**Changes**), notices and a **Finished** line per turn sit in between, and
+messages between agents show inline (**Hide agent messages** turns them off).
+While a turn runs, one moving line says what the agent is doing now. **Show
+earlier** reads older items 200 at a time.
+
+The composer under the timeline sends with `Mod+Enter`; on a touch screen the
+button is the only way, and Enter adds a line. Its button changes with the
+turn:
+
+| Button | When | What the message does |
+| --- | --- | --- |
+| **Send** | no turn is running | starts a turn |
+| **Steer** | a turn runs and the agent supports steering | joins the running turn |
+| **Queue** | a turn runs and you hold `Mod`, or the agent cannot steer (`Mod+Shift+Enter`) | runs after this turn |
+| **Interrupt** | a turn runs and the box is empty | `run.acp.cancel`: stops the turn and cancels its requests |
+| **Resume** | the run is paused | resumes it |
+
+The menus under the box set the agent's mode, model and effort
+(`run.acp.set_option`); `/` lists the agent's commands and `@` completes a
+path in the run's checkout. Sending, answering and changing options need the
+run's control lease: the tab that opens the run takes it when nobody holds
+it, and the composer offers **Take control** otherwise.
+
+A pending request docks above the composer, one at a time with `1/N`, and
+the composer stays shut until it is answered. **Approve**-style options are
+the filled button; `1` to `4` pick an option while the card has focus, and
+the header's **Answer** focuses it. A form question shows its fields; a link
+request shows the URL with **Copy link** and **Open**. Details lists the same
+cards under **Needs you**. An answered request stays in the timeline as one
+line, such as "Approved: run `go test`".
+
+When the adapter fails or exits, the view shows the error and the end of its
+stderr with two actions. **Retry Enhanced** pauses and resumes the run, which
+starts a fresh ACP server. **Open in Standard** switches the run when the
+agent is `switchable`; otherwise it starts a new Standard run with the same
+task and closes this one without merging, after asking. An agent that is not
+signed in shows its auth methods and **Open a terminal** for the login; a
+`terminal` auth method opens a shell tab with its command typed. A session the
+agent could not restore is a `Started a new agent session` line: the server
+already started the new one.
+
+On a phone, focusing the composer hides the view switch and state line, caps
+a docked request at 40% of the screen and the composer at four lines.
+
 ## Permissions and input
 
 The session starts in the agent's automatic mode: routine actions proceed
 and only risky ones ask, so requests are uncommon. Each request becomes
 pending input on the run (the run shows **Needs you**) and a `request` item
-in the log. The dashboard cannot answer it yet; its controls arrive with
-the Session view. Until then, answer with `run.input.answer`, the request
-id and the option id the agent offered, plus `values` for an accepted form
-question ([local-gateway.md](local-gateway.md)). The first answer wins; a later one gets `CodeConflict` with
+in the log. The dashboard answers it in the [Session view](#the-session-view);
+a client answers with `run.input.answer`, the request id and the option id
+the agent offered, plus `values` for an accepted form question
+([local-gateway.md](local-gateway.md)). The first answer wins; a later one gets `CodeConflict` with
 `data.reason: "already_answered"`. Cancelling the turn (`run.acp.cancel`)
 answers every pending request `cancelled`. `run.acp.set_option` changes a
 config option the agent lists, such as its mode or model.
@@ -213,6 +265,9 @@ The server method is `run.mode.switch` with `mode` `acp` or `tui`
 ([local-gateway.md](local-gateway.md#enhanced-run-methods)). It needs
 **Steer**. While someone holds the run's control lease, only that session
 can switch; the CLI holds none, so it switches only a run nobody controls.
+In the dashboard the run header's **Standard | Enhanced** control does the
+same with the tab's lease; for an agent that is not `switchable` it is
+disabled with "Chosen when the run starts".
 
 **Which agents.** `agent.list` reports `switchable`. Claude Code and
 oh-my-pi switch: their ACP server and terminal share one session store, and
@@ -298,7 +353,8 @@ without the server, use the agent's headless command line. Claude stays on
 favour API keys over the subscription login a member shares.
 
 Such a run has the enhanced container shape and session item log, and
-`/ws/acp/<run_id>` streams it while it works. The task is the session's
+`/ws/acp/<run_id>` streams it while it works; its Session view has no
+composer ("Background runs take no input"). The task is the session's
 only prompt, and the session starts in the agent's mode that acts without
 asking:
 

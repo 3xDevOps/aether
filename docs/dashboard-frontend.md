@@ -1513,6 +1513,57 @@ row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 the error above the textarea (`role="alert"`, **Dismiss**); Details shows
 only the failures of its own actions.
 
+For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
+from its [session item log](enhanced-runs.md#the-session-item-log) instead.
+`useAgentTerminal` subscribes the run to `/ws/acp/<run>` while the run is
+open and not `switching`; `store/session-stream.ts` owns the socket
+(`lib/acp-stream.ts`: the events feed's backoff and `onWake`, `after_seq`
+resume, an immediate resubscribe on close 1012, a final stop on 1008 or a
+`-32602` refusal) and the control session id, so the lease and timed
+takeover frames work as on an attach and switching views keeps the stream.
+The tab asks for the lease once on its first ack when the terminal would
+(the owner, not a phone, not a swarm worker). Frames go through
+`batchNotifications`, so a burst re-renders once per frame.
+
+The `sessions` slice keeps each run's `AcpSession`: items grouped into
+turns (`store/session-rows.ts`), the ack's live state (turn in flight,
+pending requests, config options, commands, auth, steering), the lease and
+the stream state. A `reset` frame or an ack with `oldest_seq` starts the
+timeline over; **Show earlier** pages `run.acp.history` before the oldest
+item held. A closed turn's rows are derived once and kept; only the open
+turn re-derives. At most three sessions stay whole; the least recently
+opened others keep their newest 200 items. Rows: `user` (the run's
+appended instructions hidden under its task), `assistant` (markdown through
+`react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
+so only the streaming block re-renders, code highlighted with the Lezer
+languages), `thinking`, `work` (folded by kind; expanded entries and their
+detail - command, output tail, `DiffBlock` - splice into the same list,
+and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
+`plan`, `changed-files`, `answered`, `event` (notices, mode changes, a new
+agent session, an inbox wake), `finished` and `agent-message`. A person's
+message is matched to the room message that carried it for its author; one
+not in the log yet shows its delivery word. One polite `status` region
+announces a new request, a finished turn and a state change. The row
+components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
+`markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
+
+The Enhanced composer (`routes/run/composer.tsx`, state in
+`composer-state.ts`) sends with `run.inject` and the lease; its pill reads
+**Send**, **Steer** (a turn is running and the agent advertised steering),
+**Queue** (`Mod` held, or no steering), **Interrupt** (`run.acp.cancel`, an
+empty box during a turn) or **Resume** (a paused run). `Mod+Enter` sends,
+`Mod+Shift+Enter` queues; on touch only the pill sends. Footer menus set
+mode, model and effort with `run.acp.set_option`; `/` completes the agent's
+commands and `@` paths from the Files tree cache. It closes with one line
+of reason while switching, for a Background run, while connecting, while a
+request is pending, or without the lease (**Take control**). Pending
+requests dock above it one at a time (`routes/run/session-requests.tsx`),
+the same cards Details lists; `1`-`4` pick an option while a card has
+focus, and the header's **Answer** focuses the docked card.
+`routes/run/session-failure.tsx` shows an adapter failure with **Retry
+Enhanced** and **Open in Standard**, and a sign-in failure with the agent's
+auth methods.
+
 ### Details
 
 At 1280px and wider Details is a 320px `complementary "Run details"` beside
@@ -3175,7 +3226,7 @@ phone scenario cover Captures and bounded, tappable phone presentation.
 `src/routes/run/frame.test.tsx` covers the view switch, header actions,
 Details sections and composer gating; `shells.test.tsx` covers the shell tabs;
 `terminal.test.tsx` covers the agent attach, presence and occupied-lease
-fencing; `src/store/sessions.test.ts` covers the Session rows. `src/routes/browser/index.test.tsx` covers progressive page
+fencing; `src/store/sessions.test.ts` covers the Session rows; `src/store/session-rows.test.ts`, `acp-sessions.test.ts`, `src/lib/acp-stream.test.ts`, `src/routes/run/composer-state.test.ts` and `session.test.tsx` cover the Enhanced rows, store, stream client, composer and requests, and `src/store/session-perf.test.tsx` (`RUN_PERF=1`) streams 5,000 items and opens 2,000. `src/routes/browser/index.test.tsx` covers progressive page
 controls, close/reset identity fencing and raw refusals.
 `src/routes/settings/settings.test.tsx` covers universal Appearance without local
 RPCs.
