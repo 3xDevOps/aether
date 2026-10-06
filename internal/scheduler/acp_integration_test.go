@@ -169,7 +169,7 @@ func TestIntegrationEnhancedRunDocker(t *testing.T) {
 		pending = e.sched.PendingInputs(run.ID)
 		return len(pending) == 1
 	})
-	if err = e.sched.ACPAnswer(run.ID, pending[0].ID, "allow"); err != nil {
+	if err = e.sched.ACPAnswer(run.ID, pending[0].ID, "allow", nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "the answered turn", assistantSaid("permission: allow"))
