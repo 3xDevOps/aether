@@ -104,7 +104,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
           )}
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
         </form>
-        <DialogFooter className="items-center">
+        <DialogFooter className="sm:items-center">
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
             <WorkspaceLine workspace={workspace} />
           </div>

@@ -75,3 +75,30 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
     ratio: 1,
   })
 })
+
+test('a launch refusal sits below the form, not over it', async ({ page, aether }) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+
+  await page.goto(alice.url)
+  await page
+    .getByRole('banner', { name: 'Aether' })
+    .getByRole('button', { name: 'New run' })
+    .tap()
+  const dialog = page.getByRole('dialog', { name: 'New run' })
+  await dialog.getByRole('radio', { name: /^custom/ }).tap()
+  await dialog.getByLabel('Task').fill('say hello')
+  await dialog.getByRole('button', { name: 'Launch', exact: true }).tap()
+
+  const refusal = dialog.getByRole('alert').filter({ hasText: 'Launch failed' })
+  await refusal.scrollIntoViewIfNeeded()
+  const mode = await dialog.getByRole('radiogroup', { name: 'Mode' }).boundingBox()
+  const callout = await refusal.boundingBox()
+  if (!mode || !callout) throw new Error('the launch form did not render')
+  expect(callout.y).toBeGreaterThanOrEqual(mode.y + mode.height)
+
+  const width = (await dialog.boundingBox())?.width ?? 0
+  const launch = await dialog.getByRole('button', { name: 'Launch', exact: true }).boundingBox()
+  expect(launch?.width).toBeGreaterThan(width / 2)
+})

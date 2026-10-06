@@ -15,6 +15,7 @@ const claude = (over: Parameters<typeof agentInfo>[0] = {}) =>
   agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', enhanced_installed: true, login_found: true, default_mode: 'tui', ...over })
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(api.agentList).mockResolvedValue([claude()])
   vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
   useStore.setState({
@@ -130,6 +131,7 @@ describe('new run', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('Launch failedscheduler: harness "claude" has no command for mode "acp"')
+    expect(alert.scrollIntoView).toHaveBeenCalled()
     expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' })
     expect(useStore.getState().paletteDialog).toBe('launch')
     expect(launchButton().disabled).toBe(false)

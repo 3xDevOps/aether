@@ -72,6 +72,7 @@ export function LaunchDialog() {
   const [error, setError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
 
+  const errorCallout = useRef<HTMLDivElement>(null)
   const choice = useRef({ harness, mode })
   choice.current = { harness, mode }
   const agent = agents?.find((item) => item.name === harness)
@@ -95,6 +96,10 @@ export function LaunchDialog() {
     const info = list.find((item) => item.name === name)
     setMode(initialMode(info, name, useStore.getState().launchDefaults[name]?.mode))
   }
+
+  useEffect(() => {
+    if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
+  }, [error])
 
   useEffect(() => {
     let live = true
@@ -269,7 +274,7 @@ export function LaunchDialog() {
           </DialogHeader>
           <form
             id="launch-form"
-            className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1"
+            className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1 [&>*]:shrink-0"
             onSubmit={(event) => { event.preventDefault(); void submit() }}
           >
             <TabsContent value="run" className="flex flex-col gap-4">
@@ -303,10 +308,10 @@ export function LaunchDialog() {
             </TabsContent>
             {notes}
             {options}
-            {error && <Callout tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}</Callout>}
+            {error && <Callout ref={errorCallout} tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}</Callout>}
           </form>
         </Tabs>
-        <DialogFooter className="items-center">
+        <DialogFooter className="sm:items-center">
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
             <WorkspaceLine workspace={workspace} />
           </div>
