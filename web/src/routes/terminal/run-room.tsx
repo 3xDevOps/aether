@@ -528,7 +528,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               Run Room
             </RoomTitle>
             <div className="flex items-center gap-2">
-              <kbd className="text-[11px] text-muted-foreground">{shortcutLabel('run-room')}</kbd>
+              <kbd className="text-ui-xs text-muted-foreground">{shortcutLabel('run-room')}</kbd>
               <Button type="button" size="icon" variant="ghost" aria-label="Close Run Room" onClick={closeRoom}><X className="size-4" aria-hidden /></Button>
             </div>
           </header>

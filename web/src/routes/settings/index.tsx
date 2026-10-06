@@ -70,7 +70,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
               />
               <div className="space-y-0.5">
                 <Label htmlFor="settings-single-keys">Single-key shortcuts</Label>
-                <p className="text-[13px] leading-5 text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   Letter and symbol keys such as <kbd>n</kbd>, <kbd>?</kbd> and <kbd>g</kbd> then <kbd>b</kbd>.
                   Turn off if speech input or a stray key triggers them.
                 </p>
