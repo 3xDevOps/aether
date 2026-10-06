@@ -980,6 +980,15 @@ integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
 installed runs its task as one ACP turn
 ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
+In the dashboard, **Swarms** lists each swarm with its phase, integrator and
+worker counts, swarms that need you first. A swarm's page puts **Questions
+for you** first, then **Tasks**, **Agent messages** (the swarm's
+agent-to-agent mail, grouped by thread) and **Integration** (the read-only
+candidate, with the swarm's IDs under **Technical details**). **More** holds
+**Replace integrator…** and **Cancel swarm…**. An integrator that leaves
+mail unread for over two minutes says so on its state line ("3 agent
+messages unread for 12 min").
+
 ```sh
 aether swarm create "add a health check endpoint and document it" \
   --agent claude --worker claude:background --worker codex:background
@@ -1032,7 +1041,7 @@ att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5
 
 The integrator's questions wait for you; nothing else does. `show` lists the
 question IDs; the commands below act on them and on the swarm, as the
-dashboard's Missions page does. Each one sends one mutation with a fresh
+dashboard's swarm page does. Each one sends one mutation with a fresh
 idempotency key. `cancel` and `replace-integrator` print the swarm's phase
 afterwards; `answer` prints the question ID. A server refusal is printed
 verbatim.

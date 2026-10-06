@@ -1550,7 +1550,7 @@ The panel preserves the gateway's real error rather than manufacturing a
 client-side result. Candidate review has no separate attention board or agent
 decision path; it remains an evidence-linked human review flow.
 
-The Missions page reuses the same panel with `readOnly`: a swarm's integrator
+The swarm page's Integration section reuses the same panel with `readOnly`: a swarm's integrator
 prepares, verifies, and delivers on its own, so the page lists the
 workspace's candidates and **Show full** loads one, with its state, inputs,
 conflict paths, verification results, delivery request, and receipt. Packet
@@ -3237,140 +3237,133 @@ under a used key as `store: mission idempotency conflict`. After a success
 the same contents start a new swarm. Client-generated IDs are never used as
 mission authority.
 
-`routes/missions` is registered through `routes/index.ts`, and the
+`routes/missions` (`index.tsx` loads, `list.tsx`, `detail.tsx`, and one
+file per section) is registered through `routes/index.ts`; the route name
+stays `missions` and links are `?page=missions&id=<mission>`. The
 `MissionsSlice` is composed into the root store. Hydration reads
 `mission.list` for the active workspace; mission events refetch either the
-open `mission.show` projection or the first list page, so reloads and event
-reconnects recover server state rather than retaining a demo snapshot. The
-refetched page is merged into the list, so older pages loaded with **Load
-older missions** stay, along with the cursor for the next one. The slice
-records which workspace the list and cursor were read for
-(`missionListWorkspace`): a cursor read for another workspace is replaced by
-the fetched one, and **Load older missions** only follows a cursor read for
-the active workspace. The
-progress view renders the authoritative task statuses Ready, Working, Review,
-Done, Proposed and Abandoned. It keeps blockers, exact task revision/scope,
-attempt IDs, evidence availability, and accepted submission
-revision/artifact references visible. A worker success or exit is not enough
-to render Done: the server must accept a submission for the current task
-revision, with the required evidence available and any scope disposition
-explicitly recorded.
+open `mission.show` projection or the first list page, merged so older pages
+loaded with **Show more** stay. The slice records which workspace the list
+and cursor were read for (`missionListWorkspace`), so **Show more** only
+follows a cursor read for the active workspace.
 
-### Mission phases
+### Swarms list
 
-A mission is in one of four phases - `planning`, `active`, `completed`,
-`cancelled`. Only `active` dispatches workers. No phase waits on a human
-except for the answers to questions the integrator chose to ask. The phase
-chip replaces the generic `Mission` chip on every mission card: `Planning`,
-`Planning · N questions for you`, `Active`, `Completed`, `Cancelled`. The
-detail view's status line answers the phase first and falls back to the
-task-derived string only in `active`.
+A `PaneHeader` "Swarms" with **New swarm**, then one card per swarm: a state
+line, the objective's first line as the title, the integrator's agent glyph,
+display name and mode ("Claude Code · Enhanced"), and worker counts ("3
+working · 1 needs you · 2 done", or "No workers yet"). The state line is the
+phase word (`Planning`, `Planning · N questions for you`, `Active`,
+`Completed`, `Cancelled`), the Needs you reason when a swarm run needs the
+viewer, the unread reason when the integrator has left mail unread for over
+two minutes, or `Integrator did not launch: <error>` while
+`integrator_launch_error` is set. The unread case also adds an `n unread`
+badge. Swarms that need you sort first, then by last update; completed and
+cancelled swarms fold behind **Finished (n)**. The server has no archive or
+delete for a swarm, so Finished is the archive. With no swarms the page shows
+one sentence and **New swarm**. Counts come from one pass over the run store
+(`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
 
-The detail header shows the objective's first line, cut to 80 characters
-with an ellipsis, and carries the full objective in its `title` attribute.
-The full objective opens the scrollable detail, clamped to three lines with
-a **Show more** toggle when it overflows. Mission cards clamp the objective
-the same way.
+### Swarm detail
 
-A phase banner sits under the objective in every phase and says what is
-happening. When `current_integrator_run_id` names a run whose status in the
-store is terminal, the banner adds `The integrator run <id> has exited;
-replace the integrator to continue` with the **Replace integrator** control
-inline, in `planning` and `active` - an integrator that exited is recovered,
-not hidden behind a friendlier message. A `completed` or `cancelled`
-mission's integrator stops on purpose and `mission.replace-integrator` is
-refused there, so the sentence and the control are not shown, and
-**Replace integrator** leaves the authorization section too.
+The header's title is the objective's first line cut to 80 characters; its
+state line reads the phase or reason, the integrator ("Claude Code ·
+Standard") and the creation time. On a phone the top bar keeps `Swarms`, so
+the body repeats the title and state line. One primary action: **Answer**
+(focuses the first open question's composer) while a question waits on the
+viewer, else **Open integrator**. **More** holds **Replace integrator…** and
+**Cancel swarm…**.
+
+The body is one column, in this order:
+
+1. The rest of the objective (clamped to three lines with **Show more**) and
+   the phase sentence, verbatim: planning "The integrator asks you
+   clarifying questions only if it needs answers, then proposes tasks and
+   starts the swarm.", active "Workers run. The integrator accepts their
+   work, verifies and delivers the result, then reports success.", completed
+   "The integrator reported success. Leftover workers were stopped.",
+   cancelled "The swarm was cancelled. Its workers and integrator run are
+   stopped." A stopped or missing integrator adds a callout with
+   **Replace integrator…** (see below).
+2. **Questions for you**, only when the integrator asked any. An open
+   question is a Needs you callout with an `Answer question <n>` field and
+   **Answer**, which sends `mission.question.answer` with the key
+   `question-answer-<question_id>`, so a retry replays. A question answered
+   elsewhere while a draft is typed keeps the draft and says `Answered by
+   <name> while you were typing: <answer>`. Answered questions fold to one
+   line with `Answered by <name>`; expanding shows the answer. A member who
+   may not answer sees `Only <accountable human> or an admin can answer.`
+   Answering needs `mission.question.answer`, launch permission and the
+   accountable human or an admin.
+3. **Tasks**, a compact table: title, status dot and word (Proposed, Ready,
+   Working, Review, Done, Abandoned, Blocked), the latest attempt's mode word
+   and a worker link that opens the run. On a phone each task is two rows.
+   Expanding a task shows its objective, scope, blockers other than
+   `proposal` in planning, scope diagnostics with a link to the other run,
+   and attempt errors. A worker under a human control hold shows `<name>
+   holds control of this worker` with **Release control**, which sends
+   `mission.worker.release` with the observed `expected_takeover_generation`.
+4. **Agent messages**, described below.
+5. **Integration**, closed by default: the read-only candidate panel (see
+   [Candidate review in Run evidence](#candidate-review-in-run-evidence)),
+   listing this swarm's candidates, and a **Technical details** disclosure
+   with the swarm ID, integrator run ID, generation, accepted set version,
+   execution choices, task IDs and revisions, attempts, and each accepted
+   submission's run, retained revision, evidence reference, evidence
+   exceptions and scope disposition.
+
+A task is Done only when the server accepted a submission for its current
+revision; the table shows the server's status, never a worker's exit.
 
 When `current_integrator_run_id` names a run the hydrated store does not
-hold, the detail view asks `run.get` once for that run ID; a create's
-response can reach the dashboard before the run's first `run.status` event.
-A returned run is added to the store. While the request is open, and before
-hydration, the banner keeps its phase copy. Only a not-found answer means
-the server holds no run for it: in `planning` and `active`, the banner then
-replaces the phase sentence with `The integrator run has not started.`,
-says the server retries the launch periodically and logs `mission: recover
-integrator`, and offers **Replace integrator**. When the mission's
-`integrator_run_launched` is true the run existed and is gone, so the
-banner says `The integrator run was deleted; replace the integrator or
-cancel the swarm.` instead. Any other `run.get` failure shows its error
-above the mission and keeps the phase copy; **Refresh** asks again, once.
-**Open integrator run** appears only once the store holds the run, beside
-the run's status chip - the same state vocabulary as the run list - and its
-last status reason.
+hold, the page asks `run.get` once; a create's response can reach the
+dashboard before the run's first event. Only a not-found answer marks it
+missing: the callout then says `The integrator run has not started. The
+server retries the launch periodically and logs each failure as "mission:
+recover integrator".`, or `The integrator run was deleted; replace the
+integrator or cancel the swarm.` when `integrator_run_launched` is true. An
+integrator whose run ended says `The integrator run has exited; replace the
+integrator to continue.` Either adds `Last launch failure <time ago>:
+<error>` while `integrator_launch_error` is set. Another `run.get` failure
+shows its error and is asked again on the next mission refetch. Finished
+swarms show none of this; the server refuses a replacement there.
 
-While the mission carries `integrator_launch_error`, the server's reason the
-integrator run last failed to launch, both the not-started and the exited
-banner add `Last launch failure <time ago>: <error>`, and the mission card
-in the list adds `Integrator did not launch: <error>` in `planning` and
-`active`. The server clears the field once an integrator run launches.
+**Replace integrator…** opens a dialog with the distinct accounts and agents
+from `execution_choices` and always sends mode `tui`, pins
+`expected_generation`, and reuses one idempotency key across retries.
+**Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
+when the confirmation opened. Both need the capability; cancel also needs
+the accountable human or an admin. Failures stay in the dialog, verbatim.
 
-**Replace integrator** offers each distinct account and harness in the
-mission's `execution_choices`, of any mode, and always sends mode `tui`:
-the server accepts a replacement only from those choices and runs it
-interactive.
+### Agent messages on a swarm
 
-In `planning`, **Questions from the integrator** lists every question the
-integrator asked. Questions are optional - the integrator asks only when the
-objective is ambiguous - so the section can stay at `The integrator has not
-asked anything yet.` for a whole mission. Each unanswered question takes a
-textarea and an **Answer** button sending `mission.question.answer` with the
-deterministic key `question-answer-<question_id>`, so a retry replays rather
-than answering twice. Answered questions show the answer and who answered.
-If a question this member is typing into arrives answered - the
-`mission.changed` refetch replaces the whole projection - the textarea stays
-mounted with the draft intact under `Answered by <display name>`, rather
-than dropping what was typed. The tasks the integrator has proposed render
-read-only under **Proposed tasks**. The answer form needs the capability,
-launch permission, and the mission's accountable human or an admin:
-`cap.hasMethod('mission.question.answer') && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
+The section reads `coord.messages.list` with `mission_id` into the messages
+slice and subscribes only to that swarm's list; a `coord.message` event
+re-reads its newest page. `groupMessages` (`store/messages.ts`) groups the
+loaded rows by structure, never by content: a reply sits under its question
+when the question is loaded, reports and questions stand alone, and adjacent
+plain messages between the same sender and recipient fold into one line
+("Port the controller → Integrator · 3 messages", expandable). Each row has
+a kind icon (message, question, reply, report), both runs named by their
+swarm task title, else `Integrator`, else the run title, each opening its
+run; the relative time; and the delivery word `Sent`, `Delivered` or
+`Acknowledged`. A report shows `<Outcome>: <summary>` and `Next: <next
+action>`. Bodies clamp at three lines with **Show more**. The newest six
+groups show first; **Show all** shows every loaded group and then **Show
+earlier messages** pages older history. Rows use `content-visibility: auto`
+rather than a virtualizer: history arrives only as the viewer pages it.
 
-In `planning` and `active` the header also offers **Cancel swarm** to the
-same identity, gated on `mission.cancel`. It opens a confirmation;
-confirming sends `mission.cancel` with a key minted when the confirmation
-opened, so a retry after a failure replays rather than cancelling twice. The
-mission moves to `cancelled` and its workers and integrator run are stopped.
-A refusal - the mission completed while the dialog was open, for example -
-shows the server's error inside the dialog.
+### Unread mail
 
-Outside `planning` the tasks render under **Tasks**, followed by **Candidate
-progress** - the read-only candidate panel described in [Candidate review in
-Run evidence](#candidate-review-in-run-evidence), listing only this mission's
-candidates (`integration.list` with `mission_id`) and polling every five
-seconds, because integration changes publish no event - and the questions, if
-any, collapsed into **Planning questions**. A task carrying a `pending_revision`
-shows a `Revision pending` chip and names the pending revision number and
-title under the task. A pending revision is never the task's current
-revision, so it cannot be dispatched until the integrator accepts it.
+An integrator whose oldest unacknowledged message (`oldest_unacked_at` on
+the run) is over two minutes old reads `3 agent messages unread for 12 min`
+as its state line on the swarm page, its board card and its sidebar row,
+whose trailing text becomes `3 unread`. `presentRun` (`lib/status.ts`)
+computes it once, through `unreadMail` in `lib/needs-you.ts`; it is a
+reason, not a Needs you state. A `coord.message` or `coord.message.acked`
+event re-reads the recipient's count and age.
 
-Attempt chips render wherever a task has attempts, so a completed or
-cancelled mission still shows how each attempt ended. The `proposal`
-blocker chip is hidden in `planning`: every task there waits for the
-integrator to start the swarm, which the phase banner already says, and
-repeating it as a blocker reads as a fault.
-
-Answer and cancel failures live in component state and render through the
-same `ErrorNotice` as a failed release, verbatim. They never go through
-`setMissionError`, which the next `setMissionDetail` or `mission.changed`
-refetch would wipe, and a failed answer leaves the draft intact.
-
-Run links use the existing terminal route. Take control and Release control
-continue to enforce the normal run controller and durable worker hold.
-`mission.worker.release` is the human-only release action for a worker hold:
-the dashboard sends the run ID and observed
-`expected_takeover_generation` as a compare-and-swap, while the server
-rechecks current steering authority under the same admission boundary. A
-stale generation, revoked authority, or foreign control holder leaves the
-hold in place and surfaces the conflict; an integrator or worker cannot
-release it through the assignment-scoped socket. Integrator replacement is
-gated by capabilities and role, pins `expected_generation`, and reuses one
-idempotency key across retries while reloading the resulting mission. A run's
-swarm role ("Integrator", "Worker") joins its card through the `card:meta`
-slot.
-
-`mission.show` also carries bounded server-derived scope diagnostics. The
-mission task view labels intended overlap, observed overlap and out-of-scope
-paths and links each diagnostic to the task or peer run. The same diagnostics
-are registered into the run card's `card:meta` slot as a conflict count, so overlap
-warnings stay in the conflict experience rather than creating a second board
-or lock surface.
+`mission.show` also carries bounded server-derived scope diagnostics. They
+show under their task and register into the run card's `card:meta` slot as
+a conflict count, so overlap warnings stay in the conflict experience
+rather than creating a second board or lock surface.

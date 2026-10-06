@@ -322,8 +322,14 @@ restart delays them rather than losing them, and neither carries the body:
 The dashboard's Activity feed shows `coord.message` as an **Agent message**
 row with the sender, recipient and kind, such as `Planner → Backend ·
 question`; `aether timeline` prints it as `<from-run> -> <to-run> ·
-question`. Neither shows the body. Bodies come only from
-`coord.messages.list`; the dashboard has no view of them yet.
+question`. Neither shows the body. Bodies come from `coord.messages.list`:
+the swarm page's **Agent messages** section lists a swarm's mail grouped by
+thread, with each body and its delivery word (`Sent`, `Delivered`,
+`Acknowledged`)
+([dashboard-frontend.md](dashboard-frontend.md#agent-messages-on-a-swarm)).
+An integrator that leaves mail unacknowledged for over two minutes reads
+`3 agent messages unread for 12 min` on the swarm page, its board card and
+its sidebar row.
 
 `workspace.timeline` accepts `mission_id`, which matches events of every run
 that has served the swarm, and its `run_id` filter also matches mail
@@ -740,7 +746,7 @@ completed, cancelled: terminal
 ```
 
 `mission.cancel` is the human's stop button. It is not reachable from the run
-socket; the accountable human or an admin cancels from the Missions page or
+socket; the accountable human or an admin cancels from the swarm page's More menu or
 with `aether swarm cancel`. Cancelling stops every live worker and the
 integrator run.
 
@@ -759,7 +765,7 @@ mission:
 `question ask` and `start` require an explicit `--idempotency-key`; unlike
 `send` and `ask --to`, the CLI never generates one for them. `--body-file`
 accepts a path or `-` for standard input, and the body is capped at 4 KiB.
-`mission question ask` asks the accountable human, who answers on the Missions
+`mission question ask` asks the accountable human, who answers on the swarm
 page or with `aether swarm answer`; `ask --to <run-id>` asks a peer agent run,
 which answers with `reply`. They are separate mailboxes. Questions are allowed
 only in `planning`.
