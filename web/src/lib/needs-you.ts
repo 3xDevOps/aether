@@ -175,8 +175,12 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
-// Mirrors acpFailedReason and acpEndedReason in internal/scheduler/acp_driver.go.
-export const enhancedReasonPrefixes = ['enhanced session failed: ', 'enhanced session ended: '] as const
+// Mirrors the acp*Reason constants in internal/scheduler/acp_driver.go.
+export const enhancedReasonPrefixes = [
+  'enhanced session failed: ',
+  'enhanced session ended: ',
+  'enhanced turn failed: ',
+] as const
 const stalledPrefix = 'stalled:'
 
 function enhancedFailure(run: RunRecord): string | undefined {

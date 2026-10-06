@@ -189,14 +189,17 @@ describe('needs you conditions', () => {
     )
   })
 
-  it("surfaces the server's ended reason as Enhanced unavailable", () => {
-    const ended = record({
-      status: 'needs-attention',
-      reason: "enhanced session ended: the agent's ACP server exited with code 1",
-    })
-    expect(presentRun(ended, stateContext())).toMatchObject({
+  it.each([
+    ["enhanced session ended: the agent's ACP server exited with code 1", "the agent's ACP server exited with code 1"],
+    [
+      'enhanced turn failed: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}',
+      'acphost: session/prompt: {"code":-32000,"message":"Authentication required"}',
+    ],
+  ])("surfaces the server's reason %s as Enhanced unavailable", (reason, error) => {
+    const parked = record({ status: 'needs-attention', reason })
+    expect(presentRun(parked, stateContext())).toMatchObject({
       state: 'needs-you',
-      reason: "Enhanced unavailable: the agent's ACP server exited with code 1",
+      reason: `Enhanced unavailable: ${error}`,
     })
   })
 

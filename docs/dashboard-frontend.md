@@ -1031,7 +1031,7 @@ first that applies:
 | Open swarm question | accountable human or an admin | The integrator asks: … |
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
-| Enhanced failure (`enhanced session failed: ` or `enhanced session ended: ` reason) | owner | Enhanced unavailable: … |
+| Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | Parked at `needs-attention` | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed finish (`outcome_unseen`) | owner | Finished, review the result |
