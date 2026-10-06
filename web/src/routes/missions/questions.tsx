@@ -126,9 +126,11 @@ export function SwarmQuestions({
   const accountable = useMemberName(accountableID)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   if (questions.length === 0) return null
+  const waiting = questions.some((question) => !question.answered_at || drafts[question.id])
+  const title = waiting ? 'Questions for you' : 'Questions from the integrator'
   return (
-    <section aria-label="Questions for you" className="flex flex-col gap-2">
-      <SectionLabel as="h2">Questions for you</SectionLabel>
+    <section aria-label={title} className="flex flex-col gap-2">
+      <SectionLabel as="h2">{title}</SectionLabel>
       {questions.map((question) =>
         question.answered_at && !drafts[question.id] ? (
           <AnsweredQuestion key={question.id} question={question} />

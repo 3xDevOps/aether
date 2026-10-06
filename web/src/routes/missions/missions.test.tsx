@@ -158,7 +158,7 @@ describe('swarm detail', () => {
     seed({ runs: { run_integrator: toRecord(integrator()) } })
     await mount(showing({}, { questions: [missionQuestion({ answer: 'guest', answered_at: '2026-08-14T10:02:00Z', answered_by_member_id: bob.id })], tasks: [missionTask()] }))
     const regions = screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))
-    expect(regions.filter((name) => name !== 'Candidate review')).toEqual(['Swarm', 'Questions for you', 'Tasks', 'Agent messages', 'Integration'])
+    expect(regions.filter((name) => name !== 'Candidate review')).toEqual(['Swarm', 'Questions from the integrator', 'Tasks', 'Agent messages', 'Integration'])
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('coordinate checkout work')
     expect(screen.getByText('Workers run. The integrator accepts their work, verifies and delivers the result, then reports success.')).toBeDefined()
     expect(screen.getByText('Answered by Bob')).toBeDefined()

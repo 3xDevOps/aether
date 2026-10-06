@@ -54,7 +54,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await page.getByRole('region', { name: 'Questions for you' }).getByRole('button', { name: 'Answer', exact: true }).click()
   // The answered question folds to one line once the refetch lands; the
   // member's display name is whatever the fixture registered.
-  const questions = page.getByRole('region', { name: 'Questions for you' })
+  const questions = page.getByRole('region', { name: 'Questions from the integrator' })
   await expect(questions.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
   await questions.getByRole('button', { name: /which checkout flow\?/ }).click()
   await expect(questions.getByText('the guest checkout flow', { exact: true })).toBeVisible()

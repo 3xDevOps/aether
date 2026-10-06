@@ -48,7 +48,8 @@ test('reads and answers a swarm on a phone', async ({ page, aether }) => {
   const questions = page.getByRole('region', { name: 'Questions for you' })
   await questions.getByLabel('Answer question 1').fill('Switch to the new template')
   await questions.getByRole('button', { name: 'Answer', exact: true }).click()
-  await expect(questions.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
+  const answeredQuestions = page.getByRole('region', { name: 'Questions from the integrator' })
+  await expect(answeredQuestions.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
 
   type TaskMutation = { task: { id: string; current_revision: number } }
   const proposed = runCoordCLI<TaskMutation>(
@@ -80,6 +81,6 @@ test('reads and answers a swarm on a phone', async ({ page, aether }) => {
     return scroller ? scroller.scrollWidth - scroller.clientWidth : -1
   })
   expect(overflow).toBe(0)
-  const answered = questions.getByRole('button', { name: /Keep the legacy receipt template\?/ })
+  const answered = answeredQuestions.getByRole('button', { name: /Keep the legacy receipt template\?/ })
   expect((await answered.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
 })

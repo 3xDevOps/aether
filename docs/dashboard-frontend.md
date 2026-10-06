@@ -3294,8 +3294,10 @@ The body is one column, in this order:
    `question-answer-<question_id>`, so a retry replays. A question answered
    elsewhere while a draft is typed keeps the draft and says `Answered by
    <name> while you were typing: <answer>`. Answered questions fold to one
-   line with `Answered by <name>`; expanding shows the answer. A member who
-   may not answer sees `Only <accountable human> or an admin can answer.`
+   line with `Answered by <name>`; expanding shows the answer. With none
+   left open the section is titled **Questions from the integrator**. A
+   member who may not answer sees `Only <accountable human> or an admin can
+   answer.`
    Answering needs `mission.question.answer`, launch permission and the
    accountable human or an admin.
 3. **Tasks**, a compact table: title, status dot and word (Proposed, Ready,
