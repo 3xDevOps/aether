@@ -112,7 +112,7 @@ func TestACPStreamLease(t *testing.T) {
 	}
 	_ = reader.Close()
 
-	if _, err := writer.Write([]byte(`{"type":"control","request_id":1,"control_generation":` + strconv.FormatUint(generation, 10) + "}\n")); err != nil {
+	if _, err = writer.Write([]byte(`{"type":"control","request_id":1,"control_generation":` + strconv.FormatUint(generation, 10) + "}\n")); err != nil {
 		t.Fatal(err)
 	}
 	line, err := protocol.ReadLine(bufio.NewReader(writer))

@@ -63,7 +63,7 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		_ = writeJSONLine(ch, protocol.ACPStreamResponse{Code: code, Error: message})
 	}
 	var req protocol.ACPStreamRequest
-	if err := json.Unmarshal(line, &req); err != nil {
+	if err = json.Unmarshal(line, &req); err != nil {
 		refuse(protocol.CodeParse, "parse error: "+err.Error())
 		return
 	}
@@ -71,7 +71,7 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		refuse(protocol.CodeInvalidParams, "run_id is required")
 		return
 	}
-	if err := s.checkMember(ctx, member); err != nil {
+	if err = s.checkMember(ctx, member); err != nil {
 		e := rpcError(err)
 		refuse(e.Code, e.Message)
 		return
@@ -103,12 +103,12 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 	if s.cfg.Control != nil {
 		switch {
 		case req.ReleaseControl:
-			if err := a.release(req.ControlGeneration); err != nil {
+			if err = a.release(req.ControlGeneration); err != nil {
 				ack.Code, ack.Error = attachControlError(err)
 				ack.OK = false
 			}
 		case req.Write:
-			if err := a.acquire(req.Takeover, req.ControlGeneration, nil); err != nil {
+			if err = a.acquire(req.Takeover, req.ControlGeneration, nil); err != nil {
 				ack.Code, ack.Error = attachControlError(err)
 				ack.OK = false
 			}
@@ -236,7 +236,7 @@ func (a *acpStream) acquire(force bool, generation uint64, p *pendingTakeover) e
 		return err
 	}
 	if mission := s.cfg.Services.MissionControl; mission != nil {
-		if err := mission.Takeover(a.ctx, a.run.ID, a.member); err != nil {
+		if err = mission.Takeover(a.ctx, a.run.ID, a.member); err != nil {
 			_ = s.cfg.Control.Release(run, a.member, acquired.SessionID, acquired.Generation)
 			return err
 		}
@@ -328,7 +328,7 @@ func (a *acpStream) readControl(r *bufio.Reader) {
 			return
 		}
 		var ctl protocol.DashAttachControl
-		if err := json.Unmarshal(line, &ctl); err != nil {
+		if err = json.Unmarshal(line, &ctl); err != nil {
 			_ = a.sendControl(protocol.DashAttachControl{Type: protocol.DashAttachControlFrame, Code: protocol.CodeParse, Error: "parse error: " + err.Error()})
 			continue
 		}

@@ -77,9 +77,9 @@ func (s *Server) runACPSetOption(ctx context.Context, member domain.MemberID, ra
 		return nil, perr
 	}
 	return struct{}{}, s.admitACP(ctx, member, run, p.ACPLease, func() error {
-		ctx, cancel := context.WithTimeout(ctx, acpOptionTimeout)
+		optionCtx, cancel := context.WithTimeout(ctx, acpOptionTimeout)
 		defer cancel()
-		return s.cfg.Runs.ACPSetOption(ctx, run, p.OptionID, value)
+		return s.cfg.Runs.ACPSetOption(optionCtx, run, p.OptionID, value)
 	})
 }
 
