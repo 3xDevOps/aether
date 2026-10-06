@@ -56,12 +56,9 @@ export function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
 }
 
 export function MembersRoute({ client }: RouteProps & { client?: Api }) {
-  return <MembersPage tab="members" client={client} />
-}
-
-export function DevicesRoute({ client }: RouteProps & { client?: Api }) {
-  return <MembersPage tab="devices" client={client} />
+  const tab = useStore((s) => (s.route.name === 'devices' ? 'devices' : 'members'))
+  return <MembersPage tab={tab} client={client} />
 }
 
 registerRoute('members', MembersRoute)
-registerRoute('devices', DevicesRoute)
+registerRoute('devices', MembersRoute)

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { withheld } from '@/lib/surfaces'
+import { pageOf, withheld } from '@/lib/surfaces'
 import { redirectRoute } from '@/lib/url-state'
 import { lookupRoute } from '@/routes'
 import { useStore } from '@/store'
@@ -26,7 +26,7 @@ export function CenterView() {
           terminalCacheEpoch,
           route.params.runId ?? '',
         ])
-      : route.name
+      : pageOf(route.name)
 
   // A view that took focus for itself keeps it; otherwise the heading takes
   // it so a screen reader announces where the navigation landed.

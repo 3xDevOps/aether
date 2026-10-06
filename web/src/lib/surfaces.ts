@@ -25,7 +25,6 @@ export interface Surface {
    * `palette` destinations are reached from the command palette only. */
   place: 'nav' | 'admin' | 'palette'
   keywords?: string
-  /** Other route names that are tabs of this page. */
   tabs?: string[]
 }
 
@@ -61,6 +60,10 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
 }
 
 const everything: Capability = { hasMethod: () => true, hasLocal: () => true, hasWS: () => true }
+
+export function pageOf(name: string): string {
+  return surfaces(everything).find((surface) => surface.tabs?.includes(name))?.name ?? name
+}
 
 /** A page this gateway or member is not offered, such as a stale shared link. */
 export function withheld(name: string, cap: Capability): boolean {

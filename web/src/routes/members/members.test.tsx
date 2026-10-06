@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
-import { DevicesRoute, MembersRoute } from '@/routes/members'
+import { CenterView } from '@/components/shell/center-view'
+import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
 
@@ -223,9 +224,21 @@ describe('members page', () => {
 
   it('opens the Devices route on its tab', async () => {
     seed({ route: { name: 'devices', params: {} } })
-    render(<DevicesRoute params={{}} client={fakeApi()} />)
+    render(<MembersRoute params={{}} client={fakeApi()} />)
 
     expect(screen.getByRole('tab', { name: 'Devices', selected: true })).toBeDefined()
     expect(await screen.findByRole('form', { name: 'Approve a device' })).toBeDefined()
+  })
+
+  it('keeps focus on the tab it switched to, since both tabs are one mounted page', async () => {
+    seed()
+    render(<main id="main"><CenterView /></main>)
+
+    const devices = await screen.findByRole('tab', { name: 'Devices' })
+    devices.focus()
+    await userEvent.keyboard('{Enter}')
+
+    await waitFor(() => expect(useStore.getState().route.name).toBe('devices'))
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Devices', selected: true }))
   })
 })
