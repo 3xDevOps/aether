@@ -21,7 +21,7 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--mode standard|enhanced] [--account <member-id>] [--worker <harness>[:standard|enhanced|background]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <mission-id>\n" +
 	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
@@ -54,6 +54,7 @@ func runSwarm(args []string) error {
 type swarmSpec struct {
 	objective string
 	agent     string
+	mode      string
 	account   string
 	workspace string
 	workers   []protocol.MissionExecutionChoice
@@ -85,11 +86,12 @@ func swarmCreate(args []string, stdin io.Reader) error {
 // a typo never costs a round trip or a stored mission.
 func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fs := flag.NewFlagSet("swarm create", flag.ExitOnError)
-	agent := fs.String("agent", "", "integrator harness name (runs in tui mode)")
+	agent := fs.String("agent", "", "integrator harness name")
+	mode := fs.String("mode", "standard", "integrator mode: standard (tui) or enhanced (acp)")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	var workers stringList
-	fs.Var(&workers, "worker", "allow workers on this harness, harness[:tui|headless] (repeatable, default mode tui)")
+	fs.Var(&workers, "worker", "allow workers on this harness, harness[:mode] with mode "+launchModeHelp+" (repeatable, default standard)")
 	objective, err := parseLeadingArg(fs, args)
 	if err != nil || *agent == "" {
 		return swarmSpec{}, errors.New(swarmUsage)
@@ -98,7 +100,14 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if err != nil {
 		return swarmSpec{}, err
 	}
-	spec := swarmSpec{objective: objective, agent: *agent, account: *account, workspace: *workspace}
+	integratorMode, err := parseLaunchMode(*mode)
+	if err != nil {
+		return swarmSpec{}, err
+	}
+	if integratorMode == "headless" {
+		return swarmSpec{}, errors.New("the integrator runs until the swarm ends: --mode must be standard or enhanced")
+	}
+	spec := swarmSpec{objective: objective, agent: *agent, mode: integratorMode, account: *account, workspace: *workspace}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
 		if parseErr != nil {
@@ -128,12 +137,13 @@ func stdinText(value, what string, stdin io.Reader) (string, error) {
 // parseWorker reads one --worker value, harness[:mode]. The account is the
 // integrator's and is filled in by missionCreateParams.
 func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
-	harness, mode, ok := strings.Cut(spec, ":")
+	harness, name, ok := strings.Cut(spec, ":")
 	if !ok {
-		mode = "tui"
+		name = "standard"
 	}
-	if harness == "" || (mode != "tui" && mode != "headless") {
-		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want harness or harness:tui|headless)", spec)
+	mode, err := parseLaunchMode(name)
+	if harness == "" || err != nil {
+		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want harness or harness:mode, mode %s)", spec, launchModeHelp)
 	}
 	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
 }
@@ -142,7 +152,7 @@ func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 // tuple is always the first execution choice, and a --worker that repeats it
 // or another worker is sent once, because the store refuses duplicates.
 func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key string) protocol.MissionCreateParams {
-	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: "tui"}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: spec.mode}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range spec.workers {
 		w.AccountMemberID = accountID

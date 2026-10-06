@@ -159,7 +159,7 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {
 		return protocol.AgentInfo{}, err
 	}
-	if profile.ACPDefault && info.EnhancedInstalled && s.cfg.Runs.ACPLaunchable() {
+	if profile.ACPDefault && info.EnhancedInstalled {
 		// The wire name of the enhanced launch mode.
 		info.DefaultMode = "acp"
 	}

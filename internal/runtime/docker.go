@@ -817,12 +817,15 @@ const maxStreamBuffer = 8 << 20
 // continuously (the PTY pump) never approach the cap, while one that stalls
 // (a setup shell whose SSH peer stopped reading) would otherwise grow the
 // buffer without limit, so past maxStreamBuffer the oldest bytes are dropped.
+// A lossless buffer instead blocks writes at the cap until the reader
+// catches up: a protocol stream such as JSON-RPC cannot lose a byte.
 type streamBuffer struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    bytes.Buffer
-	closed bool
-	err    error
+	mu       sync.Mutex
+	cond     *sync.Cond
+	buf      bytes.Buffer
+	lossless bool
+	closed   bool
+	err      error
 }
 
 func newStreamBuffer() *streamBuffer {
@@ -831,13 +834,26 @@ func newStreamBuffer() *streamBuffer {
 	return b
 }
 
+func newLosslessStreamBuffer() *streamBuffer {
+	b := newStreamBuffer()
+	b.lossless = true
+	return b
+}
+
 func (b *streamBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	for b.lossless && !b.closed && b.buf.Len() >= maxStreamBuffer {
+		b.cond.Wait()
+	}
 	if b.closed {
 		return 0, io.ErrClosedPipe
 	}
 	n, _ := b.buf.Write(p) // bytes.Buffer.Write cannot fail
+	if b.lossless {
+		b.cond.Broadcast()
+		return n, nil
+	}
 	if over := b.buf.Len() - maxStreamBuffer; over > 0 {
 		b.buf.Next(over)
 	}
@@ -852,6 +868,9 @@ func (b *streamBuffer) Read(p []byte) (int, error) {
 		b.cond.Wait()
 	}
 	if b.buf.Len() > 0 {
+		if b.lossless {
+			b.cond.Broadcast()
+		}
 		return b.buf.Read(p)
 	}
 	if b.err != nil {

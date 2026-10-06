@@ -490,8 +490,13 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	return s.stop()
 }
 
-// RemoveRunTranscripts removes the agent transcript and every run-shell
-// transcript for a run after the scheduler has stopped their sessions.
+func (h *Host) ItemLogPath(run domain.RunID) string {
+	return filepath.Join(h.cfg.TranscriptDir, string(run)+".items.jsonl")
+}
+
+// RemoveRunTranscripts removes the agent transcript, every run-shell
+// transcript and the session item log of a run after the scheduler has
+// stopped their sessions.
 func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -505,7 +510,7 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	if err != nil {
 		return fmt.Errorf("ptyhost: find run transcript history: %w", err)
 	}
-	paths := append(archives, transcript, checkpointPath(transcript))
+	paths := append(archives, transcript, checkpointPath(transcript), h.ItemLogPath(run))
 	patterns := []string{
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),

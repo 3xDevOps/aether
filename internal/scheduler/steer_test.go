@@ -245,7 +245,7 @@ func TestInject(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "focus on the tests"); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "focus on the tests", false); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	inj := e.pty.injected()
@@ -274,7 +274,7 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "one enter"); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "one enter", false); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	waitFor(t, "stdin delivery", func() bool {
@@ -285,7 +285,7 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch opencode: %v", err)
 	}
-	if err := e.sched.Inject(ctx, opencode.ID, e.member.ID, "two enters"); err != nil {
+	if _, err := e.sched.Inject(ctx, opencode.ID, e.member.ID, "two enters", false); err != nil {
 		t.Fatalf("Inject opencode: %v", err)
 	}
 	inj := e.pty.injected()
@@ -965,7 +965,7 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	run, c := e.launchFake(t, "task")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "keep going"); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "keep going", false); err != nil {
 		t.Fatalf("Inject stalled: %v", err)
 	}
 	inj := e.pty.injected()
@@ -1029,7 +1029,7 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 		return !ok
 	})
 
-	err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late")
+	_, err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late", false)
 	if !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject completed = %v, want ErrNoSession", err)
 	}

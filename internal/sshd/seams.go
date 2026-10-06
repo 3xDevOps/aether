@@ -62,7 +62,6 @@ type RunController interface {
 	// account would be refused over the harness or the account owner's
 	// login, and why, resolving it as Launch does.
 	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error)
-	ACPLaunchable() bool
 	// ContainerAddr resolves the network address of a supervised run
 	// container.
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
@@ -80,7 +79,7 @@ type RunController interface {
 	// PendingInputs returns an independent snapshot of unresolved requests;
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
-	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
+	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// SetArchived hides a Final run from the board (archived true) or

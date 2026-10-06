@@ -2,8 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -25,11 +23,8 @@ type AgentDriver interface {
 	// LastActivity is when the agent last produced output, zero if never.
 	LastActivity(run domain.RunID) time.Time
 	// Deliver hands a member's message to the agent as their next prompt.
-	Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string) error
+	Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string, steer bool) (string, error)
 }
-
-// ErrNoAgentDriver rejects a run whose launch mode has no driver.
-var ErrNoAgentDriver = errors.New("scheduler: no agent driver for launch mode")
 
 // tuiDriver runs the agent as the child of the container's primary PTY.
 type tuiDriver struct {
@@ -53,43 +48,15 @@ func (d tuiDriver) LastActivity(run domain.RunID) time.Time {
 	return t
 }
 
-func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string) error {
-	return d.pty.Inject(ctx, ptyhost.RunSession(run.ID), member.DisplayName, member.Color, message, harness.SubmitSequence(run.Harness))
-}
-
-// missingDriver stands in for a launch mode no driver serves, so lifecycle
-// code never branches on a nil driver.
-type missingDriver struct {
-	mode domain.LaunchMode
-}
-
-func (d missingDriver) err() error {
-	return fmt.Errorf("%w %q", ErrNoAgentDriver, d.mode)
-}
-
-func (d missingDriver) Start(context.Context, *supervised, runtime.Attachment) error {
-	return d.err()
-}
-
-func (d missingDriver) Resume(context.Context, *supervised, runtime.Attachment) error {
-	return d.err()
-}
-
-func (missingDriver) Stop(context.Context, domain.RunID) error { return nil }
-
-func (missingDriver) LastActivity(domain.RunID) time.Time { return time.Time{} }
-
-func (d missingDriver) Deliver(context.Context, *domain.Run, *domain.Member, string) error {
-	return d.err()
+func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string, _ bool) (string, error) {
+	return "", d.pty.Inject(ctx, ptyhost.RunSession(run.ID), member.DisplayName, member.Color, message, harness.SubmitSequence(run.Harness))
 }
 
 // driver returns the agent driver for mode. Headless runs also host their
 // one-shot agent on the primary PTY.
 func (s *Scheduler) driver(mode domain.LaunchMode) AgentDriver {
-	switch mode {
-	case domain.LaunchTUI, domain.LaunchHeadless:
-		return tuiDriver{pty: s.cfg.PTY}
-	default:
-		return missingDriver{mode: mode}
+	if mode == domain.LaunchACP {
+		return s.acp
 	}
+	return tuiDriver{pty: s.cfg.PTY}
 }

@@ -418,6 +418,12 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if coordErr != nil {
 		return coordErr
 	}
+	if run.Mode == domain.LaunchACP {
+		// The session host reports both ends of every turn itself.
+		s.mu.Lock()
+		entry.reporter = harness.ReporterFull
+		s.mu.Unlock()
+	}
 	plan.Mounts = append(plan.Mounts, coordMounts...)
 	if len(coordMounts) > 0 {
 		ensureCoordinationCLIPath(plan.Env)

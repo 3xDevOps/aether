@@ -298,11 +298,11 @@ type collabPTY struct {
 	err   error
 }
 
-func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string) error {
+func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, _ bool) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
-	return p.err
+	return "", p.err
 }
 func (p *collabPTY) Calls() int { p.mu.Lock(); defer p.mu.Unlock(); return p.calls }
 
@@ -729,9 +729,9 @@ func TestOverdueWorkerWaitsForSchedulerRecovery(t *testing.T) {
 	worker, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Now: clock.Now,
 		Ready: ready, WorkerInterval: time.Hour,
-		Inject: func(context.Context, domain.RunID, domain.MemberID, string) error {
+		Inject: func(context.Context, domain.RunID, domain.MemberID, string, bool) (string, error) {
 			delivered <- struct{}{}
-			return nil
+			return "", nil
 		},
 	})
 	if err != nil {
@@ -1055,12 +1055,12 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	var injectedMessage string
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string) error {
+		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string, _ bool) (string, error) {
 			if gotRun != run.ID {
 				t.Fatalf("injected run=%q, want %q", gotRun, run.ID)
 			}
 			injectedActor, injectedMessage = actor, message
-			return nil
+			return "", nil
 		},
 		Attachments: func(context.Context, domain.WorkspaceID, domain.RunID, string) error { return nil },
 	})

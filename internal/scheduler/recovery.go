@@ -325,6 +325,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			return nil, rollback(errors.Join(retainedTransitionError(), resumeErr))
 		}
 		resumed = true
+		// The ACP driver will not exec into a container it thinks is frozen.
+		s.mu.Lock()
+		entry.paused = false
+		s.mu.Unlock()
 	}
 
 	att, err := s.cfg.Runtime.Attach(ctx, cid)

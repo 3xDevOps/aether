@@ -523,6 +523,9 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		return errors.Join(err, s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid))
 	}
 	s.setPaused(entry, false)
+	if entry.launchMode == domain.LaunchACP {
+		s.acp.resumeAfterPause(ctx, entry)
+	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
 	return nil
 }
@@ -552,38 +555,39 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 // Inject delivers a steering message to the live run's agent through its
 // driver; the tui driver ends it with the harness's submit sequence so the
 // text reaches the agent's conversation rather than sitting in its input box.
-func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
+func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error) {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry != nil && (entry.status == domain.RunRunning || entry.status == domain.RunNeedsAttention) {
 		workspace := entry.workspaceID
 		s.mu.Unlock()
-		return s.injectLive(ctx, run, workspace, actor, message)
+		return s.injectLive(ctx, run, workspace, actor, message, steer)
 	}
 	s.mu.Unlock()
 
 	_, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
+	return "", fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
 }
 
-func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, message string) error {
+func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, message string, steer bool) (string, error) {
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
-		return err
+		return "", err
 	}
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := s.driver(r.Mode).Deliver(ctx, r, m, message); err != nil {
-		return err
+	outcome, err := s.driver(r.Mode).Deliver(ctx, r, m, message, steer)
+	if err != nil {
+		return "", err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
 	s.RecordSteer(ctx, run, actor)
-	return nil
+	return outcome, nil
 }
 
 // persistRetainedSidecar makes both the sidecar contents and its directory

@@ -62,8 +62,8 @@ const (
 
 // Injector is the scheduler's actor-aware canonical steering seam. It owns
 // PTY acceptance and records the timeline/co-author effects exactly once after
-// acceptance.
-type Injector func(context.Context, domain.RunID, domain.MemberID, string) error
+// acceptance. The outcome is empty for a terminal run.
+type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
 
 // AttachmentValidator accepts only an opaque reference to an image already
 // known to the image service. A validator is required whenever attachments
@@ -147,6 +147,8 @@ type MessageInput struct {
 	// prove that a steer came from the current controller session.
 	ControllerSessionID  string
 	ControllerGeneration uint64
+	// A steer held for moderation is delivered as an ordinary next prompt.
+	Steer bool
 }
 
 // Result contains the persisted message and, for steering, the delivery
@@ -154,6 +156,7 @@ type MessageInput struct {
 type Result struct {
 	Message *store.RoomMessage
 	Receipt Receipt
+	Outcome string
 }
 
 // Status is a bounded room snapshot suitable for transport responses.
@@ -403,7 +406,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	if msg.DeliverAfter != nil {
 		return Result{Message: msg}, nil
 	}
-	return s.deliverResult(ctx, msg, actor, run, false, "", deliveryProof, nil)
+	return s.deliverResult(ctx, msg, actor, run, false, "", deliveryProof, nil, in.Steer)
 }
 
 func (s *Service) observeExisting(ctx context.Context, msg *store.RoomMessage) (Result, error) {

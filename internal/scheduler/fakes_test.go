@@ -765,6 +765,7 @@ type fakePTY struct {
 	sessions       map[ptyhost.SessionKey]*fakePTYSession
 	nextGeneration uint64
 	injects        []fakeInject
+	logDir         string
 }
 
 type fakePTYSession struct {
@@ -837,8 +838,15 @@ func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {
 	return sess.att.Close()
 }
 
-func (p *fakePTY) RemoveRunTranscripts(_ context.Context, _ domain.RunID) error {
+func (p *fakePTY) RemoveRunTranscripts(_ context.Context, run domain.RunID) error {
+	if err := os.Remove(p.ItemLogPath(run)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
+}
+
+func (p *fakePTY) ItemLogPath(run domain.RunID) string {
+	return filepath.Join(p.logDir, string(run)+".items.jsonl")
 }
 func (p *fakePTY) ActiveSessions(prefix string) []ptyhost.SessionKey {
 	p.mu.Lock()

@@ -71,7 +71,7 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 	waitFor(t, "harness exit", func() bool {
 		return strings.Contains(sess.output(), "[aether] harness exited with code 0")
 	})
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "printf 'scheduler-login-shell-ready\\n'"); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "printf 'scheduler-login-shell-ready\\n'", false); err != nil {
 		t.Fatalf("Inject login-shell probe: %v", err)
 	}
 	waitFor(t, "login shell probe", func() bool {

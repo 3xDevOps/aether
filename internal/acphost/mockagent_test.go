@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -14,35 +13,19 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// fixture is a recorded agent conversation from testdata, trimmed from a
-// real adapter run: the initialize and session/new results, the updates of
-// one prompt turn, and the updates session/load replays.
-type fixture struct {
-	Initialize json.RawMessage `json:"initialize"`
-	SessionNew json.RawMessage `json:"session_new"`
-	Prompt     struct {
-		Updates []json.RawMessage `json:"updates"`
-		Result  json.RawMessage   `json:"result"`
-	} `json:"prompt"`
-	Load struct {
-		Updates []json.RawMessage `json:"updates"`
-		Result  json.RawMessage   `json:"result"`
-	} `json:"load"`
-}
+type fixture = acpmock.Fixture
 
 var discard = slog.New(slog.DiscardHandler)
 
 func loadFixture(t *testing.T, name string) fixture {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", name+".json"))
+	f, err := acpmock.Load(name)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var f fixture
-	if err := json.Unmarshal(b, &f); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -113,11 +96,7 @@ func (m *mockAgent) update(u any) {
 }
 
 func (m *mockAgent) sessionID() string {
-	var r struct {
-		SessionID string `json:"sessionId"`
-	}
-	_ = json.Unmarshal(m.fix.SessionNew, &r)
-	return r.SessionID
+	return m.fix.SessionID()
 }
 
 func (m *mockAgent) request(ctx context.Context, method string, params any) (json.RawMessage, error) {

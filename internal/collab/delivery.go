@@ -12,7 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error) (Result, error) {
+func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error, steer bool) (Result, error) {
 	var (
 		claimed bool
 		stored  *store.RoomMessage
@@ -46,7 +46,7 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// Do not publish the uncertain claim before attempting PTY delivery. A
 	// publication outage must never turn an otherwise unattempted steer into
 	// a durable "uncertain" result.
-	receipt, deliveryErr := s.deliver(ctx, msg, actor, run, deliveryProof)
+	receipt, outcome, deliveryErr := s.deliver(ctx, msg, actor, run, deliveryProof, steer)
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
@@ -65,15 +65,16 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Message: stored, Receipt: receipt}, nil
+	return Result{Message: stored, Receipt: receipt, Outcome: outcome}, nil
 }
 
 // deliver rechecks mutable membership and workspace policy while holding the
 // same run admission lock used by controller takeover and fencing. An
 // immediate delivery also proves the exact member, session, and generation
 // that made it eligible. The callback must not call back into Control.
-func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, deliveryProof *control.Snapshot) (Receipt, error) {
+func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, deliveryProof *control.Snapshot, steer bool) (Receipt, string, error) {
 	var attempted, revoked bool
+	var outcome string
 	accept := func() error {
 		freshRun, freshActor, ws, err := s.scope(ctx, msg.WorkspaceID, msg.RunID, msg.ActorID)
 		if err != nil {
@@ -97,7 +98,8 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		// production canonical injection receives the freshly authorized actor.
 		actor, run = freshActor, freshRun
 		attempted = true
-		return s.inject(ctx, msg, actor, run)
+		outcome, err = s.inject(ctx, msg, actor, run, steer)
+		return err
 	}
 	var err error
 	if s.cfg.Control != nil {
@@ -110,26 +112,26 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		err = accept()
 	}
 	if revoked {
-		return ReceiptNotSent, nil
+		return ReceiptNotSent, "", nil
 	}
 	if err != nil {
 		if deliveryProof != nil && errors.Is(err, control.ErrStale) {
-			return ReceiptNotSent, nil
+			return ReceiptNotSent, "", nil
 		}
 		if !attempted {
-			return "", err
+			return "", "", err
 		}
-		return ClassifyReceipt(err), nil
+		return ClassifyReceipt(err), "", nil
 	}
-	return ReceiptSent, nil
+	return ReceiptSent, outcome, nil
 }
 
-func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run) error {
+func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, steer bool) (string, error) {
 	message := serializeAgentMessage(msg.Body, msg.Attachments)
 	if s.cfg.Inject == nil {
-		return ErrNoInjector
+		return "", ErrNoInjector
 	}
-	return s.cfg.Inject(ctx, run.ID, actor.ID, message)
+	return s.cfg.Inject(ctx, run.ID, actor.ID, message, steer)
 }
 
 // serializeAgentMessage keeps the body and validated container-visible
@@ -194,7 +196,7 @@ func (s *Service) DeliverDue(ctx context.Context, limit int) (int, error) {
 					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue run %q for message %q: %w", msg.RunID, msg.ID, err))
 					continue
 				}
-				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil); err != nil {
+				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil, false); err != nil {
 					sweepErrs = append(sweepErrs, fmt.Errorf("deliver overdue message %q: %w", msg.ID, err))
 					continue
 				}

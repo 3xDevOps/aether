@@ -761,9 +761,6 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		if c.AccountMemberID == "" || c.Harness == "" || !mode.Valid() {
 			return protocol.MissionCreateResult{}, errors.New("execution choices must name account_member_id, harness, and valid mode")
 		}
-		if mode == domain.LaunchACP {
-			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice: " + domain.ErrLaunchModeUnavailable.Error())
-		}
 		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode})
 	}
 	m := &domain.Mission{

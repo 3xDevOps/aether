@@ -242,6 +242,7 @@ type Scheduler struct {
 	// agentInstalls maps a member with an agent.install in flight to its
 	// home's host path (agent_install.go).
 	agentInstalls map[domain.MemberID]string
+	acp           *acpDriver
 }
 
 // credentialUserReservation protects the writable member home a container
@@ -560,7 +561,7 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, fmt.Errorf("scheduler: create state dir: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Scheduler{
+	s := &Scheduler{
 		cfg:                  cfg,
 		harnesses:            harnesses,
 		superCtx:             ctx,
@@ -572,7 +573,9 @@ func New(cfg Config) (*Scheduler, error) {
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
-	}, nil
+	}
+	s.acp = newACPDriver(s)
+	return s, nil
 }
 
 // RecoveryReady returns a channel closed once all persisted runtime state has
@@ -727,37 +730,27 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 	return nil
 }
 
-// ACPLaunchable is false until the ACP driver is wired into launch.
-func (s *Scheduler) ACPLaunchable() bool {
-	return false
-}
-
 // command resolves argv and profile for one launch by member on account's
 // shared account, with the profile from launchProfile.
 func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
 	task = s.withCoAuthorInstruction(task)
-	profile, tui, headless, err := s.launchProfile(ctx, member, account, harnessName)
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
 		return nil, harness.Profile{}, err
 	}
-	var argv []string
-	switch mode {
-	case domain.LaunchTUI:
-		argv = tui
-	case domain.LaunchHeadless:
-		argv = headless
-	case domain.LaunchACP:
-		if !s.ACPLaunchable() {
-			return nil, harness.Profile{}, domain.ErrLaunchModeUnavailable
-		}
-	default:
+	if !mode.Valid() {
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
 	}
-	if harnessName == "fake" && len(argv) == 0 {
+	argv := argvs[mode]
+	if harnessName == "fake" && len(argv) == 0 && mode != domain.LaunchACP {
 		argv = strings.Fields(os.Getenv(fakeAgentEnv))
 	}
 	if len(argv) == 0 {
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
+	}
+	if mode == domain.LaunchACP {
+		// The task travels over the protocol, not argv.
+		return nil, profile, nil
 	}
 	return harness.Argv(argv, task), profile, nil
 }
@@ -773,21 +766,21 @@ var errMemberDefinitionOnly = errors.New("is your own agent definition, which ru
 // the shipped registry. Admin specs and the registry are server-controlled,
 // so their CredentialPaths decide what a share exposes; member's own
 // definition is refused on another member's account.
-func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, []string, []string, error) {
+func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, map[domain.LaunchMode][]string, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
-	var tui, headless []string
+	var tui, headless, acp []string
 	spec, ok := s.harnesses[harnessName]
 	memberDefined := false
 	if !ok {
 		memberSpec, found, err := s.memberHarnessSpec(ctx, member, harnessName)
 		if err != nil {
-			return harness.Profile{}, nil, nil, err
+			return harness.Profile{}, nil, err
 		}
 		spec, ok, memberDefined = memberSpec, found, found
 	}
 	switch {
 	case ok:
-		tui, headless = spec.TUIArgs, spec.HeadlessArgs
+		tui, headless, acp = spec.TUIArgs, spec.HeadlessArgs, spec.ACPArgs
 		if spec.Executable != "" {
 			profile = (harness.Definition{
 				Name:            harnessName,
@@ -812,21 +805,23 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
 	case inRegistry:
-		tui, headless = profile.TUIArgs, profile.HeadlessArgs
+		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
 	default:
-		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
+		return harness.Profile{}, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
 	}
 	if memberDefined && account != member {
-		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
+		return harness.Profile{}, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
 	}
-	return profile, tui, headless, nil
+	return profile, map[domain.LaunchMode][]string{domain.LaunchTUI: tui, domain.LaunchHeadless: headless, domain.LaunchACP: acp}, nil
 }
 
 // wrapTUICommand makes the configured harness the first child of a
 // POSIX-shell supervisor. Harness arguments remain positional parameters, so
 // task text and other argv values can never become shell source. Once the
 // harness exits its status is reported and the container stays available via
-// a login shell until the scheduler explicitly closes or kills the run.
+// a login shell until the scheduler explicitly closes or kills the run. With
+// no argv the login shell is the first child: an enhanced run's agent runs
+// beside it.
 func wrapTUICommand(argv []string) []string {
 	const script = `exec 3<&0
 child=
@@ -880,9 +875,11 @@ run_child() {
 	return "$status"
 }
 
-run_child TERM "$@"
-status=$?
-printf '\n[aether] harness exited with code %s\n' "$status"
+if [ "$#" -gt 0 ]; then
+	run_child TERM "$@"
+	status=$?
+	printf '\n[aether] harness exited with code %s\n' "$status"
+fi
 while :
 do
 	if [ -n "$pending_signal" ]; then
@@ -949,6 +946,11 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
+	if run.Mode == domain.LaunchACP {
+		// An adapter cannot open a browser in a container; its login
+		// prints a URL instead.
+		env["NO_BROWSER"] = "1"
+	}
 	if run.Mode.Interactive() || persistSupervisor {
 		argv = wrapTUICommand(argv)
 	}

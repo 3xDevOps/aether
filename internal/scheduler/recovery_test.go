@@ -323,7 +323,7 @@ func TestRecoveryPublishesRunBeforePTYStartReturns(t *testing.T) {
 	case <-time.After(waitTimeout):
 		t.Fatal("recovery never published PTY session")
 	}
-	if err := s2.Inject(t.Context(), run.ID, e.member.ID, "inject while PTY starts"); err != nil {
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "inject while PTY starts", false); err != nil {
 		t.Fatalf("Inject during PTY start: %v", err)
 	}
 }

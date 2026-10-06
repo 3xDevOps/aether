@@ -22,7 +22,7 @@ func init() {
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	agent := fs.String("agent", "", "harness name")
-	mode := fs.String("mode", "tui", "tui or headless")
+	mode := fs.String("mode", "standard", launchModeHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
@@ -48,13 +48,15 @@ func runRun(args []string) error {
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
-	if *mode != "tui" && *mode != "headless" {
-		return fmt.Errorf("invalid mode %q (want tui or headless)", *mode)
+	wireMode, err := parseLaunchMode(*mode)
+	if err != nil {
+		return err
 	}
-	// A taskless launch drops you into the agent's interactive TUI. Headless
-	// has no interactive surface, so it still needs a prompt.
+	*mode = wireMode
+	// A taskless launch drops you into the agent's interactive surface.
+	// Background has none, so it still needs a prompt.
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode tui|headless] [--workspace] [--account <member-id>] [--cached-base <full-sha>]\n   (a task is required with --mode headless)\n   or: aether run --template <name> [--param k=v] [--workspace]")
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--workspace] [--account <member-id>] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)

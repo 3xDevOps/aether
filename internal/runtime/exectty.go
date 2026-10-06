@@ -13,7 +13,8 @@ import (
 
 // execAttachment adapts a hijacked Docker exec connection to Attachment.
 // With a TTY, stdout carries the merged raw stream and stderr is empty;
-// without one, Docker multiplexes both and they are demuxed here.
+// without one, Docker multiplexes both and they are demuxed here, and
+// stdout is lossless because it carries the command's protocol stream.
 type execAttachment struct {
 	cli  *client.Client
 	id   string
@@ -35,6 +36,9 @@ func newExecAttachment(cli *client.Client, id string, tty bool, resp client.Hija
 		stdout: newStreamBuffer(),
 		stderr: newStreamBuffer(),
 		done:   make(chan struct{}),
+	}
+	if !tty {
+		a.stdout = newLosslessStreamBuffer()
 	}
 	go func() {
 		var err error

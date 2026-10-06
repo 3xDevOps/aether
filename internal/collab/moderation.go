@@ -29,7 +29,7 @@ func (s *Service) ApproveNow(ctx context.Context, id string, by domain.MemberID,
 	claimAdmission := func(fn func() error) error {
 		return s.cfg.Control.AdmitMember(string(run.ID), by, session, generation, fn)
 	}
-	return s.deliverResult(ctx, msg, actor, run, true, by, nil, claimAdmission)
+	return s.deliverResult(ctx, msg, actor, run, true, by, nil, claimAdmission, false)
 }
 
 // Deny atomically settles a queued steer request as denied. The caller must

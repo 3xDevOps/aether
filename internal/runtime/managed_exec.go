@@ -17,7 +17,8 @@ type ManagedExecRuntime interface {
 	StartExecTTY(context.Context, ID, ExecSpec) (ManagedExec, error)
 	// StartExecPipe owns the command the same way, without a terminal: it
 	// gets its own process group and no controlling tty, and its attachment
-	// carries separate stdin, stdout and stderr streams.
+	// carries separate stdin, stdout and stderr streams. Its stdout never
+	// drops bytes: a reader that falls behind slows the command instead.
 	StartExecPipe(context.Context, ID, ExecSpec) (ManagedExec, error)
 	RecoverExec(context.Context, ExecIdentity) (ManagedExec, error)
 }

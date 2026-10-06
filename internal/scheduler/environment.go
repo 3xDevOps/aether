@@ -341,7 +341,7 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	if account == member || s.cfg.Homes == nil {
 		return SharedLaunchable, "", nil
 	}
-	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
+	profile, _, err := s.launchProfile(ctx, member, account, harnessName)
 	if errors.Is(err, errMemberDefinitionOnly) {
 		return SharedOwnDefinitionOnly, "", nil
 	}

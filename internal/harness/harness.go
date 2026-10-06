@@ -274,6 +274,7 @@ type Profile struct {
 	// ACPSessionShared means the ACP server and the TUI keep one session
 	// store, so a session started in one resumes in the other.
 	ACPSessionShared bool
+	ACPMode          string
 	// ACPDefault makes an enhanced run the agent's default once its ACP
 	// server is installed. Claude stays on its terminal by default: its
 	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
@@ -430,6 +431,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:        []string{claudeACP.Binary},
 		ACPInstall:     claudeACP,
+		ACPMode:        "auto",
 		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
 		// Runs execute as root on the standard image, and Claude Code
@@ -467,6 +469,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		ACPArgs:         []string{codexACP.Binary},
 		ACPInstall:      codexACP,
+		ACPMode:         "agent",
 		ACPDefault:      true,
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},

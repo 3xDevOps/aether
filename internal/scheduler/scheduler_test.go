@@ -147,6 +147,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		git: newFakeGit(filepath.Join(dir, "checkouts")),
 		pty: newFakePTY(),
 	}
+	e.pty.logDir = dir
 	ctx := t.Context()
 	e.ws = &domain.Workspace{
 		Name:        "ws",
@@ -804,8 +805,8 @@ func TestLaunchValidation(t *testing.T) {
 	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
 		t.Fatal("invalid mode accepted")
 	}
-	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchACP); !errors.Is(err, domain.ErrLaunchModeUnavailable) {
-		t.Fatalf("acp launch error = %v, want ErrLaunchModeUnavailable", err)
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchACP); err == nil || !strings.Contains(err.Error(), `no command for mode "acp"`) {
+		t.Fatalf("acp launch of an agent without an ACP command: %v", err)
 	}
 	t.Setenv(fakeAgentEnv, "fake-agent")
 	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
@@ -1315,7 +1316,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi"); !errors.Is(err, ptyhost.ErrNoSession) {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi", false); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
 	}
 }
