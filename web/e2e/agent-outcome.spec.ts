@@ -1,5 +1,5 @@
 // An agent that reports its own outcome finishes the run, and the run waits
-// in Idle until its owner opens it. The agent is a shell fixture that
+// in Needs you until its owner opens it. The agent is a shell fixture that
 // calls the real `aether-internal report` over the run's coordination socket.
 
 import { expect, test } from './fixtures'
@@ -21,7 +21,7 @@ sleep 600`
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('an agent success report waits in Idle until its owner opens the run', async ({ page, aether }) => {
+test('an agent success report waits in Needs you until its owner opens the run', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -38,15 +38,15 @@ test('an agent success report waits in Idle until its owner opens the run', asyn
   await page.goto(alice.url)
   const card = (column: string) =>
     page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
-  await expect(card('Idle')).toBeVisible({ timeout: 180_000 })
-  await expect(card('Idle').getByText('The agent reported success; open the run to review it.')).toBeVisible()
-  await expect(card('Idle').getByLabel('Done', { exact: true })).toBeVisible()
+  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
+  await expect(card('Needs you').getByText('Finished, review the result')).toBeVisible()
+  await expect(card('Needs you').getByLabel('Needs you', { exact: true })).toBeVisible()
 
-  await card('Idle').getByRole('button', { name: task, exact: true }).click()
+  await card('Needs you').getByRole('button', { name: task, exact: true }).click()
   await expect
     .poll(async () => (await alice.api.rpc<{ run: { outcome_unseen?: boolean } }>('run.get', { run_id: run.id })).run.outcome_unseen ?? false)
     .toBe(false)
   await page.getByRole('navigation', { name: 'Surfaces' }).getByRole('button', { name: 'Board', exact: true }).click()
-  await expect(card('Done')).toBeVisible()
-  await expect(card('Idle')).toHaveCount(0)
+  await expect(card('Finished')).toBeVisible()
+  await expect(card('Needs you')).toHaveCount(0)
 })

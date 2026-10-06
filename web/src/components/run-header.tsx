@@ -4,39 +4,28 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { StateIndicator } from '@/components/state-dot'
 import { deletesInLabel, timeAgo } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
-import { runLabel, runState, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { focusRing } from '@/lib/utils'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
+import { useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
-function stateTone(state: PresentationState) {
-  switch (state) {
-    case 'failed':
-      return 'border-state-failed/50 text-state-failed'
-    case 'done':
-      return 'border-state-done/50 text-success-foreground'
-    case 'waiting':
-      return 'border-state-waiting/50 text-state-waiting'
-    case 'needs-attention':
-      return 'border-state-needs-attention/50 text-state-needs-attention'
-    case 'working':
-      return 'border-state-working/50 text-state-working'
-    default:
-      return 'border-border/80 text-muted-foreground'
-  }
+const stateChipClass: Record<PresentationState, string> = {
+  'needs-you': 'border-state-needs-you/50 text-state-needs-you',
+  working: 'border-state-working/50 text-state-working',
+  paused: 'border-border/80 text-muted-foreground',
+  done: 'border-state-done/50 text-success-foreground',
+  failed: 'border-state-failed/50 text-state-failed',
 }
 
-function reasonTone(state: PresentationState) {
-  switch (state) {
-    case 'failed':
-      return 'border-state-failed bg-state-failed/10'
-    case 'needs-attention':
-      return 'border-state-needs-attention/60 bg-state-needs-attention/10'
-    default:
-      return 'border-border/80 bg-muted/20'
-  }
+const reasonClass: Record<PresentationState, string> = {
+  'needs-you': 'border-state-needs-you/60 bg-state-needs-you/10',
+  working: 'border-border/80 bg-muted/20',
+  paused: 'border-border/80 bg-muted/20',
+  done: 'border-border/80 bg-muted/20',
+  failed: 'border-state-failed bg-state-failed/10',
 }
 
 /** Shared title, state, task and metadata for every run-detail tab. */
@@ -55,7 +44,7 @@ export function RunHeader({
   const account = useStore((s) =>
     run.account_member_id ? s.members[run.account_member_id] : undefined,
   )
-  const state = runState(run.status)
+  const { state, reason } = useRunPresentation(run)
   const label = runLabel(run)
   const task = run.task.trim()
   const detail = subtitle?.trim()
@@ -96,7 +85,7 @@ export function RunHeader({
           </div>
           <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-4 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <span
-              className={`inline-flex min-h-5 shrink-0 items-center gap-1.5 rounded-sm border px-2 py-px text-xs leading-4 ${stateTone(state)}`}
+              className={`inline-flex min-h-5 shrink-0 items-center gap-1.5 rounded-sm border px-2 py-px text-xs leading-4 ${stateChipClass[state]}`}
             >
               <StateIndicator
                 state={state}
@@ -161,6 +150,12 @@ export function RunHeader({
                   </div>
                 )}
                 <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+                  <dt className="text-xs font-medium text-muted-foreground">Lifecycle</dt>
+                  <dd className="min-w-0 break-words text-[13px]">
+                    {run.status}{run.reason ? ` - ${run.reason}` : ''}
+                  </dd>
+                </div>
+                <div className="grid min-w-0 gap-1 py-2 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
                   <dt className="text-xs font-medium text-muted-foreground">Created</dt>
                   <dd className="min-w-0 break-words text-[13px]">{timeAgo(run.created_at)}</dd>
                 </div>
@@ -185,15 +180,12 @@ export function RunHeader({
               </dl>
             </div>
           </details>
-          {run.reason && (
-            <div
-              tabIndex={0}
-              className={`${focusRing} col-span-2 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
-            >
-              <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
-              <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
-            </div>
-          )}
+          <div
+            tabIndex={0}
+            className={`${focusRing} col-span-2 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonClass[state]}`}
+          >
+            <span className="whitespace-pre-wrap break-words select-text">{reason}</span>
+          </div>
         </div>
         <div className="flex min-h-9 min-w-0 items-stretch justify-between overflow-hidden border-t border-border bg-sidebar">
           <RunTabs runID={run.id} active={active} />

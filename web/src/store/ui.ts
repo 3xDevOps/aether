@@ -10,7 +10,6 @@ import type {
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type GroupBy = 'status' | 'member'
 export type BoardView = 'cards' | 'map'
 
 export interface BoardMapViewport {
@@ -186,7 +185,8 @@ export interface UiSlice {
    * hydration names one, which is why every consumer treats empty as "all".
    */
   activeWorkspace: string
-  groupBy: GroupBy
+  /** Working and Finished list only the viewer's own runs. */
+  mineOnly: boolean
   boardView: BoardView
   boardMapViewports: Record<string, BoardMapViewport>
   /**
@@ -218,7 +218,7 @@ export interface UiSlice {
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
-  setGroupBy: (groupBy: GroupBy) => void
+  setMineOnly: (mineOnly: boolean) => void
   setBoardView: (view: BoardView) => void
   setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
   rememberHarness: (accountID: string, harness: string) => void
@@ -228,7 +228,7 @@ export interface UiSlice {
   clearDismissedUpdates: () => void
 }
 
-export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
+export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   theme: 'system',
   sidebarWidth: minSidebarWidth,
   sidebarCollapsed: false,
@@ -248,7 +248,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
-  groupBy: 'status',
+  mineOnly: false,
   boardView: 'cards',
   boardMapViewports: {},
   lastHarnessByAccount: {},
@@ -293,7 +293,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           ? { name: 'workspace', params: { workspaceId: workspaceID } }
           : s.route,
     })),
-  setGroupBy: (groupBy) => set({ groupBy }),
+  setMineOnly: (mineOnly) => set({ mineOnly }),
   setBoardView: (boardView) => set({ boardView }),
   setBoardMapViewport: (scope, value) => {
     const viewport = normalizeBoardMapViewport(value)
@@ -308,10 +308,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
       lastHarnessByAccount: { ...s.lastHarnessByAccount, [accountID]: harness },
     }))
   },
-  // Revealing a run acknowledges it, wherever the reveal came from: every
-  // surface routes through this one call, so this is the only place the ack
-  // belongs. Opening a workspace also makes it the active scope, so the
-  // sidebar and every scoped surface follow the view.
+  // Opening a workspace also makes it the active scope, so the sidebar and
+  // every scoped surface follow the view.
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },
@@ -319,7 +317,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
         ? { onboarded: true, ...wizardReset }
         : {}),
     }))
-    if (params.runId) get().ackRun(params.runId)
     if (name === 'workspace' && params.workspaceId) {
       set({ activeWorkspace: params.workspaceId })
     }

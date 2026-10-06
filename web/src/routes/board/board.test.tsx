@@ -40,10 +40,13 @@ function seed(runs: Run[], active = workspace.id) {
     info: { ...serverInfo, member: alice },
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
-    acked: {},
     pausedRuns: {},
     inbox: {},
+    approvalsByRun: {},
     roomMessages: {},
+    roomStatus: {},
+    missions: {},
+    mineOnly: false,
     hydrated: true,
     overlaps: {},
     missionDetails: {},
@@ -156,8 +159,8 @@ describe('board', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
-    expect(column('Idle').getByText('waiting on a question')).toBeDefined()
-    expect(column('Done').getByText('landed already')).toBeDefined()
+    expect(column('Needs you').getByText('waiting on a question')).toBeDefined()
+    expect(column('Finished').getByText('landed already')).toBeDefined()
 
     // queued (11:00) changed after running (10:02), so it sorts above it.
     const tasks = column('Working')
@@ -192,7 +195,6 @@ describe('board', () => {
 
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(working.branch))
     expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
-    expect(useStore.getState().acked[working.id]).toBeUndefined()
   })
 
   it('discloses the full task and reason without opening the run', () => {
@@ -261,7 +263,7 @@ describe('board', () => {
       },
     })
     render(
-      <RunCard variant={variant} run={toRecord(working)} state="working" unseen={false} paused={false} />,
+      <RunCard variant={variant} run={toRecord(working)} state="working" reason="Agent working" />,
     )
 
     const disclosure = screen.getByRole('button', { name: `Show details for ${working.task}` })
@@ -318,7 +320,7 @@ describe('board', () => {
     })
     seed([detailed])
     render(
-      <RunCard variant="map" run={toRecord(detailed)} state="working" unseen={false} paused={false} />,
+      <RunCard variant="map" run={toRecord(detailed)} state="working" reason="Agent working" />,
     )
     const disclosure = screen.getByRole('button', { name: 'Show details for Map checkout' })
     disclosure.focus()
@@ -378,7 +380,7 @@ describe('board', () => {
     render(<Board />)
 
     const card = screen.getByRole('article')
-    const explanation = within(card).getByText(attention.reason!)
+    const explanation = within(card).getByText(/^No activity for/)
     const range = document.createRange()
     range.selectNodeContents(explanation)
     const selection = window.getSelection()
@@ -409,6 +411,29 @@ describe('board', () => {
     expect(column('Working').queryByText('still going')).toBeNull()
   })
 
+  it('lists what needs the viewer from every workspace', () => {
+    seed([working, run({ ...stalled, workspace_id: otherWorkspace.id })])
+    render(<Board />)
+
+    expect(column('Needs you').getByText(stalled.task)).toBeDefined()
+    expect(column('Working').getByText(working.task)).toBeDefined()
+  })
+
+  it('shows a swarm as one card with its workers counted', () => {
+    const integrator = run({ id: 'run_integrator', task: 'coordinate checkout', mission_id: 'mission_1', mission_role: 'integrator' })
+    const worker = (id: string, status: Run['status']) => run({
+      id, task: `worker ${id}`, status, mode: 'headless',
+      mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id,
+    })
+    seed([integrator, worker('w1', 'running'), worker('w2', 'running'), worker('w3', 'completed')])
+    render(<Board />)
+
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(column('Working').getByText('coordinate checkout')).toBeDefined()
+    expect(column('Working').getByText('2 working · 1 done')).toBeDefined()
+    expect(screen.queryByText('worker w1')).toBeNull()
+  })
+
   it('shows every run before hydration has named a workspace', () => {
     seed([working, elsewhere], '')
     render(<Board />)
@@ -417,53 +442,19 @@ describe('board', () => {
     expect(column('Working').getByText('another workspace entirely')).toBeDefined()
   })
 
-  it('mutes a card once its run is acknowledged', () => {
-    seed([stalled])
-    render(<Board />)
-
-    const card = screen.getByRole('article')
-    expect(within(card).getByRole('button', { name: stalled.task, description: 'Unseen' })).toBeDefined()
-
-    fireEvent.click(within(card).getByRole('button', { name: 'waiting on a question' }))
-
-    expect(within(card).queryByRole('button', { name: stalled.task, description: 'Unseen' })).toBeNull()
-    // The ack is app-wide, and the click reveals the run.
-    expect(useStore.getState().acked[stalled.id]).toEqual({
-      status: stalled.status,
-      at: stalled.started_at,
-    })
-    expect(useStore.getState().route).toEqual({
-      name: 'terminal',
-      params: { runId: stalled.id },
-    })
-  })
-
-  it('marks every run seen at once', () => {
-    seed([stalled, working])
-    render(<Board />)
-
-    expect(screen.getAllByRole('button', { description: 'Unseen' })).toHaveLength(2)
-    const markAll = screen.getByRole('button', { name: 'Mark all seen' })
-
-    fireEvent.click(markAll)
-
-    expect(screen.queryAllByRole('button', { description: 'Unseen' })).toEqual([])
-    expect(Object.keys(useStore.getState().acked).sort()).toEqual([stalled.id, working.id].sort())
-  })
-
   it('badges a paused run off the timeline stream, and clears it on resume', () => {
     seed([working])
     render(<Board />)
-    expect(screen.queryByTitle('Paused')).toBeNull()
+    expect(column('Working').queryByLabelText('Paused')).toBeNull()
 
     // The whole point of the derivation: the run still reads `running`, and
     // only the steering entry says otherwise. Drive the real event path.
     act(() => timeline('pause', 1))
-    expect(screen.getByTitle('Paused')).toBeDefined()
+    expect(column('Working').getByLabelText('Paused')).toBeDefined()
     expect(useStore.getState().runs[working.id].status).toBe('running')
 
     act(() => timeline('resume', 2))
-    expect(screen.queryByTitle('Paused')).toBeNull()
+    expect(column('Working').queryByLabelText('Paused')).toBeNull()
   })
   it('marks a protected run with its access restriction badge', () => {
     const protectedRun = run({ protected: true })
@@ -475,24 +466,29 @@ describe('board', () => {
     ).toBeDefined()
   })
 
-  it('re-emphasizes an acknowledged run when it changes state again', () => {
+  it('moves the viewer\'s run into Needs you when its agent stops', () => {
     seed([working])
     render(<Board />)
-
-    act(() => useStore.getState().ackRun(working.id))
-    expect(screen.queryByRole('button', { name: working.task, description: 'Unseen' })).toBeNull()
 
     act(() =>
       useStore
         .getState()
-        .applyRunStatus(working.id, 'needs-attention', 'plan approval', '2026-08-14T12:00:00Z'),
+        .applyRunStatus(working.id, 'needs-attention', 'agent idle', '2026-08-14T12:00:00Z'),
     )
 
-    expect(column('Idle').getByRole('button', { name: working.task, description: 'Unseen' })).toBeDefined()
-    expect(column('Idle').getByText('plan approval')).toBeDefined()
+    expect(column('Needs you').getByText(working.task)).toBeDefined()
+    expect(column('Needs you').getByText(/^Agent idle for/)).toBeDefined()
   })
 
-  it('keeps a busy run in Working while its approval opens and closes', () => {
+  it("keeps another member's stopped run in Working, waiting for its owner", () => {
+    seed([run({ ...stalled, member_id: bob.id })])
+    render(<Board />)
+
+    expect(column('Working').getByText(stalled.task)).toBeDefined()
+    expect(column('Working').getByText('Waiting for Bob')).toBeDefined()
+  })
+
+  it("moves the viewer's busy run into Needs you while its approval is open", () => {
     seed([working])
     render(<Board />)
     expect(column('Working').getByText('still going')).toBeDefined()
@@ -504,17 +500,13 @@ describe('board', () => {
         .setInbox(workspace.id, [approval({ run_id: working.id })]),
     )
 
-    expect(column('Working').getByText('still going')).toBeDefined()
-    expect(column('Working').getByRole('button', { name: /Needs input: 1 approval/ })).toBeDefined()
+    expect(column('Needs you').getByText('still going')).toBeDefined()
+    expect(column('Needs you').getByText('Permission: write src/checkout.ts')).toBeDefined()
     expect(useStore.getState().runs[working.id].status).toBe('running')
-    // No run.status event fired, so the run has no reason; the card's
-    // summary is the pending question itself.
-    expect(column('Working').getByText('write src/checkout.ts')).toBeDefined()
-    fireEvent.click(column('Working').getByRole('button', { name: /Needs input: 1 approval/ }))
+    fireEvent.click(column('Needs you').getByRole('button', { name: /Requests: 1 approval/ }))
     expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
-    expect(useStore.getState().acked[working.id]).toBeUndefined()
 
-    // Deciding the request clears the indicator without moving the card.
+    // Deciding the request moves the card back.
     act(() =>
       useStore
         .getState()
@@ -523,10 +515,10 @@ describe('board', () => {
         ]),
     )
     expect(column('Working').getByText('still going')).toBeDefined()
-    expect(column('Working').queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(column('Working').queryByRole('button', { name: /Requests:/ })).toBeNull()
   })
 
-  it('closes native requests individually without moving a busy card out of Working', async () => {
+  it('closes native requests individually and returns the card to Working after the last', async () => {
     const first = { id: 'question', session_id: 'session-1', kind: 'question' as const }
     const second = { id: 'permission', session_id: 'session-2', kind: 'permission' as const }
     seed([working, stalled])
@@ -536,16 +528,18 @@ describe('board', () => {
         id: `input-${seq}`, seq, time: '2026-08-14T12:00:00Z', workspace_id: workspace.id,
         run_id: working.id, actor_id: '', type: 'run.input', payload: { pending_inputs },
       }, fakeApi())
-    expect(column('Idle').queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(column('Needs you').queryByRole('button', { name: /Requests:/ })).toBeNull()
     await act(() => input([first, second], 1))
-    expect(column('Working').getByRole('button', { name: /Needs input: 1 question.*1 permission/ })).toBeDefined()
+    expect(column('Needs you').getByRole('button', { name: /Requests: 1 question.*1 permission/ })).toBeDefined()
+    expect(column('Needs you').getByText('Permission: answer in the terminal')).toBeDefined()
     await act(() => input([second], 2))
-    expect(column('Working').getByRole('button', { name: /^Needs input: 1 permission request in Terminal$/ })).toBeDefined()
+    expect(column('Needs you').getByRole('button', { name: /^Requests: 1 permission request in Terminal$/ })).toBeDefined()
     await act(() => input([], 3))
-    expect(column('Working').queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(column('Needs you').queryByRole('button', { name: /Requests:/ })).toBeNull()
     expect(column('Working').getByText(working.task)).toBeDefined()
   })
-  it('keeps unanswered room questions actionable without hiding ongoing work', () => {
+
+  it('lists a run with an unanswered room question under Needs you', () => {
     const questionRun = run({
       id: 'run_room_attention',
       task: 'answer the room',
@@ -556,38 +550,18 @@ describe('board', () => {
     seed([questionRun])
     render(<Board />)
 
-    const active = column('Working')
-    expect(active.getByText('answer the room')).toBeDefined()
-    expect(active.getByRole('button', { name: /Needs input: 1 unanswered question/ })).toBeDefined()
-    expect(active.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('answer the room')).toBeDefined()
+    expect(needsYou.getByText('Open question in the Run Room')).toBeDefined()
 
-    fireEvent.click(active.getByRole('button', { name: /Needs input:/ }))
+    fireEvent.click(needsYou.getByRole('button', { name: /Requests: 1 unanswered question/ }))
     expect(useStore.getState().route).toEqual({
       name: 'terminal',
       params: { runId: questionRun.id },
     })
   })
 
-  it('keeps a finished run in Done with its unanswered question actionable', () => {
-    const finished = run({
-      id: 'run_finished_question',
-      task: 'answer after completion',
-      status: 'completed',
-      unanswered_questions: 1,
-      reason: '',
-      finished_at: '2026-08-14T10:30:00Z',
-    })
-    seed([finished])
-    render(<Board />)
-
-    const done = column('Done')
-    expect(done.getByText('answer after completion')).toBeDefined()
-    expect(done.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
-    expect(done.getByRole('button', { name: /Needs input:/ })).toBeDefined()
-    expect(column('Idle').queryByText('answer after completion')).toBeNull()
-    expect(useStore.getState().runs[finished.id].status).toBe('completed')
-  })
-  it('keeps the unanswered-question action ahead of a failed lifecycle reason', () => {
+  it('keeps the lifecycle reason of a finished run with an open question in its details', () => {
     const failed = run({
       id: 'run_failed_question',
       task: 'answer after failure',
@@ -599,14 +573,15 @@ describe('board', () => {
     seed([failed])
     render(<Board />)
 
-    const done = column('Done')
-    expect(done.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
-    expect(done.getByText('Failed')).toBeDefined()
-    fireEvent.click(done.getByRole('button', { name: 'Show details for answer after failure' }))
-    expect(done.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('answer after failure')).toBeDefined()
+    expect(needsYou.getByLabelText('Needs you')).toBeDefined()
+    fireEvent.click(needsYou.getByRole('button', { name: 'Show details for answer after failure' }))
+    expect(needsYou.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
+    expect(useStore.getState().runs[failed.id].status).toBe('failed')
   })
 
-  it('deals an unreviewed agent outcome into Idle with its finished state, until it is seen', () => {
+  it('lists an unreviewed agent outcome under Needs you until it is seen', () => {
     const success = run({
       id: 'run_reported_success',
       task: 'agent says done',
@@ -626,21 +601,17 @@ describe('board', () => {
     seed([success, failure])
     render(<Board />)
 
-    const idle = column('Idle')
-    expect(idle.getByText('The agent reported success; open the run to review it.')).toBeDefined()
-    expect(idle.getByText('The agent reported failure; open the run to review it.')).toBeDefined()
-    // The real state, not the amber needs-attention one.
-    expect(idle.getByLabelText('Done')).toBeDefined()
-    expect(idle.getByLabelText('Failed')).toBeDefined()
-    expect(idle.queryByLabelText('Idle')).toBeNull()
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('Finished, review the result')).toBeDefined()
+    expect(needsYou.getByText('Failed, review the result')).toBeDefined()
     // A report to review is not a structured input request.
-    expect(idle.queryByRole('button', { name: /Needs input:/ })).toBeNull()
-    expect(column('Done').queryByText('agent says done')).toBeNull()
+    expect(needsYou.queryByRole('button', { name: /Requests:/ })).toBeNull()
+    expect(column('Finished').queryByText('agent says done')).toBeNull()
 
     act(() => useStore.getState().applyOutcomeSeen(success.id))
-    expect(column('Done').getByText('agent says done')).toBeDefined()
-    expect(column('Done').queryByText(/open the run to review it/)).toBeNull()
-    expect(idle.getByText('agent says stuck')).toBeDefined()
+    expect(column('Finished').getByText('agent says done')).toBeDefined()
+    expect(column('Finished').getByText('Finished', { selector: 'p' })).toBeDefined()
+    expect(needsYou.getByText('agent says stuck')).toBeDefined()
   })
 
   it('keeps the launch action in the empty-board notice only', () => {
@@ -673,7 +644,7 @@ describe('board', () => {
     const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
     expect(within(notice).getByRole('button', { name: 'New run' })).toBeDefined()
     expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
-    for (const bucket of ['Idle', 'Working', 'Done']) {
+    for (const bucket of ['Needs you', 'Working', 'Finished']) {
       expect(screen.queryByRole('region', { name: bucket })).toBeNull()
     }
   })
@@ -699,8 +670,8 @@ describe('board', () => {
     render(<Board />)
 
     expect(column('Working').getByText('still going')).toBeDefined()
-    expect(column('Idle').getByText('Nothing here.')).toBeDefined()
-    expect(column('Done').getByText('Nothing here.')).toBeDefined()
+    expect(column('Needs you').getByText('Nothing here.')).toBeDefined()
+    expect(column('Finished').getByText('Nothing here.')).toBeDefined()
     expect(column('Working').queryByText('Nothing here.')).toBeNull()
   })
 
@@ -758,17 +729,17 @@ describe('board', () => {
       seed([merged, archivedMerged])
       render(<Board />)
 
-      expect(column('Done').getByText('landed already')).toBeDefined()
-      expect(column('Done').queryByText('already archived')).toBeNull()
+      expect(column('Finished').getByText('landed already')).toBeDefined()
+      expect(column('Finished').queryByText('already archived')).toBeNull()
 
       const toggle = screen.getByRole('button', { name: 'Archived 1' })
       expect(toggle.getAttribute('aria-pressed')).toBe('false')
 
       fireEvent.click(toggle)
 
-      expect(column('Done').getByText('already archived')).toBeDefined()
-      expect(column('Done').queryByText('landed already')).toBeNull()
-      expect(column('Done').getByText('deleted in 8 days')).toBeDefined()
+      expect(column('Finished').getByText('already archived')).toBeDefined()
+      expect(column('Finished').queryByText('landed already')).toBeNull()
+      expect(column('Finished').getByText('deleted in 8 days')).toBeDefined()
       expect(toggle.getAttribute('aria-pressed')).toBe('true')
     } finally {
       vi.useRealTimers()
@@ -798,12 +769,12 @@ describe('board', () => {
     seed([merged, archivedMerged])
     render(<Board />)
     fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
-    expect(column('Done').getByText('already archived')).toBeDefined()
+    expect(column('Finished').getByText('already archived')).toBeDefined()
 
     act(() => useStore.getState().applyRunArchived(archivedMerged.id, null, null))
 
     expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
-    expect(column('Done').getByText('landed already')).toBeDefined()
+    expect(column('Finished').getByText('landed already')).toBeDefined()
   })
 
   it('renders the grid and its toggle when every run in scope is archived', () => {
@@ -815,11 +786,11 @@ describe('board', () => {
     render(<Board />)
 
     expect(screen.queryByText(/No runs yet/)).toBeNull()
-    expect(screen.getByRole('region', { name: 'Done' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Finished' })).toBeDefined()
     const toggle = screen.getByRole('button', { name: 'Archived 1' })
 
     fireEvent.click(toggle)
-    expect(column('Done').getByText('already archived')).toBeDefined()
+    expect(column('Finished').getByText('already archived')).toBeDefined()
   })
 
   it('resets the archived toggle when the active workspace changes', () => {
@@ -843,7 +814,7 @@ describe('board', () => {
 
     const otherToggle = screen.getByRole('button', { name: 'Archived 1' })
     expect(otherToggle.getAttribute('aria-pressed')).toBe('false')
-    expect(column('Done').queryByText('archived over there')).toBeNull()
+    expect(column('Finished').queryByText('archived over there')).toBeNull()
   })
 
   it('never hides a run carrying archived_at unless its status is final', () => {
@@ -931,7 +902,7 @@ describe('archive closed runs', () => {
     seedAs(alice, [eligible, stillOpen, someoneElsesProtected])
     render(<Board />)
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     const dialog = within(await screen.findByRole('dialog'))
 
     expect(
@@ -975,7 +946,7 @@ describe('archive closed runs', () => {
       })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 8' }),
     )
@@ -1025,7 +996,7 @@ describe('archive closed runs', () => {
       return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1051,7 +1022,7 @@ describe('archive closed runs', () => {
       return run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1081,7 +1052,7 @@ describe('archive closed runs', () => {
       return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 3' }),
     )
@@ -1112,7 +1083,7 @@ describe('archive closed runs', () => {
       })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1140,7 +1111,7 @@ describe('archive closed runs', () => {
       new ApiError(404, 'run.archive: not found', -32000),
     )
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
     )
@@ -1149,7 +1120,7 @@ describe('archive closed runs', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Done' })),
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Finished' })),
     )
   })
 
@@ -1165,7 +1136,7 @@ describe('archive closed runs', () => {
       return run({ id, status: 'merged' })
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
     )
@@ -1207,7 +1178,7 @@ describe('archive closed runs', () => {
       return new Promise(() => {})
     })
 
-    fireEvent.click(column('Done').getByRole('button', { name: 'Archive closed runs...' }))
+    fireEvent.click(column('Finished').getByRole('button', { name: 'Archive closed runs...' }))
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
@@ -1247,11 +1218,11 @@ describe('archive closed runs', () => {
     seedAs(alice, [eligible, archived])
     render(<Board />)
 
-    expect(column('Done').getByRole('button', { name: 'Archive closed runs...' })).toBeDefined()
+    expect(column('Finished').getByRole('button', { name: 'Archive closed runs...' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
 
-    expect(column('Done').queryByRole('button', { name: 'Archive closed runs...' })).toBeNull()
+    expect(column('Finished').queryByRole('button', { name: 'Archive closed runs...' })).toBeNull()
   })
 })
 

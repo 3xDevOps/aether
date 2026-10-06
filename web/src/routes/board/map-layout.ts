@@ -1,5 +1,5 @@
 import type { Member } from '@/lib/types'
-import type { BoardCard } from '@/routes/board/selectors'
+import type { RunRow } from '@/store/selectors'
 
 export const mapCardWidth = 320
 export const mapCardHeight = 140
@@ -19,7 +19,7 @@ export interface MapRect {
 
 export interface MapNode extends MapRect {
   key: string
-  card: BoardCard
+  card: RunRow
   role: 'standalone' | 'integrator' | 'worker'
   parentKey?: string
 }
@@ -60,7 +60,7 @@ export interface RunMapLayout {
 }
 
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
-const runKey = (card: BoardCard) => JSON.stringify([card.run.workspace_id, card.run.id])
+const runKey = (card: RunRow) => JSON.stringify([card.run.workspace_id, card.run.id])
 
 /** Tall units go first, then identity; live state never changes shelf order. */
 function pack<T extends MapRect & { key: string }>(rects: T[], gap: number, aspect: number) {
@@ -113,14 +113,14 @@ function pack<T extends MapRect & { key: string }>(rects: T[], gap: number, aspe
   return arrange(bestTarget, true)
 }
 
-function makeUnit(key: string, cards: BoardCard[], parents: Map<string, string>): MapUnit {
+function makeUnit(key: string, cards: RunRow[], parents: Map<string, string>): MapUnit {
   const integrator = cards.find((card) => card.run.mission_role === 'integrator')
   const workers = cards.filter((card) => card !== integrator)
   const standalone = !integrator && cards[0].run.mission_role !== 'worker'
   const columns = Math.min(3, Math.max(1, workers.length))
   const width = columns * mapCardWidth + (columns - 1) * cardGap
   const nodes: MapNode[] = []
-  const add = (card: BoardCard, x: number, y: number, role: MapNode['role']) => {
+  const add = (card: RunRow, x: number, y: number, role: MapNode['role']) => {
     const nodeKey = runKey(card)
     nodes.push({
       key: nodeKey, card, x, y, width: mapCardWidth, height: mapCardHeight,
@@ -149,8 +149,8 @@ function makeUnit(key: string, cards: BoardCard[], parents: Map<string, string>)
   }
 }
 
-/** Relationships deliberately match sidebarGroups: explicit role, mission and workspace. */
-export function layoutRunMap(cards: BoardCard[]): RunMapLayout {
+/** Relationships: explicit role, mission and workspace. */
+export function layoutRunMap(cards: RunRow[]): RunMapLayout {
   const byKey = new Map(cards.map((card) => [runKey(card), card]))
   const ordered = [...byKey.values()].sort((a, b) => compare(runKey(a), runKey(b)))
   const parents = new Map<string, string>()
@@ -164,7 +164,7 @@ export function layoutRunMap(cards: BoardCard[]): RunMapLayout {
     }
   }
 
-  const owners = new Map<string, BoardCard[]>()
+  const owners = new Map<string, RunRow[]>()
   for (const card of ordered) {
     const memberId = card.run.member_id
     const owned = owners.get(memberId)
@@ -173,7 +173,7 @@ export function layoutRunMap(cards: BoardCard[]): RunMapLayout {
   }
   const groups: MapMemberGroup[] = []
   for (const [memberId, owned] of [...owners].sort(([a], [b]) => compare(a, b))) {
-    const unitsByKey = new Map<string, BoardCard[]>()
+    const unitsByKey = new Map<string, RunRow[]>()
     for (const card of owned) {
       const nodeKey = runKey(card)
       const parentKey = parents.get(nodeKey)

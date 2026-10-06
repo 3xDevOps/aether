@@ -60,39 +60,47 @@ describe('run header', () => {
     expect(within(bar).getByText('Working')).toBeDefined()
   })
 
-  it.each(tabs)('keeps execution and pending approval independent on the %s tab', (name) => {
+  it.each(tabs)('says the viewer is needed for a pending approval on the %s tab', (name) => {
     seed()
     useStore.getState().setInbox(workspace.id, [approval()])
     const bar = runHeader(name)
 
-    expect(within(bar).getByText('Working')).toBeDefined()
-    expect(within(bar).getByRole('button', { name: /Needs input: 1 approval/ })).toBeDefined()
-    expect(within(bar).queryByText('Idle')).toBeNull()
+    expect(within(bar).getByText('Needs you')).toBeDefined()
+    expect(within(bar).getByText('Permission: write src/checkout.ts')).toBeDefined()
 
-    fireEvent.click(within(bar).getByRole('button', { name: /Needs input: 1 approval/ }))
+    fireEvent.click(within(bar).getByRole('button', { name: /Requests: 1 approval/ }))
     expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
   })
 
-  it('updates outstanding native requests independently of work and ignores a stale route snapshot', () => {
+  it("says whose turn it is on another member's waiting run", () => {
+    seed({ member_id: bob.id, status: 'needs-attention' })
+    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
+    const bar = runHeader('events')
+
+    expect(within(bar).getByText('Working')).toBeDefined()
+    expect(within(bar).getByText('Waiting for Bob')).toBeDefined()
+  })
+
+  it('updates outstanding native requests and ignores a stale route snapshot', () => {
     const question = { id: 'same', session_id: 'foreground', kind: 'question' as const }
     const permission = { id: 'same', session_id: 'background', kind: 'permission' as const }
     seed({ pending_inputs: [question, permission] })
     const bar = runHeader('events')
     const oldSnapshot = { ...useStore.getState().runs.run_1 }
-    expect(within(bar).getByText('Working')).toBeDefined()
-    expect(within(bar).getByRole('button', { name: /Needs input: 1 question in Terminal; 1 permission request in Terminal/ })).toBeDefined()
+    expect(within(bar).getByText('Needs you')).toBeDefined()
+    expect(within(bar).getByRole('button', { name: /Requests: 1 question in Terminal; 1 permission request in Terminal/ })).toBeDefined()
 
     act(() => useStore.getState().applyRunInput('run_1', [permission]))
-    fireEvent.click(within(bar).getByRole('button', { name: /Needs input: 1 permission request/ }))
+    fireEvent.click(within(bar).getByRole('button', { name: /Requests: 1 permission request/ }))
     expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: 'run_1' } })
     act(() => useStore.getState().applyRunInput('run_1', []))
     act(() => useStore.getState().upsertRun(oldSnapshot))
-    expect(within(bar).queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(within(bar).queryByRole('button', { name: /Requests:/ })).toBeNull()
     expect(within(bar).getByText('Working')).toBeDefined()
 
     act(() => useStore.getState().applyRunStatus('run_1', 'needs-attention', undefined, '2026-08-14T12:00:00Z'))
-    expect(within(bar).getByText('Idle')).toBeDefined()
-    expect(within(bar).queryByRole('button', { name: /Needs input:/ })).toBeNull()
+    expect(within(bar).getByText('Needs you')).toBeDefined()
+    expect(within(bar).getByText(/^Agent idle for/)).toBeDefined()
   })
 
   it.each(tabs)('shows the finished state on the %s tab', (name) => {
@@ -102,13 +110,13 @@ describe('run header', () => {
     expect(within(bar).getByText('Done')).toBeDefined()
   })
 
-  it.each(tabs)('shows the provided run reason once on the %s tab', (name) => {
+  it.each(tabs)('says the reason in plain words once, keeping the raw one in details, on the %s tab', (name) => {
     const reason = 'stalled: no output or file changes for 15s'
     seed({ status: 'needs-attention', reason })
     const bar = runHeader(name)
 
-    expect(within(bar).getByText(reason)).toBeDefined()
-    expect(screen.getAllByText(reason)).toHaveLength(1)
+    expect(within(bar).getAllByText(/^No activity for/)).toHaveLength(1)
+    expect(within(bar).getByText(`needs-attention - ${reason}`)).toBeDefined()
   })
 
   it.each(tabs)('marks the %s tab as the open one in the strip', (name) => {

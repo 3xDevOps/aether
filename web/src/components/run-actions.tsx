@@ -22,10 +22,10 @@ import {
   useCommandRunner,
 } from '@/lib/commands'
 import type { Command, RunCommandContext } from '@/lib/commands'
-import { runLabel, runState } from '@/lib/status'
+import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 
 export function RunActions({ run }: { run: RunRecord }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
@@ -46,12 +46,11 @@ export function RunActions({ run }: { run: RunRecord }) {
   const context: RunCommandContext = { run, paused, cap, members, self, steerOthers }
   const commands = runCommands(context)
   const handoffs = handoffCommands(context)
-  const state = runState(run.status)
   const primaryIds = run.archived_at
     ? ['restore', 'relaunch', 'release']
     : run.status === 'completed'
       ? ['close', 'relaunch', 'release']
-      : state === 'done' || state === 'failed'
+      : isTerminal(run.status)
         ? ['relaunch', 'release', 'archive']
         : ['inject', paused ? 'resume' : 'pause']
   const primary = primaryIds.flatMap((id) => commands.filter((command) => command.id === id))

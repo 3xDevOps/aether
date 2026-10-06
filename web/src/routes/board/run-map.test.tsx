@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { type Run } from '@/lib/types'
 import { layoutRunMap } from '@/routes/board/map-layout'
 import { RunMap } from '@/routes/board/run-map'
-import { type BoardCard } from '@/routes/board/selectors'
+import type { RunRow } from '@/store/selectors'
 import '@/routes/diff/conflict-chips'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -18,8 +18,9 @@ let frameId = 0
 
 const renderHeader = (controls: ReactNode) => <header><h2>Runs</h2>{controls}</header>
 
-function card(overrides: Partial<Run> = {}): BoardCard {
-  return { run: toRecord(run(overrides)), owner: alice, state: 'working', unseen: false, paused: false }
+function card(overrides: Partial<Run> = {}): RunRow {
+  const record = toRecord(run(overrides))
+  return { run: record, owner: alice, state: 'working', reason: 'Agent working', group: 'working', waitingSince: record.stateChangedAt }
 }
 
 function canvas() {
@@ -88,7 +89,7 @@ beforeEach(() => {
   frames.clear()
   useStore.setState({
     boardMapViewports: {}, workspaces: { [workspace.id]: workspace },
-    members: { [alice.id]: alice }, inbox: {}, runs: {}, acked: {}, pausedRuns: {}, overlaps: {},
+    members: { [alice.id]: alice }, inbox: {}, runs: {}, pausedRuns: {}, overlaps: {},
     route: { name: 'board', params: {} },
   })
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {

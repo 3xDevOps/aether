@@ -1,151 +1,100 @@
-// Board shape: run cards dealt into Orca's three buckets. Pure over a narrow
+// Board shape: the sidebar's three run groups as columns. Pure over a narrow
 // input so the component can memoize on exactly what it reads.
 
 import { useMemo } from 'react'
-import { runState, waitsOnHuman, type PresentationState } from '@/lib/status'
-import type { Member, Workspace } from '@/lib/types'
+import type { RunActionCandidate } from '@/lib/commands'
+import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
+import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
-import { isUnseen, type Ack } from '@/store/board'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { useStateContext } from '@/store/hooks'
+import { isArchivable } from '@/store/runs'
+import {
+  runGroups,
+  stateContextOf,
+  type RunRow,
+  type RunTree,
+  type RunsInput,
+} from '@/store/selectors'
 
-export type Bucket = 'needs-you' | 'working' | 'done'
-
-export interface BoardCard {
-  run: RunRecord
-  state: PresentationState
-  owner?: Member
-  workspace?: Workspace
-  unseen: boolean
-  paused: boolean
-}
+/** One card: a run, or a swarm under its integrator with its members' counts. */
+export type BoardCard = RunTree
 
 export interface BoardColumn {
-  key: Bucket
+  key: RunGroup
   label: string
   cards: BoardCard[]
 }
 
-/**
- * An empty workspace shows every run: that is what the board falls back to
- * before hydration has named one.
- */
-export interface BoardInput {
-  workspace: string
-  workspaces: Record<string, Workspace>
-  runs: Record<string, RunRecord>
-  members: Record<string, Member>
-  acked: Record<string, Ack>
-  pausedRuns: Record<string, boolean>
-}
-
-export const bucketLabel: Record<Bucket, string> = {
-  'needs-you': 'Idle',
-  working: 'Working',
-  done: 'Done',
-}
-
-/**
- * Lifecycle to bucket. `needs-attention` covers turn-end idle and stalls;
- * outstanding requests are a separate indicator, never a bucket override.
- * A clean exit presents as `completed`, which lands in Done, not here;
- * `board()` lists one whose agent report awaits review here instead.
- */
-export function bucketOf(state: PresentationState): Bucket {
-  switch (state) {
-    case 'needs-attention':
-      return 'needs-you'
-    case 'working':
-    case 'waiting':
-      return 'working'
-    default:
-      return 'done'
-  }
-}
-
 export interface BoardData {
   columns: BoardColumn[]
-  /** Finished, archived runs in scope - hidden from Done, shown behind its toggle. */
+  /** Finished, archived runs in scope - hidden from Finished, shown behind its toggle. */
   archivedCards: BoardCard[]
 }
 
 const at = (iso: string) => Date.parse(iso)
 
-export function board(s: BoardInput): BoardData {
-  const columns: Record<Bucket, BoardCard[]> = {
-    'needs-you': [],
-    working: [],
-    done: [],
-  }
+export function board(s: RunsInput): BoardData {
+  const groups = runGroups(s)
   const archivedCards: BoardCard[] = []
-
-  for (const run of Object.values(s.runs)) {
+  for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    const state = runState(run.status)
-    const card: BoardCard = {
-      run,
-      state,
-      owner: s.members[run.member_id],
-      workspace: s.workspaces[run.workspace_id],
-      unseen: isUnseen(s.acked, run),
-      paused: state === 'working' && s.pausedRuns[run.id] === true,
-    }
     // A live run can never be hidden: archiving is a server-side no-op
     // outside a final status, but this guard holds even so.
-    if (run.archived_at && isArchivable(run.status)) {
-      archivedCards.push(card)
-      continue
-    }
-    columns[waitsOnHuman(run, state) ? 'needs-you' : bucketOf(state)].push(card)
+    if (!run.archived_at || !isArchivable(run.status)) continue
+    const shown = presentRun(run, s.ctx)
+    archivedCards.push({
+      run,
+      state: shown.state,
+      reason: shown.reason,
+      group: groupOf(shown.state),
+      waitingSince: run.stateChangedAt,
+      owner: s.ctx.members[run.member_id],
+      children: [],
+    })
   }
-
-  const newestFirst = (a: BoardCard, b: BoardCard) =>
-    at(b.run.stateChangedAt) - at(a.run.stateChangedAt)
-  const archivedFirst = (a: BoardCard, b: BoardCard) =>
-    at(b.run.archived_at ?? '') - at(a.run.archived_at ?? '')
-
   return {
-    columns: (Object.keys(columns) as Bucket[]).map((key) => ({
+    columns: (Object.keys(groups) as RunGroup[]).map((key) => ({
       key,
-      label: bucketLabel[key],
-      cards: columns[key].sort(newestFirst),
+      label: groupLabel[key],
+      cards: groups[key],
     })),
-    archivedCards: archivedCards.sort(archivedFirst),
+    archivedCards: archivedCards.sort(
+      (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),
+    ),
   }
 }
 
 export function useBoard(): BoardData {
+  const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
-  const workspaces = useStore((s) => s.workspaces)
-  const runs = useStore((s) => s.runs)
-  const members = useStore((s) => s.members)
-  const acked = useStore((s) => s.acked)
-  const pausedRuns = useStore((s) => s.pausedRuns)
-  return useMemo(
-    () =>
-      board({ workspace, workspaces, runs, members, acked, pausedRuns }),
-    [workspace, workspaces, runs, members, acked, pausedRuns],
+  const mineOnly = useStore((s) => s.mineOnly)
+  return useMemo(() => board({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
+}
+
+/** Each card's run followed by its swarm's members. */
+export function cardRuns(cards: BoardCard[]): RunRow[] {
+  return cards.flatMap((card) => [card, ...(card.swarm?.members ?? [])])
+}
+
+function candidates(rows: RunRow[], workspaces: Record<string, Workspace>): RunActionCandidate[] {
+  return rows.map(({ run }) => ({ run, workspace: workspaces[run.workspace_id] }))
+}
+
+/** The Finished column's runs, swarm members included, which Archive closed runs sweeps. */
+export function finishedRuns(data: BoardData, workspaces: Record<string, Workspace>): RunActionCandidate[] {
+  return candidates(cardRuns(data.columns.find((c) => c.key === 'finished')?.cards ?? []), workspaces)
+}
+
+/** Every run in scope, archived ones included, which Release finished resources sweeps. */
+export function allRuns(data: BoardData, workspaces: Record<string, Workspace>): RunActionCandidate[] {
+  return candidates(
+    [...data.columns.flatMap((column) => cardRuns(column.cards)), ...data.archivedCards],
+    workspaces,
   )
-}
-
-/** The Done column's cards, which Archive closed runs sweeps. */
-export function doneCards(data: BoardData): BoardCard[] {
-  return data.columns.find((c) => c.key === 'done')?.cards ?? []
-}
-
-/** Every card in scope, archived ones included, which Release finished resources sweeps. */
-export function allCards(data: BoardData): BoardCard[] {
-  return [...data.columns.flatMap((column) => column.cards), ...data.archivedCards]
 }
 
 /** The board as the store holds it now, for a snapshot taken outside render. */
 export function currentBoard(): BoardData {
   const s = useStore.getState()
-  return board({
-    workspace: s.activeWorkspace,
-    workspaces: s.workspaces,
-    runs: s.runs,
-    members: s.members,
-    acked: s.acked,
-    pausedRuns: s.pausedRuns,
-  })
+  return board({ workspace: s.activeWorkspace, mineOnly: s.mineOnly, ctx: stateContextOf(s, Date.now()) })
 }

@@ -1,189 +1,174 @@
-import type { RunRecord } from '@/store/runs'
-import { toRecord } from '@/store/runs'
-import { sidebarGroups, sidebarRuns, type SidebarInput } from '@/store/selectors'
-import { alice, bob, otherWorkspace, run, workspace } from '@/test/fixtures'
+import { toRecord, type RunRecord } from '@/store/runs'
+import {
+  listedRuns,
+  needsYouByWorkspace,
+  runGroups,
+  sidebarGroups,
+  type RunsInput,
+} from '@/store/selectors'
+import {
+  alice,
+  approval,
+  bob,
+  mission,
+  otherWorkspace,
+  run,
+  stateContext,
+  workspace,
+} from '@/test/fixtures'
 
 function record(over: Parameters<typeof run>[0]): RunRecord {
   return toRecord(run(over))
 }
 
-const runs: Record<string, RunRecord> = {
-  working: record({ id: 'working', status: 'running' }),
-  attention: record({
-    id: 'attention',
-    status: 'needs-attention',
-    created_at: '2026-08-14T10:03:00Z',
-    started_at: '2026-08-14T10:03:00Z',
-  }),
-  done: record({
-    id: 'done',
-    workspace_id: otherWorkspace.id,
-    member_id: bob.id,
-    status: 'completed',
-    finished_at: '2026-08-14T10:30:00Z',
-  }),
+function input(runs: RunRecord[], over: Partial<RunsInput> = {}, ctx = {}): RunsInput {
+  return {
+    workspace: workspace.id,
+    mineOnly: false,
+    ctx: stateContext({ runs: Object.fromEntries(runs.map((r) => [r.id, r])), ...ctx }),
+    ...over,
+  }
 }
 
-const input: SidebarInput = {
-  workspace: '',
-  runs,
-  members: { [alice.id]: alice, [bob.id]: bob },
-  groupBy: 'status',
-}
+const ids = (trees: { run: { id: string } }[]) => trees.map((tree) => tree.run.id)
 
-describe('sidebarRuns', () => {
-  it('puts the worst state first, then the most recent change', () => {
-    expect(sidebarRuns(input).map((r) => r.run.id)).toEqual([
-      'attention',
-      'working',
-      'done',
-    ])
+const working = record({ id: 'working', status: 'running', started_at: '2026-08-14T10:02:00Z' })
+const newer = record({ id: 'newer', status: 'running', started_at: '2026-08-14T10:09:00Z' })
+const stopped = record({ id: 'stopped', status: 'needs-attention', started_at: '2026-08-14T10:05:00Z' })
+const elsewhere = record({
+  id: 'elsewhere',
+  workspace_id: otherWorkspace.id,
+  status: 'needs-attention',
+  started_at: '2026-08-14T10:03:00Z',
+})
+const done = record({ id: 'done', status: 'merged', finished_at: '2026-08-14T10:30:00Z' })
+const failed = record({ id: 'failed', status: 'failed', finished_at: '2026-08-14T10:10:00Z' })
+
+describe('runGroups', () => {
+  it('lists Needs you from every workspace and the others from the active one', () => {
+    const otherWorking = record({ id: 'other-working', workspace_id: otherWorkspace.id })
+    const groups = runGroups(input([working, stopped, elsewhere, otherWorking, done]))
+    expect(ids(groups['needs-you'])).toEqual(['elsewhere', 'stopped'])
+    expect(ids(groups.working)).toEqual(['working'])
+    expect(ids(groups.finished)).toEqual(['done'])
   })
 
-  it('attaches the owning member to each run', () => {
-    expect(sidebarRuns(input)[0].owner).toEqual(alice)
+  it('names the workspace of a row outside the active one', () => {
+    const [outside, inside] = runGroups(input([stopped, elsewhere]))['needs-you']
+    expect(outside.workspaceName).toBe(otherWorkspace.name)
+    expect(inside.workspaceName).toBeUndefined()
+    expect(runGroups(input([elsewhere], { workspace: '' }))['needs-you'][0].workspaceName).toBeUndefined()
   })
 
-  it('narrows to the active workspace', () => {
-    const scoped = sidebarRuns({ ...input, workspace: otherWorkspace.id })
-    expect(scoped.map((r) => r.run.id)).toEqual(['done'])
+  it('sorts Needs you oldest wait first, from when the request was made', () => {
+    const asked = record({ id: 'asked', started_at: '2026-08-14T10:00:00Z' })
+    const groups = runGroups(
+      input([stopped, asked], {}, { approvalsByRun: { asked: [approval({ run_id: 'asked', created_at: '2026-08-14T10:15:00Z' })] } }),
+    )
+    expect(ids(groups['needs-you'])).toEqual(['stopped', 'asked'])
+    expect(groups['needs-you'][1].waitingSince).toBe('2026-08-14T10:15:00Z')
   })
 
-  it('keeps a busy run with unanswered questions in Working', () => {
-    const scoped = sidebarRuns({
-      ...input,
-      runs: {
-        ...input.runs,
-        working: record({ id: 'working', status: 'running', unanswered_questions: 1 }),
-      },
-    })
-    expect(scoped.find((r) => r.run.id === 'working')?.state).toBe('working')
+  it('sorts Working by latest change and Finished with failures first', () => {
+    const groups = runGroups(input([working, newer, done, failed]))
+    expect(ids(groups.working)).toEqual(['newer', 'working'])
+    expect(ids(groups.finished)).toEqual(['failed', 'done'])
   })
 
-  it('preserves the terminal lifecycle of a run with unanswered questions', () => {
-    const finished = record({
-      id: 'finished-question',
-      status: 'failed',
-      unanswered_questions: 1,
-    })
-    const scoped = sidebarRuns({
-      ...input,
-      runs: { ...input.runs, [finished.id]: finished },
-    })
-    expect(scoped.find((entry) => entry.run.id === finished.id)?.state).toBe('failed')
+  it('narrows Working and Finished to the viewer under Mine, never Needs you', () => {
+    const theirs = record({ id: 'theirs', member_id: bob.id })
+    const theirsStopped = record({ id: 'theirs-stopped', member_id: bob.id, status: 'needs-attention' })
+    const groups = runGroups(
+      input([working, theirs, theirsStopped], { mineOnly: true }, { viewerID: bob.id, viewerRole: bob.role }),
+    )
+    expect(ids(groups['needs-you'])).toEqual(['theirs-stopped'])
+    expect(ids(groups.working)).toEqual(['theirs'])
+  })
+
+  it('hides archived finished runs but never a live one', () => {
+    const archived = { ...done, archived_at: '2026-08-15T00:00:00Z' }
+    const live = { ...working, id: 'live', archived_at: '2026-08-15T00:00:00Z' }
+    const groups = runGroups(input([archived, live]))
+    expect(ids(groups.finished)).toEqual([])
+    expect(ids(groups.working)).toEqual(['live'])
   })
 })
 
-describe('an agent outcome awaiting review', () => {
-  for (const status of ['completed', 'failed'] as const) {
-    it(`groups a ${status} run with Idle and keeps its own state`, () => {
-      const reported = record({
-        id: 'reported',
-        status,
-        outcome_unseen: true,
-        finished_at: '2026-08-14T10:20:00Z',
-      })
-      const scoped = { ...input, runs: { ...input.runs, [reported.id]: reported } }
-
-      const entry = sidebarRuns(scoped).find((e) => e.run.id === reported.id)
-      expect(entry?.state).toBe(status === 'failed' ? 'failed' : 'done')
-      expect(entry?.waitsOnHuman).toBe(true)
-      expect(sidebarRuns(scoped).map((e) => e.run.id).slice(0, 2)).toEqual(['reported', 'attention'])
-      const [idle] = sidebarGroups(scoped)
-      expect(idle.label).toBe('Idle')
-      expect(idle.runs.map((r) => r.run.id)).toEqual(['reported', 'attention'])
+describe('swarms', () => {
+  const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
+  const worker = (id: string, over: Parameters<typeof run>[0] = {}) =>
+    record({
+      id,
+      member_id: bob.id,
+      mission_id: 'mission_1',
+      mission_role: 'worker',
+      integrator_run_id: integrator.id,
+      mode: 'headless',
+      ...over,
     })
-  }
+
+  it('folds a swarm into one collapsed entry with its counts', () => {
+    const groups = runGroups(
+      input([integrator, worker('w1'), worker('w2', { status: 'needs-attention' }), worker('w3', { status: 'completed' })]),
+    )
+    expect(ids(groups.working)).toEqual(['run_integrator'])
+    const [swarm] = groups.working
+    expect(swarm.children).toEqual([])
+    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1 } })
+    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3'])
+  })
+
+  it('lists the swarm in Needs you with only the members that need the viewer', () => {
+    const blocked = worker('blocked', { status: 'needs-attention', reason: 'blocked: no database access' })
+    const groups = runGroups(input([integrator, worker('w1'), blocked], {}, { missions: { mission_1: mission() } }))
+    expect(ids(groups['needs-you'])).toEqual(['run_integrator'])
+    const [swarm] = groups['needs-you']
+    expect(swarm.state).toBe('working')
+    expect(ids(swarm.children)).toEqual(['blocked'])
+    expect(swarm.swarm?.counts).toEqual({ working: 1, needsYou: 1, done: 0 })
+  })
+
+  it("roots a replaced integrator's swarm at the current one", () => {
+    const old = record({ id: 'old', mission_id: 'mission_1', mission_role: 'integrator', status: 'failed' })
+    const groups = runGroups(input([old, integrator, worker('w1')], {}, { missions: { mission_1: mission() } }))
+    expect(ids(groups.working)).toEqual(['run_integrator'])
+    expect(groups.finished).toEqual([])
+  })
+
+  it('lists workers standalone when no integrator is listed', () => {
+    const groups = runGroups(input([worker('w1'), worker('w2')]))
+    expect(ids(groups.working).sort()).toEqual(['w1', 'w2'])
+  })
 })
 
 describe('sidebarGroups', () => {
-  it('groups by state, worst group first', () => {
-    const groups = sidebarGroups(input)
-
-    expect(groups[0].runs.map((r) => r.run.id)).toEqual(['attention'])
-    expect(groups[2].runs.map((r) => r.run.id)).toEqual(['done'])
+  it('drops empty groups and counts what needs the viewer', () => {
+    const groups = sidebarGroups(input([working, stopped, elsewhere]))
+    expect(groups.map((group) => [group.label, group.count])).toEqual([
+      ['Needs you', 2],
+      ['Working', 1],
+    ])
   })
 
-  it('groups by member when asked', () => {
-    const groups = sidebarGroups({ ...input, groupBy: 'member' })
-
-    expect(groups.map((g) => g.label)).toEqual(['Alice', 'Bob'])
-    // Within a member, the worst-first sort still holds.
-    expect(groups[0].runs.map((r) => r.run.id)).toEqual(['attention', 'working'])
-    expect(groups[1].runs.map((r) => r.run.id)).toEqual(['done'])
+  it('is empty without runs', () => {
+    expect(sidebarGroups(input([]))).toEqual([])
   })
+})
 
-  it('yields no groups when the active workspace holds no runs', () => {
-    expect(sidebarGroups({ ...input, workspace: workspace.id, runs: {} })).toEqual([])
-  })
-
-  const integrator = record({
-    id: 'integrator',
-    status: 'running',
-    mission_id: 'mission_1',
-    mission_role: 'integrator',
-    integrator_run_id: 'integrator',
-  })
-  const worker = record({
-    id: 'worker',
-    member_id: bob.id,
-    status: 'completed',
-    mission_id: 'mission_1',
-    mission_role: 'worker',
-    integrator_run_id: integrator.id,
-  })
-
-  it('keeps subsessions under their integrator across owners and statuses', () => {
-    const groups = sidebarGroups({
-      ...input,
-      groupBy: 'member',
-      runs: { integrator, worker, attention: runs.attention },
+describe('needsYouByWorkspace', () => {
+  it('counts runs needing the viewer per workspace', () => {
+    const theirs = record({ id: 'theirs', member_id: bob.id, status: 'needs-attention' })
+    expect(needsYouByWorkspace(input([working, stopped, elsewhere, theirs]).ctx)).toEqual({
+      [workspace.id]: 1,
+      [otherWorkspace.id]: 1,
     })
-    expect(groups.map((group) => group.label)).toEqual(['Alice'])
-    expect(groups[0].runs.map((entry) => entry.run.id)).toEqual(['attention', 'integrator'])
-    expect(groups[0].runs[1].children.map((entry) => entry.run.id)).toEqual(['worker'])
-    expect(groups[0].runs[1].children[0].owner).toEqual(bob)
   })
+})
 
-  it('raises a swarm to its most urgent child without changing individual states', () => {
-    const groups = sidebarGroups({
-      ...input,
-      runs: { integrator, worker: { ...worker, status: 'needs-attention' } },
-    })
-    expect(groups.map((group) => group.key)).toEqual(['needs-attention'])
-    expect(groups[0].runs[0].state).toBe('working')
-    expect(groups[0].runs[0].children[0].state).toBe('needs-attention')
+describe('listedRuns', () => {
+  it('lists one workspace in group order', () => {
+    const rows = listedRuns(workspace.id, input([done, working, stopped, elsewhere, failed]).ctx)
+    expect(ids(rows)).toEqual(['stopped', 'working', 'failed', 'done'])
+    expect(rows[0].owner).toEqual(alice)
   })
-
-  it('orders subsessions by attention and retains standalone runs exactly once', () => {
-    const failed = { ...worker, id: 'failed-worker', status: 'failed' as const }
-    const groups = sidebarGroups({
-      ...input,
-      runs: { worker, integrator, failed, attention: runs.attention },
-    })
-    expect(groups.map((group) => group.key)).toEqual(['needs-attention', 'failed'])
-    expect(groups.flatMap((group) => group.runs.map((entry) => entry.run.id)))
-      .toEqual(['attention', 'integrator'])
-    expect(groups[1].runs[0].children.map((entry) => entry.run.id)).toEqual(['failed-worker', 'worker'])
-  })
-
-  it.each(['missing', 'archived', 'other-workspace', 'other-mission'] as const)(
-    'keeps a subsession visible when its integrator is %s',
-    (kind) => {
-      const parent = {
-        ...integrator,
-        ...(kind === 'archived' ? { status: 'merged' as const, archived_at: '2026-08-15T00:00:00Z' } : {}),
-        ...(kind === 'other-workspace' ? { workspace_id: otherWorkspace.id } : {}),
-        ...(kind === 'other-mission' ? { mission_id: 'mission_2' } : {}),
-      }
-      const groups = sidebarGroups({
-        ...input,
-        workspace: workspace.id,
-        runs: kind === 'missing' ? { worker } : { worker, integrator: parent },
-      })
-      const roots = groups.flatMap((group) => group.runs)
-      expect(roots.find((entry) => entry.run.id === worker.id)?.children).toEqual([])
-      expect(roots.flatMap((entry) => entry.children)).toEqual([])
-    },
-  )
 })

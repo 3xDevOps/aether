@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import { clearDonePlan, releaseFinishedPlan, runClearDone, runReleaseFinished } from '@/lib/commands'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
-import { allCards, currentBoard, doneCards } from '@/routes/board/selectors'
+import { allRuns, currentBoard, finishedRuns } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
@@ -15,7 +15,7 @@ export function ClearDoneDialog() {
   const self = useSelf()
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
-  const [plan] = useState(() => clearDonePlan(doneCards(currentBoard()), cap, self))
+  const [plan] = useState(() => clearDonePlan(finishedRuns(currentBoard(), useStore.getState().workspaces), cap, self))
   const [running, setRunning] = useState(false)
 
   const confirm = async () => {
@@ -39,7 +39,7 @@ export function ReleaseFinishedDialog() {
   const cap = useCapability()
   const self = useSelf()
   const close = useStore((s) => s.closePaletteDialog)
-  const [plan] = useState(() => releaseFinishedPlan(allCards(currentBoard()), cap, self))
+  const [plan] = useState(() => releaseFinishedPlan(allRuns(currentBoard(), useStore.getState().workspaces), cap, self))
   const [running, setRunning] = useState(false)
 
   const confirm = async () => {

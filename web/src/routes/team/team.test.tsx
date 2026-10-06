@@ -42,7 +42,6 @@ function seed(extra: Partial<RootState> = {}) {
     presence: [],
     budgets: {},
     showDecided: false,
-    acked: {},
     pausedRuns: {},
     hydrated: true,
     hydrationError: null,

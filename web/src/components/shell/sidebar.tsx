@@ -33,23 +33,24 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed, useDrag } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
-import { runLabel, runState } from '@/lib/status'
+import { runLabel } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { pendingApprovals } from '@/store/approvals'
-import { isUnseen } from '@/store/board'
 import {
-  useAttentionCount,
   useCapability,
+  useNeedsYouByWorkspace,
+  useNeedsYouCount,
   useRun,
   useRunInput,
+  useRunPresentation,
   useSidebarGroups,
 } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { SidebarGroup } from '@/store/selectors'
-import { maxSidebarWidth, minSidebarWidth, type GroupBy } from '@/store/ui'
+import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
 
 /**
  * The desktop shell cannot open a window narrower than 960px, so this matches
@@ -305,6 +306,7 @@ function WorkspaceSwitcher({
   const current = workspaces[active]
   const navigate = useStore((s) => s.navigate)
   const caps = useCapability()
+  const needsYou = useNeedsYouByWorkspace()
 
   return (
     <div className="flex h-[var(--title-bar-height)] shrink-0 items-center gap-1 border-b border-border px-2">
@@ -318,6 +320,7 @@ function WorkspaceSwitcher({
             {list.map((workspace) => (
               <SelectItem key={workspace.id} value={workspace.id}>
                 {workspace.name}
+                {needsYou[workspace.id] ? ` · ${needsYou[workspace.id]} ${needsYou[workspace.id] === 1 ? 'needs' : 'need'} you` : ''}
               </SelectItem>
             ))}
           </SelectContent>
@@ -356,59 +359,50 @@ function SidebarHeader() {
       <span className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
-      <AttentionBadge />
+      <NeedsYouBadge />
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <GroupByControl />
+        <MineToggle />
       </div>
     </div>
   )
 }
 
-function GroupByControl() {
-  const groupBy = useStore((s) => s.groupBy)
-  const setGroupBy = useStore((s) => s.setGroupBy)
+/** Narrows Working and Finished to the viewer's own runs; Needs you is always the viewer's. */
+function MineToggle() {
+  const mineOnly = useStore((s) => s.mineOnly)
+  const setMineOnly = useStore((s) => s.setMineOnly)
   return (
-    <div
-      role="group"
-      aria-label="Group runs by"
-      className="flex shrink-0 items-center rounded-sm border border-border"
-    >
-      {([['status', 'Status'], ['member', 'Member']] as const).map(([mode, label]) => (
-        <Tooltip key={mode}>
-          <Tooltip.Trigger<'button'>
-            render={(triggerProps) => (
-              <Button
-                {...triggerProps}
-                variant="ghost"
-                size="sm"
-                aria-pressed={groupBy === mode}
-                onClick={() => setGroupBy(mode)}
-                className={cn(
-                  'h-[26px] rounded-none px-2 text-[12px] first:rounded-l-sm last:rounded-r-sm coarse:h-11',
-                  groupBy === mode
-                    ? 'bg-selection font-medium text-selection-foreground'
-                    : 'text-muted-foreground',
-                )}
-              >
-                {label}
-              </Button>
+    <Tooltip>
+      <Tooltip.Trigger<'button'>
+        render={(triggerProps) => (
+          <Button
+            {...triggerProps}
+            variant="ghost"
+            size="sm"
+            aria-pressed={mineOnly}
+            onClick={() => setMineOnly(!mineOnly)}
+            className={cn(
+              'h-[26px] rounded-sm border border-border px-2 text-[12px] coarse:h-11',
+              mineOnly ? 'bg-selection font-medium text-selection-foreground' : 'text-muted-foreground',
             )}
-          />
-          <Tooltip.Content>Group runs by {label.toLowerCase()}</Tooltip.Content>
-        </Tooltip>
-      ))}
-    </div>
+          >
+            Mine
+          </Button>
+        )}
+      />
+      <Tooltip.Content>Show only your runs under Working and Finished</Tooltip.Content>
+    </Tooltip>
   )
 }
 
-/** Count unresolved requests without changing execution grouping. */
-function AttentionBadge() {
-  const count = useAttentionCount()
+/** Runs that need the viewer, across every workspace. */
+function NeedsYouBadge() {
+  const count = useNeedsYouCount()
   if (count === 0) return null
   return (
     <span
-      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
-      title={`${count} ${count === 1 ? 'run needs' : 'runs need'} input`}
+      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
+      title={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       role="img"
       className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
     >
@@ -426,7 +420,6 @@ function AttentionBadge() {
 
 function RunTree() {
   const groups = useSidebarGroups()
-  const groupBy = useStore((s) => s.groupBy)
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -468,29 +461,20 @@ function RunTree() {
   return (
     <div className="flex-1 overflow-y-auto py-1">
       {groups.map((group) => {
-        const stateKey = groupStateKey(groupBy, group.key)
-        const initiallyExpanded = groupBy !== 'status' || group.key !== 'done'
-        const expanded = expandedByGroup[stateKey] ?? initiallyExpanded
+        const initiallyExpanded = group.key !== 'finished'
+        const expanded = expandedByGroup[group.key] ?? initiallyExpanded
         return (
           <Group
-            key={stateKey}
+            key={group.key}
             group={group}
             expanded={expanded}
-            onToggle={() => toggleGroup(stateKey, initiallyExpanded)}
-            regionId={groupRegionId(groupBy, group.key)}
+            onToggle={() => toggleGroup(group.key, initiallyExpanded)}
+            regionId={`sidebar-run-group-${group.key}`}
           />
         )
       })}
     </div>
   )
-}
-
-function groupStateKey(groupBy: GroupBy, groupKey: string): string {
-  return `${groupBy}:${groupKey}`
-}
-
-function groupRegionId(groupBy: GroupBy, groupKey: string): string {
-  return `sidebar-run-group-${groupBy}-${groupKey}`
 }
 
 function approvalsLabel(label: string, waiting: number, error: string | null): string {
@@ -724,19 +708,19 @@ function Group({
           )}
           <span className="truncate">{group.label}</span>
           <span className="ml-auto shrink-0 normal-case">
-            {group.runs.reduce((count, run) => count + 1 + run.children.length, 0)}
+            {group.count}
           </span>
         </button>
       </h2>
       <ul id={regionId} hidden={!expanded}>
         {expanded && group.runs.map((run) => (
           <li key={run.run.id}>
-            <RunRow runID={run.run.id} />
+            <RunRow runID={run.run.id} workspaceName={run.workspaceName} />
             {run.children.length > 0 && (
-              <ul aria-label={`Subsessions of ${runLabel(run.run)}`}>
+              <ul aria-label={`Workers of ${runLabel(run.run)}`}>
                 {run.children.map((child, index) => (
                   <li key={child.run.id}>
-                    <RunRow runID={child.run.id} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
+                    <RunRow runID={child.run.id} workspaceName={child.workspaceName} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
                   </li>
                 ))}
               </ul>
@@ -749,24 +733,31 @@ function Group({
 }
 
 /** Subscribes to its own run, so an event about another run leaves it alone. */
-const RunRow = memo(function RunRow({ runID, branch }: { runID: string; branch?: 'middle' | 'last' }) {
+const RunRow = memo(function RunRow({ runID, workspaceName, branch }: {
+  runID: string
+  /** Set for a Needs you row outside the active workspace. */
+  workspaceName?: string
+  branch?: 'middle' | 'last'
+}) {
   const run = useRun(runID)
-  return run ? <RunRowButton run={run} branch={branch} /> : null
+  return run ? <RunRowButton run={run} workspaceName={workspaceName} branch={branch} /> : null
 })
 
-function RunRowButton({ run, branch }: { run: RunRecord; branch?: 'middle' | 'last' }) {
+function RunRowButton({ run, workspaceName, branch }: {
+  run: RunRecord
+  workspaceName?: string
+  branch?: 'middle' | 'last'
+}) {
   const navigate = useStore((s) => s.navigate)
   const selected = useStore((s) => isRunRoute(s.route, run.id))
   const ownerColor = useStore((s) => s.members[run.member_id]?.color)
-  // Acks are app-wide, so a row mutes at the same moment its board card does.
-  const unseen = useStore((s) => isUnseen(s.acked, run))
-  const state = runState(run.status)
+  const { state, reason } = useRunPresentation(run)
   const label = runLabel(run)
   const input = useRunInput(run)
   const role = run.mission_role === 'integrator'
     ? 'Integrator'
-    : run.mission_role === 'worker' ? 'Subsession' : undefined
-  const description = [label, role, run.harness, input.count > 0 && `Needs input: ${input.summary}`].filter(Boolean).join(' · ')
+    : run.mission_role === 'worker' ? 'Worker' : undefined
+  const description = [workspaceName, label, role, run.harness, reason, input.count > 0 && `Requests: ${input.summary}`].filter(Boolean).join(' · ')
   return (
     <button
       type="button"
@@ -784,7 +775,7 @@ function RunRowButton({ run, branch }: { run: RunRecord; branch?: 'middle' | 'la
         branch ? 'pl-11' : 'pl-5',
         selected
           ? 'bg-selection font-medium text-selection-foreground'
-          : unseen
+          : state === 'needs-you'
             ? 'font-medium'
             : 'text-muted-foreground',
       )}
@@ -799,6 +790,7 @@ function RunRowButton({ run, branch }: { run: RunRecord; branch?: 'middle' | 'la
         state={state}
         className={cn(state === 'working' && 'state-pulse')}
       />
+      {workspaceName && <span className="shrink-0 text-muted-foreground">{workspaceName} ·</span>}
       <span className="min-w-0 truncate">{label}</span>
       <RunInputIndicator run={run} compact />
       {role && !branch && (

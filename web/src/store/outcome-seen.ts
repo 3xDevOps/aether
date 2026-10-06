@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { awaitingReview } from '@/lib/status'
+import { awaitingReview } from '@/lib/needs-you'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
 

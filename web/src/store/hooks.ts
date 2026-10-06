@@ -1,59 +1,61 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { pendingApprovalKey } from '@/lib/status'
+import { useClock } from '@/lib/clock'
+import type { StateContext } from '@/lib/needs-you'
+import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
 import {
+  listedRuns,
+  needsYouByWorkspace,
   sidebarGroups,
-  sidebarRuns,
+  stateContextOf,
+  type RunRow,
   type SidebarGroup,
-  type SidebarRun,
 } from '@/store/selectors'
 
-/**
- * The pending-approval run set, stable across inbox refetches that changed
- * nothing: the store subscription is on a string key, so an unchanged queue
- * neither re-renders subscribers nor invalidates downstream memos.
- */
-export function usePendingApprovalRuns(): Set<string> {
-  const key = useStore((s) => pendingApprovalKey(s.inbox))
-  return useMemo(() => new Set(key ? key.split('\n') : []), [key])
+/** The state context, stable until a field it reads changes or the clock ticks. */
+export function useStateContext(): StateContext {
+  const now = useClock()
+  const fields = useStore(useShallow((s) => stateContextOf(s, 0)))
+  return useMemo(() => ({ ...fields, now }), [fields, now])
 }
 
-function useSidebarInput() {
-  const workspace = useStore((s) => s.activeWorkspace)
-  const runs = useStore((s) => s.runs)
-  const members = useStore((s) => s.members)
-  const groupBy = useStore((s) => s.groupBy)
-  return useMemo(
-    () => ({ workspace, runs, members, groupBy }),
-    [workspace, runs, members, groupBy],
-  )
-}
-
+/** The sidebar's groups for the active workspace and the Mine toggle. */
 export function useSidebarGroups(): SidebarGroup[] {
-  const input = useSidebarInput()
-  return useMemo(() => sidebarGroups(input), [input])
+  const ctx = useStateContext()
+  const workspace = useStore((s) => s.activeWorkspace)
+  const mineOnly = useStore((s) => s.mineOnly)
+  return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
 }
 
-/** Runs with a genuine unresolved request, independent of execution. */
-export function useAttentionCount(): number {
-  const input = useSidebarInput()
-  const pending = usePendingApprovalRuns()
-  const roomMessages = useStore((s) => s.roomMessages)
+/** Runs that need the viewer: in one workspace, or across all of them. */
+export function useNeedsYouCount(workspace?: string): number {
+  const counts = useNeedsYouByWorkspace()
+  return workspace === undefined
+    ? Object.values(counts).reduce((total, n) => total + n, 0)
+    : counts[workspace] ?? 0
+}
+
+/** Workspace ID to how many of its runs need the viewer, for the switcher. */
+export function useNeedsYouByWorkspace(): Record<string, number> {
+  const ctx = useStateContext()
+  return useMemo(() => needsYouByWorkspace(ctx), [ctx])
+}
+
+/** One run's state and reason as the viewer sees it, kept fresh by the clock. */
+export function useRunPresentation(run: RunRecord): RunPresentation {
+  const now = useClock()
+  const key = useStore((s) => {
+    const shown = presentRun(run, stateContextOf(s, now))
+    return JSON.stringify([shown.state, shown.reason])
+  })
   return useMemo(() => {
-    let count = 0
-    for (const run of Object.values(input.runs)) {
-      if (input.workspace && run.workspace_id !== input.workspace) continue
-      if (run.archived_at && isArchivable(run.status)) continue
-      const questions = run.unanswered_questions ??
-        unansweredQuestions(roomMessages[run.id] ?? []).length
-      if (pending.has(run.id) || (run.pending_inputs?.length ?? 0) > 0 || questions > 0) count++
-    }
-    return count
-  }, [input, pending, roomMessages])
+    const [state, reason] = JSON.parse(key) as [PresentationState, string]
+    return { state, reason }
+  }, [key])
 }
 
 /** One run's record; re-renders only when that run changes. */
@@ -98,10 +100,10 @@ export function useRunInput(run: Run) {
   }
 }
 
-/** Every run in the active workspace, worst state and most recent change first. */
-export function useAttentionRuns(): SidebarRun[] {
-  const input = useSidebarInput()
-  return useMemo(() => sidebarRuns(input), [input])
+/** A workspace's runs in group order, every run when it is empty. */
+export function useListedRuns(workspace: string): RunRow[] {
+  const ctx = useStateContext()
+  return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])
 }
 
 /** What the connected gateway can do, queryable per method, verb and socket. */

@@ -7,9 +7,11 @@ import { useDelayed } from '@/lib/hooks'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-import type { SidebarRun } from '@/store/selectors'
+import { useRunPresentation } from '@/store/hooks'
+import type { RunRecord } from '@/store/runs'
+import type { RunRow } from '@/store/selectors'
 
-export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) {
+export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -63,7 +65,7 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
           <span className="text-right">Changed</span>
         </div>
         <ul>
-          {runs.map(({ run, state, owner }) => (
+          {runs.map(({ run, state, reason, owner }) => (
             <li key={run.id} className="border-b last:border-b-0">
               <div
                 onClick={(event: MouseEvent<HTMLDivElement>) => {
@@ -121,10 +123,10 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
                       >
                         {run.branch || 'No branch assigned'}
                       </span>
-                      {run.reason && (
+                      {reason && (
                         <>
                           <span aria-hidden> · </span>
-                          <span>{run.reason}</span>
+                          <span>{reason}</span>
                         </>
                       )}
                     </span>
@@ -153,6 +155,11 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
       </div>
     </div>
   )
+}
+
+/** One run's chip, in the state the viewer sees it in. */
+export function RunStatusChip({ run }: { run: RunRecord }) {
+  return <StatusChip state={useRunPresentation(run).state} />
 }
 
 export function StatusChip({ state }: { state: PresentationState }) {

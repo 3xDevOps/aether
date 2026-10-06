@@ -322,7 +322,7 @@ test('reviews two retained runs, verifies them in a real container, and lands th
     )
     .toBe('pending')
   await page.reload()
-  await page.getByRole('region', { name: 'Done', exact: true })
+  await page.getByRole('region', { name: 'Finished', exact: true })
     .getByRole('button', { name: alphaTask, exact: true }).click()
   await expect(page.getByRole('heading', { name: alphaTask, exact: true })).toBeVisible()
   ;({ review } = await openCandidateReview(page))
@@ -370,7 +370,7 @@ test('reviews two retained runs, verifies them in a real container, and lands th
     if (requestEvent.url().includes('/api/v1/integration.deliver')) replayDeliverCalls += 1
   })
   await page.reload()
-  await page.getByRole('region', { name: 'Done', exact: true })
+  await page.getByRole('region', { name: 'Finished', exact: true })
     .getByRole('button', { name: alphaTask, exact: true }).click()
   await expect(page.getByRole('heading', { name: alphaTask, exact: true })).toBeVisible()
   ;({ review } = await openCandidateReview(page))

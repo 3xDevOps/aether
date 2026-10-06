@@ -10,7 +10,7 @@ export function RunInputIndicator({ run, compact = false }: { run: Run; compact?
   const input = useRunInput(run)
   const navigate = useStore((s) => s.navigate)
   if (input.count === 0) return null
-  const description = `Needs input: ${input.summary}`
+  const description = `Requests: ${input.summary}`
   if (compact) {
     return (
       <span role="img" aria-label={description} title={description} className="inline-flex shrink-0 items-center gap-0.5 text-state-needs-attention">
@@ -32,7 +32,7 @@ export function RunInputIndicator({ run, compact = false }: { run: Run; compact?
           >
             <Chip color="warning" variant="soft" size="sm">
               <MessageCircleQuestion className="size-3" aria-hidden />
-              <Chip.Label>Needs input{input.count > 1 ? ` ${input.count}` : ''}</Chip.Label>
+              <Chip.Label>{input.count} {input.count === 1 ? 'request' : 'requests'}</Chip.Label>
             </Chip>
           </button>
         )}

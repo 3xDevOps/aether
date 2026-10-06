@@ -23,7 +23,6 @@ beforeEach(() => {
     activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     runs: { [active.id]: toRecord(active) },
-    acked: {},
     pausedRuns: {},
     paletteOpen: false,
     paletteDialog: null,
@@ -462,11 +461,6 @@ describe('command palette', () => {
       params: { runId: 'run_1' },
     })
     expect(useStore.getState().paletteOpen).toBe(false)
-    // Revealing a run acknowledges it, here as everywhere else.
-    expect(useStore.getState().acked[active.id]).toEqual({
-      status: active.status,
-      at: active.started_at,
-    })
   })
 
 

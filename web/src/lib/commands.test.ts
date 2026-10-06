@@ -30,7 +30,6 @@ it('changes and persists appearance through explicit palette choices on a server
     members: { [alice.id]: alice },
     info: serverInfo,
     runs: {},
-    acked: {},
     pausedRuns: {},
     paletteOpen: false,
     paletteDialog: null,

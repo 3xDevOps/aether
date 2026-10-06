@@ -1,4 +1,4 @@
-import { Archive, CheckCheck, PackageX, Rocket } from 'lucide-react'
+import { Archive, PackageX, Rocket } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
@@ -19,7 +19,7 @@ import { registerRoute } from '@/routes/registry'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
-import { allCards, doneCards, useBoard, type BoardColumn } from '@/routes/board/selectors'
+import { allRuns, cardRuns, finishedRuns, useBoard, type BoardColumn } from '@/routes/board/selectors'
 import { RunMap } from '@/routes/board/run-map'
 import { useBoardTransition } from '@/routes/board/use-board-transition'
 import { useStore } from '@/store'
@@ -31,10 +31,10 @@ import '@/components/palette'
 export function Board() {
   const data = useBoard()
   const { columns, archivedCards } = data
-  const ackAll = useStore((s) => s.ackAll)
   const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
+  const workspaces = useStore((s) => s.workspaces)
   const boardView = useStore((s) => s.boardView)
   const setBoardView = useStore((s) => s.setBoardView)
   const { boardRef, changeView } = useBoardTransition(
@@ -55,23 +55,23 @@ export function Board() {
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
-  const donePlan = clearDonePlan(doneCards(data), caps, self)
+  const donePlan = clearDonePlan(finishedRuns(data, workspaces), caps, self)
   const runClear = (eligible: RunRecord[]) => runClearDone(eligible, { api, removeRun })
-  const releasePlan = releaseFinishedPlan(allCards(data), caps, self)
+  const releasePlan = releaseFinishedPlan(allRuns(data, workspaces), caps, self)
 
   const [showArchived, setShowArchived] = useState(false)
   // The toggle only exists while there is something behind it; once the
-  // last archived run leaves (restored, or later swept), fall back to Done.
+  // last archived run leaves (restored, or later swept), fall back to Finished.
   useEffect(() => {
     if (archivedCards.length === 0) setShowArchived(false)
   }, [archivedCards.length])
-  // A workspace switch starts the new board on Done, not on whatever the
+  // A workspace switch starts the new board on Finished, not on whatever the
   // previous workspace's toggle was left showing.
   useEffect(() => {
     setShowArchived(false)
   }, [activeWorkspace])
   const visibleColumns = columns.map((column) =>
-    column.key === 'done' && showArchived ? { ...column, cards: archivedCards } : column,
+    column.key === 'finished' && showArchived ? { ...column, cards: archivedCards } : column,
   )
   const archivedToggle = {
     count: archivedCards.length,
@@ -128,28 +128,6 @@ export function Board() {
         subtitle={
           workspace ? `${workspace.name} · base ${workspace.base_branch}` : 'All workspaces'
         }
-        actions={
-          <>
-            <Tooltip>
-              <Tooltip.Trigger<'button'>
-                render={(triggerProps) => (
-                  <Button
-                    {...triggerProps}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      ackAll()
-                    }}
-                  >
-                    <CheckCheck />
-                    Mark all seen
-                  </Button>
-                )}
-              />
-              <Tooltip.Content>Mark every run seen</Tooltip.Content>
-            </Tooltip>
-          </>
-        }
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
@@ -182,7 +160,7 @@ export function Board() {
                 </>
               ) : (
                 <RunMap
-                  cards={visibleColumns.flatMap((column) => column.cards)}
+                  cards={cardRuns(visibleColumns.flatMap((column) => column.cards))}
                   scope={activeWorkspace || 'all'}
                   renderHeader={mapHeader}
                 />
@@ -191,7 +169,7 @@ export function Board() {
           ) : (
             <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:grid-rows-[auto_minmax(0,1fr)] lg:overflow-hidden">
               {visibleColumns.map((column) =>
-                column.key === 'done' ? (
+                column.key === 'finished' ? (
                   <Column
                     key={column.key}
                     column={column}
@@ -267,14 +245,14 @@ function EmptyNotice() {
   )
 }
 
-/** The Done header's toggle between finished runs and its archived ones. */
+/** The Finished header's toggle between finished runs and its archived ones. */
 interface ArchivedToggle {
   count: number
   showing: boolean
   onToggle: (showing: boolean) => void
 }
 
-/** The Done header's bulk-archive action, hidden while archived.showing. */
+/** The Finished header's bulk-archive action, hidden while archived.showing. */
 interface ClearDoneAction {
   plan: ClearDonePlan
   onRun: (eligible: RunRecord[]) => Promise<void>
@@ -312,7 +290,7 @@ function Column({
       />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
-          <RunCard key={card.run.id} run={card.run} state={card.state} unseen={card.unseen} paused={card.paused} />
+          <RunCard key={card.run.id} run={card.run} state={card.state} reason={card.reason} swarm={card.swarm} />
         ))}
         {column.cards.length === 0 && placeholder === 'skeleton' && (
           <>
@@ -386,7 +364,7 @@ function ColumnHeader({
               )}
             />
             <Tooltip.Content>
-              {archived.showing ? 'Back to Done' : 'Show archived runs'}
+              {archived.showing ? 'Back to Finished' : 'Show archived runs'}
             </Tooltip.Content>
           </Tooltip>
         )}
@@ -399,8 +377,8 @@ function ColumnHeader({
 }
 
 /**
- * Archives eligible Done cards behind a snapshot confirmation. `plan` tracks
- * Done while idle; the open dialog remains stable if runs change beneath it.
+ * Archives eligible Finished runs behind a snapshot confirmation. `plan` tracks
+ * Finished while idle; the open dialog remains stable if runs change beneath it.
  */
 function ClearDoneButton({
   plan,

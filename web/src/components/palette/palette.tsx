@@ -19,7 +19,7 @@ import {
 import { runLabel, stateLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
-import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useListedRuns, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
 // Browsing shows the most urgent runs; a search reaches every run.
@@ -53,7 +53,7 @@ export function PaletteBody({
   onTemplates: () => void
   onConfirm: (run: RunRecord, command: Command & { confirm: NonNullable<Command['confirm']> }) => void
 }) {
-  const runs = useAttentionRuns()
+  const runs = useListedRuns(useStore((s) => s.activeWorkspace))
   const runMap = useStore((s) => s.runs)
   const workspaces = useStore((s) => s.workspaces)
   const members = useStore((s) => s.members)
@@ -74,9 +74,9 @@ export function PaletteBody({
   // Steering acts on the run the centre view is showing, whichever of the run
   // detail routes is showing it - the terminal tab is exactly where a human
   // decides to steer. From the board no run is in view: reveal one first.
-  // Resolved from the run map rather than the attention list: an archived
+  // Resolved from the run map rather than the run list: an archived
   // run's own page still needs its commands (Restore among them), and
-  // attention excludes archived runs once they are also final.
+  // the list excludes archived runs once they are also final.
   const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
   const goTo = surfaces(cap).map((surface) => ({

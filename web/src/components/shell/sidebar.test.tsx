@@ -30,7 +30,7 @@ beforeEach(async () => {
     sidebarCollapsed: false,
     sidebarDrawerOpen: false,
     activeWorkspace: '',
-    groupBy: 'status',
+    mineOnly: false,
     inbox: {},
     roomMessages: {},
     inboxError: null,
@@ -283,12 +283,12 @@ describe('Sidebar', () => {
         ),
     )
 
-    expect(screen.getAllByTitle('Idle').length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
   })
 
-  it('does not infer input from a stalled or idle run', () => {
+  it("lists the viewer's own stalled run under Needs you", () => {
     render(<Sidebar />)
-    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
+    expect(screen.queryByLabelText(/\d+ runs? needs? you/i)).toBeNull()
 
     act(() =>
       useStore
@@ -301,56 +301,74 @@ describe('Sidebar', () => {
         ),
     )
 
-    expect(screen.queryByLabelText(/\d+ runs? needs? input/i)).toBeNull()
-    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
+    expect(screen.getByLabelText('1 run needs you')).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
+    expect(screen.queryByRole('img', { name: /Requests:/ })).toBeNull()
   })
 
-  it('badges an approval without moving a busy run into Idle', () => {
+  it("moves the viewer's run with an approval into Needs you until it is decided", () => {
     useStore.setState({ inbox: {} })
     render(<Sidebar />)
-    expect(screen.queryByTitle('Idle')).toBeNull()
+    expect(screen.queryByTitle('Needs you')).toBeNull()
 
-    // The run still reads `running`; the pending inbox entry is the signal.
     act(() => useStore.getState().setInbox(workspace.id, [approval()]))
 
-    expect(screen.getByLabelText('1 run needs input')).toBeDefined()
-    expect(screen.getByRole('img', { name: /Needs input: 1 approval/ })).toBeDefined()
-    expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
-    expect(screen.queryByRole('heading', { name: /^Idle/ })).toBeNull()
+    expect(screen.getByLabelText('1 run needs you')).toBeDefined()
+    expect(screen.getByRole('img', { name: /Requests: 1 approval/ })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: /^Working/ })).toBeNull()
 
     act(() => useStore.getState().setInbox(workspace.id, [
       approval({ decision: 'approved' }),
     ]))
-    expect(screen.queryByRole('img', { name: /Needs input:/ })).toBeNull()
-    expect(screen.queryByLabelText('1 run needs input')).toBeNull()
+    expect(screen.queryByRole('img', { name: /Requests:/ })).toBeNull()
+    expect(screen.queryByLabelText('1 run needs you')).toBeNull()
     expect(screen.getByRole('button', { name: /rewrite the checkout flow/ })).toBeDefined()
     expect(screen.getByRole('heading', { name: /^Working/ })).toBeDefined()
   })
 
-  it('keeps a finished unanswered run in its lifecycle group', () => {
-    const finished = run({
-      id: 'run_finished_question',
-      task: 'answer after completion',
-      status: 'failed',
-      unanswered_questions: 1,
+  it("lists another member's waiting run under Working, waiting for its owner", () => {
+    const bobRun = run({
+      id: 'run_bob',
+      member_id: bob.id,
+      account_member_id: bob.id,
+      task: 'tune the rate limiter',
+      status: 'needs-attention',
     })
     act(() =>
-      useStore.setState((state) => ({
-        runs: { ...state.runs, [finished.id]: toRecord(finished) },
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [bobRun.id]: toRecord(bobRun) },
       })),
     )
     render(<Sidebar />)
 
-    expect(screen.getByRole('button', { name: /^Failed/, expanded: true })).toBeDefined()
-    expect(screen.getByRole('img', { name: /Needs input: 1 unanswered question/ })).toBeDefined()
-    expect(screen.getByText('answer after completion')).toBeDefined()
+    expect(screen.queryByRole('heading', { name: /^Needs you/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /tune the rate limiter.*Waiting for Bob/ })).toBeDefined()
   })
 
-  it('starts the Done status group collapsed with its run count visible', () => {
+  it('names the workspace of a Needs you row from another workspace', () => {
+    const elsewhere = run({
+      id: 'run_elsewhere',
+      workspace_id: otherWorkspace.id,
+      task: 'fix the docs build',
+      status: 'needs-attention',
+    })
+    act(() =>
+      useStore.setState((s) => ({
+        activeWorkspace: workspace.id,
+        runs: { ...s.runs, [elsewhere.id]: toRecord(elsewhere) },
+      })),
+    )
+    render(<Sidebar />)
+
+    expect(screen.getByRole('button', { name: new RegExp(`^${otherWorkspace.name} · fix the docs build`) })).toBeDefined()
+  })
+
+  it('starts the Finished group collapsed with its run count visible', () => {
     const done = run({
       id: 'run_done',
       task: 'publish the finished checkout',
-      status: 'completed',
+      status: 'merged',
     })
     act(() =>
       useStore.setState((s) => ({
@@ -359,7 +377,7 @@ describe('Sidebar', () => {
     )
     render(<Sidebar />)
 
-    const doneHeader = screen.getByRole('button', { name: /^Done/, expanded: false })
+    const doneHeader = screen.getByRole('button', { name: /^Finished/, expanded: false })
     expect(doneHeader.getAttribute('aria-expanded')).toBe('false')
     expect(doneHeader.textContent).toContain('1')
     expect(screen.queryByText(done.task)).toBeNull()
@@ -391,7 +409,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
   })
 
-  it('toggles one member group while leaving other member rows visible', () => {
+  it("narrows Working to the viewer's runs under Mine", () => {
     const bobRun = run({
       id: 'run_bob',
       member_id: bob.id,
@@ -404,73 +422,17 @@ describe('Sidebar', () => {
       })),
     )
     render(<Sidebar />)
-    fireEvent.click(
-      within(screen.getByRole('group', { name: 'Group runs by' })).getByRole('button', {
-        name: 'Member',
-      }),
-    )
-
-    const aliceHeader = screen.getByRole('button', { name: /^Alice/, expanded: true })
-    expect(aliceHeader.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+    const mine = screen.getByRole('button', { name: 'Mine' })
+    expect(mine.getAttribute('aria-pressed')).toBe('false')
     expect(screen.getByText(bobRun.task)).toBeDefined()
 
-    fireEvent.click(aliceHeader)
+    fireEvent.click(mine)
 
-    expect(aliceHeader.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText('rewrite the checkout flow')).toBeNull()
-    expect(screen.getByText(bobRun.task)).toBeDefined()
-
-    fireEvent.click(aliceHeader)
-
-    expect(aliceHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(useStore.getState().mineOnly).toBe(true)
+    expect(mine.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByText(bobRun.task)).toBeNull()
     expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
   })
-
-  it('keeps disclosure state isolated between grouping modes with the same key', () => {
-    const sameKey = run({
-      id: 'run_same_key',
-      member_id: 'done',
-      account_member_id: 'done',
-      task: 'inspect the matching key',
-      status: 'completed',
-    })
-    act(() =>
-      useStore.setState((s) => ({
-        runs: { ...s.runs, [sameKey.id]: toRecord(sameKey) },
-      })),
-    )
-    render(<Sidebar />)
-
-    const groupBy = within(screen.getByRole('group', { name: 'Group runs by' }))
-    const doneStatusHeader = screen.getByRole('button', { name: /^Done/, expanded: false })
-    expect(doneStatusHeader.getAttribute('aria-expanded')).toBe('false')
-
-    fireEvent.click(groupBy.getByRole('button', { name: 'Member' }))
-
-    const doneMemberHeader = screen.getByRole('button', { name: /^done/, expanded: true })
-    expect(doneMemberHeader.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText(sameKey.task)).toBeDefined()
-
-    fireEvent.click(doneMemberHeader)
-    expect(doneMemberHeader.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText(sameKey.task)).toBeNull()
-
-    fireEvent.click(groupBy.getByRole('button', { name: 'Status' }))
-    expect(
-      screen.getByRole('button', { name: /^Done/, expanded: false }).getAttribute('aria-expanded'),
-    ).toBe(
-      'false',
-    )
-
-    fireEvent.click(groupBy.getByRole('button', { name: 'Member' }))
-    expect(
-      screen.getByRole('button', { name: /^done/, expanded: false }).getAttribute('aria-expanded'),
-    ).toBe(
-      'false',
-    )
-  })
-
 
   it('marks the active workspace destination without offering All runs in the rail', () => {
     useStore.setState({ route: { name: 'board', params: {} } })
@@ -523,26 +485,6 @@ describe('Sidebar', () => {
         name: 'Approvals, approval.list: database is locked',
       }),
     ).toBeDefined()
-  })
-
-  it('groups the runs by the pressed segment', () => {
-    render(<Sidebar />)
-    const control = within(screen.getByRole('group', { name: 'Group runs by' }))
-    const status = control.getByRole('button', { name: 'Status' })
-    const member = control.getByRole('button', { name: 'Member' })
-
-    // Both choices are on screen, so the pressed one is the state and the
-    // other one is the action.
-    expect(status.getAttribute('aria-pressed')).toBe('true')
-    expect(member.getAttribute('aria-pressed')).toBe('false')
-
-    fireEvent.click(member)
-
-    expect(useStore.getState().groupBy).toBe('member')
-    expect(member.getAttribute('aria-pressed')).toBe('true')
-    expect(status.getAttribute('aria-pressed')).toBe('false')
-    // The runs regroup under their owner rather than their state.
-    expect(screen.getByRole('heading', { name: /^Alice/ })).toBeDefined()
   })
 
   it('keeps every permitted destination reachable as the available rail height changes', async () => {

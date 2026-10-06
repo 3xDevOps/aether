@@ -233,7 +233,7 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   expectVisibleFocus('the run tab', await indicator(events))
   // Keep the live run on screen while checking its sidebar row. The Working
   // group is expanded by default; closing first would move the row under the
-  // collapsed Done group and leave nothing for focus() to target.
+  // collapsed Finished group and leave nothing for focus() to target.
   const row = page
     .getByRole('complementary', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })
@@ -307,29 +307,24 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   const runs = sidebar.getByText('Runs', { exact: true })
   const toolbar = runs.locator('..')
   const firstGroup = sidebar.getByRole('heading').first()
-  const groupBy = sidebar.getByRole('group', { name: 'Group runs by' })
-  const member = groupBy.getByRole('button', { name: 'Member', exact: true })
-  await expect(member).toBeVisible()
+  const mine = sidebar.getByRole('button', { name: 'Mine', exact: true })
+  await expect(mine).toBeVisible()
 
   const toolbarBox = await toolbar.boundingBox()
   const firstGroupBox = await firstGroup.boundingBox()
-  const groupBox = await groupBy.boundingBox()
-  const memberBox = await member.boundingBox()
+  const mineBox = await mine.boundingBox()
   const minimum = await sidebar.boundingBox()
   if (
     !toolbarBox ||
     !firstGroupBox ||
-    !groupBox ||
-    !memberBox ||
+    !mineBox ||
     !minimum
   ) {
     throw new Error('minimum-width sidebar controls did not render')
   }
 
   expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
-  for (const control of [groupBox, memberBox]) {
-    expect(control.x).toBeGreaterThanOrEqual(minimum.x)
-    expect(control.x + control.width).toBeLessThanOrEqual(minimum.x + minimum.width)
-  }
+  expect(mineBox.x).toBeGreaterThanOrEqual(minimum.x)
+  expect(mineBox.x + mineBox.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   await closeFirstRun(page)
 })

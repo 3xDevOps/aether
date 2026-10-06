@@ -26,6 +26,32 @@ import type {
   Workspace,
 } from '@/lib/types'
 import type { Candidate } from '@/lib/integration-types'
+import type { StateContext } from '@/lib/needs-you'
+import { toRecord, type RunRecord } from '@/store/runs'
+
+/** A viewer's state context: Alice looking, nothing pending, at 10:20. */
+export function stateContext(over: Partial<StateContext> = {}): StateContext {
+  return {
+    viewerID: alice.id,
+    viewerRole: alice.role,
+    members: { [alice.id]: alice, [bob.id]: bob },
+    runs: {},
+    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
+    approvalsByRun: {},
+    roomMessages: {},
+    roomStatus: {},
+    missions: {},
+    missionDetails: {},
+    pausedRuns: {},
+    now: Date.parse('2026-08-14T10:20:00Z'),
+    ...over,
+  }
+}
+
+/** Runs as the store keys them. */
+export function runRecords(...runs: Run[]): Record<string, RunRecord> {
+  return Object.fromEntries(runs.map((r) => [r.id, toRecord(r)]))
+}
 export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',

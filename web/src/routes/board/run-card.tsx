@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
+import { Archive, ChevronDown, Copy, GitBranch, GitCommit, Shield } from 'lucide-react'
 import { memo, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { RunInputIndicator } from '@/components/run-input-indicator'
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/
 import { RelativeTime } from '@/components/ui/relative-time'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
-import { awaitingReview, runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { mapCardHeight } from '@/routes/board/map-layout'
@@ -16,12 +16,13 @@ import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
 import { useRunInput } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import type { SwarmSummary } from '@/store/selectors'
 
 const lifecycleLabel: Record<RunRecord['status'], string> = {
   queued: 'Queued',
   provisioning: 'Provisioning',
   running: 'Running',
-  'needs-attention': 'Idle',
+  'needs-attention': 'Needs attention',
   completed: 'Completed',
   merged: 'Merged',
   abandoned: 'Abandoned',
@@ -45,14 +46,14 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
 export const RunCard = memo(function RunCard({
   run,
   state,
-  unseen,
-  paused,
+  reason,
+  swarm,
   variant = 'cards',
 }: {
   run: RunRecord
   state: PresentationState
-  unseen: boolean
-  paused: boolean
+  reason: string
+  swarm?: SwarmSummary
   variant?: 'cards' | 'map'
 }) {
   const owner = useStore((s) => s.members[run.member_id])
@@ -60,7 +61,6 @@ export const RunCard = memo(function RunCard({
   const branchRef = useRef<HTMLSpanElement>(null)
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
-  const unseenId = unseen ? `${detailsId}-unseen` : undefined
   const input = useRunInput(run)
   const unansweredCount = input.questions
   const questionAction =
@@ -178,7 +178,6 @@ export const RunCard = memo(function RunCard({
         style={{ borderLeftColor: owner?.color, height: variant === 'map' ? mapCardHeight : undefined }}
         className={cn(
           'group min-w-0 cursor-pointer border border-l-2 border-border bg-background transition-colors duration-100 hover:bg-toolbar-hover motion-reduce:transition-none',
-          unseen && 'border-foreground/25',
         )}
       >
         <div className="flex min-w-0 flex-col gap-0.5 px-3 py-1">
@@ -186,14 +185,6 @@ export const RunCard = memo(function RunCard({
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
               <StateChip state={state} />
               <RunInputIndicator run={run} />
-              {paused && (
-                <span title="Paused" className="shrink-0">
-                  <Chip color="warning" variant="soft" size="sm">
-                    <PauseCircle className="size-3" aria-hidden />
-                    <Chip.Label>Paused</Chip.Label>
-                  </Chip>
-                </span>
-              )}
               {run.protected && (
                 <span
                   role="img"
@@ -220,29 +211,23 @@ export const RunCard = memo(function RunCard({
           <button
             type="button"
             aria-label={runLabel(run)}
-            aria-describedby={unseenId}
             onClick={() => navigate('terminal', { runId: run.id })}
             className={cn(focusRing, 'h-10 min-w-0 shrink-0 text-left text-sm leading-5')}
           >
-            <span className={cn('line-clamp-2 break-words font-medium', unseen && 'font-semibold')}>
+            <span className="line-clamp-2 break-words font-medium">
               {runLabel(run)}
             </span>
-            {unseen && <span id={unseenId} className="sr-only">Unseen</span>}
           </button>
-          {(input.count > 0 || state === 'needs-attention') && summary ? (
-            <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
-              {summary}
-            </p>
-          ) : awaitingReview(run) && (
-            <p
-              className={cn(
-                'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 text-muted-foreground coarse:line-clamp-1',
-                run.status === 'failed' ? 'border-state-failed/60' : 'border-state-done/60',
-              )}
-            >
-              The agent reported {run.status === 'failed' ? 'failure' : 'success'}; open the run to review it.
-            </p>
-          )}
+          <p
+            className={cn(
+              'line-clamp-2 break-words border-l-2 pl-2 text-xs leading-4 coarse:line-clamp-1',
+              reasonBorder[state],
+              state === 'needs-you' ? 'text-foreground/85' : 'text-muted-foreground',
+            )}
+          >
+            {reason}
+          </p>
+          {swarm && <p className="text-xs text-muted-foreground">{swarmCounts(swarm)}</p>}
           <div className="flex h-5 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
             <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
@@ -266,22 +251,27 @@ export const RunCard = memo(function RunCard({
   )
 })
 
-const stateChipColor: Record<
-  PresentationState,
-  'accent' | 'danger' | 'default' | 'success' | 'warning'
-> = {
-  'needs-attention': 'warning',
-  failed: 'danger',
-  working: 'accent',
-  waiting: 'default',
-  done: 'success',
-  idle: 'default',
+const reasonBorder: Record<PresentationState, string> = {
+  'needs-you': 'border-state-needs-you/60',
+  working: 'border-border',
+  paused: 'border-state-paused/60',
+  done: 'border-state-done/60',
+  failed: 'border-state-failed/60',
+}
+
+/** "3 working · 1 needs you · 2 done" over a swarm's members. */
+function swarmCounts({ counts }: SwarmSummary): string {
+  return [
+    counts.working > 0 && `${counts.working} working`,
+    counts.needsYou > 0 && `${counts.needsYou} needs you`,
+    counts.done > 0 && `${counts.done} done`,
+  ].filter(Boolean).join(' · ') || 'No workers yet'
 }
 
 function StateChip({ state }: { state: PresentationState }) {
   return (
     <Chip
-      color={stateChipColor[state]}
+      color={stateTone[state]}
       variant="soft"
       size="sm"
       aria-label={stateLabel[state]}

@@ -1,16 +1,16 @@
 import type { Run } from '@/lib/types'
 import { layoutRunMap } from '@/routes/board/map-layout'
 import type { MapRect } from '@/routes/board/map-layout'
-import type { BoardCard } from '@/routes/board/selectors'
+import type { RunRow } from '@/store/selectors'
 import { toRecord } from '@/store/runs'
 import { alice, bob, otherWorkspace, run, workspace } from '@/test/fixtures'
 
-function card(overrides: Partial<Run>): BoardCard {
+function card(overrides: Partial<Run>): RunRow {
   const record = toRecord(run(overrides))
   return {
     run: record,
     owner: [alice, bob].find((member) => member.id === record.member_id),
-    state: 'working', unseen: false, paused: false,
+    state: 'working', reason: 'Agent working', group: 'working', waitingSince: record.stateChangedAt,
   }
 }
 
@@ -61,7 +61,7 @@ it('keeps visible workers without a visible integrator and does not invent legac
 })
 
 it('fits two owners beside one another and keeps three sibling workers on one row', () => {
-  const cards: BoardCard[] = []
+  const cards: RunRow[] = []
   for (const [member, workerCount, singleCount] of [[alice, 3, 2], [bob, 2, 1]] as const) {
     const root = `root-${member.id}`
     cards.push(card({ id: root, member_id: member.id, mission_id: root, mission_role: 'integrator' }))
@@ -99,7 +99,7 @@ it('fits two owners beside one another and keeps three sibling workers on one ro
 })
 
 it('contains sparse and large swarms, shelf packs without overlap, and routes orthogonal connectors clear of cards', () => {
-  const cards: BoardCard[] = []
+  const cards: RunRow[] = []
   for (let owner = 0; owner < 7; owner++) {
     cards.push(card({ id: `root-${owner}`, member_id: `member-${owner}`, mission_id: `mission-${owner}`, mission_role: 'integrator' }))
     for (let worker = 0; worker < owner * 4; worker++) {
@@ -145,8 +145,8 @@ it('does not move nodes when input order, heartbeat timestamps or live presentat
     card({ id: 'single', member_id: bob.id }),
   ]
   const before = layoutRunMap(cards)
-  const after = layoutRunMap([...cards].reverse().map<BoardCard>((entry) => ({
-    ...entry, state: 'needs-attention', unseen: true,
+  const after = layoutRunMap([...cards].reverse().map<RunRow>((entry) => ({
+    ...entry, state: 'needs-you', group: 'needs-you',
     run: { ...entry.run, status: 'needs-attention', stateChangedAt: '2026-09-29T12:00:00Z' },
   })))
   expect(after.nodes.map(({ key, x, y, width, height }) => ({ key, x, y, width, height })))

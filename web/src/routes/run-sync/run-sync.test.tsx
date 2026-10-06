@@ -24,7 +24,6 @@ function seed(extra: Partial<RootState> = {}) {
     runs: {},
     syncSessions: {},
     linkStatus: null,
-    acked: {},
     pausedRuns: {},
     inbox: {},
     info: serverInfo,

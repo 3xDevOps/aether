@@ -7,6 +7,7 @@ import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { configKey } from '@/store/files'
 import { capability } from '@/store/hooks'
+import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
@@ -477,18 +478,11 @@ describe('hydrate', () => {
     expect(s.pausedRuns).toEqual({ run_1: true, run_2: false })
     expect(s.pausedRuns.run_3).toBeUndefined()
 
-    // And the board card carries the badge straight from the snapshot.
-    const { columns } = board({
-      workspace: s.activeWorkspace,
-      workspaces: s.workspaces,
-      runs: s.runs,
-      members: s.members,
-      acked: s.acked,
-      pausedRuns: s.pausedRuns,
-    })
+    // And the board card shows Paused straight from the snapshot.
+    const { columns } = board({ workspace: s.activeWorkspace, mineOnly: false, ctx: stateContextOf(s, Date.now()) })
     const working = columns.find((c) => c.key === 'working')
-    expect(working?.cards.find((c) => c.run.id === 'run_1')?.paused).toBe(true)
-    expect(working?.cards.find((c) => c.run.id === 'run_2')?.paused).toBe(false)
+    expect(working?.cards.find((c) => c.run.id === 'run_1')?.state).toBe('paused')
+    expect(working?.cards.find((c) => c.run.id === 'run_2')?.state).toBe('working')
   })
 
   it('replaces the paused map wholesale on re-hydration', async () => {

@@ -15,7 +15,7 @@ import { layoutRunMap } from '@/routes/board/map-layout'
 import type { RunMapLayout } from '@/routes/board/map-layout'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunCard } from '@/routes/board/run-card'
-import type { BoardCard } from '@/routes/board/selectors'
+import type { RunRow } from '@/store/selectors'
 import { useStore } from '@/store'
 import {
   maxBoardMapZoom,
@@ -31,7 +31,7 @@ export function RunMap({
   scope,
   renderHeader,
 }: {
-  cards: BoardCard[]
+  cards: RunRow[]
   scope: string
   renderHeader: (controls: ReactNode) => ReactNode
 }) {
@@ -394,7 +394,7 @@ function MapViewport({
             return (
               <div key={node.key} role="group" aria-label={description} className="absolute cursor-default" style={{ left: node.x, top: node.y, width: node.width, height: node.height }}>
                 {node.role !== 'standalone' && <span className={cn('pointer-events-none absolute -top-5 text-[11px] font-medium text-muted-foreground', node.role === 'worker' ? 'right-0' : 'left-0')}>{node.role === 'integrator' ? 'Integrator' : 'Worker'}</span>}
-                <RunCard run={node.card.run} state={node.card.state} unseen={node.card.unseen} paused={node.card.paused} variant="map" />
+                <RunCard run={node.card.run} state={node.card.state} reason={node.card.reason} variant="map" />
               </div>
             )
           })}

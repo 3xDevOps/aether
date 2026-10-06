@@ -32,7 +32,8 @@ beforeEach(() => {
 })
 
 // The palette's archive entry shares the board confirmation and executor,
-// over the board's Done column as it stands when the dialog opens.
+// over the board's Finished column, failures first, as it stands when the
+// dialog opens.
 describe('archive confirmation dialog', () => {
   it('archives every eligible run in order and closes the palette form', async () => {
     render(<ClearDoneDialog />)
@@ -40,8 +41,8 @@ describe('archive confirmation dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive 2' }))
 
     await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
-    expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(1, 'run_a', true)
-    expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(2, 'run_b', true)
+    expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(1, 'run_b', true)
+    expect(archiveMocks.runArchive).toHaveBeenNthCalledWith(2, 'run_a', true)
   })
 
   it('cancels without calling the gateway', () => {

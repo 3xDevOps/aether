@@ -1,15 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { RunList } from '@/components/run-list'
-import { runState } from '@/lib/status'
+import { listedRuns } from '@/store/selectors'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { alice, run } from '@/test/fixtures'
+import { run, runRecords, stateContext } from '@/test/fixtures'
 
 describe('run list', () => {
   it('bounces a working row and opens it on the terminal', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
     const listed = toRecord(run())
-    const rows = [{ run: listed, state: runState(listed.status), waitsOnHuman: false, owner: alice }]
+    const rows = listedRuns('', stateContext({ runs: runRecords(run()) }))
     const { container } = render(<RunList runs={rows} empty="No runs yet" />)
 
     expect(container.querySelector('.working-dots')).not.toBeNull()
@@ -50,10 +50,9 @@ describe('run list empty states', () => {
   it('gives a taskless TUI run a placeholder title', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
     // A TUI launch carries no task; the row still needs a legible title.
-    const taskless = toRecord(run({ task: '' }))
     render(
       <RunList
-        runs={[{ run: taskless, state: runState(taskless.status), waitsOnHuman: false, owner: alice }]}
+        runs={listedRuns('', stateContext({ runs: runRecords(run({ task: '' })) }))}
         empty="No runs yet"
       />,
     )

@@ -1,0 +1,367 @@
+// The Needs you conditions: every server condition that blocks a run until a
+// human acts, as one table. A condition holds for a run whoever is looking;
+// it needs *you* only when the viewer is one of the members who can resolve
+// it. See "Run state" in docs/dashboard-frontend.md.
+
+import type {
+  Approval,
+  Member,
+  Mission,
+  RoomMessage,
+  RoomStatusResult,
+  Run,
+  Workspace,
+} from '@/lib/types'
+import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
+import type { MissionDetail } from '@/store/missions'
+import { isTerminal, type RunRecord } from '@/store/runs'
+
+/** Everything a run's state is derived from beyond the run itself. */
+export interface StateContext {
+  viewerID: string | null
+  viewerRole: Member['role'] | null
+  members: Record<string, Member>
+  /** Every listed run, so a worker can find its integrator. */
+  runs: Record<string, RunRecord>
+  workspaces: Record<string, Workspace>
+  /** Pending Aether approvals per run, oldest first. */
+  approvalsByRun: Record<string, Approval[]>
+  roomMessages: Record<string, RoomMessage[]>
+  /** Room presence per run; its controller holds the run's terminal control. */
+  roomStatus: Record<string, RoomStatusResult | undefined>
+  missions: Record<string, Mission>
+  missionDetails: Record<string, MissionDetail>
+  pausedRuns: Record<string, boolean>
+  /** Epoch milliseconds the reason lines measure waits against. */
+  now: number
+}
+
+/** Where the viewer goes to resolve a condition. */
+export type NeedsYouTarget = 'request' | 'run' | 'changes' | 'notes' | 'swarm'
+
+export type NeedsYouID =
+  | 'permission'
+  | 'question'
+  | 'queued-message'
+  | 'room-question'
+  | 'swarm-question'
+  | 'integrator-down'
+  | 'control-hold'
+  | 'enhanced-failure'
+  | 'worker-blocked'
+  | 'stopped'
+  | 'unreviewed-finish'
+
+export interface NeedsYouCondition {
+  id: NeedsYouID
+  /** The condition holds and the viewer can resolve it. */
+  applies: (run: RunRecord, ctx: StateContext) => boolean
+  /** The member the condition waits on while it holds, whoever is looking. */
+  waitsOn: (run: RunRecord, ctx: StateContext) => string | undefined
+  reason: (run: RunRecord, ctx: StateContext) => string
+  /** When the wait began, for oldest-first ordering. */
+  since: (run: RunRecord, ctx: StateContext) => string
+  target: NeedsYouTarget
+}
+
+interface Spec {
+  id: NeedsYouID
+  holds: (run: RunRecord, ctx: StateContext) => boolean
+  /** Members who can resolve it, most responsible first. */
+  resolvers: (run: RunRecord, ctx: StateContext) => (string | undefined)[]
+  /** Admins can resolve it too. */
+  admins?: boolean
+  /** Counts on a Background run. */
+  background?: boolean
+  /** Counts on a worker its live integrator supervises. */
+  supervised?: boolean
+  reason: (run: RunRecord, ctx: StateContext) => string
+  since?: (run: RunRecord, ctx: StateContext) => string | undefined
+  target: NeedsYouTarget
+}
+
+function condition(spec: Spec): NeedsYouCondition {
+  const holds = (run: RunRecord, ctx: StateContext) =>
+    (spec.background || run.mode !== 'headless') &&
+    (spec.supervised || !supervised(run, ctx)) &&
+    spec.holds(run, ctx)
+  return {
+    id: spec.id,
+    target: spec.target,
+    reason: spec.reason,
+    since: (run, ctx) => spec.since?.(run, ctx) ?? run.stateChangedAt,
+    applies: (run, ctx) => {
+      if (!ctx.viewerID || !holds(run, ctx)) return false
+      if (spec.admins && ctx.viewerRole === 'admin') return true
+      return spec.resolvers(run, ctx).includes(ctx.viewerID)
+    },
+    waitsOn: (run, ctx) =>
+      holds(run, ctx) ? spec.resolvers(run, ctx).find((id) => id) : undefined,
+  }
+}
+
+/**
+ * An agent report finished the run and its owner has not opened it yet. The
+ * flag is owner-scoped on the server.
+ */
+export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
+  return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
+}
+
+export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
+  return !isTerminal(run.status) && (ctx.pausedRuns[run.id] ?? run.paused) === true
+}
+
+function missionOf(run: RunRecord, ctx: StateContext): Mission | undefined {
+  return run.mission_id ? ctx.missions[run.mission_id] : undefined
+}
+
+const swarmRunning = (mission: Mission | undefined) =>
+  !mission || mission.phase === 'planning' || mission.phase === 'active'
+
+function attemptHold(run: RunRecord, ctx: StateContext) {
+  if (run.mission_role !== 'worker' || !run.mission_id) return undefined
+  return ctx.missionDetails[run.mission_id]?.attempts.find(
+    (attempt) => attempt.run_id === run.id && attempt.takeover_active,
+  )
+}
+
+/**
+ * A worker whose swarm is running under a live integrator: the integrator,
+ * not a human, handles its stops and requests, until a human holds it.
+ */
+export function supervised(run: RunRecord, ctx: StateContext): boolean {
+  if (run.mission_role !== 'worker' || !run.integrator_run_id) return false
+  const integrator = ctx.runs[run.integrator_run_id]
+  const mission = missionOf(run, ctx)
+  return (
+    integrator !== undefined &&
+    !isTerminal(integrator.status) &&
+    swarmRunning(mission) &&
+    !mission?.integrator_launch_error &&
+    attemptHold(run, ctx) === undefined
+  )
+}
+
+function controller(run: RunRecord, ctx: StateContext): string | undefined {
+  return ctx.roomStatus[run.id]?.controller?.member_id
+}
+
+export function memberName(memberID: string, ctx: Pick<StateContext, 'members'>): string {
+  return ctx.members[memberID]?.display_name ?? memberID
+}
+
+/** "12 min" since an instant, never less than a minute's precision. */
+function waited(iso: string, now: number): string {
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000)
+  if (!Number.isFinite(minutes) || minutes < 1) return 'less than a minute'
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} h`
+  return `${Math.floor(hours / 24)} d`
+}
+
+const nativeRequests = (run: RunRecord, kinds: string[]) =>
+  (run.pending_inputs ?? []).filter((request) => kinds.includes(request.kind))
+
+const questionKinds = ['question', 'form', 'extension_ui']
+
+function openRoomQuestions(run: RunRecord, ctx: StateContext): RoomMessage[] {
+  return unansweredQuestions(ctx.roomMessages[run.id] ?? []).filter(
+    (message) => message.actor_id !== run.member_id,
+  )
+}
+
+function queuedMessages(run: RunRecord, ctx: StateContext): RoomMessage[] {
+  const holder = controller(run, ctx)
+  return queuedSteers(ctx.roomMessages[run.id] ?? []).filter(
+    (message) => message.actor_id !== holder,
+  )
+}
+
+function currentIntegrator(run: RunRecord, ctx: StateContext): Mission | undefined {
+  const mission = missionOf(run, ctx)
+  if (run.mission_role !== 'integrator' || !mission) return undefined
+  if (mission.current_integrator_run_id !== run.id || !swarmRunning(mission)) return undefined
+  return mission
+}
+
+function openSwarmQuestions(run: RunRecord, ctx: StateContext) {
+  const mission = currentIntegrator(run, ctx)
+  if (!mission) return []
+  return (ctx.missionDetails[mission.id]?.questions ?? []).filter((q) => !q.answered_at)
+}
+
+/** The human accountable for a swarm: the mission's, else whoever started its integrator. */
+function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
+  return (
+    missionOf(run, ctx)?.accountable_human_id ??
+    (run.integrator_run_id ? ctx.runs[run.integrator_run_id]?.member_id : undefined) ??
+    run.member_id
+  )
+}
+
+const blockedPrefix = 'blocked: '
+const enhancedPrefix = 'enhanced:'
+const stalledPrefix = 'stalled:'
+
+/**
+ * Checked in order; `needsYou` reports the first that applies. The rows that
+ * read a reason prefix come before the generic stop, which matches any
+ * parked run.
+ */
+export const needsYouConditions: NeedsYouCondition[] = [
+  condition({
+    id: 'permission',
+    target: 'request',
+    holds: (run, ctx) =>
+      nativeRequests(run, ['permission']).length > 0 || (ctx.approvalsByRun[run.id]?.length ?? 0) > 0,
+    resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
+    reason: (run, ctx) => {
+      const approval = ctx.approvalsByRun[run.id]?.[0]
+      return approval ? `Permission: ${approval.action}` : 'Permission: answer in the terminal'
+    },
+    since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
+  }),
+  condition({
+    id: 'question',
+    target: 'request',
+    holds: (run) => nativeRequests(run, questionKinds).length > 0,
+    resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
+    reason: () => 'Question: answer in the terminal',
+  }),
+  condition({
+    id: 'queued-message',
+    target: 'request',
+    holds: (run, ctx) =>
+      controller(run, ctx) !== undefined &&
+      (queuedMessages(run, ctx).length > 0 ||
+        (ctx.roomMessages[run.id] === undefined && (ctx.roomStatus[run.id]?.queued_steers ?? 0) > 0)),
+    resolvers: (run, ctx) => [controller(run, ctx)],
+    reason: (run, ctx) => {
+      const message = queuedMessages(run, ctx)[0]
+      const sender = message ? message.actor_display_name ?? memberName(message.actor_id, ctx) : 'A teammate'
+      return `${sender} sent a message, approve to deliver`
+    },
+    since: (run, ctx) => queuedMessages(run, ctx)[0]?.created_at,
+  }),
+  condition({
+    id: 'room-question',
+    target: 'notes',
+    // The snapshot count is authoritative; room history, loaded only with
+    // the room and possibly stale, names the asker.
+    holds: (run, ctx) =>
+      run.unanswered_questions !== 0 &&
+      (ctx.roomMessages[run.id] === undefined
+        ? (run.unanswered_questions ?? 0) > 0
+        : openRoomQuestions(run, ctx).length > 0),
+    resolvers: (run) => [run.member_id],
+    reason: (run, ctx) => {
+      const question = openRoomQuestions(run, ctx)[0]
+      if (!question) return 'Open question in the Run Room'
+      return `${question.actor_display_name ?? memberName(question.actor_id, ctx)} asked you: ${question.body}`
+    },
+    since: (run, ctx) => openRoomQuestions(run, ctx)[0]?.created_at,
+  }),
+  condition({
+    id: 'swarm-question',
+    target: 'swarm',
+    background: true,
+    holds: (run, ctx) =>
+      openSwarmQuestions(run, ctx).length > 0 || (currentIntegrator(run, ctx)?.open_questions ?? 0) > 0,
+    resolvers: (run, ctx) => [currentIntegrator(run, ctx)?.accountable_human_id],
+    admins: true,
+    reason: (run, ctx) => {
+      const question = openSwarmQuestions(run, ctx)[0]
+      return question ? `The integrator asks: ${question.body}` : 'The integrator has a question'
+    },
+    since: (run, ctx) => openSwarmQuestions(run, ctx)[0]?.asked_at,
+  }),
+  condition({
+    id: 'integrator-down',
+    target: 'swarm',
+    background: true,
+    holds: (run, ctx) => {
+      if (run.mission_role !== 'integrator') return false
+      const mission = currentIntegrator(run, ctx)
+      // Without the swarm's record only a failure is certain: a completed
+      // integrator may simply have finished the swarm.
+      if (!missionOf(run, ctx)) return run.status === 'failed' || run.status === 'interrupted'
+      return mission !== undefined && (Boolean(mission.integrator_launch_error) || !!isTerminal(run.status))
+    },
+    resolvers: (run, ctx) => [swarmHuman(run, ctx)],
+    admins: true,
+    reason: (run, ctx) =>
+      missionOf(run, ctx)?.integrator_launch_error
+        ? 'Integrator failed to launch, replace it to continue'
+        : 'Integrator stopped, replace it to continue',
+    since: (run, ctx) => missionOf(run, ctx)?.integrator_launch_error_at,
+  }),
+  condition({
+    id: 'control-hold',
+    target: 'run',
+    background: true,
+    supervised: true,
+    holds: (run, ctx) => attemptHold(run, ctx)?.takeover_member_id !== undefined,
+    resolvers: (run, ctx) => [attemptHold(run, ctx)?.takeover_member_id],
+    reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
+  }),
+  condition({
+    // A placeholder predicate until Enhanced runs report their failures.
+    id: 'enhanced-failure',
+    target: 'run',
+    background: true,
+    holds: (run) => run.reason?.startsWith(enhancedPrefix) === true,
+    resolvers: (run) => [run.member_id],
+    reason: (run) => `Enhanced unavailable: ${run.reason?.slice(enhancedPrefix.length).trim()}`,
+  }),
+  condition({
+    id: 'worker-blocked',
+    target: 'swarm',
+    background: true,
+    supervised: true,
+    holds: (run) =>
+      run.mission_role === 'worker' &&
+      run.status === 'needs-attention' &&
+      run.reason?.startsWith(blockedPrefix) === true,
+    resolvers: (run, ctx) => [swarmHuman(run, ctx)],
+    reason: (run) => `Worker blocked: ${run.reason?.slice(blockedPrefix.length)}`,
+  }),
+  condition({
+    id: 'stopped',
+    target: 'run',
+    holds: (run, ctx) =>
+      run.status === 'needs-attention' &&
+      !isPaused(run, ctx) &&
+      !run.reason?.startsWith(blockedPrefix) &&
+      !run.reason?.startsWith(enhancedPrefix),
+    resolvers: (run) => [run.member_id],
+    reason: (run, ctx) =>
+      run.reason?.startsWith(stalledPrefix)
+        ? `No activity for ${waited(run.stateChangedAt, ctx.now)}`
+        : `Agent idle for ${waited(run.stateChangedAt, ctx.now)}`,
+  }),
+  condition({
+    id: 'unreviewed-finish',
+    target: 'changes',
+    background: true,
+    holds: (run) => awaitingReview(run),
+    resolvers: (run) => [run.member_id],
+    reason: (run) =>
+      run.status === 'failed' ? 'Failed, review the result' : 'Finished, review the result',
+  }),
+]
+
+/** The first condition the viewer can resolve on this run, if any. */
+export function needsYou(run: RunRecord, ctx: StateContext): NeedsYouCondition | undefined {
+  return needsYouConditions.find((entry) => entry.applies(run, ctx))
+}
+
+/** Who the run waits on when it waits on somebody other than the viewer. */
+export function waitingOn(run: RunRecord, ctx: StateContext): string | undefined {
+  for (const entry of needsYouConditions) {
+    const member = entry.waitsOn(run, ctx)
+    if (member !== undefined) return member
+  }
+  return undefined
+}

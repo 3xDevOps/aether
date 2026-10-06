@@ -40,9 +40,8 @@ import { useCapability, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
-import { StatusChip } from '@/components/run-list'
+import { RunStatusChip } from '@/components/run-list'
 import { RunInputIndicator } from '@/components/run-input-indicator'
-import { runState } from '@/lib/status'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
   ErrorNotice,
@@ -458,7 +457,7 @@ function MissionDetailView({
                   {integratorRun && (
                     <>
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <StatusChip state={runState(integratorRun.status)} />
+                        <RunStatusChip run={integratorRun} />
                         <RunInputIndicator run={integratorRun} />
                         {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
                       </span>

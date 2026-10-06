@@ -9,7 +9,6 @@ import {
   Archive,
   ArchiveRestore,
   Cable,
-  CheckCheck,
   CircleCheck,
   Download,
   FileText,
@@ -36,12 +35,11 @@ import { toast } from 'sonner'
 import { api, ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import { runState } from '@/lib/status'
-import type { Member, PullResult, RunStatus, Workspace } from '@/lib/types'
+import type { Member, PullResult, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { isArchivable, isTerminal, type RunRecord } from '@/store/runs'
 import type { Theme } from '@/store/ui'
 
 /** What a command needs to do its work, supplied by the surface running it. */
@@ -50,7 +48,6 @@ export interface CommandDeps {
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
-  ackAll: () => void
   setTheme: (theme: Theme) => void
   /** Keeps a pull's git output for the diff tab to show. */
   recordPull: (runID: string, result: PullResult) => void
@@ -143,7 +140,7 @@ export interface ReleaseFinishedPlan {
 
 /** The existing status and reason pair is the wire evidence of retention. */
 export function isRetainedRun(run: RunRecord): boolean {
-  if (!isFinished(run.status)) return false
+  if (!isTerminal(run.status)) return false
   switch (run.reason) {
     case 'closed; retained container':
       return run.status === 'merged' || run.status === 'abandoned'
@@ -319,7 +316,7 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
 export function runCommands(ctx: RunCommandContext): Command[] {
   const { run, paused, cap, self, steerOthers } = ctx
   const id = run.id
-  const finished = isFinished(run.status)
+  const finished = isTerminal(run.status)
   const target = { owner: run.member_id, protected: run.protected, steerOthers }
   // The same three questions internal/permissions asks. A verb the server
   // would answer with a denial is not offered on either surface.
@@ -466,7 +463,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (
     run.mode === 'tui' &&
     (run.reason === 'closed; retained container'
-      ? runState(run.status) === 'done'
+      ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
       : finished && agentReportRetained.has(run.reason ?? '')) &&
     cap.hasMethod('run.relaunch') &&
     maySteer
@@ -505,15 +502,6 @@ const agentReportRetained = new Set([
   'agent reported success; retained container',
   'agent reported failure; retained container',
 ])
-
-/**
- * Whether the run has stopped for good. A pending approval only ever reads as
- * needs-attention, so the presentation state decides this on status alone.
- */
-function isFinished(status: RunStatus): boolean {
-  const state = runState(status)
-  return state === 'done' || state === 'failed'
-}
 
 /**
  * Whether this member may start a run. The gateway capability descriptor says
@@ -571,12 +559,6 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.onTemplates(),
     })
   }
-  list.push({
-    id: 'ack-all',
-    label: 'Mark all runs seen',
-    Icon: CheckCheck,
-    perform: (d) => d.ackAll(),
-  })
   // The confirmation computes which runs qualify when it opens, and says so
   // when none do; the palette does not build the board to find out first.
   if (ctx.cap.hasMethod('run.archive')) {
@@ -631,7 +613,6 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
-  const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -645,7 +626,6 @@ export function useCommandRunner(
         navigate,
         openDialog,
         openForwardDialog,
-        ackAll,
         recordPull,
         removeRun,
         setTheme,
@@ -661,7 +641,6 @@ export function useCommandRunner(
       }
     },
     [
-      ackAll,
       navigate,
       onDone,
       onTemplates,

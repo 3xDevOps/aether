@@ -72,7 +72,7 @@ const persistedUi = (s: RootState) => ({
   singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
-  groupBy: s.groupBy,
+  mineOnly: s.mineOnly,
   lastHarnessByAccount: s.lastHarnessByAccount,
   boardView: s.boardView,
   boardMapViewports: s.boardMapViewports,
@@ -121,7 +121,7 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 4,
+        version: 5,
         // Every version before 2 stored a Repository step record this build
         // cannot use: version 0's push answer predates the comparison state
         // the step renders, and version 1 has no link id to tell one
@@ -131,6 +131,7 @@ export function createRootStore() {
         // as the step it meant. Every version before 4 has no furthest step:
         // the resume point is the only evidence of how far the member got,
         // and without it the header would turn every later step inert.
+        // Version 5 replaced the sidebar's Status/Member grouping with Mine.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -150,6 +151,7 @@ export function createRootStore() {
           if (version < 4 && state.onboardingStep) {
             state.onboardingFurthest = state.onboardingStep
           }
+          if (version < 5) delete (state as { groupBy?: unknown }).groupBy
           return state
         },
         // `migrate` only runs when the stored version differs, and xterm is

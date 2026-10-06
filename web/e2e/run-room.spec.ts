@@ -126,8 +126,10 @@ test('two members share comments, moderated steering, and explicit control trans
         const header = viewerPage.locator('header').filter({
           has: viewerPage.getByRole('heading', { name: task, exact: true }),
         })
-        await expect(header.getByRole('button', { name: /^Needs input:/ })).toHaveCount(requests.length)
-        await expect(header.getByText('Working', { exact: true })).toBeVisible()
+        await expect(header.getByRole('button', { name: /^Requests:/ })).toHaveCount(requests.length)
+        // The owner answers a native question; everyone else sees it waiting on her.
+        const state = requests.length > 0 && viewerPage === page ? 'Needs you' : 'Working'
+        await expect(header.getByText(state, { exact: true })).toBeVisible()
       }
     }
 
@@ -308,12 +310,8 @@ test('two members share comments, moderated steering, and explicit control trans
     await page.goto(alice.url)
     const card = page.locator(`[data-run-id="${run.id}"]`)
     await expect(card.getByText(task, { exact: true })).toBeVisible()
-    await expect(card.getByRole('button', { name: /Needs input: 1 unanswered question/ })).toBeVisible()
-    await expect(
-      card.getByText('1 unanswered question - open Run Room to answer', {
-        exact: true,
-      }),
-    ).toBeVisible()
+    await expect(card.getByRole('button', { name: /Requests: 1 unanswered question/ })).toBeVisible()
+    await expect(card.getByText('Open question in the Run Room', { exact: true })).toBeVisible()
     await card.getByRole('button', { name: task, exact: true }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   } finally {

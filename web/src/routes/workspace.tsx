@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { message, timeAgo } from '@/lib/format'
 import type { WorkspaceMirrorResult } from '@/lib/types'
 import { api } from '@/lib/api'
@@ -14,8 +14,7 @@ import {
 } from '@/routes/admin-dialogs'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin } from '@/store/hooks'
-import { sidebarRuns } from '@/store/selectors'
+import { useCapability, useIsAdmin, useListedRuns } from '@/store/hooks'
 
 /**
  * One workspace: its runs, its base branch, and the two settings that used
@@ -25,9 +24,7 @@ import { sidebarRuns } from '@/store/selectors'
 export function WorkspaceView({ params }: RouteProps) {
   const workspaceID = params.workspaceId
   const workspace = useStore((s) => s.workspaces[workspaceID])
-  const allRuns = useStore((s) => s.runs)
-  const members = useStore((s) => s.members)
-  const groupBy = useStore((s) => s.groupBy)
+  const runs = useListedRuns(workspaceID)
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const [dialog, setDialog] = useState<'budget' | 'settings' | 'mirror' | 'repository' | 'local' | null>(params.repository === 'local' ? 'local' : params.repository === 'remote' ? 'repository' : null)
@@ -55,17 +52,6 @@ export function WorkspaceView({ params }: RouteProps) {
       live = false
     }
   }, [workspaceID, workspace, canMirror, repositoryOpen])
-
-  const runs = useMemo(
-    () =>
-      sidebarRuns({
-        workspace: workspaceID,
-        runs: allRuns,
-        members,
-        groupBy,
-      }),
-    [workspaceID, allRuns, members, groupBy],
-  )
 
   if (!workspace) {
     return (
@@ -181,7 +167,7 @@ export function WorkspaceView({ params }: RouteProps) {
             <h2 id="workspace-runs-heading" className="text-[13px] font-semibold leading-5">
               Runs
             </h2>
-            <span className="text-xs text-muted-foreground">attention first</span>
+            <span className="text-xs text-muted-foreground">Needs you first</span>
           </div>
           <RunList runs={runs} empty="No runs in this workspace yet." />
         </section>
