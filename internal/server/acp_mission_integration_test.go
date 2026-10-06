@@ -16,10 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// TestIntegrationEnhancedMissionWake runs a swarm on real Docker whose
-// integrator and worker are enhanced acpmock runs. Mail to either one while
-// its session is idle starts a turn that carries the inbox instruction: a
-// message to the worker, and the worker's report to the integrator.
 func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -98,7 +94,6 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	}
 }
 
-// waitTurns waits until run's session has ended n turns and returns its item log.
 func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID, n int) []acphost.Item {
 	t.Helper()
 	for {
@@ -123,8 +118,6 @@ func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID,
 	}
 }
 
-// woken reports whether the log holds a user prompt announcing unread
-// unacknowledged inbox items.
 func woken(items []acphost.Item, unread int) bool {
 	want := protocol.CoordInboxContext(unread)
 	for _, it := range items {

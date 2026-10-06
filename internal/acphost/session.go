@@ -34,8 +34,8 @@ type Config struct {
 	// SessionID is the agent session to restore; empty starts a new one.
 	SessionID string
 	Logger    *slog.Logger
-	// AutoAllow answers every permission request with its first allow_*
-	// option, for a session no one is expected to watch.
+	// AutoAllow answers every permission request with allow_once, or else
+	// the first allow_* option.
 	AutoAllow bool
 
 	// OnState reports execution state: working at every prompt start,

@@ -60,10 +60,9 @@ func (m *Manager) Installation(launcher, account domain.MemberID, executable str
 	return account, nil
 }
 
-// AgentInstalled reports whether a launch by launcher on account's account
-// finds the agent's CLI, and whether it finds the agent's ACP server in the
-// same home: the launch sees only that home's ~/.local. An empty acp means
-// the agent serves no ACP.
+// AgentInstalled looks for the ACP server only in the home the CLI comes
+// from: the launch sees only that home's ~/.local. An empty acp means the
+// agent serves no ACP.
 func (m *Manager) AgentInstalled(launcher, account domain.MemberID, cli, acp string, installPaths []string) (installed, acpInstalled bool, err error) {
 	owner, err := m.Installation(launcher, account, cli, installPaths)
 	if err != nil || owner == "" || acp == "" {

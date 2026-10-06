@@ -82,7 +82,6 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 		t.Fatalf("wake prompt %q, want %q", got, want)
 	}
 
-	// The agent ended its turn without reading the message.
 	waker.endTurn(b)
 	h.svc.wakeEnhanced(b)
 	if n := waker.count(); n != 1 {
@@ -120,8 +119,6 @@ func TestEnhancedWakeSkipsBusySessionUntilIdle(t *testing.T) {
 	}
 }
 
-// A refusal by run control or a mission lock is retried with no new mail
-// and no turn end.
 func TestEnhancedWakeRetriesARefusedAdmission(t *testing.T) {
 	waker := newFakeACPWaker()
 	var mu sync.Mutex
@@ -174,8 +171,6 @@ func (m *questionMissionStub) setOpen(n int) {
 	m.open = n
 }
 
-// A human's answer changes no mail, so the mission change itself wakes an
-// enhanced integrator, once per changed notice.
 func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 	waker := newFakeACPWaker()
 	stub := &questionMissionStub{open: 1}

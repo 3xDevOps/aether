@@ -32,8 +32,7 @@ const (
 	// TypeRunTitle carries the latest terminal title for a run.
 	TypeRunTitle Type = "run.title"
 	// TypeRunProtected carries a run's protection state.
-	TypeRunProtected Type = "run.protected"
-	// TypeRunController carries the member holding a run's control lease.
+	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
@@ -155,8 +154,7 @@ func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
 
-// RunControllerPayload names the member holding a run's control lease;
-// empty means nobody does.
+// An empty MemberID means nobody holds the run's control lease.
 type RunControllerPayload struct {
 	MemberID domain.MemberID `json:"member_id"`
 }

@@ -161,7 +161,6 @@ func (s *Scheduler) recordedMode(run domain.RunID) string {
 	return lastItem(log, acphost.KindModeChange).Mode
 }
 
-// lastItem is the log's last item of kind, the zero item when it has none.
 func lastItem(log *acphost.Log, kind acphost.Kind) acphost.Item {
 	for before := int64(math.MaxInt64); ; {
 		items, err := log.ReadBefore(before, 512)

@@ -268,7 +268,7 @@ type supervised struct {
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
-	// acp mirrors Run.ACP: the acp driver hosts the agent.
+	// acp mirrors Run.ACP.
 	acp             bool
 	missionAssigned bool
 	retained        bool
@@ -640,9 +640,8 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 // command resolves argv and profile for one launch by member on account's
-// shared account, with the profile from launchProfile. acp reports that the
-// acp driver hosts the agent, which then has no argv: the task travels over
-// the protocol.
+// shared account, with the profile from launchProfile. An acp launch has no
+// argv: the task travels over the protocol.
 func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) (argv []string, profile harness.Profile, acp bool, err error) {
 	task = s.withCoAuthorInstruction(task)
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
@@ -670,9 +669,6 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	return harness.Argv(argv, task), profile, false, nil
 }
 
-// backgroundACP reports whether a background run of the agent goes through
-// its ACP server: the agent defaults to enhanced runs, has an ACP server, and
-// it is installed in the home whose CLI the launch runs.
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
 	adapter := argvs[domain.LaunchACP]
 	if !profile.ACPDefault || len(adapter) == 0 || s.cfg.Homes == nil {

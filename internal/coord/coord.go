@@ -129,8 +129,7 @@ type Config struct {
 	// WakeAdmission orders the final native wake frame with human control.
 	// An absent seam disables native dispatch without affecting legacy hooks.
 	WakeAdmission WakeAdmission
-	// ACPWaker is how mail reaches an idle enhanced run, through the same
-	// WakeAdmission. Nil leaves enhanced runs to read mail on their own.
+	// Nil leaves enhanced runs to read mail on their own.
 	ACPWaker ACPWaker
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
@@ -167,19 +166,17 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu               sync.Mutex
-	listeners        map[socketKey]*net.UnixListener
-	buckets          map[domain.RunID]*bucket
-	inboxBuckets     map[domain.RunID]*bucket
-	requestBuckets   map[domain.RunID]*bucket
-	hookBuckets      map[domain.RunID]*bucket
-	lifecycleBuckets map[domain.RunID]*bucket
-	inboxWaiters     map[domain.RunID]*inboxWaiter
-	hookWaiters      map[domain.RunID]map[*hookWaiter]struct{}
-	inboxConsumers   map[domain.RunID]int
-	reportLocks      map[domain.RunID]*sync.Mutex
-	// enhancedWoken holds the unread message IDs the last enhanced wake
-	// announced, per run.
+	mu                sync.Mutex
+	listeners         map[socketKey]*net.UnixListener
+	buckets           map[domain.RunID]*bucket
+	inboxBuckets      map[domain.RunID]*bucket
+	requestBuckets    map[domain.RunID]*bucket
+	hookBuckets       map[domain.RunID]*bucket
+	lifecycleBuckets  map[domain.RunID]*bucket
+	inboxWaiters      map[domain.RunID]*inboxWaiter
+	hookWaiters       map[domain.RunID]map[*hookWaiter]struct{}
+	inboxConsumers    map[domain.RunID]int
+	reportLocks       map[domain.RunID]*sync.Mutex
 	enhancedWoken     map[domain.RunID]map[string]struct{}
 	enhancedNotices   map[domain.RunID]missionNotice
 	enhancedWakeLocks map[domain.RunID]*sync.Mutex

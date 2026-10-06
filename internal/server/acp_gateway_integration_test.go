@@ -28,9 +28,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// enhancedServer is a server on real Docker whose "fake" agent serves ACP
-// through the acpmock agent seeded into the workspace's repository, reached
-// through the dashboard gateway at web. Its terminal mode sleeps.
+// enhancedServer's "fake" agent serves ACP through the acpmock agent seeded
+// into the workspace's repository; its terminal mode sleeps.
 type enhancedServer struct {
 	srv  *Server
 	web  string

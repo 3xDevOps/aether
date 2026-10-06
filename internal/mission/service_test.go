@@ -243,9 +243,6 @@ func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 	}
 }
 
-// A headless integrator exits after one turn, so it could never be asked a
-// question or told of a decision. An enhanced one is woken by its mail.
-// Workers keep every mode.
 func TestIntegratorModes(t *testing.T) {
 	const refused = "integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told"
 	ctx := context.Background()

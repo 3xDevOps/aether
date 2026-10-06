@@ -15,9 +15,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// newBackgroundEnv is an enhanced env that runs agent as a fake agent with a
-// headless command line. installed puts the agent and its ACP server in the
-// member's home, where a background launch looks for them.
+// installed puts the agent and its ACP server in the member's home, where a
+// background launch looks for them.
 func newBackgroundEnv(t *testing.T, agent string, installed bool) (*testEnv, *acpRuntime) {
 	t.Helper()
 	e, rt := newACPEnv(t, func(cfg *Config) {
@@ -173,8 +172,6 @@ func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	}
 }
 
-// An agent that cannot restore the interrupted session starts a new one,
-// which has never seen the task.
 func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 	t.Parallel()
 	e, rt := newBackgroundEnv(t, enhancedAgent, true)

@@ -339,9 +339,6 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	}
 }
 
-// startOneShot runs a background run's single turn. A restored session
-// continues a turn the restart interrupted and ends at once when its turn
-// had already ended; a new session that replaced it gets the task again.
 func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
 	prompt := d.s.withCoAuthorInstruction(task)
 	if !fresh {
@@ -370,10 +367,8 @@ func turnEndReport(stop string) agentstatus.Report {
 	return agentstatus.Report{State: agentstatus.Idle, Reason: "the agent's turn ended: " + stop}
 }
 
-// endOneShot ends a background run after its turn as a one-shot agent's
-// exit does: a swarm worker keeps its container, and any other run's
-// container exits 0 for a normal turn end and 1 otherwise. Only the first
-// call for a session ends it, and its session takes no input from then on.
+// Only the first call for a session ends it, and its session takes no input
+// from then on.
 func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Report) {
 	d.mu.Lock()
 	r := d.runs[entry.runID]

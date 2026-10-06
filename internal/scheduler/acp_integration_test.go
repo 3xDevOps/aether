@@ -29,9 +29,6 @@ func buildStatic(t *testing.T, pkg, name string) string {
 	return out
 }
 
-// TestIntegrationBackgroundRunDocker runs a background task through the
-// acpmock agent installed in the member's home: after its one turn the
-// supervisor's container exits 0 on SIGUSR1 and the run completes.
 func TestIntegrationBackgroundRunDocker(t *testing.T) {
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
