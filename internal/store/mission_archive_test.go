@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -81,5 +82,32 @@ func TestDeleteMissionRemovesItsRecordsAndReleasesItsRuns(t *testing.T) {
 	}
 	if err := db.DeleteMission(ctx, mission.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete a deleted mission = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteMissionSubmissionsReleasesRunsTheSwarmStillLists(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
+	task := mustCreateMissionTask(t, db, mission.ID, "accepted output")
+	submission := mustSubmitMissionAttempt(t, db, mission, task, "release-output")
+	mustAcceptMissionSubmission(t, db, mission, submission, "release-accept")
+	if err := db.DeleteMissionSubmissions(ctx, mission.ID); !errors.Is(err, ErrMissionPhase) {
+		t.Fatalf("release an active mission's runs = %v, want ErrMissionPhase", err)
+	}
+	if _, err := db.CancelMission(ctx, mission.ID, member.ID, "release-cancel"); err != nil {
+		t.Fatalf("CancelMission: %v", err)
+	}
+	if err := db.DeleteMissionSubmissions(ctx, mission.ID); err != nil {
+		t.Fatalf("DeleteMissionSubmissions: %v", err)
+	}
+	if err := db.DeleteRun(ctx, submission.Ref.RunID); err != nil {
+		t.Fatalf("delete the worker run after its submission: %v", err)
+	}
+	runs, err := db.ListMissionRunIDs(ctx, mission.ID)
+	if err != nil || !slices.Contains(runs, submission.Ref.RunID) {
+		t.Fatalf("mission runs = %v, %v; want the worker still listed for a retried delete", runs, err)
 	}
 }

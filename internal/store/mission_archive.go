@@ -44,9 +44,28 @@ func (d *DB) SetMissionArchived(ctx context.Context, id domain.MissionID, at *ti
 	return true, nil
 }
 
+// DeleteMissionSubmissions removes the swarm's submissions, the only
+// records that keep its runs from being deleted. The swarm row stays, so
+// ListMissionRunIDs still finds every run.
+func (d *DB) DeleteMissionSubmissions(ctx context.Context, id domain.MissionID) error {
+	return d.deleteMissionRecords(ctx, id,
+		// mission_acceptances references mission_submissions without a cascade.
+		`DELETE FROM mission_acceptances WHERE mission_id = ?`,
+		`DELETE FROM mission_submissions WHERE mission_id = ?`,
+	)
+}
+
 // DeleteMission leaves the mission's runs; the caller deletes them through
 // the scheduler.
 func (d *DB) DeleteMission(ctx context.Context, id domain.MissionID) error {
+	return d.deleteMissionRecords(ctx, id,
+		`DELETE FROM run_messages WHERE mission_id = ?`,
+		`DELETE FROM mission_acceptances WHERE mission_id = ?`,
+		`DELETE FROM missions WHERE id = ?`,
+	)
+}
+
+func (d *DB) deleteMissionRecords(ctx context.Context, id domain.MissionID, queries ...string) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: delete mission: begin: %w", err)
@@ -62,12 +81,7 @@ func (d *DB) DeleteMission(ctx context.Context, id domain.MissionID) error {
 	case m.Phase == domain.MissionPhaseCompleted && m.ArchivedAt == nil:
 		return fmt.Errorf("%w: mission.delete: swarm is completed; archive it first", ErrMissionPhase)
 	}
-	for _, query := range []string{
-		`DELETE FROM run_messages WHERE mission_id = ?`,
-		// mission_acceptances references mission_submissions without a cascade.
-		`DELETE FROM mission_acceptances WHERE mission_id = ?`,
-		`DELETE FROM missions WHERE id = ?`,
-	} {
+	for _, query := range queries {
 		if _, err := tx.ExecContext(ctx, query, id); err != nil {
 			return fmt.Errorf("store: delete mission %s: %w", id, mapConstraint(err, ErrInUse))
 		}

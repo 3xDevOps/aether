@@ -19,9 +19,24 @@ type storeRetirer struct {
 	db      *store.DB
 	closed  map[domain.RunID]domain.RunStatus
 	deleted []domain.RunID
+	calls   int
+	failOn  int
+}
+
+var errInjected = errors.New("injected failure")
+
+func (r *storeRetirer) fail() error {
+	r.calls++
+	if r.calls == r.failOn {
+		return errInjected
+	}
+	return nil
 }
 
 func (r *storeRetirer) CloseRun(ctx context.Context, run domain.RunID, _ domain.MemberID, outcome domain.RunStatus) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
 	r.closed[run] = outcome
 	return r.db.UpdateRunStatus(ctx, run, outcome, "closed", nil, nil)
 }
@@ -39,6 +54,9 @@ func (r *storeRetirer) SetArchived(ctx context.Context, run domain.RunID, _ doma
 }
 
 func (r *storeRetirer) DeleteRun(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
+	if err := r.fail(); err != nil {
+		return err
+	}
 	r.deleted = append(r.deleted, run)
 	return r.db.DeleteRun(ctx, run)
 }
@@ -327,5 +345,33 @@ func TestSwarmOperationsRefuseAnotherMembersProtectedRun(t *testing.T) {
 	}
 	if err := f.svc.Delete(ctx, owner.ID, f.params()); err != nil {
 		t.Fatalf("admin delete: %v", err)
+	}
+}
+
+func (f *archiveFixture) runs() []domain.RunID {
+	return []domain.RunID{f.mission.CurrentIntegratorRunID, f.worker}
+}
+
+func TestDeleteThatFailsPartWayFinishesOnRetry(t *testing.T) {
+	ctx := context.Background()
+	f := newArchiveFixture(t)
+	if _, err := f.db.CancelMission(ctx, f.mission.ID, f.human, "retry-cancel"); err != nil {
+		t.Fatalf("cancel mission: %v", err)
+	}
+	f.runsAre(t, domain.RunAbandoned)
+	f.retire.failOn = 2
+	if err := f.svc.Delete(ctx, f.human, f.params()); !errors.Is(err, errInjected) {
+		t.Fatalf("delete with a failing run delete = %v, want the injected error", err)
+	}
+	if err := f.svc.Delete(ctx, f.human, f.params()); err != nil {
+		t.Fatalf("retry delete: %v", err)
+	}
+	if _, err := f.db.GetMission(ctx, f.mission.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("mission after the retried delete = %v, want ErrNotFound", err)
+	}
+	for _, run := range f.runs() {
+		if _, err := f.db.GetRun(ctx, run); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("run %s after the retried delete = %v, want ErrNotFound", run, err)
+		}
 	}
 }

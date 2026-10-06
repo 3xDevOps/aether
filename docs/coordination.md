@@ -887,10 +887,11 @@ wait for its runs to stop`.
 - `mission.unarchive` (**Unarchive swarm**) clears `archived_at` and restores
   the swarm's runs. Closed runs stay closed.
 - `mission.delete` (**Delete swarm…**) needs a `cancelled` or archived swarm;
-  a completed one is refused with `archive it first`. It removes the swarm,
-  its tasks, attempts, submissions, questions and agent messages, then
-  deletes each run as `run.delete` does. Published branches stay. It returns
-  `{}`.
+  a completed one is refused with `archive it first`. It deletes each run as
+  `run.delete` does, then removes the swarm, its tasks, attempts,
+  submissions, questions and agent messages. Published branches stay. It
+  returns `{}`. If a run fails to delete, the error names it and the swarm
+  stays; calling `mission.delete` again finishes the job.
 
 Each publishes `mission.changed`; after a delete its payload carries
 `"deleted":true`. An archived swarm is deleted 14 days after archiving, like

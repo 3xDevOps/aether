@@ -82,8 +82,8 @@ func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protoc
 	return s.setArchived(ctx, m.ID, nil)
 }
 
-// Delete removes the swarm's records before its runs: a submission
-// references its worker run.
+// Delete removes the swarm row last so a failed run deletion leaves the
+// swarm in place for a retry to find its remaining runs.
 func (s *Service) Delete(ctx context.Context, actor domain.MemberID, p protocol.MissionIDParams) error {
 	m, err := s.authorizedMission(ctx, actor, p.MissionID, "delete this swarm")
 	if err != nil {
@@ -97,22 +97,18 @@ func (s *Service) Delete(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return err
 	}
+	if err := s.cfg.Missions.DeleteMissionSubmissions(ctx, m.ID); err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if err := retire.DeleteRun(ctx, run.ID, actor); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("mission.delete: delete run %s: %w", run.ID, err)
+		}
+	}
 	if err := s.cfg.Missions.DeleteMission(ctx, m.ID); err != nil {
 		return err
 	}
-	var errs []error
-	for _, run := range runs {
-		if err := retire.DeleteRun(ctx, run.ID, actor); err != nil && !errors.Is(err, store.ErrNotFound) {
-			errs = append(errs, fmt.Errorf("delete run %s: %w", run.ID, err))
-		}
-	}
-	if err := s.publishMissionDeleted(ctx, m, actor); err != nil {
-		errs = append(errs, err)
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("mission.delete: swarm %s deleted, but: %w", m.ID, errors.Join(errs...))
-	}
-	return nil
+	return s.publishMissionDeleted(ctx, m, actor)
 }
 
 // sweepArchived leaves the swarm's runs to the scheduler's archive sweep.
