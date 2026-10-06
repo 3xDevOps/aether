@@ -165,13 +165,14 @@ func (RunControllerPayload) EventType() Type { return TypeRunController }
 func init() { registerPayload[RunControllerPayload](TypeRunController) }
 
 // RunModePayload reports a mode switch. Previous is the mode the run was in
-// when the switch started. The first event of a switch has Switching set and
-// Mode the target; the last has the mode the run is left in, which after a
-// failed switch is Previous, with the error in Reason.
+// when the switch started. The first event of a switch has Switching and
+// Mode set to the target, as the run snapshot's switching field; the last
+// has no Switching and the mode the run is left in, which after a failed
+// switch is Previous, with the error in Reason.
 type RunModePayload struct {
 	Mode      domain.LaunchMode `json:"mode"`
 	Previous  domain.LaunchMode `json:"previous"`
-	Switching bool              `json:"switching,omitempty"`
+	Switching domain.LaunchMode `json:"switching,omitempty"`
 	Reason    string            `json:"reason,omitempty"`
 }
 

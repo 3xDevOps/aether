@@ -574,7 +574,8 @@ answers `-32002` with `data.reason` `not_switchable` for an agent whose
 `agent.list` entry has `switchable: false`, and `-32002` with the reason for
 a run it cannot switch now. A run snapshot carries `switching` (`tui` or
 `acp`) while a switch is in flight; a `run.mode` event
-`{mode, previous, switching, reason}` opens and closes each switch.
+`{mode, previous, switching, reason}` with the same `switching` opens each
+switch, and one without `switching` closes it.
 `run.inject` takes `steer: true` to add a message to the agent's running
 turn, and `control_session_id`/`control_generation` to deliver it at once
 rather than after the room's moderation delay; its result's `outcome` is

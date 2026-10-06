@@ -192,7 +192,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admitNow); err != nil {
 		t.Fatalf("switch to Standard: %v", err)
 	}
-	if got := modeEvents(t, sub, run.ID, 2); got[0] != (events.RunModePayload{Mode: domain.LaunchTUI, Previous: domain.LaunchACP, Switching: true, Reason: "Switching to Standard…"}) ||
+	if got := modeEvents(t, sub, run.ID, 2); got[0] != (events.RunModePayload{Mode: domain.LaunchTUI, Previous: domain.LaunchACP, Switching: domain.LaunchTUI, Reason: "Switching to Standard…"}) ||
 		got[1] != (events.RunModePayload{Mode: domain.LaunchTUI, Previous: domain.LaunchACP}) {
 		t.Fatalf("run.mode events %+v", got)
 	}

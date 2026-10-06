@@ -326,8 +326,9 @@ log; a `Switched to Standard` or `Switched from Standard` notice marks the
 gap. `/ws/acp` serves only a run that is Enhanced at the time.
 
 While the switch runs, the run snapshot carries `switching` (`tui` or
-`acp`), a `run.mode` event `{mode, previous, switching: true, reason:
-"Switching to Enhanced…"}` announces it, and messages are refused, so a Run
+`acp`), a `run.mode` event `{mode, previous, switching, reason:
+"Switching to Enhanced…"}` with `mode` and `switching` both the target
+announces it, and messages are refused, so a Run
 Room message reads `not_sent`. A second `run.mode` event `{mode, previous}`
 ends it.
 

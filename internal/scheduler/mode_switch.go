@@ -113,7 +113,7 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 		return err
 	}
 	ctx = context.WithoutCancel(ctx)
-	s.publishMode(ctx, entry, actor, events.RunModePayload{Mode: mode, Previous: from, Switching: true, Reason: "Switching to " + modeName(mode) + "…"})
+	s.publishMode(ctx, entry, actor, events.RunModePayload{Mode: mode, Previous: from, Switching: mode, Reason: "Switching to " + modeName(mode) + "…"})
 	sw := modeSwitch{s: s, c: c, entry: entry, run: r, profile: profile, cid: cid, session: session}
 	if mode == domain.LaunchTUI {
 		err = sw.toStandard(ctx)
