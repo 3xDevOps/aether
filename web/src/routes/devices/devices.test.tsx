@@ -48,7 +48,7 @@ describe('devices tab', () => {
     const list = within(await screen.findByRole('list', { name: 'Devices' }))
     const laptop = list.getByText('laptop').closest('li')!
     expect(within(laptop).getByText('Approved')).toBeDefined()
-    expect(laptop.querySelector('[title="SHA256:examplefingerprint"]')).not.toBeNull()
+    expect(within(laptop).getByText('SHA256:examplefingerprint')).toBeDefined()
     expect(laptop.textContent).toMatch(/Alice · alice on GitHub · added .+ · last seen/)
     const desktop = list.getByText('desktop').closest('li')!
     expect(within(desktop).getByText('Pending')).toBeDefined()
