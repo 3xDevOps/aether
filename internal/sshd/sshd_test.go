@@ -17,7 +17,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -604,54 +603,6 @@ func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 
 func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool) (string, error) {
 	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
-}
-
-func (f *fakeRuns) ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error) {
-	if err := f.record(fmt.Sprintf("acp.subscribe:%s:%d", run, afterSeq)); err != nil {
-		return scheduler.ACPStream{}, err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	stream := f.acpStream
-	if stream.Cancel == nil {
-		stream.Cancel = func() {}
-	}
-	return stream, nil
-}
-
-func (f *fakeRuns) ACPAnswer(run domain.RunID, requestID, optionID string) error {
-	return f.record(fmt.Sprintf("acp.answer:%s:%s:%s", run, requestID, optionID))
-}
-
-func (f *fakeRuns) ACPCancel(_ context.Context, run domain.RunID) error {
-	return f.record(fmt.Sprintf("acp.cancel:%s", run))
-}
-
-func (f *fakeRuns) ACPSetOption(_ context.Context, run domain.RunID, optionID string, value any) error {
-	return f.record(fmt.Sprintf("acp.set_option:%s:%s:%v", run, optionID, value))
-}
-
-func (f *fakeRuns) ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error) {
-	if err := f.record(fmt.Sprintf("acp.history:%s:%d:%d", run, beforeSeq, limit)); err != nil {
-		return nil, err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.acpStream.Replay, nil
-}
-
-func (f *fakeRuns) ACPItem(run domain.RunID, seq int64) (acphost.Item, error) {
-	if err := f.record(fmt.Sprintf("acp.item:%s:%d", run, seq)); err != nil {
-		return acphost.Item{}, err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, it := range f.acpStream.Replay {
-		if it.Seq == seq {
-			return it, nil
-		}
-	}
-	return acphost.Item{}, scheduler.ErrACPItemNotFound
 }
 
 func (f *fakeRuns) RecordHandoff(_ context.Context, run domain.RunID, from domain.MemberID) {
