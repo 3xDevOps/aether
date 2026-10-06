@@ -209,7 +209,8 @@ agent has not reported yet (before its first turn, or with
 scheduler: invalid run state transition: the agent has not reported its session yet; it does on its first turn
 ```
 
-**To Standard.** The server stops the ACP server, writes the agent's resume
+**To Standard.** The server stops the ACP server (a stop that fails ends
+the switch there), writes the agent's resume
 command (`ResumeArgs`, for Claude Code `claude --dangerously-skip-permissions
 --resume <session>`, plus the status and mail arguments a Standard run gets)
 to `/run/aether/next-command`, and signals the run supervisor, which ends
@@ -245,11 +246,16 @@ which the closing `run.mode` event carries in `reason`:
 switch to Standard: the agent's terminal exited with code 1 as it started; the Terminal tab shows its output
 ```
 
+If the ACP server cannot resume its session on the way back, the run stays
+Enhanced with an `Enhanced session failed` notice, as after an adapter
+crash; Pause and Resume retry it.
+
 The switch holds the run: Pause, Close and Kill wait for it, at most about
-two minutes when the ACP server is slow to start. A server that stops
-mid-switch brings the run back in the mode it recorded last, the previous
-one, even if the container had already swapped its child; switch again to
-line them up.
+two minutes when the ACP server is slow to start. The server records each
+child swap on disk before it signals the supervisor. A server that stops
+mid-switch reads `/tmp/aether-supervisor` in the container on restart: if
+the supervisor reached that swap, the run comes back in the new mode,
+otherwise in the previous one.
 
 ## Background runs
 

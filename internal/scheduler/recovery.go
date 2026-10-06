@@ -1428,6 +1428,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		}
 		s.mu.Unlock()
 	}
+	s.settleSwitch(ctx, entry)
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err == nil {
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
@@ -1554,6 +1555,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		gitAuthorEmail:      sc.GitAuthorEmail,
 		agentSessionID:      sc.AgentSessionID,
 		agentExec:           sc.AgentExec,
+		switchIntent:        sc.Switch,
 		done:                make(chan struct{}),
 	}
 }

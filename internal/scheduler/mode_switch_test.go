@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -35,9 +36,16 @@ type fakeSupervisor struct {
 	// hold, when set, keeps the swap exec waiting until it is closed.
 	hold   chan struct{}
 	bodies []string
+	// state is what the supervisor's state file holds.
+	state string
 }
 
 func (f *fakeSupervisor) exec(_ runtime.ID, argv []string) (int, string, error) {
+	if len(argv) == 5 && argv[3] == "aether-switch" {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return 0, f.state, nil
+	}
 	if len(argv) < 6 || argv[3] != "aether-swap" {
 		return 0, "", nil
 	}
@@ -228,6 +236,85 @@ func TestSwitchToStandardRestoresEnhancedWhenTheTerminalExits(t *testing.T) {
 	}
 	if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != domain.LaunchACP || !row.ACP {
 		t.Fatalf("row mode %q acp %v", row.Mode, row.ACP)
+	}
+}
+
+func TestSwitchToStandardKeepsEnhancedWhenTheAdapterDoesNotStop(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	run := e.launch(t, "", domain.LaunchACP)
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	e.rt.all()[0].stopErr = errors.New("docker: exec control failed")
+
+	err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admitNow)
+	if err == nil || !strings.Contains(err.Error(), "docker: exec control failed") {
+		t.Fatalf("switch error %v", err)
+	}
+	if bodies := e.sup.ran(); len(bodies) != 0 {
+		t.Fatalf("supervisor ran %q while the adapter may still run", bodies)
+	}
+	if len(e.rt.all()) != 2 || e.sched.acp.session(run.ID) == nil {
+		t.Fatal("the enhanced session was not restored")
+	}
+	if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != domain.LaunchACP || !row.ACP {
+		t.Fatalf("row mode %q acp %v", row.Mode, row.ACP)
+	}
+}
+
+func TestRestartSettlesAnInterruptedSwitch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state string
+		want        domain.LaunchMode
+	}{
+		{"swapped", "n1 started\n", domain.LaunchTUI},
+		{"not swapped", "n0 exited 0\n", domain.LaunchACP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newSwitchEnv(t)
+			run := e.launch(t, "", domain.LaunchACP)
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			e.sched.mu.Lock()
+			entry := e.sched.runs[run.ID]
+			e.sched.mu.Unlock()
+			if err := (modeSwitch{s: e.sched, entry: entry}).recordIntent(&switchIntent{Mode: domain.LaunchTUI, Nonce: "n1", Reporter: harness.ReporterFull}); err != nil {
+				t.Fatal(err)
+			}
+			e.sup.state = tc.state
+			before := len(e.rt.all())
+			if err := e.sched.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg := e.cfg
+			cfg.PTY = newFakePTY()
+			cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+			s2, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s2.Close() })
+			startScheduler(t, s2)
+			waitFor(t, "the recovered run", func() bool {
+				s2.mu.Lock()
+				defer s2.mu.Unlock()
+				return s2.runs[run.ID] != nil && s2.runs[run.ID].switchIntent == nil
+			})
+			if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != tc.want {
+				t.Fatalf("row mode %q, want %q", row.Mode, tc.want)
+			}
+			if sc, err := s2.readSidecar(run.ID); err != nil || sc.Mode != tc.want || sc.Switch != nil {
+				t.Fatalf("sidecar %+v (%v)", sc, err)
+			}
+			if tc.want == domain.LaunchACP {
+				waitFor(t, "resumed session", func() bool { return s2.acp.session(run.ID) != nil })
+				return
+			}
+			if len(e.rt.all()) != before || s2.acp.session(run.ID) != nil {
+				t.Fatal("recovery started an ACP server beside the resumed terminal")
+			}
+		})
 	}
 }
 

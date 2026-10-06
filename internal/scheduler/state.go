@@ -225,6 +225,7 @@ type sidecar struct {
 	// stops before starting a fresh one.
 	AgentSessionID string                `json:"agent_session_id,omitempty"`
 	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
+	Switch         *switchIntent         `json:"switch,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -282,6 +283,7 @@ func (e *supervised) sidecar() sidecar {
 		GitAuthorEmail:      e.gitAuthorEmail,
 		AgentSessionID:      e.agentSessionID,
 		AgentExec:           e.agentExec,
+		Switch:              e.switchIntent,
 	}
 }
 

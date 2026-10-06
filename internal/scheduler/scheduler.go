@@ -242,8 +242,8 @@ type supervised struct {
 	// loginMember is the account owner whose login paths the container
 	// mounts; empty when none.
 	loginMember domain.MemberID
-	// reporter is fixed at launch and recovered from the sidecar, since only
-	// the launch knew which profile the container got.
+	// reporter is recovered from the sidecar, since only the launch or mode
+	// switch knew which command the container runs.
 	reporter harness.Reporter
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus
@@ -309,12 +309,12 @@ type supervised struct {
 	// gitAuthorEmail is fixed at container creation, so it tells the agent's
 	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
-	// agentSessionID and agentExec mirror the sidecar fields of the same name.
 	agentSessionID string
 	agentExec      *runtime.ExecIdentity
 	// switching is the mode a mode switch is moving the run to, empty when
 	// none is in flight. The switch holds lifecycleMu throughout.
-	switching domain.LaunchMode
+	switching    domain.LaunchMode
+	switchIntent *switchIntent
 	// coAuthorMu serializes the co-author list's read-modify-write so
 	// concurrent steers cannot leave the shorter list on disk.
 	coAuthorMu sync.Mutex

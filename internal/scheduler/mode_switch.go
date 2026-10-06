@@ -150,7 +150,7 @@ func (s *Scheduler) publishMode(ctx context.Context, entry *supervised, actor do
 	s.publish(ctx, events.Event{WorkspaceID: entry.workspaceID, RunID: entry.runID, ActorID: actor, Payload: payload})
 }
 
-// modeSwitch is one switch in flight. Its caller holds the run's lifecycleMu.
+// The caller of a modeSwitch method holds the run's lifecycleMu.
 type modeSwitch struct {
 	s       *Scheduler
 	c       *coordination
@@ -166,16 +166,20 @@ func (m modeSwitch) toStandard(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	m.s.acp.stopAdapter(ctx, m.entry.runID)
+	if err := m.s.acp.stopAdapter(ctx, m.entry.runID); err != nil {
+		return errors.Join(err, m.reopenEnhanced(ctx))
+	}
+	if err := m.recordIntent(&switchIntent{Mode: domain.LaunchTUI, Nonce: nonce, Reporter: reporter}); err != nil {
+		return errors.Join(err, m.reopenEnhanced(ctx))
+	}
 	if err := m.s.swapChild(ctx, m.cid, nonce, tuiSettle); err != nil {
 		return errors.Join(err, m.restoreEnhanced(ctx))
 	}
 	m.s.acp.switchNotice(m.entry.runID, "info", "Switched to Standard",
 		"The conversation continues in the agent's terminal and is not recorded here until the run switches back to Enhanced.")
-	if err := m.commit(ctx, domain.LaunchTUI, reporter); err != nil {
+	if err := m.s.commitMode(ctx, m.entry, domain.LaunchTUI, reporter); err != nil {
 		return err
 	}
-	// The resumed terminal waits for input, and the adapter's requests went with it.
 	if err := m.s.ReportAgentState(ctx, m.entry.runID, agentstatus.Report{
 		State: agentstatus.Idle, Reason: agentstatus.ReasonIdle,
 		InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: []domain.RunInputRequest{}}},
@@ -190,6 +194,9 @@ func (m modeSwitch) toEnhanced(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := m.recordIntent(&switchIntent{Mode: domain.LaunchACP, Nonce: nonce, Reporter: harness.ReporterFull}); err != nil {
+		return err
+	}
 	if err := m.s.swapChild(ctx, m.cid, nonce, 0); err != nil {
 		return errors.Join(fmt.Errorf("stop the agent's terminal: %w", err), m.restoreStandard(ctx))
 	}
@@ -199,11 +206,11 @@ func (m modeSwitch) toEnhanced(ctx context.Context) error {
 		m.s.acp.switchNotice(m.entry.runID, "error", "Switch to Enhanced failed", err.Error())
 		return errors.Join(err, m.restoreStandard(ctx))
 	}
-	return m.commit(ctx, domain.LaunchACP, harness.ReporterFull)
+	return m.s.commitMode(ctx, m.entry, domain.LaunchACP, harness.ReporterFull)
 }
 
 func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
-	var errs []error
+	errs := []error{m.recordIntent(nil)}
 	nonce, err := m.writeShell()
 	if err == nil {
 		err = m.s.swapChild(ctx, m.cid, nonce, 0)
@@ -211,27 +218,47 @@ func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
 	if err != nil {
 		errs = append(errs, fmt.Errorf("start the login shell: %w", err))
 	}
-	m.s.acp.connect(ctx, m.entry, openRestore)
+	return errors.Join(append(errs, m.reopenEnhanced(ctx))...)
+}
+
+// reopenEnhanced restores the session the adapter had. A restore that fails
+// leaves the Enhanced session failed, as an adapter crash would.
+func (m modeSwitch) reopenEnhanced(ctx context.Context) error {
+	m.s.acp.connect(ctx, m.entry, openSwitch)
 	if _, err := m.s.acp.live(m.entry.runID); err != nil {
-		errs = append(errs, fmt.Errorf("restore the enhanced session: %w", err))
+		return fmt.Errorf("restore the enhanced session: %w", err)
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 func (m modeSwitch) restoreStandard(ctx context.Context) error {
+	errs := []error{m.recordIntent(nil)}
 	nonce, _, err := m.writeTerminal()
 	if err == nil {
 		err = m.s.swapChild(ctx, m.cid, nonce, tuiSettle)
 	}
 	if err != nil {
-		return fmt.Errorf("restore the agent's terminal: %w", err)
+		errs = append(errs, fmt.Errorf("restore the agent's terminal: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// recordIntent persists the child swap about to happen, so a server that
+// stops before commitMode can tell which mode the container ended up in.
+func (m modeSwitch) recordIntent(intent *switchIntent) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	previous := m.entry.switchIntent
+	m.entry.switchIntent = intent
+	if err := m.s.writeSidecar(m.entry.sidecar()); err != nil {
+		m.entry.switchIntent = previous
+		return fmt.Errorf("persist the switch: %w", err)
 	}
 	return nil
 }
 
-// writeTerminal writes the next-command file that resumes the session in the
-// agent's terminal, with the coordination assets that command loads. It
-// returns the file's nonce and the reporter the command gives the run.
+// writeTerminal returns the next-command file's nonce and the reporter the
+// command gives the run.
 func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
 	argv := m.profile.ResumeCommand(m.session)
 	var native harness.NativeLaunch
@@ -267,21 +294,58 @@ func (m modeSwitch) writeShell() (string, error) {
 	return nonce, nil
 }
 
-// commit records the mode the container now runs. The sidecar decides the
-// driver after a restart, so it is written first.
-func (m modeSwitch) commit(ctx context.Context, mode domain.LaunchMode, reporter harness.Reporter) error {
+// commitMode records the mode the container now runs. The sidecar decides
+// the driver after a restart, so it is written first.
+func (s *Scheduler) commitMode(ctx context.Context, entry *supervised, mode domain.LaunchMode, reporter harness.Reporter) error {
 	acp := mode == domain.LaunchACP
-	m.s.mu.Lock()
-	m.entry.launchMode, m.entry.acp, m.entry.reporter = mode, acp, reporter
+	s.mu.Lock()
+	entry.launchMode, entry.acp, entry.reporter, entry.switchIntent = mode, acp, reporter, nil
 	var errs []error
-	if err := m.s.writeSidecar(m.entry.sidecar()); err != nil {
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		errs = append(errs, fmt.Errorf("persist the run's mode: %w", err))
 	}
-	m.s.mu.Unlock()
-	if err := m.s.cfg.Store.SetRunMode(ctx, m.entry.runID, mode, acp); err != nil {
+	s.mu.Unlock()
+	if err := s.cfg.Store.SetRunMode(ctx, entry.runID, mode, acp); err != nil {
 		errs = append(errs, fmt.Errorf("record the run's mode: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+// settleSwitch finishes a mode switch the previous server process left
+// between its child swap and commitMode: the container runs the target mode
+// when the supervisor's state file names the swap's nonce. The caller holds
+// the run's lifecycleMu.
+func (s *Scheduler) settleSwitch(ctx context.Context, entry *supervised) {
+	s.mu.Lock()
+	intent, cid := entry.switchIntent, entry.containerID
+	s.mu.Unlock()
+	if intent == nil {
+		return
+	}
+	_, stdout, _, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", `cat "$1" 2>/dev/null || :`, "aether-switch", supervisorStateFile}, "")
+	if err != nil {
+		slog.Warn("scheduler: read the run supervisor's state", "run", entry.runID, "error", err)
+		return
+	}
+	if nonce, _, _ := strings.Cut(stdout, " "); nonce == intent.Nonce {
+		if err := s.commitMode(ctx, entry, intent.Mode, intent.Reporter); err != nil {
+			slog.Warn("scheduler: finish an interrupted mode switch", "run", entry.runID, "error", err)
+		}
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry.switchIntent = nil
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: clear an interrupted mode switch", "run", entry.runID, "error", err)
+	}
+}
+
+// switchIntent is a mode switch whose child swap may have happened.
+type switchIntent struct {
+	Mode     domain.LaunchMode `json:"mode"`
+	Nonce    string            `json:"nonce"`
+	Reporter harness.Reporter  `json:"reporter,omitempty"`
 }
 
 // nextCommand is the supervisor's next-command file: "# <nonce>", then a
