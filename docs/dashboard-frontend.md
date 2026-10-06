@@ -1317,12 +1317,16 @@ scopes share keys, or one begins the other's sequence.
 | `⌘.` / `Ctrl+.` | run | Show or hide run details |
 | `c` | run | Message the agent (focuses the Session composer) |
 | `Esc` | run | Leave a run for the board |
+| `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
+| `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
+| `1` to `4` | request | Pick that option of the focused Session request |
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
 The scopes are `global`, `run`, `card`, `request` and `composer`; `card` is
-the board's `a`/`r`/`o` on the focused card, and `request` and `composer`
-have no bindings yet. When a key matches in two live scopes, the
+the board's `a`/`r`/`o` on the focused card, `request` the option digits on
+a focused Session request and `composer` the send keys while the Session
+composer has focus. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
