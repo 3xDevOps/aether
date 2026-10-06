@@ -81,6 +81,21 @@ type MissionQuestion struct {
 	AnsweredAt         *time.Time
 }
 
+// MissionChange names a kind of swarm change an integrator reacts to.
+type MissionChange string
+
+const (
+	MissionTaskProposed       MissionChange = "task_proposed"
+	MissionTaskAccepted       MissionChange = "task_accepted"
+	MissionTaskFinished       MissionChange = "task_finished"
+	MissionQuestionAsked      MissionChange = "question_asked"
+	MissionQuestionAnswered   MissionChange = "question_answered"
+	MissionWorkerReport       MissionChange = "worker_report"
+	MissionWorkerEnded        MissionChange = "worker_ended"
+	MissionIntegratorReplaced MissionChange = "integrator_replaced"
+	MissionPhaseChanged       MissionChange = "phase_changed"
+)
+
 type Mission struct {
 	ID                           MissionID
 	WorkspaceID                  WorkspaceID
@@ -107,10 +122,15 @@ type Mission struct {
 	// known to exist. Reconciliation relaunches a missing row only while it
 	// is unset, so a deleted integrator run stays deleted.
 	IntegratorRunLaunched bool
-	IdempotencyKey        string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	ArchivedAt            *time.Time
+	// ChangeSeq counts every change that matters to the integrator.
+	// Changes holds, per kind, the ChangeSeq of the latest change of that
+	// kind its current integrator run did not make itself.
+	ChangeSeq      uint64
+	Changes        map[MissionChange]uint64
+	IdempotencyKey string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ArchivedAt     *time.Time
 }
 
 const (

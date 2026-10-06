@@ -168,6 +168,7 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	if attempt == nil {
 		out.Role = missionRoleIntegrator
 		out.Capabilities = integratorCapabilities()
+		out.ChangeSeq, out.Changes = m.ChangeSeq, m.Changes
 		// Questions are asked only while planning, so the extra read stays off
 		// every other phase.
 		if m.Phase == domain.MissionPhasePlanning {

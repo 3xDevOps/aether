@@ -225,7 +225,7 @@ func hookContext(status protocol.CoordStatusResult, notices hookNotices, stoppin
 		text.WriteString(protocol.CoordInboxContext(notices.Unread))
 	}
 	if notices.Mission != "" {
-		text.WriteString(protocol.CoordMissionUpdateContext(status.Assignment.MissionID))
+		text.WriteString(protocol.CoordMissionUpdateContext(status.Assignment.MissionID, nil))
 	}
 	if notices.Overlap != "" && !stopping {
 		text.WriteString("Aether detects overlapping edits with an authorized peer. Run /usr/local/bin/aether-internal status to inspect the overlap and coordinate before editing shared files.\n")

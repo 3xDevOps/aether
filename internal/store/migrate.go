@@ -1543,6 +1543,13 @@ ALTER TABLE missions ADD COLUMN archived_at INTEGER;
 	`
 ALTER TABLE room_messages ADD COLUMN agent_delivery TEXT NOT NULL DEFAULT '';
 `,
+	// v54: a swarm's change counter, and per kind of change the counter of
+	// its latest one the integrator did not make, so an enhanced
+	// integrator is woken for an ask and answer within one turn.
+	`
+ALTER TABLE missions ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN change_kinds TEXT NOT NULL DEFAULT '{}';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -1,8 +1,10 @@
 package coord
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -75,16 +77,16 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	}
 	notice := s.integratorNotice(ctx, run)
 	freshMail := s.unwoken(run, ids)
-	missionChanged := s.missionNoticeChanged(run, notice)
-	if !freshMail && !missionChanged {
+	changes := s.missionChanges(run, notice)
+	if !freshMail && len(changes) == 0 {
 		return false
 	}
 	var prompt strings.Builder
 	if len(ids) > 0 {
 		prompt.WriteString(protocol.CoordInboxContext(len(ids)))
 	}
-	if missionChanged {
-		prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission))
+	if len(changes) > 0 {
+		prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission, changes))
 	}
 	err = s.cfg.WakeAdmission(ctx, run, func() error {
 		return s.cfg.ACPWaker.WakeEnhanced(ctx, run, prompt.String())
@@ -103,7 +105,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	for _, id := range ids {
 		woken[id] = struct{}{}
 	}
-	if missionChanged {
+	if len(changes) > 0 {
 		s.enhancedNotices[run] = notice
 	}
 	return false
@@ -111,7 +113,8 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 
 type missionNotice struct {
 	mission string
-	key     string
+	seq     uint64
+	changes map[domain.MissionChange]uint64
 }
 
 func (s *Service) integratorNotice(ctx context.Context, run domain.RunID) missionNotice {
@@ -123,24 +126,40 @@ func (s *Service) integratorNotice(ctx context.Context, run domain.RunID) missio
 		slog.Debug("coord: enhanced wake: read mission assignment", "run", run, "error", err)
 		return missionNotice{}
 	}
-	return missionNotice{mission: a.MissionID, key: a.IntegratorNotice()}
+	if a.Role != "integrator" {
+		return missionNotice{}
+	}
+	return missionNotice{mission: a.MissionID, seq: a.ChangeSeq, changes: a.Changes}
 }
 
-// The first notice seen is the baseline: the integrator's own task already
-// describes the mission it starts in.
-func (s *Service) missionNoticeChanged(run domain.RunID, notice missionNotice) bool {
+// missionChanges lists, oldest first, the kinds of change others made since
+// the last notice the integrator saw. The first notice seen is the baseline:
+// the integrator's own task already describes the mission it starts in. Its
+// own changes move the baseline without a wake.
+func (s *Service) missionChanges(run domain.RunID, notice missionNotice) []domain.MissionChange {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if notice.key == "" {
+	if notice.mission == "" {
 		delete(s.enhancedNotices, run)
-		return false
+		return nil
 	}
-	announced, ok := s.enhancedNotices[run]
+	seen, ok := s.enhancedNotices[run]
 	if !ok {
 		s.enhancedNotices[run] = notice
-		return false
+		return nil
 	}
-	return announced.key != notice.key
+	var changes []domain.MissionChange
+	for kind, seq := range notice.changes {
+		if seq > seen.seq {
+			changes = append(changes, kind)
+		}
+	}
+	if len(changes) == 0 {
+		s.enhancedNotices[run] = notice
+		return nil
+	}
+	slices.SortFunc(changes, func(a, b domain.MissionChange) int { return cmp.Compare(notice.changes[a], notice.changes[b]) })
+	return changes
 }
 
 // EnhancedSessionOpened takes the baseline before the session's first turn,
@@ -150,7 +169,7 @@ func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
 		return
 	}
 	defer s.leaveRun(run)
-	s.missionNoticeChanged(run, s.integratorNotice(ctx, run))
+	s.missionChanges(run, s.integratorNotice(ctx, run))
 }
 
 // Only integrators a wake has already seen are offered the change.

@@ -42,6 +42,22 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	integrator := waitMissionSocket(t, filepath.Join(env.data, "coord", string(integratorRun)))
 	waitTurns(ctx, t, env.srv, integratorRun, 1)
 
+	var asked protocol.MissionQuestionResult
+	if err := pacedCall(ctx, integrator, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which login flow?", IdempotencyKey: "ask",
+	}, &asked); err != nil {
+		t.Fatalf("mission.question.ask: %v", err)
+	}
+	answer, _ := json.Marshal(protocol.MissionQuestionAnswerParams{QuestionID: asked.Question.ID, Answer: "the SSO one", IdempotencyKey: "answer"})
+	var answered protocol.MissionQuestionResult
+	if status := postJSON(t, env.web+"/api/v1/"+protocol.MethodMissionQuestionAnswer, string(answer), &answered); status != http.StatusOK {
+		t.Fatalf("mission.question.answer status %d", status)
+	}
+	items := waitTurns(ctx, t, env.srv, integratorRun, 2)
+	if !prompted(items, protocol.CoordMissionUpdateContext(missionID, []domain.MissionChange{domain.MissionQuestionAnswered})) {
+		t.Fatalf("the answer did not wake the integrator: %+v", items)
+	}
+
 	var proposed protocol.TaskMutationResult
 	if err := pacedCall(ctx, integrator, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 		MissionID: missionID, IdempotencyKey: "propose",
@@ -71,8 +87,8 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("coord.send: %v", err)
 	}
-	items := waitTurns(ctx, t, env.srv, worker, 2)
-	if !woken(items, 1) {
+	items = waitTurns(ctx, t, env.srv, worker, 2)
+	if !prompted(items, protocol.CoordInboxContext(1)) {
 		t.Fatalf("the worker's second turn is not the inbox wake: %+v", items)
 	}
 
@@ -82,8 +98,8 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("worker coord.report: %v", err)
 	}
-	items = waitTurns(ctx, t, env.srv, integratorRun, 2)
-	if !woken(items, 1) {
+	items = waitTurns(ctx, t, env.srv, integratorRun, 3)
+	if !prompted(items, protocol.CoordInboxContext(1)) {
 		t.Fatalf("the worker's report did not wake the integrator: %+v", items)
 	}
 
@@ -118,10 +134,11 @@ func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID,
 	}
 }
 
-func woken(items []acphost.Item, unread int) bool {
-	want := protocol.CoordInboxContext(unread)
+// prompted reports a wake prompt that carries instruction; one wake can
+// carry both the inbox and the swarm-update instruction.
+func prompted(items []acphost.Item, instruction string) bool {
 	for _, it := range items {
-		if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.TrimSpace(it.Message.Text) == strings.TrimSpace(want) {
+		if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.Contains(it.Message.Text, strings.TrimSpace(instruction)) {
 			return true
 		}
 	}

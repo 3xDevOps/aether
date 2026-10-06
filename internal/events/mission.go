@@ -16,6 +16,7 @@ type MissionChangedPayload struct {
 	IntegratorGeneration uint64           `json:"integrator_generation"`
 	AcceptedSetVersion   uint64           `json:"accepted_set_version"`
 	Deleted              bool             `json:"deleted,omitempty"`
+	ChangeSeq            uint64           `json:"change_seq"`
 }
 
 func (MissionChangedPayload) EventType() Type { return TypeMissionChanged }

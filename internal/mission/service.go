@@ -413,7 +413,7 @@ func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Att
 	if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
 		return err
 	}
-	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
+	if err := s.missionChanged(ctx, attempt.MissionID, domain.MissionWorkerEnded, ""); err != nil {
 		return err
 	}
 	return nil
@@ -877,7 +877,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	if publishErr := s.publishMissionChanged(ctx, replaced.ID); publishErr != nil {
+	if publishErr := s.missionChanged(ctx, replaced.ID, domain.MissionIntegratorReplaced, ""); publishErr != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, publishErr
 	}
 	if s.cfg.Runs == nil || replaced.CurrentIntegratorRunID == "" {

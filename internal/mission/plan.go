@@ -77,7 +77,7 @@ func (s *Service) questionAsk(ctx context.Context, run domain.RunID, raw json.Ra
 	if err != nil {
 		return nil, err
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.missionChanged(ctx, m.ID, domain.MissionQuestionAsked, run); publishErr != nil {
 		return nil, publishErr
 	}
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
@@ -108,7 +108,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, raw json.RawMessa
 	if _, startErr := s.cfg.Missions.StartMission(ctx, m.ID, run, p.IdempotencyKey); startErr != nil {
 		return nil, startErr
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.missionChanged(ctx, m.ID, domain.MissionPhaseChanged, run); publishErr != nil {
 		return nil, publishErr
 	}
 	state, _, err := s.planState(ctx, m.ID)
@@ -235,7 +235,7 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	if err != nil {
 		return protocol.MissionQuestionResult{}, err
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.missionChanged(ctx, m.ID, domain.MissionQuestionAnswered, ""); publishErr != nil {
 		return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, publishErr
 	}
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
@@ -259,7 +259,7 @@ func (s *Service) Cancel(ctx context.Context, actor domain.MemberID, p protocol.
 	if _, cancelErr := s.cfg.Missions.CancelMission(ctx, m.ID, actor, p.IdempotencyKey); cancelErr != nil {
 		return protocol.MissionCancelResult{}, cancelErr
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.missionChanged(ctx, m.ID, domain.MissionPhaseChanged, ""); publishErr != nil {
 		return protocol.MissionCancelResult{}, publishErr
 	}
 	current, err := s.cfg.Missions.GetMission(ctx, m.ID)

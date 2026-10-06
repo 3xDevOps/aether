@@ -36,6 +36,7 @@ type MissionStore interface {
 	MissionControlStore
 	CreateMission(context.Context, *domain.Mission) error
 	GetMission(context.Context, domain.MissionID) (*domain.Mission, error)
+	RecordMissionChange(context.Context, domain.MissionID, domain.MissionChange, domain.RunID) error
 	GetMissionByRun(context.Context, domain.RunID) (*domain.Mission, error)
 	ListMissions(context.Context, domain.WorkspaceID) ([]*domain.Mission, error)
 	ListMissionsPage(context.Context, domain.WorkspaceID, int, string) ([]*domain.Mission, string, error)
@@ -162,11 +163,11 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
-	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at`
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at, change_seq, change_kinds`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
-	var choices string
+	var choices, changes string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
 	var launchErrorAt, archivedAt sql.NullInt64
@@ -175,7 +176,7 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
-		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt, &m.ChangeSeq, &changes); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
@@ -198,6 +199,9 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	}
 	if err := json.Unmarshal([]byte(choices), &m.ExecutionChoices); err != nil {
 		return nil, fmt.Errorf("store: decode mission execution choices: %w", err)
+	}
+	if err := json.Unmarshal([]byte(changes), &m.Changes); err != nil {
+		return nil, fmt.Errorf("store: decode mission changes: %w", err)
 	}
 	m.CreatedAt, m.UpdatedAt = decodeTime(created), decodeTime(updated)
 	return &m, nil
@@ -265,7 +269,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}')`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, runID,
@@ -306,6 +310,22 @@ func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.M
 		return nil, ErrNotFound
 	}
 	return m, err
+}
+
+// A change by the mission's current integrator run is counted but not
+// added to Changes.
+func (d *DB) RecordMissionChange(ctx context.Context, id domain.MissionID, kind domain.MissionChange, by domain.RunID) error {
+	if id == "" || kind == "" {
+		return errors.New("store: record mission change: mission and kind are required")
+	}
+	res, err := d.db.ExecContext(ctx, `UPDATE missions SET change_seq = change_seq + 1,
+		change_kinds = CASE WHEN current_integrator_run_id = ? THEN change_kinds
+			ELSE json_set(change_kinds, '$.' || ?, change_seq + 1) END
+		WHERE id = ?`, by, kind, id)
+	if err != nil {
+		return fmt.Errorf("store: record mission %s change: %w", id, err)
+	}
+	return notFoundOnZeroRows(res, nil)
 }
 
 func (d *DB) GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error) {

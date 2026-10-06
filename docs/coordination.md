@@ -211,7 +211,10 @@ instructions. The agent reads the original, attributed payload through `inbox`.
 
 Hooks also direct agents with overlapping edits to `status`. Integrators are
 told to refresh `mission plan show` and `worker list` when the swarm phase,
-open-question count, or integrator generation changes. Those APIs remain
+open-question count, or integrator generation changes. An Enhanced
+integrator is told instead whenever the swarm's change counter moves past
+the last one it saw for a change it did not make itself, so a question asked
+and answered within one turn still prompts it. Those APIs remain
 authoritative; no terminal notice is required.
 
 Claude Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
@@ -813,8 +816,18 @@ outcome. A worker whose run ends without reporting sends nothing, so check
 `worker list` before declaring completion. The integrator's hooks announce a
 changed swarm phase or open-question count once; an Enhanced integrator
 is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries),
-and with the same swarm-update instruction when its phase, open-question
-count or generation changes.
+and with the same swarm-update instruction, naming what changed, as in
+[enhanced-runs.md](enhanced-runs.md#mail).
+
+A swarm carries `change_seq`, on `mission.show` and on every
+`mission.changed` event: a counter that every change an integrator reacts to
+advances. The kinds are `task_proposed` (a task or revision),
+`task_accepted`, `task_finished` (accepted submission or abandoned task),
+`question_asked`, `question_answered`, `worker_report`, `worker_ended` (a
+worker run ended without a report), `integrator_replaced` and
+`phase_changed`. The integrator's `coord.status` assignment carries
+`change_seq` and `changes`, the counter of the latest change of each kind it
+did not make itself.
 The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
 `mission.create` and `mission.replace-integrator` refuse Background
 (`headless`) with `-32602` and

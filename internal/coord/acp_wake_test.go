@@ -3,6 +3,8 @@ package coord
 import (
 	"context"
 	"errors"
+	"maps"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -151,29 +153,40 @@ func TestEnhancedWakeRetriesARefusedAdmission(t *testing.T) {
 	}
 }
 
-type questionMissionStub struct {
+type changeMissionStub struct {
 	missionTransportStub
-	mu   sync.Mutex
-	open int
+	mu      sync.Mutex
+	seq     uint64
+	changes map[domain.MissionChange]uint64
 }
 
-func (m *questionMissionStub) Assignment(ctx context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
+func (m *changeMissionStub) Assignment(ctx context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
 	a, err := m.missionTransportStub.Assignment(ctx, run)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	a.Phase, a.OpenQuestions = "active", m.open
+	a.ChangeSeq, a.Changes = m.seq, maps.Clone(m.changes)
 	return a, err
 }
 
-func (m *questionMissionStub) setOpen(n int) {
+// change counts one swarm change; one the integrator made itself is
+// counted but not listed, as the store does.
+func (m *changeMissionStub) change(kind domain.MissionChange, byIntegrator bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.open = n
+	m.seq++
+	if byIntegrator {
+		return
+	}
+	if m.changes == nil {
+		m.changes = make(map[domain.MissionChange]uint64)
+	}
+	m.changes[kind] = m.seq
 }
 
-func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
+func newMissionWakeHarness(t *testing.T) (*coordHarness, *fakeACPWaker, *changeMissionStub, domain.RunID) {
+	t.Helper()
 	waker := newFakeACPWaker()
-	stub := &questionMissionStub{open: 1}
+	stub := &changeMissionStub{}
 	h := newHarness(t, 2, func(c *Config) {
 		c.WakeAdmission = allowHookWake
 		c.ACPWaker = waker
@@ -182,14 +195,21 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 	worker, integrator := h.run(0), h.run(1)
 	stub.mission, stub.integrator = []domain.RunID{worker, integrator}, integrator
 	h.start()
-	publish := func() {
-		t.Helper()
-		if _, err := h.bus.Publish(context.Background(), events.Event{
-			WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
-		}); err != nil {
-			t.Fatal(err)
-		}
+	return h, waker, stub, integrator
+}
+
+func (h *coordHarness) publishMissionChanged(t *testing.T) {
+	t.Helper()
+	if _, err := h.bus.Publish(context.Background(), events.Event{
+		WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
+	}); err != nil {
+		t.Fatal(err)
 	}
+}
+
+func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
+	h, waker, stub, integrator := newMissionWakeHarness(t)
+	stub.change(domain.MissionTaskProposed, false)
 
 	waker.endTurn(integrator)
 	h.svc.wakeEnhanced(integrator)
@@ -197,42 +217,57 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 		t.Fatalf("the first mission state seen woke the integrator %d times", n)
 	}
 
-	stub.setOpen(0)
-	publish()
-	if got, want := waker.next(t), protocol.CoordMissionUpdateContext("mission-1"); got != want {
+	stub.change(domain.MissionWorkerReport, false)
+	h.publishMissionChanged(t)
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerReport})
+	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
 
 	waker.endTurn(integrator)
-	publish()
+	h.publishMissionChanged(t)
 	h.svc.wakeEnhanced(integrator)
 	if n := waker.count(); n != 1 {
 		t.Fatalf("an unchanged mission woke the integrator again: %d wakes", n)
 	}
 }
 
-func TestEnhancedWakeAnnouncesAnAnswerBeforeTheFirstTurnEnd(t *testing.T) {
-	waker := newFakeACPWaker()
-	stub := &questionMissionStub{open: 1}
-	h := newHarness(t, 2, func(c *Config) {
-		c.WakeAdmission = allowHookWake
-		c.ACPWaker = waker
-		c.Mission = stub
-	})
-	worker, integrator := h.run(0), h.run(1)
-	stub.mission, stub.integrator = []domain.RunID{worker, integrator}, integrator
-	h.start()
-
+func TestEnhancedWakeAnnouncesAnAskAndAnswerWithinOneTurn(t *testing.T) {
+	h, waker, stub, integrator := newMissionWakeHarness(t)
 	h.svc.EnhancedSessionOpened(context.Background(), integrator)
-	stub.setOpen(0)
-	if _, err := h.bus.Publish(context.Background(), events.Event{
-		WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
+
+	stub.change(domain.MissionQuestionAsked, true)
+	h.publishMissionChanged(t)
+	stub.change(domain.MissionQuestionAnswered, false)
+	h.publishMissionChanged(t)
 	waker.endTurn(integrator)
 	h.svc.WakeIdle(integrator)
-	if got, want := waker.next(t), protocol.CoordMissionUpdateContext("mission-1"); got != want {
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionQuestionAnswered})
+	if got := waker.next(t); got != want {
+		t.Fatalf("mission wake prompt %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(want, "Mission update (question answered): ") {
+		t.Fatalf("prompt %q does not name the change", want)
+	}
+}
+
+func TestEnhancedWakeSkipsTheIntegratorsOwnChanges(t *testing.T) {
+	h, waker, stub, integrator := newMissionWakeHarness(t)
+	h.svc.EnhancedSessionOpened(context.Background(), integrator)
+
+	stub.change(domain.MissionTaskProposed, true)
+	stub.change(domain.MissionPhaseChanged, true)
+	waker.endTurn(integrator)
+	h.svc.wakeEnhanced(integrator)
+	if n := waker.count(); n != 0 {
+		t.Fatalf("the integrator's own changes woke it %d times", n)
+	}
+
+	stub.change(domain.MissionWorkerEnded, false)
+	stub.change(domain.MissionWorkerReport, false)
+	h.svc.wakeEnhanced(integrator)
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionWorkerReport})
+	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
 }
