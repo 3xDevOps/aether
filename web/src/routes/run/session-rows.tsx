@@ -11,7 +11,6 @@ import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
 import { inputHint } from '@/lib/run-requests'
-import { runLabel as labelOfRun } from '@/lib/status'
 import type { RunNavigation } from '@/routes/run/header'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { AnsweredText } from '@/routes/run/session-requests'
@@ -103,7 +102,7 @@ function EntryRow({ entry, runID }: { entry: WorkItem; runID: string }) {
 function MailRow({ messageID, runID }: { messageID: string; runID: string }) {
   const m = useStore((s) => s.runMessages[messageID])
   if (!m) return null
-  return <AgentMessage message={m} flush label={(id, run) => (id === runID ? 'This run' : run ? labelOfRun(run) : id)} />
+  return <AgentMessage message={m} flush label={(id) => (id === runID ? 'This run' : undefined)} />
 }
 
 function hasDetail(entry: WorkItem): boolean {

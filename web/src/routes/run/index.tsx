@@ -6,6 +6,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
+import { useBrowserTab } from '@/routes/browser/visibility'
 import { BrowserView } from '@/routes/browser'
 import { ChangesView } from '@/routes/diff'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
@@ -62,7 +63,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [noteDraft, setNoteDraft] = useState<{ text: string } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
-  const views = runViews.filter((view) => view !== 'browser' || cap.hasMethod('dev.browser.status'))
+  const browserTab = useBrowserTab(run, cap.hasMethod('dev.browser.status'))
+  const views = runViews.filter((view) => view !== 'browser' || browserTab || (params.view === 'browser' && cap.hasMethod('dev.browser.status')))
   const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)

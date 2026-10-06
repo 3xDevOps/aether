@@ -105,7 +105,7 @@ describe('session rows', () => {
     })
     const failed = toRecord(run({ status: 'failed', reason: 'agent exited 1', finished_at: '2026-08-14T10:09:00Z' }))
     expect(rows({ run: failed, events: [], room: [], memberName, paused: false }).at(-1)).toEqual({
-      kind: 'finished', text: 'Failed: agent exited 1', tone: 'failed',
+      kind: 'finished', text: 'Failed: Agent exited with code 1', tone: 'failed',
     })
     const recorded = [event('run.status', { to: 'completed' }, '2026-08-14T10:09:00Z')]
     const done = toRecord(run({ status: 'completed' }))

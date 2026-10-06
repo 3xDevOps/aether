@@ -1,6 +1,7 @@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
+import { plainReason } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
 import type { SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
@@ -377,7 +378,7 @@ function statusRow(event: Event): SessionRow | null {
     kind: 'finished',
     id: event.id,
     at: event.time,
-    text: p.reason ? `${text}: ${p.reason}` : text,
+    text: p.reason ? `${text}: ${plainReason(p.reason)}` : text,
     tone: p.to === 'failed' || p.to === 'interrupted' ? 'failed' : 'done',
   }
 }
@@ -452,7 +453,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
     const at = run.finished_at ?? run.stateChangedAt
     items.push({ at, order: Number.MAX_SAFE_INTEGER, row: {
       kind: 'finished', id: `finished:${run.id}`, at,
-      text: run.reason ? `${finishedText[run.status]}: ${run.reason}` : finishedText[run.status] ?? 'Finished',
+      text: run.reason ? `${finishedText[run.status]}: ${plainReason(run.reason)}` : finishedText[run.status] ?? 'Finished',
       tone: run.status === 'failed' || run.status === 'interrupted' ? 'failed' : 'done',
     } })
   }

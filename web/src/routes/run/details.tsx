@@ -11,8 +11,8 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
 import { isRetainedRun } from '@/lib/commands'
 import { deletesInLabel } from '@/lib/format'
+import { plainReason } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
-import { runLabel } from '@/lib/status'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
@@ -63,7 +63,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const [loading, setLoading] = useState(false)
   useMessageList(useStore, api, scope)
   if (messages.length === 0 && !run.mission_id) return null
-  const label = (id: string, other: RunRecord | undefined) => (id === run.id ? 'This run' : other ? runLabel(other) : id)
+  const label = (id: string) => (id === run.id ? 'This run' : undefined)
   const shown = all ? messages : messages.slice(-recentMessages)
   const older = async () => {
     setLoading(true)
@@ -176,7 +176,7 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
         </Row>
         <Row label="Container">{container(run)}</Row>
         {run.archived_at && run.deletes_at && <Row label="Archived">{deletesInLabel(run.deletes_at)}</Row>}
-        {run.reason && <Row label="Last reason">{run.reason}</Row>}
+        {run.reason && <Row label="Last reason">{plainReason(run.reason)}</Row>}
       </dl>
     </Section>
   )
