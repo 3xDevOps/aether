@@ -19,8 +19,11 @@ const batches = new WeakMap<object, Batch>()
  * Store middleware that can hold subscriber notification back while
  * `batchNotifications` runs. `set()` still applies at once, so `getState()`
  * is always current; only listeners wait. They hear one change - the state
- * before the first held write and the state now - when the batch ends or a
- * frame has passed, whichever comes first.
+ * before the first held write and the state now - on the next frame. The
+ * hold outlives the batch: each socket message drains in its own task, so
+ * ending on an empty queue would notify once per message of a burst. A write
+ * outside any batch, which is the user acting, notifies at once and takes
+ * the held change with it.
  */
 export function batched<
   T,
@@ -44,20 +47,21 @@ export function batched<
       held = null
       notify(api.getState(), previous)
     }
+    // A hidden tab runs no frames, so the timer stands in for one there.
     const schedule = () => {
       if (cancelFrame) return
-      if (typeof requestAnimationFrame === 'function') {
-        const id = requestAnimationFrame(flush)
-        cancelFrame = () => cancelAnimationFrame(id)
-      } else {
-        const id = setTimeout(flush, 16)
-        cancelFrame = () => clearTimeout(id)
+      const timer = setTimeout(flush, 16)
+      const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(flush) : null
+      cancelFrame = () => {
+        clearTimeout(timer)
+        if (frame !== null) cancelAnimationFrame(frame)
       }
     }
 
     api.subscribe((state, previous) => {
       if (depth === 0) {
-        notify(state, previous)
+        if (held) flush()
+        else notify(state, previous)
         return
       }
       held ??= { previous }
@@ -73,7 +77,6 @@ export function batched<
       },
       end: () => {
         depth--
-        if (depth === 0) flush()
       },
     })
     return config(set, get, api)
