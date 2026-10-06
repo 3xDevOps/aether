@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { ThemeEffect } from '@/components/theme'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
 import { createRootStore, useStore, type RootState } from '@/store'
 import { runLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
-import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, fakeApi, run, serverInfo, updateStatus, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 
 const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
@@ -48,7 +48,7 @@ describe('settings view', () => {
     seed({ runs: { [active.id]: toRecord(active) } })
     render(<SettingsRoute params={{}} client={fakeApi()} />)
 
-    const picker = screen.getByLabelText('Run')
+    const picker = screen.getByLabelText('Mirror run files')
     await pickOption(picker, runLabel(active))
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
 
@@ -118,9 +118,8 @@ describe('settings view', () => {
     changeSystemTheme(true)
     expect(root.dataset.theme).toBe('dark')
     expect(root.style.colorScheme).toBe('dark')
-    expect(screen.queryByRole('region', { name: 'Link' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Sync daemon' })).toBeNull()
-    expect(screen.queryByLabelText('Run')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'This computer' })).toBeNull()
+    expect(screen.queryByLabelText('Mirror run files')).toBeNull()
     for (const [method, call] of Object.entries(client)) {
       if (method.startsWith('local')) expect(call).not.toHaveBeenCalled()
     }
@@ -137,6 +136,49 @@ describe('settings view', () => {
 
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(createRootStore().getState().singleKeyShortcuts).toBe(false)
+  })
+
+  it('applies a larger text size to the document and keeps it across a reload', async () => {
+    seed()
+    const root = document.documentElement
+    onTestFinished(() => {
+      useStore.setState({ textSize: 'default' })
+      delete root.dataset.textSize
+    })
+    render(
+      <>
+        <ThemeEffect />
+        <SettingsRoute params={{}} client={fakeApi()} />
+      </>,
+    )
+    expect(root.dataset.textSize).toBe('default')
+    await pickOption(screen.getByLabelText('Text size'), 'Larger')
+    expect(root.dataset.textSize).toBe('larger')
+    expect(createRootStore().getState().textSize).toBe('larger')
+  })
+
+  it('offers an admin the server update and frees retained containers through the board dialog', async () => {
+    const retained = run({ id: 'run_r', status: 'merged', reason: 'closed; retained container' })
+    seed({
+      runs: { [retained.id]: toRecord(retained) },
+      capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'update.check'] },
+      update: updateStatus(),
+    })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+
+    const server = screen.getByRole('region', { name: 'Server' })
+    fireEvent.click(within(server).getByRole('button', { name: 'Update…' }))
+    expect(useStore.getState().updatesOpen).toBe(true)
+    fireEvent.click(within(server).getByRole('button', { name: 'Free retained containers…' }))
+    expect(useStore.getState().paletteDialog).toBe('release-finished')
+  })
+
+  it('keeps the server admin rows from a collaborator', () => {
+    seed({ info: { ...serverInfo, member: bob } })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    const server = screen.getByRole('region', { name: 'Server' })
+    expect(within(server).getByText('Version')).toBeDefined()
+    expect(within(server).queryByText('Retained containers')).toBeNull()
   })
 
   it('installs the daemon and shows the unit path and enable note', async () => {
@@ -156,10 +198,7 @@ describe('settings view', () => {
     expect(
       await screen.findByText('/home/alice/.config/systemd/user/aether-sync.service'),
     ).toBeDefined()
-    const note = screen.getByLabelText<HTMLInputElement>('Enable command')
-    expect(note.value).toBe(
-      'enable with systemctl --user enable --now aether-sync',
-    )
+    expect(screen.getByText('enable with systemctl --user enable --now aether-sync')).toBeDefined()
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
   })
   it('opens a sync overlay without requesting unavailable daemon methods', async () => {
@@ -173,7 +212,7 @@ describe('settings view', () => {
     })
     render(<SettingsRoute params={{}} client={client} />)
 
-    await pickOption(screen.getByLabelText('Run'), runLabel(active))
+    await pickOption(screen.getByLabelText('Mirror run files'), runLabel(active))
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
     expect(client.localDaemonStatus).not.toHaveBeenCalled()
     expect(client.localDaemonInstall).not.toHaveBeenCalled()
@@ -199,7 +238,7 @@ describe('settings view', () => {
 
     expect(await screen.findByText('prod')).toBeDefined()
     expect(screen.getByText('staging')).toBeDefined()
-    expect(screen.getByText('active')).toBeDefined()
+    expect(screen.getByText('Active')).toBeDefined()
     const switches = screen.getAllByRole('button', { name: 'Switch' })
     expect(switches).toHaveLength(1)
 
@@ -226,8 +265,8 @@ describe('settings view', () => {
     render(<SettingsRoute params={{}} client={client} />)
 
     expect(await screen.findByText('host:2222')).toBeDefined()
-    expect(screen.getByText('alice')).toBeDefined()
-    expect(screen.getByText(/No repository linked/)).toBeDefined()
-    expect(screen.queryByText(/No server configured/)).toBeNull()
+    expect(screen.getByText(/as alice/)).toBeDefined()
+    expect(screen.getByText('No clone linked to this server.')).toBeDefined()
+    expect(screen.queryByText(/No server yet/)).toBeNull()
   })
 })

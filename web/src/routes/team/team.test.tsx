@@ -263,11 +263,11 @@ describe('team refresh and summary', () => {
       await refreshTeam(useStore, client)
     })
 
-    const detail = screen.getByLabelText('Disk usage').getAttribute('title')
+    const detail = screen.getByLabelText('Disk usage').textContent
     expect(detail).toContain('Worktrees 256 MB')
     expect(detail).toContain('Transcripts 128 MB')
     expect(detail).toContain('Database 64 MB')
-    expect(detail).toContain('Repos 512 MB')
+    expect(detail).toContain('Repositories 512 MB')
   })
 
   // An upgraded server can add a component while the filesystem totals stay put.
@@ -277,15 +277,15 @@ describe('team refresh and summary', () => {
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
     render(<ServerSection />)
     expect(
-      screen.getByLabelText('Disk usage').getAttribute('title'),
-    ).not.toContain('Repos')
+      screen.getByLabelText('Disk usage').textContent,
+    ).not.toContain('Repositories')
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    expect(screen.getByLabelText('Disk usage').getAttribute('title')).toContain(
-      'Repos 512 MB',
+    expect(screen.getByLabelText('Disk usage').textContent).toContain(
+      'Repositories 512 MB',
     )
   })
 })

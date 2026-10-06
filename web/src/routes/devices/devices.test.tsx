@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Device } from '@/lib/types'
-import { DevicesRoute } from '@/routes/devices'
+import { DevicesPanel } from '@/routes/devices'
 import { useStore } from '@/store'
 import { alice, bob, fakeApi, serverInfo } from '@/test/fixtures'
 
@@ -39,51 +39,47 @@ function seed(self = alice) {
   })
 }
 
-describe('devices view', () => {
+describe('devices tab', () => {
   it('lists label, status, key, owner and when each device was added and last seen', async () => {
     seed()
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [device(), pendingDesktop]) })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     const list = within(await screen.findByRole('list', { name: 'Devices' }))
     const laptop = list.getByText('laptop').closest('li')!
-    expect(within(laptop).getByText('approved')).toBeDefined()
-    expect(within(laptop).getByText('SHA256:examplefingerprint')).toBeDefined()
-    expect(laptop.textContent).toMatch(/Alice · added .+ · last seen/)
-    expect(within(laptop).getByText('signed in as alice on GitHub')).toBeDefined()
+    expect(within(laptop).getByText('Approved')).toBeDefined()
+    expect(laptop.querySelector('[title="SHA256:examplefingerprint"]')).not.toBeNull()
+    expect(laptop.textContent).toMatch(/Alice · alice on GitHub · added .+ · last seen/)
     const desktop = list.getByText('desktop').closest('li')!
-    expect(within(desktop).getByText('pending')).toBeDefined()
-    expect(within(desktop).getByText('SHA256:otherfingerprint')).toBeDefined()
+    expect(within(desktop).getByText('Pending')).toBeDefined()
     // An admin reads whose device it is.
-    expect(desktop.textContent).toMatch(/Bob · added .+ · never seen/)
-    expect(within(desktop).getByText('signed in as bob@example.com on GitHub')).toBeDefined()
+    expect(desktop.textContent).toMatch(/Bob · bob@example.com on GitHub · added .+ · never seen/)
   })
 
   it('names the provider of a device v0.5.2-alpha.3 signed in with Google', async () => {
     seed()
     const old = device({ id: 'dev_old', provider: 'google', account: 'alice@example.com', label: 'old' })
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [old]) })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     const row = (await screen.findByText('old')).closest('li')!
-    expect(within(row).getByText('signed in as alice@example.com on google')).toBeDefined()
+    expect(row.textContent).toContain('alice@example.com on google')
   })
 
   it('names the invitation a device waits on, which has no member yet', async () => {
     seed()
     const waiting = device({ id: 'dev_new', member_id: '', invitation_id: 'inv_1', label: 'new', status: 'pending' })
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [waiting]) })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     const row = (await screen.findByText('new')).closest('li')!
-    expect(row.textContent).toMatch(/invitation inv_1 · added/)
-    expect(within(row).getByText('signed in as alice on GitHub')).toBeDefined()
+    expect(row.textContent).toMatch(/invitation inv_1 · alice on GitHub · added/)
   })
 
   it('leaves owner names off a member own list', async () => {
     seed(bob)
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [pendingDesktop]) })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     const desktop = (await screen.findByText('desktop')).closest('li')!
     expect(desktop.textContent).not.toContain('Bob ·')
@@ -105,7 +101,7 @@ describe('devices view', () => {
       })),
       memberDeviceApprove: vi.fn(async () => ({ ...pendingDesktop, status: 'approved' as const })),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
     await screen.findByText('desktop')
 
     fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: ' ABCD-EFGH ' } })
@@ -122,7 +118,7 @@ describe('devices view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Approve' }))
-    expect(await screen.findByText('approved')).toBeDefined()
+    expect(await screen.findByText('Approved')).toBeDefined()
     expect(client.memberDeviceApprove).toHaveBeenCalledWith('ABCD-EFGH', 'dev_desktop')
     expect(list).toHaveBeenCalledTimes(2)
   })
@@ -133,7 +129,7 @@ describe('devices view', () => {
     const client = fakeApi({
       memberDeviceLookup: vi.fn(async () => ({ device: waiting, role: 'collaborator' as const })),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'ABCD-EFGH' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
@@ -146,12 +142,12 @@ describe('devices view', () => {
     seed()
     const registered = device({ id: 'dev_phone', label: 'phone', status: 'registered' })
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [pendingDesktop, registered]) })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     const desktop = (await screen.findByText('desktop')).closest('li')!
     expect(within(desktop).queryByRole('button', { name: /Approve/ })).toBeNull()
     const phone = screen.getByText('phone').closest('li')!
-    expect(within(phone).getByText('registered')).toBeDefined()
+    expect(within(phone).getByText('Registered')).toBeDefined()
     expect(within(phone).queryByRole('button', { name: /Approve/ })).toBeNull()
     expect(within(phone).getByRole('button', { name: 'Revoke phone' })).toBeDefined()
   })
@@ -165,7 +161,7 @@ describe('devices view', () => {
         ),
       ),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'ZZZZ-ZZZZ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
@@ -181,7 +177,7 @@ describe('devices view', () => {
       memberDeviceList: vi.fn(async () => [device()]),
       memberDeviceRevoke: vi.fn(async () => device({ status: 'revoked' })),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Revoke laptop' }))
     const dialog = within(await screen.findByRole('alertdialog'))
@@ -205,7 +201,7 @@ describe('devices view', () => {
         Promise.reject(new ApiError(403, 'member.device.revoke: permission denied')),
       ),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Revoke workstation' }))
     const dialog = within(await screen.findByRole('alertdialog'))
@@ -222,9 +218,9 @@ describe('devices view', () => {
     const client = fakeApi({
       memberDeviceList: vi.fn(async () => [device({ status: 'revoked' })]),
     })
-    render(<DevicesRoute params={{}} client={client} />)
+    render(<DevicesPanel client={client} />)
 
-    expect(await screen.findByText('revoked')).toBeDefined()
+    expect(await screen.findByText('Revoked')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Revoke laptop' })).toBeNull()
   })
 })
