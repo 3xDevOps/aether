@@ -26,6 +26,10 @@ second sandbox inside it.
   workspace's own entries. An unprivileged server owns the checkout on the
   host while the agent runs as root; git's ownership check guards against
   another user's repository on a shared machine, which the container is not.
+  Git reads `GIT_CONFIG_COUNT` from 2.31 on; an image with an older git that
+  carries the ownership check (Debian 11's 2.30.2, Ubuntu 20.04's 2.25.1)
+  still refuses the checkout. The image's own `ENV GIT_CONFIG_*` entries are
+  replaced, not appended to: set them in the workspace environment instead.
 
 Each member's persistent home is mounted as `$HOME` only into that member's
 own containers: their environment and the runs they launch. An

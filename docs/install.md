@@ -1093,7 +1093,11 @@ give up: every environment image must keep a root user. Git works in those
 runs - the checkout stays owned by the server's user, and every run container
 sets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`, so neither the
 agent's git nor the dashboard's Git panel stops at `detected dubious
-ownership`.
+ownership`. This needs git 2.31 or newer in the image; the standard image
+qualifies. An unprivileged server cannot delete files a root agent created,
+such as `.git/objects` or `node_modules`, so cleanup of finished runs fails
+with `permission denied` and their checkouts stay under the data directory
+until you remove them as root.
 
 Browser support also needs permission to assign its private control directory
 to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
