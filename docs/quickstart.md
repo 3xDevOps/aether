@@ -462,7 +462,8 @@ account, not to one workspace. **Set up** opens three numbered steps:
    it is installed, whether a running agent can switch, what happens when the
    adapter fails, and for Claude Code which login pays. An agent without
    Enhanced shows that card disabled with the reason. The choice starts on
-   the agent's default and becomes its default in **New run**.
+   Enhanced for Codex, oh-my-pi and OpenCode and on Standard for the others,
+   and becomes the agent's default in **New run**.
 2. **Install and log in.** **Install <agent>** runs the vendor's install
    command in your **environment**, the container Aether keeps for you on the
    server, followed by the pinned adapter when Enhanced is chosen. A failed

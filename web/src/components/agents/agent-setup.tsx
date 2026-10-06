@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { defaultMode, enhancedSupported, label, loginFor, ready } from '@/components/agents/agent-copy'
+import { enhancedSupported, label, loginFor, ready, setupMode } from '@/components/agents/agent-copy'
 import { ModeComparison, type SetupMode } from '@/components/agents/mode-comparison'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -50,10 +50,7 @@ export function AgentSetup({
   const caps = useCapability()
   const rememberLaunch = useStore((s) => s.rememberLaunch)
   const [agent, setAgent] = useState(initial)
-  const [mode, setMode] = useState<SetupMode>(() => {
-    const remembered = defaultMode(initial, useStore.getState().launchDefaults[initial.name]?.mode)
-    return remembered === 'acp' ? 'acp' : 'tui'
-  })
+  const [mode, setMode] = useState<SetupMode>(() => setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
   const [installing, setInstalling] = useState(false)
   const [result, setResult] = useState<AgentInstallResult | null>(null)
   const [error, setError] = useState<string | null>(null)

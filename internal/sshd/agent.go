@@ -136,13 +136,14 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 // definition runs only on their own account, so it has no install command.
 func (s *Server) describeAgent(member, account domain.MemberID, profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
 	info := protocol.AgentInfo{
-		Name:        profile.Name,
-		DisplayName: profile.Label(),
-		Glyph:       profile.Name,
-		Source:      source,
-		Enhanced:    string(profile.EnhancedSupport()),
-		Switchable:  profile.Switchable(),
-		DefaultMode: string(domain.LaunchTUI),
+		Name:            profile.Name,
+		DisplayName:     profile.Label(),
+		Glyph:           profile.Name,
+		Source:          source,
+		Enhanced:        string(profile.EnhancedSupport()),
+		Switchable:      profile.Switchable(),
+		DefaultMode:     string(domain.LaunchTUI),
+		EnhancedDefault: profile.ACPDefault,
 	}
 	if source == "member" {
 		info.Glyph = "custom"

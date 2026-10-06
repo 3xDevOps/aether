@@ -676,6 +676,8 @@ type AgentInfo struct {
 	LoginFound bool `json:"login_found"`
 	// "acp" when enhanced mode is installed and preferred, else "tui".
 	DefaultMode string `json:"default_mode"`
+	// EnhancedDefault: the agent prefers enhanced mode, installed or not.
+	EnhancedDefault bool `json:"enhanced_default"`
 	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.

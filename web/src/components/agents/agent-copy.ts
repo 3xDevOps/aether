@@ -35,6 +35,11 @@ export function defaultMode(agent: AgentInfo, remembered: LaunchMode | undefined
   return remembered ?? (agent.default_mode === 'acp' ? 'acp' : 'tui')
 }
 
+export function setupMode(agent: AgentInfo, remembered: LaunchMode | undefined): 'tui' | 'acp' {
+  if (!remembered && agent.enhanced_default && enhancedSupported(agent)) return 'acp'
+  return defaultMode(agent, remembered) === 'acp' ? 'acp' : 'tui'
+}
+
 export function supportWords(agent: AgentInfo): string {
   return enhancedSupported(agent) ? 'Standard · Enhanced' : 'Standard'
 }

@@ -88,6 +88,17 @@ describe('agent setup', () => {
     expect(screen.getByRole('radio', { name: 'Enhanced' }).getAttribute('aria-checked')).toBe('true')
   })
 
+  it('starts on Enhanced for an agent that prefers it before its adapter is installed', () => {
+    setUp({ ...codex, installed: false, enhanced_installed: false, default_mode: 'tui', enhanced_default: true })
+    expect(screen.getByRole('radio', { name: 'Enhanced' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('starts on the mode the member chose over the one the agent prefers', () => {
+    useStore.getState().setLaunchDefault('codex', 'tui')
+    setUp({ ...codex, enhanced_default: true })
+    expect(screen.getByRole('radio', { name: 'Standard' }).getAttribute('aria-checked')).toBe('true')
+  })
+
   it('installs the adapter with the agent when Enhanced is chosen, then checks agent.list', async () => {
     const client = fakeApi({
       agentInstall: vi.fn(async () => ({ log_tail: 'added 1 package\n', installed: true, enhanced_installed: true })),

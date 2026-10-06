@@ -891,6 +891,8 @@ export interface AgentInfo {
   login_found?: boolean
   /** The launch mode the agent starts in unless asked otherwise. */
   default_mode?: 'tui' | 'acp'
+  /** Whether the agent prefers Enhanced, installed yet or not. */
+  enhanced_default?: boolean
   /** Whether a running run can switch between Standard and Enhanced. */
   switchable?: boolean
   /** Shared account: refused because its owner has no login for this agent. */

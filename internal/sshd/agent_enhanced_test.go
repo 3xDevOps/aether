@@ -72,25 +72,28 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	type state struct {
 		enhancedInstalled, loginFound bool
 		defaultMode                   string
+		enhancedDefault               bool
 	}
 	check := func(agents map[string]protocol.AgentInfo, want map[string]state) {
 		t.Helper()
 		for name, w := range want {
 			got := agents[name]
-			if got.EnhancedInstalled != w.enhancedInstalled || got.LoginFound != w.loginFound || got.DefaultMode != w.defaultMode {
-				t.Errorf("%s = enhanced_installed %v, login_found %v, default_mode %q; want %+v",
-					name, got.EnhancedInstalled, got.LoginFound, got.DefaultMode, w)
+			if got.EnhancedInstalled != w.enhancedInstalled || got.LoginFound != w.loginFound || got.DefaultMode != w.defaultMode ||
+				got.EnhancedDefault != w.enhancedDefault {
+				t.Errorf("%s = enhanced_installed %v, login_found %v, default_mode %q, enhanced_default %v; want %+v",
+					name, got.EnhancedInstalled, got.LoginFound, got.DefaultMode, got.EnhancedDefault, w)
 			}
 		}
 	}
 	own := list(grantee.ID)
 	check(own, map[string]state{
-		"codex": {true, true, "acp"},
-		"omp":   {true, false, "acp"},
+		"codex": {true, true, "acp", true},
+		"omp":   {true, false, "acp", true},
 		// Claude stays on its terminal by default, and its adapter is the
-		// owner's, not the grantee's.
-		"claude":   {false, false, "tui"},
-		"opencode": {false, false, "tui"},
+		// owner's, not the grantee's. OpenCode prefers enhanced before it
+		// is installed.
+		"claude":   {false, false, "tui", false},
+		"opencode": {false, false, "tui", true},
 	})
 	codex, _ := harness.Lookup("codex")
 	if got := own["codex"].EnhancedInstallScript; got != codex.InstallCommand(true) {
@@ -106,13 +109,13 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	check(list(owner.ID), map[string]state{
 		// The grantee's own claude runs, so the owner's adapter is not
 		// on the launch's PATH.
-		"claude": {false, true, "tui"},
+		"claude": {false, true, "tui", false},
 		// The grantee has no pi, so the launch borrows the owner's pi and
 		// its adapter together.
-		"pi": {true, false, "tui"},
+		"pi": {true, false, "tui", false},
 		// The grantee's own codex and adapter run, but the login is the
 		// owner's, who has none.
-		"codex": {true, false, "acp"},
+		"codex": {true, false, "acp", true},
 	})
 }
 

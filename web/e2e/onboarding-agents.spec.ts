@@ -36,8 +36,10 @@ test('setting an agent up installs it, opens its login, and checks it', async ({
 
   await expect(agent.row('Codex')).toContainText('Not installed')
   await agent.setUp('Codex').click()
-  // Codex starts in Standard until its adapter is installed: the default
-  // selection is agent.list's default_mode.
+  // Codex prefers Enhanced (agent.list's enhanced_default) before its adapter
+  // is installed.
+  await expect(agent.mode('Enhanced')).toHaveAttribute('aria-checked', 'true')
+  await agent.mode('Standard').click()
   await expect(agent.mode('Standard')).toHaveAttribute('aria-checked', 'true')
   await expect(agent.section).toContainText('Codex: supported through an adapter')
   await expect(agent.section).toContainText('Chosen when the run starts')
@@ -75,7 +77,6 @@ test('choosing Enhanced installs the adapter with the agent and seeds the first 
   aether.giveCodexLogin(id)
 
   await agent.setUp('Codex').click()
-  await agent.mode('Enhanced').click()
   await expect(agent.mode('Enhanced')).toHaveAttribute('aria-checked', 'true')
   await agent.install('Codex').click()
 
@@ -99,6 +100,7 @@ test('a failed install shows the command error and its output', async ({ page, a
 
   // No stub npm: the real install command finds none in the environment.
   await agent.setUp('Codex').click()
+  await agent.mode('Standard').click()
   await agent.install('Codex').click()
   const failure = agent.section.getByRole('alert').filter({ hasText: 'Install failed' })
   await expect(failure).toContainText('the install command exited 1', { timeout: 5 * 60 * 1000 })

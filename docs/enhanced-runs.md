@@ -50,7 +50,9 @@ whether a running agent can switch modes (`switchable`, otherwise "Chosen
 when the run starts"), what a failed adapter start does, and for Claude Code
 that it uses your Claude login through the Claude Agent SDK. An agent whose
 `enhanced` is `none` shows the Enhanced card disabled with the reason. The
-selection starts on the agent's `default_mode` and becomes that agent's
+selection starts on the mode last chosen for the agent, else Enhanced for an
+agent with `enhanced_default` (Codex, oh-my-pi and OpenCode, before their
+adapter is installed too), else `default_mode`, and becomes that agent's
 default in **New run**; **Install <agent>** with Enhanced selected installs
 the adapter in the same `agent.install` call. The **Agents** page keeps a
 **Default mode** per agent.

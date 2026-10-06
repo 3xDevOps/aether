@@ -386,11 +386,11 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true,
 			Enhanced: "adapter", Switchable: true, DefaultMode: "tui", LoginMissing: true},
 		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true,
-			Enhanced: "adapter", DefaultMode: "tui"},
+			Enhanced: "adapter", DefaultMode: "tui", EnhancedDefault: true},
 		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true,
 			Enhanced: "none", DefaultMode: "tui", OwnAccountOnly: true},
 		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false,
-			Enhanced: "native", Switchable: true, DefaultMode: "tui", Unavailable: refusal},
+			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal},
 	} {
 		got := agents[name]
 		got.InstallScript, got.EnhancedInstallScript = "", ""

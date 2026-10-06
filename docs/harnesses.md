@@ -156,8 +156,9 @@ owner's installation borrows the owner's adapter with it, read-only.
 launch from the same `~/.local` as the CLI), `login_found` (a non-empty
 **Login state** file or directory exists in the home the launch signs in
 with: the owner's on a shared account; it checks for the path, not for a
-working session), and `default_mode`: `acp` for `codex`, `omp`, and
-`opencode` once their ACP server is installed, `tui` for everything else.
+working session), `default_mode`: `acp` for `codex`, `omp`, and
+`opencode` once their ACP server is installed, `tui` for everything else, and
+`enhanced_default`: true for those three whether installed or not.
 Claude Code stays on its terminal by default because its adapter runs on the
 Claude Agent SDK, whose terms favour API keys.
 
@@ -1023,7 +1024,8 @@ aether agent add <name>
 
 In either dashboard, **Set up** on onboarding's **Agent** step or the
 **Agents** page runs three numbered steps. **Choose how runs show it**
-compares Standard and Enhanced for that agent and starts on its
+compares Standard and Enhanced for that agent and starts on the mode last
+chosen for it, else Enhanced when `enhanced_default` is set, else
 `default_mode`. **Install <agent>** calls `agent.install` with `enhanced` set
 when Enhanced is chosen, then shows the command's output, and on failure
 **Install failed** with the exit status. Once the agent is installed the
