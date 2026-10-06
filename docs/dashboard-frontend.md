@@ -1024,8 +1024,8 @@ first that applies:
 
 | Condition | Who it needs | Reason line |
 | --- | --- | --- |
-| Pending permission (approval or native) | owner or terminal controller | Permission: … |
-| Pending native question | owner or terminal controller | Question: answer in the terminal |
+| Pending permission (approval or native) | owner or terminal controller | Permission: … (enhanced: Permission requested) |
+| Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
 | Run Room question to the owner | owner | Bob asked you: … |
 | Open swarm question | accountable human or an admin | The integrator asks: … |

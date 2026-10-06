@@ -200,6 +200,14 @@ describe('needs you conditions', () => {
     })
   })
 
+  it.each([
+    ['permission', 'Permission requested'],
+    ['question', 'Question from the agent'],
+  ] as const)('gives no terminal instruction for an enhanced run\'s %s', (kind, reason) => {
+    const enhanced = record({ mode: 'acp', pending_inputs: [{ id: 'r1', session_id: 's1', kind }] })
+    expect(presentRun(enhanced, stateContext())).toMatchObject({ state: 'needs-you', reason })
+  })
+
   it('names no wait for a run parked before the snapshot', () => {
     const reloaded = record({ status: 'needs-attention', reason: 'agent idle', started_at: '2026-08-14T08:00:00Z' })
     expect(presentRun(reloaded, stateContext()).reason).toBe('Agent idle')

@@ -195,7 +195,8 @@ export const needsYouConditions: NeedsYouCondition[] = [
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
     reason: (run, ctx) => {
       const approval = ctx.approvalsByRun[run.id]?.[0]
-      return approval ? `Permission: ${approval.action}` : 'Permission: answer in the terminal'
+      if (approval) return `Permission: ${approval.action}`
+      return run.mode === 'acp' ? 'Permission requested' : 'Permission: answer in the terminal'
     },
     since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
   }),
@@ -204,7 +205,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'request',
     holds: (run) => nativeRequests(run, questionKinds).length > 0,
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
-    reason: () => 'Question: answer in the terminal',
+    reason: (run) => (run.mode === 'acp' ? 'Question from the agent' : 'Question: answer in the terminal'),
   }),
   condition({
     id: 'queued-message',
