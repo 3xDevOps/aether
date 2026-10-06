@@ -355,6 +355,7 @@ describe('team state from events', () => {
     await applyEvent(store, status(2), client)
     await applyEvent(store, event(3, 'run.diff', { files: [], tree: 'b', parent_tree: 'a' }), client)
     await applyEvent(store, event(4, 'run.status', { to: 'running' }, { workspace_id: 'other' }), client)
+    store.getState().appendLiveEvent(event(4, 'mission.changed', { mission_id: 'mission_1' }, { run_id: '' }))
     expect(store.getState().feed.map((e) => e.seq)).toEqual([2])
     expect(store.getState().feedCursor).toBe(2)
 

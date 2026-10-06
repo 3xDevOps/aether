@@ -86,7 +86,7 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
       <RunName id={p.from_run_id} /> → <RunName id={p.to_run_id} /> · {String(p.kind ?? 'message')}
     </span>
   ),
-  'mission.changed': () => '',
+  'mission.changed': (p) => <MissionName id={p.mission_id} />,
   'coord.message.acked': (p) => (
     <span>
       <RunName id={p.to_run_id} /> acknowledged <code>{String(p.message_id ?? '')}</code>
@@ -108,6 +108,12 @@ function RunName({ id }: { id: unknown }) {
       {runLabel(run)}
     </button>
   )
+}
+
+function MissionName({ id }: { id: unknown }) {
+  const missionID = typeof id === 'string' ? id : ''
+  const objective = useStore((s) => s.missions[missionID]?.objective)
+  return objective ? objective.split('\n')[0] : <code>{missionID}</code>
 }
 
 export function describeEvent(event: Event): ReactNode {

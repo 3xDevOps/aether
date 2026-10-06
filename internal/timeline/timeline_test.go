@@ -85,8 +85,10 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	}
 }
 
-func TestRunTitleIsExcludedFromDefaultFeed(t *testing.T) {
-	if !detailTypes[events.TypeRunTitle] {
-		t.Fatal("run.title should be a detail event in the default feed")
+func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
+	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged} {
+		if !detailTypes[typ] {
+			t.Fatalf("%s should be a detail event in the default feed", typ)
+		}
 	}
 }
