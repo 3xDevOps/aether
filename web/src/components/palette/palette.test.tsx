@@ -647,12 +647,12 @@ describe('command palette', () => {
   })
 
   it.each(['local', 'remote'] as const)(
-    'finds configuration and remote files with config-only capabilities on a %s gateway',
+    'finds agent config files under Agents, and remote files, on a %s gateway',
     async (gateway) => {
       useStore.setState({
         capabilities: {
           gateway,
-          methods: ['config.roots', 'config.import', 'config.tree', 'config.read'],
+          methods: ['agent.list', 'config.roots', 'config.import', 'config.tree', 'config.read'],
           ws: [],
         },
         workspaces: {},
@@ -663,9 +663,9 @@ describe('command palette', () => {
       open()
 
       const search = await screen.findByRole('combobox')
-      await userEvent.type(search, 'config')
-      fireEvent.click(await screen.findByText('Agent config files'))
-      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
+      await userEvent.type(search, 'config files')
+      fireEvent.click(await screen.findByText('Agents'))
+      expect(useStore.getState().route).toEqual({ name: 'agents', params: {} })
       expect(useStore.getState().paletteOpen).toBe(false)
 
       act(() => useStore.setState({ paletteOpen: true }))
@@ -674,24 +674,6 @@ describe('command palette', () => {
       await userEvent.type(reopenedSearch, 'files')
       fireEvent.click(await screen.findByText('Files'))
       expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
-    },
-  )
-
-  it.each(['config.roots', 'config.import'])(
-    'hides configuration when %s is not advertised',
-    async (missing) => {
-      useStore.setState({
-        capabilities: {
-          gateway: 'remote',
-          methods: ['config.roots', 'config.import'].filter(
-            (method) => method !== missing,
-          ),
-          ws: [],
-        },
-      })
-      open()
-      await screen.findByRole('combobox')
-      expect(screen.queryByText('Agent config files')).toBeNull()
     },
   )
 

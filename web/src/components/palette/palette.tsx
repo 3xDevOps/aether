@@ -72,7 +72,7 @@ export function PaletteBody({
 
   const goTo = surfaces(cap).filter((surface) => surface.name !== 'board').map((surface) => ({
     ...surface,
-    value: `${surface.label} ${surface.name}`,
+    value: `${surface.label} ${surface.name} ${surface.keywords ?? ''}`,
   }))
   const board = boardCommands({ cap, self })
   const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')

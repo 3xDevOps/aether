@@ -2,8 +2,6 @@
 // (the board, terminal, diffs, team surfaces) add one line here.
 import '@/routes/agents'
 import '@/routes/board'
-import '@/routes/configuration'
-import '@/routes/devices'
 import '@/routes/environment'
 import '@/routes/files'
 import '@/routes/members'

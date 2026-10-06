@@ -5,7 +5,6 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
-import { ConfigurationRoute } from '@/routes/configuration'
 import { useStore } from '@/store'
 import { agentInfo } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
@@ -126,17 +125,5 @@ describe('agents page', () => {
     await flush()
 
     expect(screen.queryByRole('button', { name: /^Agent config files/ })).toBeNull()
-  })
-
-  it('still opens the configuration route without a workspace', async () => {
-    useStore.setState({
-      capabilities: { gateway: 'remote', methods: ['agent.list', 'config.roots', 'config.import', 'config.tree'], ws: [] },
-      onboarded: true,
-      workspaces: {},
-      activeWorkspace: '',
-    })
-    render(<ConfigurationRoute params={{}} client={api} />)
-    await flush()
-    expect((screen.getByRole('button', { name: 'Choose directory' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
