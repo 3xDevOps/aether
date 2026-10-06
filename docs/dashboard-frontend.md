@@ -1364,44 +1364,25 @@ xterm, not the table, and accepts Ctrl and Meta alike. Terminal copy, paste and
 find are Ctrl on every platform, because that is what xterm binds; see
 [terminal.md](terminal.md).
 
-**Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
-docks (`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a
-single tab stop that follows focus, and Left/Right/Home/End through
-`onTabListKeyDown` in `src/lib/keys.ts`. A removable dock tab advertises
-unmodified Delete and Backspace through `aria-keyshortcuts`.
-
-Neither strip is a Radix `Tabs`, though the library is already a dependency.
-The run strip cannot be: its five tabs are separate registry routes with no
-common parent to hold a `Tabs.Root`, and Radix would emit `aria-controls`
-pointing at panels that are not in the tree. The dock keeps each tab's close
-affordance inside its native tab button instead of nesting another button
-inside the tab list; pointer closing stops that tab's activation. What is left
-of the pattern either way is `onTabListKeyDown`, one function both strips share.
+**Tab strips behave as tab lists.** The run view switch is a Radix `Tabs`
+(`TabsList look="segmented"`) whose panels are the four views, so Radix wires
+`aria-controls` and the `tabpanel`s. The terminal strip in the run toolbar
+(`TerminalTabs` in `routes/run/shells.tsx`) and the environment dock
+(`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a single tab
+stop that follows focus, and Left/Right/Home/End through `onTabListKeyDown` in
+`src/lib/keys.ts`. The terminal strip's Agent tab controls the agent pane and
+each shell tab the shell pane, both `tabpanel`s while a shell is open; with
+only the agent there is one terminal and no tab list. A removable dock tab
+advertises unmodified Delete and Backspace through `aria-keyshortcuts`.
 
 Those keys move focus and nothing else. Selection does not follow focus here,
 which the ARIA tab list pattern reserves for panels that are cheap to swap:
-behind these tabs are a websocket attach, a patch fetch and an xterm host that
-replays a transcript, so arrowing from Terminal to Events must not open the tab
-it lands on. Enter or Space opens the focused tab, a click opens the tab it
-landed on, and both work because every tab is a real `<button>`.
-Delete or Backspace closes the focused removable dock tab. A close repairs
-focus to the next surviving tab, the previous one when closing the last tab, or
-the Add terminal tab when the dock becomes empty.
-Each run route names the body under the strip as its `tabpanel`, through
-`runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
-one carrying `aria-controls`: on the run strip only one of the four routes is
-active at a time, so the other three would be naming a panel that is not active
-in the tree. An open dock's body is the panel its selected tab names; a shut
-dock has no body, and a dock
-holding no tabs is no tab list at all, so neither names anything.
-
-Opening a run tab replaces its header and strip with the active center view's.
-The new strip restores keyboard-activation focus so it does not fall to `body`.
-That handoff is armed from the activation rather than the key press, and only
-from one the keyboard produced, which carries no click count: a cancelled
-press arms nothing. Pointer navigation does not steal focus; it scrolls the
-selected tab into view so the run actions cannot leave its label clipped.
-The dock's strip needs no handoff because its own tabs do not unmount it.
+behind these tabs are websocket attaches, a patch fetch and xterm hosts, so
+arrowing must not open the tab it lands on. Enter or Space opens the focused
+tab, and a click opens the tab it landed on. Delete or Backspace closes the
+focused removable dock tab. A close repairs focus to the next surviving tab,
+the previous one when closing the last tab, or the Add terminal tab when the
+dock becomes empty.
 
 **Resize handles are window splitters.** The sidebar's and the docks'
 `separator` handles take Tab, name the pane they size with `aria-controls`,

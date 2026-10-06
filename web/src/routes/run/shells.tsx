@@ -86,6 +86,8 @@ export function useRunShells(runID: string) {
 
 export type RunShells = ReturnType<typeof useRunShells>
 
+export const terminalPanelID = { agent: 'run-agent-panel', shell: 'run-shell-panel' }
+
 export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: boolean }) {
   const mobile = useIsMobile()
   const { runID, dock } = shells
@@ -179,6 +181,7 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
               variant={tab.id === active ? 'secondary' : 'ghost'}
               size="sm"
               aria-selected={tab.id === active}
+              aria-controls={tab.id ? terminalPanelID.shell : terminalPanelID.agent}
               tabIndex={i === focused ? 0 : -1}
               onFocus={() => setFocused(i)}
               onKeyDown={(event) => onTabListKeyDown(event, tabs.length, focused, setFocused)}

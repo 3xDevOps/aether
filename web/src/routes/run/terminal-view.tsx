@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
-import { TerminalTabs, type RunShells } from '@/routes/run/shells'
+import { terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
@@ -80,6 +80,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
 }) {
   const shellShown = shells.dock.shellShown && shells.dock.activeTab !== null && shells.canOpen
   const tabs = <TerminalTabs shells={shells} agent={agent.hasAgentTerminal} />
+  const tabbed = agent.hasAgentTerminal && shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
 
@@ -90,12 +91,24 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
       )}
       <div className="relative min-h-0 flex-1">
       {shellShown && (
-        <div data-slot="shell-terminal" className="absolute inset-0 flex flex-col">
+        <div
+          data-slot="shell-terminal"
+          id={terminalPanelID.shell}
+          role={tabbed ? 'tabpanel' : undefined}
+          aria-label={tabbed ? 'Shell' : undefined}
+          className="absolute inset-0 flex flex-col"
+        >
           <ShellTerminal shells={shells} tabs={tabs} onCaptures={onCaptures} />
         </div>
       )}
       {agent.hasAgentTerminal ? (
-        <div inert={shellShown} className={cn('absolute inset-0', shellShown && 'invisible')}>
+        <div
+          id={terminalPanelID.agent}
+          role={tabbed ? 'tabpanel' : undefined}
+          aria-label={tabbed ? 'Agent' : undefined}
+          inert={shellShown}
+          className={cn('absolute inset-0', shellShown && 'invisible')}
+        >
           <TerminalPane
             controller={controller}
             tabs={tabs}
