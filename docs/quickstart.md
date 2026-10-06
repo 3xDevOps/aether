@@ -764,10 +764,10 @@ a GitHub PR is not an internal candidate proposal.
    A PR failure never erases a successful **Pushed: yes** outcome.
 7. Click **Refresh PR feedback** for typed checks, comments, reviews and inline
    feedback (including file/line and commit context). Check only the feedback
-   you want to send, then **Send selected feedback to Run Room**. This creates
-   a normal moderated steering request; its receipt is not proof of delivery
-   unless it says sent. Open the run terminal and **Run Room** to inspect the
-   durable message and delivery state.
+   you want to send, then **Send selected feedback to the agent**. This creates
+   a normal moderated message; its receipt is not proof of delivery unless it
+   says sent. **Open the session** shows the durable message and its delivery
+   state.
 
 Native status is read when this view opens and after explicit actions; GitHub
 discovery and feedback refresh are explicit. No background PR watcher, automatic

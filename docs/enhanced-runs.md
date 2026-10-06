@@ -106,7 +106,7 @@ Answering, cancelling and changing options need **Steer** and the run's
 takes the lease on `/ws/acp/<run_id>` with the attach control fields
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
 
-Messages go through `run.inject` and the Run Room as for any run. A message
+Messages go through `run.inject` and the run's room messages as for any run. A message
 sent while no turn runs starts one and reports `outcome: "sent"` once the
 agent accepts it: its first update, or 1.5 s without a refusal. A prompt
 the agent refuses at once (an error such as `authRequired`) returns that

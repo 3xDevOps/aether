@@ -279,7 +279,7 @@ in `src/store/selectors.ts` as pure functions over a `StateContext`
 `src/store/hooks.ts`. Selectors that build new arrays must not be passed to
 `useStore` directly. A view that owns its own derived shape keeps it beside
 the view instead (`src/routes/board/selectors.ts`). `useRunInput` combines
-structured native requests, pending Aether approvals and unanswered Run Room
+structured native requests, pending Aether approvals and unanswered teammate
 questions for the request indicator; the run's state comes from
 [Run state](#run-state).
 
@@ -574,8 +574,7 @@ Use this variant rather than a new breakpoint or a per-component pixel value.
 **The bars are tokens, not repeated numbers.** `--window-bar-height` (35px,
 the desktop drag strip) and `--top-bar-height` (48px, the phone top bar,
 border included) are declared in `src/index.css`, and every offset measured
-from the top bar reads the token - the palette's drop, the phone Run Room and
-evidence sheets. `--safe-top` is the top safe-area inset under a name, so that
+from the top bar reads the token - the palette's drop and the phone sheets. `--safe-top` is the top safe-area inset under a name, so that
 a surface measuring from the top bar can add the same amount the bar itself
 grew by. It carries a `0px` fallback because a bare `env()` in a browser
 without it would void every `calc()` height that reads it.
@@ -927,7 +926,7 @@ first that applies:
 | Pending permission (approval or native) | owner or terminal controller | Permission: … (enhanced: Permission requested) |
 | Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
-| Run Room question to the owner | owner | Bob asked you: … |
+| Teammate question to the owner | owner | Bob asked you: … |
 | Open swarm question | accountable human or an admin | The integrator asks: … |
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
@@ -963,8 +962,8 @@ gateway decorates from the control lease on `run.get` and `run.list` (empty
 when nobody holds it). A `run.controller` event, published whenever a lease
 is taken, taken over, released, fenced or runs out its reconnect window,
 keeps it current, so a teammate holding control of someone else's run sees
-its requests without opening the Run Room. Only a gateway too old to send
-the field falls back to the Run Room's cached status.
+its requests without opening the run. Only a gateway too old to send
+the field falls back to the run's cached presence status.
 
 **Paused** comes from the `paused` field the gateway decorates from the
 scheduler on `run.get` and `run.list`; a paused run still reads `running`.
@@ -1009,15 +1008,15 @@ contains native request identities (`id`, `session_id`, and `kind`: `question`,
 The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
 an empty list clears it immediately. Closing one request leaves the others
 visible. Run headers, cards, lists and sidebar rows combine this set with
-pending Aether approvals and unanswered Run Room questions, including room
+pending Aether approvals and unanswered teammate questions, including room
 questions after execution finishes. Counts and tooltips name the source.
 Use the existing Terminal for native prompts, Approvals for Aether approvals,
-or open Run Room from Terminal for room questions; no new answer transport is
+or the run's Details for teammate questions; no new answer transport is
 introduced. Unsupported native integrations show no inferred request.
 
 A terminal lifecycle transition also clears native requests if its empty
 `run.input` event is lost. Later native input events cannot revive a request
-on a finished run. This does not clear Aether approvals or Run Room questions.
+on a finished run. This does not clear Aether approvals or teammate questions.
 
 Hydration is authoritative and queues live events until its snapshot lands.
 Ordinary run upserts preserve a known input set, including an empty one, so
@@ -1123,7 +1122,7 @@ through: launch, post a steer request to the agent, and launch from a template.
 The message form is `inject-dialog.tsx` over `run.inject`; each submission
 includes a caller-generated `idempotency_key`, which stays the same when the
 request is retried and changes only after the message payload changes or the
-submission succeeds. The server records that legacy method as a Run Room steer
+submission succeeds. The server records that legacy method as a room steer
 request, so it follows the controller lease, 45-second queue, moderation, and
 receipt rules. The launch and message forms are a store dialog
 (`openPaletteDialog` on the `palette` slice) hosted by `AppShell` through
@@ -1285,7 +1284,9 @@ scopes share keys, or one begins the other's sequence.
 | `u` | global | Open the next run that needs you |
 | `j` / `k` | global | Focus the next or previous run in the sidebar |
 | `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
-| `⌘Shift+M` / `Ctrl+Shift+M` | run | Toggle Run Room |
+| `[` / `]` | run | Show the previous or next run view |
+| `⌘.` / `Ctrl+.` | run | Show or hide run details |
+| `c` | run | Message the agent (focuses the Session composer) |
 | `Esc` | run | Leave a run for the board |
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
@@ -1338,9 +1339,8 @@ not take the keyboard back from a button that disabled itself mid-flight.
 There is no target left to read, so the fallback asks whether a dialog or a
 menu is open, and a dialog playing its exit animation does not count. It does
 not ask about terminals: focus on `body` with a terminal on screen is
-ordinary, and the run dock hands the keyboard to whichever body replaces its
-terminal - the refusal, the "Open shell" button, the unavailable notice -
-rather than orphaning it.
+ordinary, and hiding a shell hands the keyboard to the next running shell or,
+when there is none, to the shell's actions button rather than orphaning it.
 
 An open tooltip is the one overlay that neither guard names, and it does not
 need to: a tooltip owns no keys, and its trigger is an ordinary control.
@@ -1419,119 +1419,106 @@ is not something a finger does well - so that handle is not drawn on a
 coarse pointer at all and the dock offers collapsed, half and full instead
 (see [Terminal view](#terminal-view)).
 
-## Terminal view
+## Run view
 
-`src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
-`/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
-tab strip (`tabs.tsx`), so Terminal, Browser, Diff and Events are registry
-routes on the same `runId`; the strip is a real tab list, arrow keys included
-(see [Keyboard and focus](#keyboard-and-focus)).
+`src/routes/run/` is the one `run` route. Its params are `runId` and an
+optional `view` (`session`, `terminal`, `changes`, `browser`), written to the
+address as `?run=<id>&view=<view>`; the old `?view=diff` reads as `changes`.
+Every way into a run navigates to `run`: board card, sidebar row, run list,
+palette, feed entry, approval, conflict chip, template, and the launch and
+onboarding forms. A view the address does not name is the one this tab last
+showed for the run (`runViewMemory`, not persisted), else Terminal for a
+Standard or Background run and Session for an Enhanced one. Browser appears
+only when the gateway serves `dev.browser.status`. `isRunRoute` in `views.ts`
+keeps a sidebar row lit across views.
 
-Every way into a run navigates to `terminal`, because that is where the agent
-is: board card, sidebar row, run list, palette, feed entry, approval,
-conflict chip, template, and the launch and onboarding forms. The shared
-`RunHeader` keeps metadata with those four tabs rather than a per-run Overview:
-**Task and details** contains the full task, owner, borrowed agent account,
-created and changed times, and last commit when its timestamp is present.
-State, harness/mode and the route's subtitle remain in the compact header;
-the branch remains a subtitle where supplied, while protection and archival
-expiry stay by the title. The second section holds the tab strip and actions.
-The run's reason remains readable in the shared header.
-Each active run-detail route renders one `RunHeader`; a parked terminal keeps
-only its primary pane and therefore no header/tab IDs or action portals. This
-lets the run's own state travel with the reader, and `isRunRoute` in `tabs.tsx`
-is what keeps a sidebar
-row lit while they move between the tabs. The disclosure keeps long task text
-available without enlarging the compact summary.
+The frame (header, view switch, Details) stays mounted while the view
+changes; `CenterView` remounts it only for another run, identity or event
+epoch. Session and Terminal mount on first visit and stay mounted, laid out but
+`invisible` and `inert`, because xterm hidden with `display: none` measures zero
+and would resize the shared PTY; Changes and Browser mount only while shown, so
+a hidden Browser streams no screencast. The agent's attach lives in
+`useAgentTerminal` at frame level, so switching views never reattaches, and
+`useRunRoom` reads room history once per frame and polls presence every ten
+seconds with an abortable 15-second deadline.
 
-### Run Room and control lease
+The header is `PaneHeader size="run"`: title, then a state line with the
+shaped dot, the reason, "Claude Code · Standard" (`agent.list` display names,
+`run.mode`), the branch (click copies it) and the owner. A container query
+drops the branch and owner, then the agent, as the column narrows. Actions:
+the state's one primary action, a **Details** toggle and **More**. The primary
+action follows the Needs you condition: a Standard permission or question
+gives **Open terminal** (switches to Terminal and asks for the lease), an
+Aether approval gives **Approve** in place, a queued message from a teammate
+gives **Approve** (reveals its card), a teammate question **Reply** (reveals
+its card with the reply field focused), an unreviewed finish **Review
+changes**, a swarm condition **Open swarm**. On the Terminal view there is no
+terminal action in the header; the toolbar has **Take control**. **More**
+(`components/run-actions.tsx`) lists every verb from `lib/commands.ts` except
+the old Message dialog, plus **Captures…** and **Raw events…**. The view
+switch is a segmented `tablist` with manual activation; below 720px of column
+it moves to its own row under the header. On a phone with the composer
+focused the header keeps only the title line.
 
-`RunRoom` is the collaboration view for the current run. Its collapsed opener
-sits beside the terminal; opening loads the durable room timeline, while
-presence refreshes even when collapsed. The count comes from the collaboration
-slice's unanswered questions and queued steers.
+### Terminal view
 
-The server-side lease, reconnect, takeover, steering, protection, attachment,
-and question contract is defined once in
-[Run control and the Run Room](terminal.md#run-control-and-the-run-room).
-Dashboard changes must preserve that contract rather than restating it here.
+`TerminalView` stacks the agent's `TerminalPane` and the selected shell. The
+toolbar is one 32px strip (44px on touch): terminal tabs (**Agent**, then each
+shell; one menu under 768px), **+ Shell**, the **Tools** menu, and on the right
+the presence summary with `ControlButton` (click to take a free lease, hold
+five seconds to request an occupied one) and the connection word only while
+the attach is not live. Refusals, lost Steer and presence errors are one line
+under the strip. The key bar, Ctrl arming, follow geometry, panning, history
+reading and hold-to-take-control are unchanged. `useRunShells` lists shells
+every ten seconds while the run is open; `ShellTerminal` owns the selected
+shell's attach (sockets registered in `store/terminal.ts`), reads its
+controller every ten seconds and holds **Take a screenshot**, **Hide this
+shell** and **Stop this shell** in its `…` menu. Shell and Browser control
+remain independent leases. The frame renders one `TakeoverDialog` above every
+sheet and dialog for the holder's decision; the dialog restores the
+interrupted focus. Worker runs never ask for the lease on open.
 
-The dashboard-specific state wiring is:
+### Session view
 
-- `RunRoom` reads history, pagination, loading, action errors and presence from
-  `src/store/collaboration.ts`. `run.room.list` loads on opening and reconciles
-  every ten seconds while open; live room events merge through normal store
-  sync. `run.room.status` runs on mount, every ten seconds and when acknowledged
-  control metadata changes. Refreshes are serialized with an abortable 15-second
-  deadline; polling continues after timeout. Each snapshot retains the exact
-  acknowledged `ControlMetadata` reference: taking then releasing can restore
-  the same generation, so generation values alone cannot establish freshness.
-  A changed reference marks the cached controller **(last known)** until the
-  next response. Late responses from an old scope or timed-out request are
-  ignored. Presence errors stay separate from history errors: retained names
-  are marked stale, and unavailable/loading status is not shown as nobody.
-- The composer calls `run.room.post` for comments, questions, replies, and
-  steer requests. Approval and denial call `run.room.decide` with the control
-  metadata supplied by the terminal attach.
-- `TerminalView` owns the attach callbacks and passes the current
-  `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
-  the agent terminal and exposes its own control action without duplicating
-  room state.
-  While the run is open in a visible tab, `RunDock` reads `dev.terminal.list`
-  and the active tab's `dev.control.status` together every ten seconds; its
-  own start, stop and control actions refresh at once, so the interval only
-  catches what other members and the agent did.
-  The toolbar and phone Room share `ControlButton` and `useTakeover`; the
-  host renders one `TakeoverDialog` above Room and Evidence for the current
-  holder's decision. `RunDock` defers Evidence's responsive sheet/popover swap
-  during that decision to keep its focus scope stable. The server owns
-  transfer timing and authority, and the dialog restores the interrupted
-  terminal or composer focus. Attachment reopens still invalidate the old
-  decision. Shell and Browser control remain independent leases, not
-  authority over the agent terminal.
-- `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
-  automatic write requests. Opening a subsession therefore starts as a mirror,
-  not a human takeover. `useRunTerminalSession` still gives deliberate per-run
-  write intent precedence over that default, with its existing identity and
-  authority fences; Take control and Release use acknowledged control frames.
-  Ordinary/integrator owner defaults and phone mirrors are unchanged.
-- **Ctrl/Cmd+Shift+M** toggles the room from xterm or the composer; the opener
-  tooltip, room header and shortcut reference show the platform-specific key.
-  The capture handler prevents terminal bytes, focuses the composer on keyboard
-  opening and restores the invoker (or opener) on closing without clearing the
-  draft, mode or attachments. Dialogs, the palette, composition and already
-  handled events take precedence.
-- **Comment** starts selected with a neutral selected segment and a
-  collaborators-only hint. **Send to agent** uses teal and explains the queued
-  instruction and controller approval consequence; colour is not the sole cue.
+The Session view is a `virtua` list in a 736px column over `rowsForRun`
+(`store/sessions.ts`). For a Standard run the rows come from the run's
+`run.agent`, `workspace.timeline` and `run.status` events (read with
+`workspace.timeline` filtered by run and type, then kept live by sync), room
+messages, the run record and its pending inputs: `user` (a message to the
+agent with its delivery word), `note`, `work` (consecutive tool calls folded
+into "Ran 3 commands and read 2 files", expanding to verb-first entries),
+`request` (a terminal request reads "Answer in the terminal" with **Open
+terminal**; a teammate question offers **Reply**), `event` and `finished`. A
+timeline steer that matches a room message is shown once. The log keeps the
+last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
+row carries `aria-setsize`/`aria-posinset`. The docked composer posts
+`steer_request` with the lease the tab holds; its rules are in
+[Run control](terminal.md#run-control).
 
-On desktop the open Room is a real flex sibling beside the terminal and dock,
-below the run header, capped at 420px and 40% of the available row. It does not
-overlay the terminal or its controls. The terminal toolbar owns same-run
-controller/presence facts and the header owns protection; Room does not repeat
-them on desktop. On a phone Room is a full-width modal sheet below the
-top bar, retaining those contextual facts and containing keyboard focus.
-Escape or the Room shortcut closes it and restores focus without discarding
-the draft. Both surfaces share server state: questions and queued steers
-contribute to the Run Room count; an unanswered question to the owner also
-puts the run in the owner's **Needs you** without creating another inbox.
+### Details
 
-The Terminal tab's single **Evidence** trigger lives in the dock header through
-`Dock.persistentActions`, including when the shell is collapsed or has no
-tabs. Room does not duplicate it. On desktop Evidence is an anchored Popover
-bounded by the terminal tabpanel; on a phone it is a modal sheet.
-Capture selections, verification notes, candidate drafts and pending mutations
-belong to the open Evidence session, so crossing the phone breakpoint does not
-discard them or create a new retry key. Explicitly closing Evidence clears
-local drafts; it does not cancel a mutation already submitted to the server.
-**Answer with fact** closes Evidence and opens/focuses a Room comment draft.
-Each fresh request object is consumed once, preserves attachments and clears
-question correlation; it never sends automatically. Source availability,
-expiry, partial results and retained-evidence authority remain unchanged.
+At 1280px and wider Details is a 320px `complementary "Run details"` beside
+the view, toggled by the header button or `Mod+.` and remembered
+(`detailsOpen`); narrower desktops open it as a side sheet and phones as a
+bottom sheet, each a `dialog "Run details"` that returns focus to whatever
+opened it. Sections: **Needs you** (`RequestCard`s for pending inputs, Aether
+approvals with **Approve**/**Deny**, teammate messages awaiting the controller
+with **Approve**/**Deny** through `run.room.decide`, teammate questions with a
+reply field), **Agent messages** (the run-scoped coordination mail, until the
+Wave 4 surface), **Notes** (`comment` room messages and a one-line composer)
+and the run record (task, owner, account, agent and mode, branch, times, last
+commit, who controls, who is watching, container state).
 
-### Candidate review in Run evidence
+**Captures…** opens `routes/run/captures.tsx`, the former evidence drawer, as a
+dialog (a bottom sheet on phones): transient captures, retained packets and
+candidate review. **Answer** on a packet's unresolved fact closes it and puts
+the fact in the Notes field. **Raw events…** opens the run's slice of the
+activity feed (`routes/run/raw-events.tsx`) and restores the feed filters on
+close.
 
-The existing `EvidenceDrawer` is also the candidate review surface; candidate
+### Candidate review in Captures
+
+The Captures dialog is also the candidate review surface; candidate
 state is not a second run board. Its retained packet view keeps the heading
 **Recorded observations, not verification**, and the candidate panel labels raw
 packet snapshots as **Raw packet — observation, not verification**. **Review
@@ -1655,24 +1642,10 @@ only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
 back to a compact current-screen bootstrap through the hidden serial
 transaction. A finished run stays read-only until that same run is relaunched.
 
-Below the shared run header, the Terminal view places the agent terminal and
-`RunDock` in one flexible column, with the desktop `RunRoom` beside that column.
-The agent terminal keeps flexible space above the dock. The first
-header section contains the title and metadata on two lines; the next contains
-tabs and actions on one line. The existing terminal toolbar contains connection,
-control and presence alongside its tools, with no extra viewer/controller row.
-It names the controller and all viewers; the viewer list scrolls horizontally,
-and **Terminal tools** takes utility actions in narrow or touch panes. **(this tab)** requires
-live acknowledged local control; **(another session)** distinguishes the same
-member's other controller session. Real gateway errors remain readable.
-At narrow widths key and eye icons identify the controller and viewers; full
-role labels stay accessible, with the session marker also in the controller's
-hover title.
-The viewer scroller is keyboard-focusable.
-Find opens in a temporary row below the strip so it never obscures a matched
-terminal line. Closing Find returns that space to the terminal.
+Find replaces the toolbar strip's contents while it is open, so it never
+obscures a matched terminal line; closing it returns focus to the terminal.
 
-The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
+The environment dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
 horizontally. Add and collapse controls stay keyboard and pointer reachable;
 the close affordance is pointer reachable inside each removable tab, and its
@@ -1794,10 +1767,8 @@ and Ctrl+C, each through `terminal.input` so the replay gate and
 modifier held in the host (`armCtrl`), because a soft keyboard sends
 characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte. On phones, and when the run toolbar is too
-narrow for inline tools alongside presence, **Terminal tools** opens a bounded,
-scrollable popover with named search, text-size, copy, paste and upload actions
-instead of a second permanent toolbar row. Wider layouts keep inline tools.
+than spending it on the wrong byte. **Tools** is one menu at every width;
+under 768px it opens as a bottom sheet with 44px rows.
 
 In a run's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
@@ -1807,21 +1778,13 @@ an input keyboard. Oversized alternate screens use live-grid panning too;
 when the grid fits vertically, application scrolling remains native. Shell
 and environment terminals retain native xterm scrollback.
 
-The dock has a persisted height
-(`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
-expanded, a resizer on a fine pointer. A finger cannot drag an edge, so under
-`coarse` the separator is not rendered at all and an expanded dock gets a
-second header control instead, toggling between half of the room it has and
-all of it; collapsed, half and full are the three states touch has. Half is
-measured from the dock's own maximum rather than stored, so it follows the
-screen. The run dock starts collapsed (`initialRunShellDock`), so the
-terminal a member came for owns the window until they ask for a shell. The
-flag is not persisted, so a reload starts collapsed again, and it is per run
-because `shellDocks` is keyed by run id. Environment's fill dock is never
-collapsed. The header strip stays live while a dock is
-shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
-xterm host and would never attach. Expanded-only dock actions are omitted while
-collapsed, but `persistentActions` keeps Evidence reachable even with no shell.
+The environment dock has a persisted height (`UiSlice.terminalDockHeight`)
+and, on a fine pointer, a resizer. A finger cannot drag an edge, so under
+`coarse` the separator is not rendered at all and the dock gets a header
+control instead, toggling between half of the room it has and all of it.
+Environment's fill dock is never collapsed. A run's shells start hidden
+behind the agent's terminal (`shellShown: false` in `initialRunShellDock`,
+keyed by run id in `shellDocks`).
 `TerminalDock` mounted with `openOnMount` expands itself once, because the
 Agents and GitHub steps type into it.
 
@@ -1973,7 +1936,7 @@ because the page cannot tell whether the terminal predates the first one.
   dock's. Each shell attach requires Steer and asks for the same one controller
   lease, so an occupied shell request is refused rather than becoming another
   writer. Each uses `/ws/attach/<run>?shell=<tab>` and closes its socket when
-  the tab is closed. `RunDock` exposes an uploaded-image path only while its
+  the tab is closed. `ShellTerminal` exposes an uploaded-image path only while its
   attached identity still matches the current `{ runID, tab }`. A `-32001`
   response does not reconnect; the dock replaces the terminal with **You can
   view this run but not open a shell in it**. A normal `1000` socket close
@@ -2021,7 +1984,7 @@ because the page cannot tell whether the terminal predates the first one.
   their powerline and devicon glyphs at the same advance as text. The terminal
   opens only once regular and bold faces are loaded, because xterm caches glyph
   metrics synchronously at `open` and would otherwise bake fallback metrics in.
-- **Delivered steers need no extra terminal work.** Once a Run Room steer
+- **Delivered messages need no extra terminal work.** Once a room steer
   request is delivered, the server writes the attributed member-coloured banner
   into the PTY stream itself, so it arrives as ANSI and xterm renders it like
   any other output.
@@ -2111,8 +2074,8 @@ the run owns stopping the companion itself.
 
 **Screenshot** calls the real capture API at its own recorded boundary, not
 a canvas copy or the last received frame. It creates a private transient
-capture and displays its ID. Open the existing **Evidence** drawer to inspect
-and explicitly select captures/verification notes for retention. Taking a
+capture and displays its ID. Open **Captures** from the run's **More** menu
+to inspect and explicitly select captures/verification notes for retention. Taking a
 screenshot does not publish or automatically retain anything.
 
 `web/e2e/development-browser/` adds real-server Playwright scenarios using the
@@ -2128,21 +2091,9 @@ deterministic harness only holds the run alive: these are not proof of an
 authenticated vendor model/tool loop, nor an authenticated Tailscale-hosted
 device run.
 
-## Run events tab
-
-`src/routes/terminal/events.tsx` is the run-detail Events tab: the workspace
-activity feed pinned to the run in view. It drives the same feed slice and
-paging readers and live appends the team activity view uses (`openFeed`,
-`useLiveFeed`, `olderFeed`), and both views render rows through the one shared component
-(`src/components/feed-entry.tsx`), whose describe covers every feed payload -
-`run.agent` and `run.diff` included - so the two feeds cannot drift apart.
-Because the slice is shared, the pin is borrowed: the tab captures the
-filters on mount and restores them on unmount, so the team Activity view
-opens with whatever it had chosen.
-
 ## Diff timeline and conflict chips
 
-`src/routes/diff/` is the run-detail Diff tab, and `src/store/diff.ts` holds
+`src/routes/diff/` is the run's Changes view, and `src/store/diff.ts` holds
 both what it renders and the overlap set the conflict chips read.
 
 - **The patch is fetched, the events only say when.** `run.diff` carries
@@ -2195,7 +2146,7 @@ both what it renders and the overlap set the conflict chips read.
   run-detail route is active at a time and component state would forget it
   on every trip to the Terminal tab. The Files tab's diff pane reads the same
   preference: it has no toolbar to put a toggle in, so it never sets one, but
-  a member who turned wrapping off on the Diff tab meant it for diffs and not
+  a member who turned wrapping off on the Changes view meant it for diffs and not
   for one tab of them.
 - **The verbs are not here, the answers are.** The tab keeps what is only
   about reading the diff - the refresh, the snapshot list, the two copyable
@@ -2215,7 +2166,7 @@ both what it renders and the overlap set the conflict chips read.
   beside the chip. A tooltip is a hint for a pointer, never the only copy of
   a fact.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers an overlap
-  count into `card:meta`, whose popover lists the chips, and the Diff tab
+  count into `card:meta`, whose popover lists the chips, and the Changes view
   renders the chips in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
   hydration, then `run.overlap` events), names the file and the other member,
@@ -2233,10 +2184,10 @@ the two full views are registry routes (`approvals`, `timeline`): Activity is
 a sidebar row, Approvals is reached from the palette, and each is gated on the
 method it needs.
 
-The approval inbox is for agent permission and plan approvals. Run Room
-questions and queued steer requests stay contextual to their run. Unanswered
-questions to the owner put the run in **Needs you**; both contribute to the Run Room
-count, and neither creates a second action inbox.
+The approval inbox is for agent permission and plan approvals. Teammate
+questions and queued messages stay contextual to their run, in its Details
+**Needs you** section. Unanswered questions to the owner put the run in
+**Needs you**, and neither creates a second action inbox.
 
 - **Events keep them current; a full read only fills gaps.**
   `useTeamRefresh` in `src/routes/team/sync.ts` reads everything once on
@@ -3149,14 +3100,14 @@ corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
 setup details live in [testing.md](testing.md).
 
-Room scenarios (`run-room.spec.ts` and `run-room.mobile.spec.ts`) cover shared
-comments, moderation, explicit control transfer and the phone sheet.
-`run-evidence.spec.ts`, `run-evidence.mobile.spec.ts` and the Room phone
-scenario cover retained evidence and bounded, tappable phone presentation.
-`src/routes/terminal/run-dock.test.tsx` covers Evidence access from an empty,
-collapsed dock without starting a process; `run-room.test.tsx` covers its
-comment-draft handoff, and `terminal.test.tsx` covers occupied-lease
-confirmation fencing. `src/routes/browser/index.test.tsx` covers progressive page
+Run view scenarios (`run-room.spec.ts` and `run-room.mobile.spec.ts`) cover
+shared notes, moderated messages, explicit control transfer and the phone
+Details sheet. `run-evidence.spec.ts`, `run-evidence.mobile.spec.ts` and the
+phone scenario cover Captures and bounded, tappable phone presentation.
+`src/routes/run/frame.test.tsx` covers the view switch, header actions,
+Details sections and composer gating; `shells.test.tsx` covers the shell tabs;
+`terminal.test.tsx` covers the agent attach, presence and occupied-lease
+fencing; `src/store/sessions.test.ts` covers the Session rows. `src/routes/browser/index.test.tsx` covers progressive page
 controls, close/reset identity fencing and raw refusals.
 `src/routes/settings/settings.test.tsx` covers universal Appearance without local
 RPCs.

@@ -577,7 +577,7 @@ a run it cannot switch now. A run snapshot carries `switching` (`tui` or
 `{mode, previous, switching, reason}` opens and closes each switch.
 `run.inject` takes `steer: true` to add a message to the agent's running
 turn, and `control_session_id`/`control_generation` to deliver it at once
-rather than after the Run Room's moderation delay; its result's `outcome` is
+rather than after the room's moderation delay; its result's `outcome` is
 `sent`, `queued` or `injected` for an enhanced run.
 
 ### Candidate integration methods

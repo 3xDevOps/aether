@@ -625,7 +625,7 @@ The dashboard shows each run in one of five states: **Needs you**,
 you** means something blocks the run that you can resolve: a permission or
 question on your run or the run whose terminal you control, a parked or
 stalled run of yours, your unreviewed finish, a teammate's queued message, a
-Run Room question to you, or a swarm question, a stopped integrator or a
+teammate's question to you, or a swarm question, a stopped integrator or a
 blocked worker in a swarm you are accountable for. The full list is in
 [dashboard-frontend.md](dashboard-frontend.md#run-state). The same run reads
 **Working** with "Waiting for Alice" for everyone else. Needs you lists every
@@ -638,7 +638,7 @@ Desktop **Run idle** notifications and `aether runs --attention` follow the
 
 Handoff is an immediate transfer. `aether handoff <run> <member>` changes the
 run owner and notification routing without waiting for the recipient to accept.
-The timeline and Run Room record the handoff actor, outgoing owner, and incoming
+The timeline and the run's Session view record the handoff actor, outgoing owner, and incoming
 owner. A system entry points to the handoff evidence packet, or says that
 evidence is unavailable when preservation did not succeed. The transfer does
 not switch the selected agent account or its cost attribution, and the run's
@@ -673,10 +673,10 @@ truncated source as incomplete.
 If required preservation fails, Aether reports the failure and keeps the
 recoverable run resources instead of deleting the checkout or transcript
 silently. A handoff itself is not rolled back solely because its evidence
-packet could not be captured. Unresolved facts remain inspectable in the Run
-Room's evidence drawer. Use a fact's **Answer** action to open the composer
-with that fact prefilled, then edit and send a normal room comment. Evidence
-facts do not put a run in **Needs you**; an unanswered Run Room question to
+packet could not be captured. Unresolved facts remain inspectable in the
+run's **Captures**. A fact's **Answer** action puts it in the Details **Notes**
+field, to edit and add as a normal note. Evidence
+facts do not put a run in **Needs you**; an unanswered teammate question to
 the owner does. This is not a separate action inbox, blocker, or task model.
 
 ### Task templates and schedules

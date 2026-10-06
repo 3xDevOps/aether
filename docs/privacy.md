@@ -181,7 +181,7 @@ per page.
 URLs and logged messages can still reveal sensitive information.
 
 To preserve a reviewed capture before cleanup, explicitly select it in the
-existing Evidence drawer, optionally enter verification notes, and choose
+run's **Captures** (in **More**), optionally enter verification notes, and choose
 **Retain selected captures**. An agent with the advertised capability uses
 `aether-internal artifact retain` with selected `artifact_ids`, optional
 `verification_notes`, and an `idempotency_key`. This copies only the selected

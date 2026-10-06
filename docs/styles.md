@@ -210,30 +210,16 @@ placeholders, disabled and read-only states, menu roving focus, typeahead,
 portalling and viewport flipping. Shared primitives retain their props,
 events, refs and accessibility contracts.
 
-Run headers expose at most two contextual labeled actions plus **More** at
-every width; destructive overflow actions remain last, with their existing gates and
-confirmations. **Task and details** holds the full task and metadata rather
-than a separate per-run Overview tab. Terminal, Browser, Diff and Events remain;
-the global overview is unaffected.
-
-On desktop, **Run Room** is a real flex sibling beside the terminal and its
-dock, below the run header, capped at 420px or 40% of the available width.
-It never overlays that work area. The terminal toolbar is the single source
-for same-run controller/presence controls, and protection stays in the header.
-On phones Room is a full-width modal sheet below the top bar, contains
-keyboard focus and retains those metadata/control affordances. Closing restores
-focus without discarding the draft. One host-owned holder decision dialog
-serves the toolbar and phone Room's shared takeover gesture, above Room and
-Evidence. While that decision is open, Evidence defers its sheet/popover
-layout change so the interrupted surface cannot steal focus.
-
-Within Terminal, **Evidence** has one persistent trigger in the existing dock
-header, including when the shell is collapsed or empty, and none in Room.
-Desktop Evidence is an anchored popover bounded by the terminal tabpanel;
-phones use a modal sheet. Answering with a fact closes Evidence and opens and
-focuses a Room comment draft without sending it, preserving attachments and
-clearing steer correlation. Retention, expiry, partial-source disclosure and
-authority boundaries are unchanged.
+The run header shows one primary action for the run's state, a **Details**
+toggle and **More**; destructive verbs stay last in **More**, behind their
+existing gates and confirmations. The view switch (Session, Terminal,
+Changes, Browser) is a segmented tab list. Details is a 320px side panel at
+1280px and wider, a side sheet below that and a bottom sheet on phones; it
+never overlays the terminal on wide screens. The terminal toolbar is the
+single source for same-run controller controls, and protection stays by the
+title. One frame-owned holder decision dialog sits above every sheet and
+dialog. Request cards use the needs-you soft fill; the Session column is
+736px wide with no row borders.
 
 ## Run state and motion
 

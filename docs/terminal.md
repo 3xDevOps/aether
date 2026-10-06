@@ -48,7 +48,12 @@ shown. For a run terminal, this bootstrap is compact current-screen state
 captured without scanning the retained archive; the live view never fetches
 that archive.
 
-## Run control and the Run Room
+## Run control
+
+A run's own terminal is the **Terminal** view of the run: open a run from the
+sidebar, the board or the palette, then pick **Terminal** in the view switch
+(`[` and `]` cycle the views). A Standard run opens on it. An Enhanced run has
+no agent terminal; its Terminal view lists only shells.
 
 An [enhanced run](enhanced-runs.md) has no agent terminal: its primary
 terminal is the container's login shell, and the agent runs beside it over
@@ -77,8 +82,8 @@ keep automatic acquisition; other members and phones start as mirrors.
 The server grants an unoccupied lease only with Steer permission. A write
 request that cannot acquire the lease is refused rather than silently becoming
 a second writer. `aether attach` asks for control by default; use
-`aether attach --read-only <run>` to watch deliberately. In either the terminal
-toolbar or Run Room, clicking **Take control** acquires an unoccupied terminal.
+`aether attach --read-only <run>` to watch deliberately. Clicking **Take
+control** in the Terminal view's toolbar acquires an unoccupied terminal.
 An occupied click reports `run control is held by another session` and leaves
 the current controller in place.
 
@@ -103,9 +108,10 @@ The dialog returns focus to the interrupted terminal or composer when it closes.
 
 ![An occupied click reports the original conflict without taking control](media/terminal-takeover-refusal.webp)
 
-The development shell dock does not compete for the primary harness lease.
-Each shell has its own controller, named in the dock, and starts as a watcher.
-Use **Take shell control** for an explicit acquisition or confirmed takeover.
+Shells do not compete for the primary harness lease. Each shell has its own
+controller, named in the toolbar while that shell is shown, and starts as a
+watcher. Use the shell's **Take control** for an explicit acquisition or
+confirmed takeover.
 
 Control is tied to the logical terminal session. When a controller disconnects,
 the server holds its lease for a **15-second reconnect window**. The same tab or
@@ -163,27 +169,25 @@ authority or affects unrelated workers.
 
 Only the run owner or an administrator can enable protection. Enabling
 protection immediately fences the current controller and cancels every queued
-Run Room steer request. While protected, non-owner steering is refused and the
+queued message to the agent. While protected, non-owner steering is refused and the
 owner or an administrator must acquire control again before typing. Disabling
 protection does not restore a controller or a cancelled request.
 
-The **Run Room** is the collaboration surface for this run. It starts as a
-collapsed vertical tab on the right of the terminal; its count includes
-unanswered questions and queued steer requests. The existing terminal toolbar
-names the controller and every viewer even while the room is collapsed. Viewer
-names scroll horizontally instead of adding a row. Desktop terminal tools
-(search, text size, copy, paste, and upload) stay directly visible, including
-in environment and development terminals. At narrower desktop widths the tools
-wrap and presence/control use a separate row rather than a hidden menu.
-Phones keep secondary tools in **Terminal tools**, with **Take control** /
-**Release** directly accessible. **(this tab)** means this live attach has
-acknowledged control; the same member controlling elsewhere is **(another session)**.
-Narrow toolbars use key and eye icons for controller and viewers, retaining
-accessible role labels. Session markers stay in the controller's hover title
-and screen-reader text instead of wrapping onto another row.
-Live local ownership is shown by the toolbar's **(this tab)** controller marker
-and **Release** action. A 1px subdued teal border traces only the terminal
-viewport, never the toolbar, search bar, or UI above it. After this tab
+The run view puts the controls in three places. The Terminal view's toolbar
+holds the terminal tabs, a **Tools** menu (find, text size, copy selection,
+copy screen, paste, upload an image, captures) and, on the right, who
+controls the run: **You control**, **Alice controls**, **You control in
+another tab** when your own other session holds the lease, or **Nobody
+controls**, followed by **Take control** or **Release**. A name from before a
+control change or a failed presence read carries **(last known)** until a
+fresh answer arrives; before the first answer it reads **Checking control…**,
+and **Control unknown** if presence cannot be read, with the server's error on
+the line under the toolbar. The connection word (**Connecting**,
+**Reconnecting**, **Offline**) shows only while the attach is not live. Who is
+watching is listed under **Watching** in the run's **Details** panel.
+Live local ownership is shown by **You control** and **Release**. A 1px
+subdued teal border traces only the terminal viewport, never the toolbar,
+search bar, or UI above it. After this tab
 acknowledges live input, the border propagates from the left and right side
 midpoints, splitting up and down to meet at the top and bottom centers. An
 acknowledged voluntary release reverses that path. Both decelerate toward their
@@ -201,57 +205,57 @@ viewport boundary, and a rapid control change reverses from the visible point.
 
 ![A holder's red takeover progress traces over the active teal border](media/terminal-takeover-hold.webp)
 
-Presence refreshes on mount, every five seconds and after acknowledged control
-changes, independently of room history. A stalled refresh times out after 15
-seconds; later polls retry automatically. A controller name from before a
-control change, or after a failed refresh, is marked **(last known)** until a
-fresh response arrives. Loading or unavailable presence is not an empty room.
-Presence never decides who may type. Opening the room loads its durable
-attributed timeline; history refreshes only while it is open.
+Presence refreshes on mount and every ten seconds while the run is open, and
+after acknowledged control changes. A stalled refresh times out after 15
+seconds; later polls retry automatically. Presence never decides who may
+type.
 
-**Ctrl+Shift+M** (**Cmd+Shift+M** on macOS) toggles the room from the terminal or
-composer. The opener tooltip, room header and shortcut reference show the key.
-Keyboard opening focuses the composer; closing restores the invoking control
-or the room opener. Toggling preserves the draft, mode and attachments and never
-sends terminal input. Dialogs and the command palette take precedence.
+People and the agent meet in the run's **Session** view and its **Details**
+panel. Both read and write the same durable, attributed room messages (`run.room.list`, `run.room.post`).
 
-**Comment** is the default selected composer segment; its hint says it is shared
-with collaborators, not sent to the agent. **Send to agent** is teal and explains
-that it queues an instruction the controller can approve or deny. **Comment**
-writes only to the timeline; **Send to agent** creates a steer request. A request
-made by the current controller session, with its current lease, is eligible for
-immediate PTY delivery. A request from another session, or from a run with no
-current controller, is queued with a **45-second countdown**. The current
-controller can choose **Approve now** or **Deny** during the countdown. When
-the timer expires, Aether attempts delivery and records the result as **Sent**
-(`sent`), **Not sent** (`not_sent`), or **Delivery uncertain** (`uncertain`).
-**Sent** means the PTY write was accepted; it does not mean that the agent read
-or answered the request. Retries use the
-same message identity, so they do not create a second request.
+The Session view's composer sends a message to the agent: type it and press
+**Ctrl+Enter** (**Cmd+Enter** on macOS) or **Send**; on a touch screen
+**Send** is the only way, and Enter inserts a newline. The paperclip attaches
+images. A message from the current controller session, with its current
+lease, is delivered to the PTY at once; the composer says so ("You control
+this run, so your message reaches the agent now"). A message from anyone
+else, or to a run with no controller, waits with a **45-second countdown**
+shown on its row (**Delivers in 32s**). During the countdown the controller
+sees it in **Details > Needs you** with **Approve** and **Deny**; anyone else
+there sees **Take control to decide**. When the timer expires Aether attempts
+delivery. The row then reads **Sent** (`sent`), **Not sent** (`not_sent`),
+**Delivery uncertain** (`uncertain`), **Denied** or **Cancelled**. **Sent**
+means the PTY write was accepted, not that the agent read or answered it.
+Retries reuse the message identity, so they never create a second request.
+When the viewer cannot message the agent the composer is replaced by one line
+saying why: the run has finished (with "Reopen it from More" when the run can
+be reopened), the agent is still starting, the run is protected, or the
+viewer may only watch.
 
-Questions appear in the Run Room where they apply. **Answer** posts a
-correlated reply. The run snapshot counts unanswered questions from anyone
-but the owner, so the run is in the owner's **Needs you** before anyone
-opens the room; the owner's own questions are for teammates.
-The question does not change the run's wire status. The
-card identifies the run owner and links to the Run Room. Questions and queued
-steers do not create a separate action inbox.
+**Details** lists, in order: **Needs you** (every pending request with the
+actions that answer it), **Agent messages** (agent-to-agent mail to or from
+this run, shown when there is any or the run belongs to a swarm), **Notes**
+and the run record. A note is for people only: the agent never sees it.
+**Add** posts it as a `comment`. A question a teammate posts appears in
+**Needs you** for the run owner with a reply field; **Reply** posts a
+correlated `reply`. The run snapshot counts unanswered questions from anyone
+but the owner, so the run is in the owner's **Needs you** before anyone opens
+it; the owner's own questions are for teammates. The question does not change
+the run's wire status.
 
-Room image attachments use the terminal upload rules: each message may include
-up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than 8 MiB.
-Aether validates and stores the bytes in the home the run's container mounts,
-then records the generated container-visible
-path with the room message. A local filesystem path from clipboard text is not
-an upload. An attachment is a persistent file reference, not a second input
-channel; steering still reaches every supported harness as serialized text
-written to its run PTY. Aether does not require or provide a universal inbound
-harness hook.
+Message image attachments use the terminal upload rules: each message may
+include up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than
+8 MiB. Aether validates and stores the bytes in the home the run's container
+mounts, then records the generated container-visible path with the message. A
+local filesystem path from clipboard text is not an upload. An attachment is
+a persistent file reference, not a second input channel; messages still reach
+every supported harness as serialized text written to its run PTY. Aether
+does not require or provide a universal inbound harness hook.
 
-On a desktop the open Run Room is a right-side panel up to 420px wide. On a
-phone it becomes a full-viewport sheet. The phone opens the run terminal as a
-read-only mirror, including a run owned by that member; tap **Take control**
-before the keyboard can send input. Phone terminals follow the already
-acknowledged PTY size and do not resize the shared session.
+The phone opens the run terminal as a read-only mirror, including a run owned
+by that member; tap **Take control** before the keyboard can send input. Phone
+terminals follow the already acknowledged PTY size and do not resize the
+shared session. **Details** opens as a bottom sheet over the terminal.
 
 `aether attach` remains a raw terminal stream: it consumes exactly the replay
 byte count announced by the ack before treating following bytes as live. It
@@ -267,29 +271,32 @@ discard rules above remain in force.
 
 ## Shared development terminals
 
-The run's existing dock lists the server's authoritative development terminals,
-including command terminals started by an agent. `+` / **Open shell** calls
-`dev.terminal.start`; displaying, selecting, reconnecting or showing a hidden
-terminal never starts a process. There can be at most four running development
-terminals. The server assigns each a stable `terminal_id` and an `incarnation`;
-every attachment and mutation names that exact incarnation. An ended or replaced
-process is never implicitly rerun.
+A run's Terminal view lists the server's authoritative development terminals
+as tabs after **Agent**, including command terminals started by an agent; on a
+phone the tabs are one menu. **+ Shell** calls `dev.terminal.start`;
+displaying, selecting, reconnecting or showing a hidden terminal never starts
+a process. There can be at most four running development terminals, and
+**+ Shell** says so when that limit is reached. The server assigns each a
+stable `terminal_id` and an `incarnation`; every attachment and mutation names
+that exact incarnation. An ended or replaced process is never implicitly rerun.
 
-Tabs show the process state, and the active panel shows its exit status/reason
-when available. **Hide terminal**, closing a dock tab, collapsing the dock,
-switching views, and disconnecting only detach the viewer. The process keeps
-running in the run container. **Show** reopens a hidden terminal; the same compact
-replay, focus handling and phone panning are used as in the existing dock.
-**Stop terminal** is different: the current controller must explicitly confirm
-stopping the named process. Ended terminals remain discoverable until the server
-replaces them; starting a new one is always a separate action.
+A tab names its process state when it is not running, and the line under the
+toolbar shows its exit status and reason when available. **Hide this shell**
+(in the shell's `…` menu), switching to **Agent** or another view, and
+disconnecting only detach the viewer. The process keeps running in the run
+container. A hidden shell is listed under **+ Shell** as **Show <name>**; the
+same compact replay, focus handling and phone panning are used as for the
+agent's terminal. **Stop this shell** is different: the current controller must
+explicitly confirm stopping the named process. Ended terminals remain
+discoverable until the server replaces them; starting a new one is always a
+separate action.
 
-The dock shows the current terminal controller (member or run agent).
-**Take shell control** acquires only that terminal's lease; occupied takeover
+The shell's toolbar shows its current controller (member or run agent).
+**Take control** acquires only that terminal's lease; occupied takeover
 requires confirmation and fences the previously observed generation.
-**Release shell control** releases only that surface lease. It does **not**
-release primary harness control or clear any durable mission hold. Use the
-mission/Run Room's authorized hold-release action for that separate decision.
+**Release** releases only that surface lease. It does **not** release primary
+harness control or clear any durable mission hold. Use the swarm page's
+authorized hold-release action for that separate decision.
 Input, paste, mouse sequences, resizing and stop all use the acknowledged
 surface control session and generation. Failed mutations are shown and are not
 automatically retried.
@@ -306,12 +313,13 @@ alternate-screen state, Unicode, keyboard, paste and mouse input remain active;
 output parsing is not a reason to discard user input. This policy applies only
 to development terminals; primary harness replay gating is unchanged.
 
-**Screenshot** calls the terminal screenshot API and captures the server's
+**Take a screenshot** (in the shell's `…` menu) calls the terminal screenshot API and captures the server's
 actual emulator state, without needing a connected viewer. Its total budget is
 90 seconds, including first companion startup; rendering itself is bounded to
 30 seconds. Cancelling the request closes only its isolated renderer, not the
-app's browser session. Open the existing **Evidence** drawer to inspect and
-select transient captures and explicitly retain them with verification notes.
+app's browser session. Open **Captures** (in **More** or the toolbar's
+**Tools**) to inspect and select transient captures and explicitly retain them
+with verification notes.
 Taking a screenshot alone does not retain it as durable evidence.
 
 
@@ -404,13 +412,12 @@ cursor, autowrap, and mouse reporting - and restores it ahead of the
 replay. Without that, a terminal opened hours into a run would disagree
 with the agent about how a paste arrives, and only the agent could tell.
 
-The terminal toolbar has named **Copy terminal selection**, **Copy last
-screen**, **Paste into terminal**, and **Upload image to terminal** controls.
-**Copy last screen** copies the rows currently on screen, which is how to copy
-without a drag selection - a touch screen has none. On a touch screen both
-copy controls carry their name beside them, since the tooltip that tells
-them apart needs a pointer to hover. Copying an empty screen says so.
-The toolbar's Paste control first uses the browser clipboard API to look for
+The toolbar's **Tools** menu has **Find**, **Smaller text**, **Larger text**,
+**Reset text size**, **Copy selection**, **Copy screen**, **Paste** and
+**Upload image…**; a run's terminal adds **Captures…**. Under 768px the menu
+opens as a bottom sheet. **Copy screen** copies the rows currently on screen,
+which is how to copy without a drag selection - a touch screen has none.
+Copying an empty screen says so. **Paste** first uses the browser clipboard API to look for
 an image and then falls back to text. If no usable clipboard read API
 remains, or its reads are denied, it shows a visible **Paste unavailable**
 error telling you to use the native paste shortcut or allow clipboard
@@ -465,10 +472,10 @@ so tapping it does not raise the keyboard.
 
 An image paste must contain the actual file bytes. If the clipboard provides a
 PNG, JPEG, GIF, or WebP file (including a disk-backed clipboard image), native
-paste or the toolbar's **Paste into terminal** opens **Upload image to
-terminal** with a preview. Select **Upload and insert** to send it. In a
-browser or desktop app on Windows, macOS, or Linux, the **Upload image to
-terminal** toolbar control opens the platform's file chooser directly; use
+paste or **Tools > Paste** opens **Upload image to terminal** with a
+preview. Select **Upload and insert** to send it. In a
+browser or desktop app on Windows, macOS, or Linux, **Tools > Upload image…**
+opens the platform's file chooser directly; use
 **Choose another image** in the dialog to replace a selection. The chooser is
 the fallback when the clipboard exposes no image bytes.
 
