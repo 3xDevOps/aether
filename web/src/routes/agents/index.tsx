@@ -1,162 +1,107 @@
-import { useCallback, useEffect, useState } from 'react'
-import { message } from '@/lib/format'
+import { useState } from 'react'
+import { AddAgent } from '@/components/agents/add-agent'
+import { defaultMode, enhancedSupported, label } from '@/components/agents/agent-copy'
+import { AgentExtras } from '@/components/agents/agent-extras'
+import { AgentList, useAgentList } from '@/components/agents/agent-list'
+import { AgentSetup } from '@/components/agents/agent-setup'
+import { modes } from '@/components/launch/modes'
+import { ArrowLeft } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
-import { api } from '@/lib/api'
+import { api, type Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
-import type { AgentInfo } from '@/lib/types'
-import { registerRoute } from '@/routes/registry'
-import { AgentWizard } from '@/routes/agents/wizard'
+import type { AgentInfo, GitHubConnectResult, LaunchMode } from '@/lib/types'
+import { GitHubConnect } from '@/routes/onboarding/github-connect'
+import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-import { GitHubConnect, GitHubSection } from '@/routes/onboarding/github-connect'
-import { GitIdentityStep } from '@/routes/onboarding/git-identity-step'
-import type { GitHubConnectResult } from '@/lib/types'
 
-function AgentsView() {
+const addScreen = '@add'
+const githubScreen = '@github'
+
+function DefaultMode({ agent }: { agent: AgentInfo }) {
+  const remembered = useStore((s) => s.launchDefaults[agent.name]?.mode)
+  const setLaunchDefault = useStore((s) => s.setLaunchDefault)
+  return (
+    <Select value={defaultMode(agent, remembered)} onValueChange={(mode) => setLaunchDefault(agent.name, mode as LaunchMode)}>
+      <SelectTrigger aria-label={`Default mode for ${label(agent)}`} className="w-32">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {modes.map((mode) => (
+          <SelectItem key={mode.value} value={mode.value} disabled={mode.value === 'acp' && !enhancedSupported(agent)}>
+            {mode.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
-  const navigate = useStore((s) => s.navigate)
-  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [harness, setHarness] = useState<string | undefined>()
-  const [githubOpen, setGithubOpen] = useState(false)
+  const { agents, error, reload } = useAgentList(client)
+  const [screen, setScreen] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
-  const [identityOpen, setIdentityOpen] = useState(false)
-
-  const refetch = useCallback(() => {
-    api
-      .agentList()
-      .then((list) => {
-        setAgents(list)
-        setError(null)
-      })
-      .catch((err) => setError(message(err)))
-  }, [])
-
-  useEffect(() => {
-    refetch()
-  }, [refetch])
-
   const loading = useDelayed(agents === null && error === null)
+  const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
+  const settingUp = agents?.find((agent) => agent.name === screen)
+  const close = () => setScreen('')
+
+  const run = (agent: AgentInfo) => {
+    const state = useStore.getState()
+    state.rememberLaunch(agent.name, defaultMode(agent, state.launchDefaults[agent.name]?.mode))
+    state.openPaletteDialog('launch')
+  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title="Agents"
-        actions={
-          caps.hasMethod('config.roots') && caps.hasMethod('config.import') && (
-            <Button size="sm" variant="secondary" onClick={() => navigate('configuration')}>
-              Configuration
-            </Button>
-          )
-        }
+        actions={screen
+          ? <Button size="sm" variant="ghost" onClick={close}><ArrowLeft />All agents</Button>
+          : caps.hasMethod('agent.register') && <Button size="sm" variant="secondary" onClick={() => setScreen(addScreen)}>Add agent…</Button>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
-          {caps.hasMethod('member.git') && <section className="space-y-2 border-b pb-3">
-            <Button size="sm" variant="secondary" onClick={() => setIdentityOpen(!identityOpen)}>Git commit identity</Button>
-            {identityOpen && <GitIdentityStep client={api} caps={caps} onNext={() => setIdentityOpen(false)} />}
-          </section>}
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-2">
-            <div className="min-w-0">
-              <h2 className="text-[13px] font-semibold">Registered agents</h2>
-              {agents && (
-                <p className="text-xs text-muted-foreground">
-                  {agents.length} {agents.length === 1 ? 'agent' : 'agents'}
-                </p>
-              )}
-            </div>
-            <Button size="sm" variant="secondary" onClick={refetch}>
-              Refresh agents
-            </Button>
-          </div>
-          {error && (
-            <div
-              role="alert"
-              className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-y border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed"
-            >
-              <span className="min-w-0 break-words">{error}</span>
-              <Button size="sm" variant="secondary" onClick={refetch}>
-                Retry
-              </Button>
-            </div>
-          )}
-          {loading && (
-            <div className="space-y-1 border-y py-2">
-              <Skeleton className="h-8 w-full rounded-[2px]" />
-              <Skeleton className="h-8 w-full rounded-[2px]" />
-            </div>
-          )}
-          {agents && (
-            <section aria-label="Registered agents" className="min-w-0">
-              <ul className="border-y" aria-label="Agent inventory">
-                {agents.map((a) => (
-                  <li
-                    key={a.name}
-                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2.5 last:border-b-0 sm:px-4"
-                  >
-                    <span className="min-w-0 flex-1 break-all text-[13px] font-medium">
-                      {a.name}
-                    </span>
-                    <span
-                      className={
-                        a.installed === true
-                          ? 'shrink-0 bg-state-done/10 px-1.5 py-0.5 text-xs text-state-done'
-                          : 'shrink-0 bg-muted px-1.5 py-0.5 text-xs text-muted-foreground'
-                      }
-                    >
-                      {a.installed === true
-                        ? 'Installed'
-                        : a.installed === false
-                          ? 'Not installed'
-                          : 'Installation status unavailable'}
-                    </span>
-                    <span className="shrink-0 border-l pl-3 text-xs text-muted-foreground">
-                      {a.source === 'shipped' ? 'shipped' : 'member'}
-                    </span>
-                    {caps.hasMethod('agent.register') && caps.hasMethod('env.save') && <Button size="sm" variant="secondary" onClick={() => { setHarness(a.name); setAdding(true) }}>Set up / log in</Button>}
-                  </li>
-                ))}
-                {agents.length === 0 && (
-                  <li className="px-3 py-4 text-[13px] text-muted-foreground sm:px-4">
-                    No agents registered yet.
-                  </li>
-                )}
-              </ul>
-            </section>
-          )}
-          {adding ? (
-            <AgentWizard
-              key={harness ?? '@custom'}
-              harness={harness}
-              agents={agents ?? []}
-              onRegistered={refetch}
-              onCancel={() => setAdding(false)}
-            />
+        <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-5 px-4 py-6 sm:px-6">
+          {screen === githubScreen ? (
+            <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={close} />
+          ) : screen === addScreen ? (
+            <AddAgent client={client} onAdded={(agent) => { reload(); setScreen(agent.name) }} onCancel={close} />
+          ) : screen ? (
+            settingUp
+              ? <AgentSetup key={settingUp.name} agent={settingUp} client={client} onDone={() => { reload(); close() }} />
+              : <div className="h-28"><Skeleton className="size-full" /></div>
           ) : (
-            caps.hasMethod('agent.register') && (
-              <section className="border-y bg-sidebar px-3 py-3 sm:px-4">
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className="text-[13px] font-semibold">Add an agent</h2>
-                    <p className="text-xs text-muted-foreground">
-                      Register a member-managed executable and verify its setup.
-                    </p>
-                  </div>
-                  <Button size="sm" onClick={() => { setHarness(undefined); setAdding(true) }}>
-                    Add agent
-                  </Button>
-                </div>
-              </section>
-            )
+            <>
+              <p className="max-w-2xl text-ui text-muted">
+                An agent is the coding CLI a run starts. Each one is installed once in your environment and every workspace uses it.
+              </p>
+              {loading && <div className="h-28"><Skeleton className="size-full" /></div>}
+              {error && (
+                <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={reload}>Retry</Button>}>
+                  {error}
+                </Callout>
+              )}
+              {agents?.length === 0 && <p className="text-ui text-muted">This server lists no agents.</p>}
+              {agents && agents.length > 0 && (
+                <AgentList
+                  agents={agents}
+                  onSetUp={canSetUp ? (agent) => setScreen(agent.name) : undefined}
+                  onRun={caps.hasMethod('run.launch') ? run : undefined}
+                  extra={(agent) => <DefaultMode agent={agent} />}
+                />
+              )}
+              <AgentExtras client={client} caps={caps} identity github={github} onConnectGitHub={() => setScreen(githubScreen)} />
+            </>
           )}
-          {caps.hasMethod('github.connect') && caps.hasMethod('github.probe') && (githubOpen ? <GitHubConnect client={api} caps={caps} onConnected={setGithub} onClose={() => setGithubOpen(false)} /> : <GitHubSection connection={github} onOpen={() => setGithubOpen(true)} />)}
         </div>
       </div>
     </div>
   )
 }
 
-registerRoute('agents', AgentsView)
+registerRoute('agents', AgentsRoute)
