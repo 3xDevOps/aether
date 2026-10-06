@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -10,6 +10,7 @@ import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { EmptyBoard, type AgentsState } from '@/routes/board/empty-board'
+import { TerminalDock } from '@/routes/board/terminal-dock'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -28,6 +29,7 @@ export function Board() {
   const dead = useStore((s) => s.streamDead)
   const stacked = useMediaQuery(belowLg)
   const agents = useAgents()
+  const caps = useCapability()
   const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
@@ -54,40 +56,54 @@ export function Board() {
   const column = (key: BoardColumn['key']) => columns.find((c) => c.key === key)!
   const finished = showArchived ? { ...column('finished'), cards: archivedCards } : column('finished')
 
+  let body: ReactNode
+  if (unreachable && total === 0) {
+    body = (
+      <div className="p-4">
+        <Callout role="alert" tone="failed" title="Cannot reach the server">
+          {dead ? error : 'Retrying.'}
+        </Callout>
+      </div>
+    )
+  } else if (hydrated && total === 0) {
+    body = (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <EmptyBoard agents={agents} />
+      </div>
+    )
+  } else {
+    body = (
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
+      >
+        <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
+        <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
+        <Column
+          key={stacked ? 'stacked' : 'wide'}
+          column={finished}
+          label={showArchived ? 'Archived' : undefined}
+          placeholder={placeholder}
+          agentNames={agentNames}
+          collapsed={stacked ? true : undefined}
+          footer={
+            <FinishedFooter
+              archived={archivedCards.length}
+              showingArchived={showArchived}
+              onToggleArchived={() => setShowArchived((shown) => !shown)}
+            />
+          }
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Board" />
-      {unreachable && total === 0 ? (
-        <div className="p-4">
-          <Callout role="alert" tone="failed" title="Cannot reach the server">
-            {dead ? error : 'Retrying.'}
-          </Callout>
-        </div>
-      ) : hydrated && total === 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <EmptyBoard agents={agents} />
-        </div>
-      ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0">
-          <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
-          <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
-          <Column
-            key={stacked ? 'stacked' : 'wide'}
-            column={finished}
-            label={showArchived ? 'Archived' : undefined}
-            placeholder={placeholder}
-            agentNames={agentNames}
-            collapsed={stacked ? true : undefined}
-            footer={
-              <FinishedFooter
-                archived={archivedCards.length}
-                showingArchived={showArchived}
-                onToggleArchived={() => setShowArchived((shown) => !shown)}
-              />
-            }
-          />
-        </div>
-      )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="flex min-h-24 min-w-0 flex-1 flex-col overflow-hidden">{body}</div>
+        {caps.hasWS('terminal') && <TerminalDock containment="parent" />}
+      </div>
     </div>
   )
 }

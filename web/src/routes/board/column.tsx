@@ -60,9 +60,9 @@ export function Column({
     )
   }
   return (
-    <section aria-label={column.label} className="flex min-h-0 min-w-0 flex-col gap-2">
+    <section aria-label={column.label} className="flex min-w-0 flex-col gap-2 lg:min-h-0">
       <h2 className="flex h-7 shrink-0 items-center gap-2 px-1 text-ui font-medium text-text">{heading}</h2>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 lg:-mx-1 lg:overflow-y-auto lg:px-1 lg:pb-4">{body}</div>
+      <div className="flex flex-1 flex-col gap-2 lg:-mx-1 lg:min-h-0 lg:overflow-y-auto lg:px-1 lg:pb-4">{body}</div>
     </section>
   )
 }
