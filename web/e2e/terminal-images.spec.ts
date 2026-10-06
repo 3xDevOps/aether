@@ -84,7 +84,7 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   })
 
   await page.goto(alice.url)
-  await page.getByRole('complementary').getByRole('button', { name: new RegExp(task) }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: new RegExp(task) }).click()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   const runDock = page.getByRole('region', { name: 'Terminal dock' })
