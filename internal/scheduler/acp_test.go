@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/collab"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -136,7 +137,7 @@ func (e *acpExec) exited() bool {
 	}
 }
 
-func newACPEnv(t *testing.T) (*testEnv, *acpRuntime) {
+func newACPEnv(t *testing.T, opts ...func(*Config)) (*testEnv, *acpRuntime) {
 	t.Helper()
 	rt := newACPRuntime(t)
 	e := newTestEnv(t, func(cfg *Config) {
@@ -144,6 +145,9 @@ func newACPEnv(t *testing.T) (*testEnv, *acpRuntime) {
 		cfg.WorktreeMount = "/workspace"
 		cfg.Harnesses["fake"] = HarnessSpec{
 			TUIArgs: []string{"fake-agent", "{task}"}, ACPArgs: []string{"acp-mock"},
+		}
+		for _, opt := range opts {
+			opt(cfg)
 		}
 	})
 	e.rt = rt.fakeRuntime
@@ -566,5 +570,50 @@ func TestACPSubscribeWithoutSessionWaitsForTheNext(t *testing.T) {
 	idle.Cancel()
 	if ops, waiters := driverEntries(); ops != 0 || waiters != 0 {
 		t.Fatalf("driver kept %d op locks and %d waiters", ops, waiters)
+	}
+}
+
+func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, _ := withCoordination(t, e)
+	run := e.launchACP(t, "say pong")
+	if env := e.rt.byName(string(run.ID)).spec.Env; env[coordtransport.EnhancedEnv] != "1" {
+		t.Fatalf("%s = %q, want 1 so the agent's inbox hooks stay silent", coordtransport.EnhancedEnv, env[coordtransport.EnhancedEnv])
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	waitFor(t, "the idle session handed to coordination", func() bool {
+		return slices.Contains(coord.idleWakeRuns(), run.ID)
+	})
+	if !e.sched.IdleEnhanced(run.ID) {
+		t.Fatal("an enhanced run at turn end is not idle")
+	}
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil {
+		t.Fatal(err)
+	}
+	items := waitItems(t, e.sched, run.ID, "the wake turn", turnEnded("end_turn", 2))
+	if !slices.ContainsFunc(items, func(it acphost.Item) bool {
+		return it.Kind == acphost.KindMessage && it.Message.Role == "user" && it.Message.Text == "inbox hint"
+	}) {
+		t.Fatal("the wake prompt is not in the item log")
+	}
+
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false); err != nil {
+		t.Fatal(err)
+	}
+	e.waitAgentState(t, run.ID, agentstatus.Working)
+	if e.sched.IdleEnhanced(run.ID) {
+		t.Fatal("a session with a running turn is idle")
+	}
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); !errors.Is(err, ErrACPBusy) {
+		t.Fatalf("wake during a turn: %v, want ErrACPBusy", err)
+	}
+
+	standard, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.sched.IdleEnhanced(standard.ID) || e.rt.byName(string(standard.ID)).spec.Env[coordtransport.EnhancedEnv] != "" {
+		t.Fatal("a standard run is treated as enhanced")
 	}
 }

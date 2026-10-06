@@ -319,6 +319,26 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 	return Receipt{Outcome: OutcomeSent}, nil
 }
 
+// PromptIdle starts a turn only when no turn is running and no prompt is
+// queued, and reports whether it did once the agent accepted the prompt.
+func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bool, error) {
+	s.mu.Lock()
+	if s.closed || s.conn.closed() {
+		s.mu.Unlock()
+		return false, ErrClosed
+	}
+	if s.turnActive || len(s.queue) > 0 {
+		s.mu.Unlock()
+		return false, nil
+	}
+	ack := s.startTurnLocked(blocks)
+	s.mu.Unlock()
+	if _, err := awaitAccept(ctx, ack); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Session) startTurnLocked(blocks []acp.ContentBlock) *turnAck {
 	ack := &turnAck{done: make(chan struct{})}
 	s.starting = ack

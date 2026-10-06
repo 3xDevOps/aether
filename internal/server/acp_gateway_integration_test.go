@@ -28,13 +28,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// TestIntegrationEnhancedRunGateway drives an enhanced run through the
-// dashboard gateway on real Docker, with the acpmock agent as its ACP server,
-// the way the session view does.
-func TestIntegrationEnhancedRunGateway(t *testing.T) {
+// enhancedServer is a server on real Docker whose "fake" agent serves ACP
+// through the acpmock agent seeded into the workspace's repository, reached
+// through the dashboard gateway at web. Its terminal mode sleeps.
+type enhancedServer struct {
+	srv  *Server
+	web  string
+	ws   *domain.Workspace
+	data string
+	stop func(*testing.T)
+}
+
+func startEnhancedServer(ctx context.Context, t *testing.T) *enhancedServer {
+	t.Helper()
 	requireBinary(t, "git")
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
 	rt, verifyNoLeaks, ok := dockerRuntime(t)
 	if !ok {
 		t.Skip("an enhanced run needs a managed exec in a real container; Docker daemon unreachable")
@@ -49,36 +56,43 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 
 	whois := &stubWhoIs{}
 	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
+	data := filepath.Join(t.TempDir(), "data")
 	srv, err := New(ctx, Config{
-		DataDir: filepath.Join(t.TempDir(), "data"), Addr: "127.0.0.1:0", Runtime: rt,
+		DataDir: data, Addr: "127.0.0.1:0", Runtime: rt,
 		StandardImage: "busybox", RunContainerTTL: -time.Second, WhoIs: whois,
 		ServerBinary: buildServerBinary(t),
 		Harnesses: map[string]scheduler.HarnessSpec{
-			"fake": {ACPArgs: []string{"sh", "-c", "exec /workspace/acp-mock"}},
+			"fake": {
+				TUIArgs: []string{"sh", "-c", "exec sleep 3600"},
+				ACPArgs: []string{"sh", "-c", "exec /workspace/acp-mock"},
+			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
 	runCtx, stopServer := context.WithCancel(ctx)
-	defer stopServer()
 	go func() { _ = srv.Run(runCtx) }()
 	addr := waitSSHAddr(t, srv)
 	gw, err := servergw.New(servergw.Config{SSH: srv.ssh})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = gw.Close() }()
 	server := httptest.NewServer(gw)
-	defer server.Close()
-	web := server.URL
+	env := &enhancedServer{srv: srv, web: server.URL, data: data, stop: func(t *testing.T) {
+		server.Close()
+		_ = gw.Close()
+		stopServer()
+		_ = srv.Close()
+		verifyNoLeaks(t)
+	}}
 
 	var caps protocol.GatewayCapabilities
-	if status := getJSON(t, web+"/api/v1/capabilities", &caps); status != http.StatusOK || !strings.Contains(strings.Join(caps.WS, ","), "acp") {
+	if status := getJSON(t, env.web+"/api/v1/capabilities", &caps); status != http.StatusOK || !strings.Contains(strings.Join(caps.WS, ","), "acp") {
 		t.Fatalf("capabilities %d %+v, want ws acp", status, caps)
 	}
-	ws := &domain.Workspace{Name: "enhanced", BaseBranch: domain.DefaultBaseBranch}
-	if err := srv.Store().CreateWorkspace(ctx, ws); err != nil {
+	env.ws = &domain.Workspace{Name: "enhanced", BaseBranch: domain.DefaultBaseBranch}
+	if err := srv.Store().CreateWorkspace(ctx, env.ws); err != nil {
 		t.Fatal(err)
 	}
 	seedDir := t.TempDir()
@@ -97,10 +111,22 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 	}
 	runGit(t, seedDir, gitEnv, "add", "-A")
 	runGit(t, seedDir, gitEnv, "commit", "-q", "-m", "seed")
-	runGit(t, seedDir, gitEnv, "push", "-q", fmt.Sprintf("ssh://aether@%s/%s.git", addr, ws.ID), "main")
+	runGit(t, seedDir, gitEnv, "push", "-q", fmt.Sprintf("ssh://aether@%s/%s.git", addr, env.ws.ID), "main")
+	return env
+}
+
+// TestIntegrationEnhancedRunGateway drives an enhanced run through the
+// dashboard gateway on real Docker, with the acpmock agent as its ACP server,
+// the way the session view does.
+func TestIntegrationEnhancedRunGateway(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	env := startEnhancedServer(ctx, t)
+	defer env.stop(t)
+	web := env.web
 
 	var launched protocol.RunResult
-	params, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: string(ws.ID), Task: "say pong", Harness: "fake", Mode: string(domain.LaunchACP)})
+	params, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: string(env.ws.ID), Task: "say pong", Harness: "fake", Mode: string(domain.LaunchACP)})
 	if status := postJSON(t, web+"/api/v1/run.launch", string(params), &launched); status != http.StatusOK {
 		t.Fatalf("run.launch status %d", status)
 	}
@@ -178,7 +204,4 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 		}
 		break
 	}
-	stopServer()
-	_ = srv.Close()
-	verifyNoLeaks(t)
 }

@@ -284,6 +284,9 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 				report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 			}
 			d.report(runID, report)
+			if c := d.s.coordinationSeam(); !working && c != nil && c.enabled {
+				c.svc.WakeIdle(runID)
+			}
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})

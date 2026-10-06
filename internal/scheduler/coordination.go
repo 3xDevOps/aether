@@ -39,6 +39,8 @@ type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
 	Release(run domain.RunID) error
+	// WakeIdle hands mail to an enhanced run whose session just went idle.
+	WakeIdle(run domain.RunID)
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls

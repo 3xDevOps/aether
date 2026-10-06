@@ -42,6 +42,7 @@ func init() {
 			EvidencePackets: d.Store,
 			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
 			WakeAdmission:   newCoordWakeAdmission(d),
+			ACPWaker:        d.Runs,
 		})
 		if err != nil {
 			return nil, err

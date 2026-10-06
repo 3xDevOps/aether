@@ -211,6 +211,8 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.hookBuckets, run)
 	delete(s.lifecycleBuckets, run)
 	delete(s.reportLocks, run)
+	delete(s.enhancedWoken, run)
+	delete(s.enhancedWakeLocks, run)
 	delete(s.runs, run)
 	s.mu.Unlock()
 	if err := os.RemoveAll(dir); err != nil {

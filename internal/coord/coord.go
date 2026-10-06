@@ -128,6 +128,9 @@ type Config struct {
 	// WakeAdmission orders the final native wake frame with human control.
 	// An absent seam disables native dispatch without affecting legacy hooks.
 	WakeAdmission WakeAdmission
+	// ACPWaker is how mail reaches an idle enhanced run, through the same
+	// WakeAdmission. Nil leaves enhanced runs to read mail on their own.
+	ACPWaker ACPWaker
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -174,13 +177,17 @@ type Service struct {
 	hookWaiters      map[domain.RunID]map[*hookWaiter]struct{}
 	inboxConsumers   map[domain.RunID]int
 	reportLocks      map[domain.RunID]*sync.Mutex
-	reportPackets    map[string]protocol.EvidencePacket
-	runs             map[domain.RunID]*runLifecycle
-	reportCursor     store.CoordOutboxCursor
-	auditCursor      store.CoordOutboxCursor
-	outboxKick       chan struct{}
-	closed           bool
-	wg               sync.WaitGroup
+	// enhancedWoken holds the unread message IDs the last enhanced wake
+	// announced, per run.
+	enhancedWoken     map[domain.RunID]map[string]struct{}
+	enhancedWakeLocks map[domain.RunID]*sync.Mutex
+	reportPackets     map[string]protocol.EvidencePacket
+	runs              map[domain.RunID]*runLifecycle
+	reportCursor      store.CoordOutboxCursor
+	auditCursor       store.CoordOutboxCursor
+	outboxKick        chan struct{}
+	closed            bool
+	wg                sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -216,24 +223,26 @@ func New(cfg Config) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		cfg:              cfg,
-		radar:            newRadar(cfg.Peers, cfg.Grace, cfg.now),
-		now:              cfg.now,
-		serveCtx:         ctx,
-		stop:             cancel,
-		listeners:        make(map[socketKey]*net.UnixListener),
-		buckets:          make(map[domain.RunID]*bucket),
-		inboxBuckets:     make(map[domain.RunID]*bucket),
-		requestBuckets:   make(map[domain.RunID]*bucket),
-		hookBuckets:      make(map[domain.RunID]*bucket),
-		lifecycleBuckets: make(map[domain.RunID]*bucket),
-		inboxWaiters:     make(map[domain.RunID]*inboxWaiter),
-		hookWaiters:      make(map[domain.RunID]map[*hookWaiter]struct{}),
-		inboxConsumers:   make(map[domain.RunID]int),
-		reportLocks:      make(map[domain.RunID]*sync.Mutex),
-		reportPackets:    make(map[string]protocol.EvidencePacket),
-		runs:             make(map[domain.RunID]*runLifecycle),
-		outboxKick:       make(chan struct{}, 1),
+		cfg:               cfg,
+		radar:             newRadar(cfg.Peers, cfg.Grace, cfg.now),
+		now:               cfg.now,
+		serveCtx:          ctx,
+		stop:              cancel,
+		listeners:         make(map[socketKey]*net.UnixListener),
+		buckets:           make(map[domain.RunID]*bucket),
+		inboxBuckets:      make(map[domain.RunID]*bucket),
+		requestBuckets:    make(map[domain.RunID]*bucket),
+		hookBuckets:       make(map[domain.RunID]*bucket),
+		lifecycleBuckets:  make(map[domain.RunID]*bucket),
+		inboxWaiters:      make(map[domain.RunID]*inboxWaiter),
+		hookWaiters:       make(map[domain.RunID]map[*hookWaiter]struct{}),
+		inboxConsumers:    make(map[domain.RunID]int),
+		reportLocks:       make(map[domain.RunID]*sync.Mutex),
+		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
+		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
+		reportPackets:     make(map[string]protocol.EvidencePacket),
+		runs:              make(map[domain.RunID]*runLifecycle),
+		outboxKick:        make(chan struct{}, 1),
 	}, nil
 }
 

@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 
+	acp "github.com/coder/acp-go-sdk"
+
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -200,4 +202,42 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 		return err
 	}
 	return sess.SetOption(ctx, optionID, value)
+}
+
+// ErrACPBusy refuses a wake while the enhanced session has a turn running
+// or a prompt queued.
+var ErrACPBusy = errors.New("scheduler: the enhanced session is busy")
+
+func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
+	s.mu.Lock()
+	entry := s.runs[run]
+	enhanced := entry != nil && entry.launchMode == domain.LaunchACP
+	s.mu.Unlock()
+	if !enhanced {
+		return false
+	}
+	sess := s.acp.session(run)
+	if sess == nil {
+		return false
+	}
+	st := sess.State()
+	return !st.TurnInFlight && st.Queued == 0
+}
+
+func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt string) error {
+	if !s.IdleEnhanced(run) {
+		return ErrACPBusy
+	}
+	sess, err := s.acp.live(run)
+	if err != nil {
+		return err
+	}
+	started, err := sess.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(prompt)})
+	if err != nil {
+		return err
+	}
+	if !started {
+		return ErrACPBusy
+	}
+	return nil
 }

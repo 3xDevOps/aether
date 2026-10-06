@@ -1342,6 +1342,7 @@ func (s *Service) wakeInbox(run domain.RunID) {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)
 	}
+	s.wakeEnhancedLocked(run)
 }
 
 type bucket struct {

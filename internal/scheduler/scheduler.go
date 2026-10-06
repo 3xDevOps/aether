@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -850,6 +851,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		// An adapter cannot open a browser in a container; its login
 		// prints a URL instead.
 		env["NO_BROWSER"] = "1"
+		env[coordtransport.EnhancedEnv] = "1"
 	}
 	if run.Mode.Interactive() || persistSupervisor {
 		argv = wrapTUICommand(argv)

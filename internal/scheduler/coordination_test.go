@@ -29,6 +29,7 @@ type fakeCoordinator struct {
 
 	mu             sync.Mutex
 	released       []domain.RunID
+	idleWakes      []domain.RunID
 	coAuthors      map[domain.RunID][]string
 	coAuthorWrites map[domain.RunID]int
 }
@@ -79,6 +80,18 @@ func (f *fakeCoordinator) Release(run domain.RunID) error {
 	f.released = append(f.released, run)
 	f.mu.Unlock()
 	return os.RemoveAll(filepath.Join(f.root, string(run)))
+}
+
+func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.idleWakes = append(f.idleWakes, run)
+}
+
+func (f *fakeCoordinator) idleWakeRuns() []domain.RunID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.idleWakes)
 }
 
 func (f *fakeCoordinator) releasedRuns() []domain.RunID {
