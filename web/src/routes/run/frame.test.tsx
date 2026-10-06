@@ -111,6 +111,13 @@ describe('run frame', () => {
     expect(api.agentList).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps Changes mounted after a view switch so a Publish draft survives', () => {
+    const { rerender } = open({}, 'changes')
+    rerender(rerouted('session'))
+    const changes = document.querySelector('[role=group][aria-label=Changes]')
+    expect(changes?.closest('[inert]')).not.toBeNull()
+  })
+
   it('cycles the views on ] and [', () => {
     open()
     fireEvent.keyDown(window, { key: ']' })

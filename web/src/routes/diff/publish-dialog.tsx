@@ -12,8 +12,8 @@ import { PushStep } from '@/routes/diff/publish-push'
 import { usePublish, type Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
 
-/** Stays mounted while the Changes view is open so a typed message or an
- * uncertain PR creation survives closing the dialog. */
+/** Stays mounted while the run is open so a typed message or an uncertain
+ * PR creation survives closing the dialog and switching views. */
 export function PublishDialog({ run, client = api }: { run: Run; client?: Api }) {
   const [open, setOpen] = useState(false)
   const p = usePublish(run, client, open)

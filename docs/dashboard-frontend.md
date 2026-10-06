@@ -1448,10 +1448,11 @@ keeps a sidebar row lit across views.
 
 The frame (header, view switch, Details) stays mounted while the view
 changes; `CenterView` remounts it only for another run, identity or event
-epoch. Session and Terminal mount on first visit and stay mounted, laid out but
-`invisible` and `inert`, because xterm hidden with `display: none` measures zero
-and would resize the shared PTY; Changes and Browser mount only while shown, so
-a hidden Browser streams no screencast. The agent's attach lives in
+epoch. Session, Terminal and Changes mount on first visit and stay mounted,
+laid out but `invisible` and `inert`: xterm hidden with `display: none`
+measures zero and would resize the shared PTY, and a Publish draft (commit
+message, an uncertain pull request) must survive a view switch. Browser
+mounts only while shown, so a hidden Browser streams no screencast. The agent's attach lives in
 `useAgentTerminal` at frame level, so switching views never reattaches, and
 `useRunRoom` reads the newest room page once per frame, then follows
 `workspace.room_message` events; after the event stream reconnects it reads

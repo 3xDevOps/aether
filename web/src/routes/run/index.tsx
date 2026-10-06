@@ -190,8 +190,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           <TabsContent value="terminal" forceMount inert={view !== 'terminal'} className={cn(panel, view !== 'terminal' && 'invisible')}>
             <TerminalView run={run} agent={agent} shells={shells} onCaptures={openCaptures} />
           </TabsContent>
-          {view === 'changes' && (
-            <TabsContent value="changes" className={panel}>
+          {visited.has('changes') && (
+            <TabsContent value="changes" forceMount inert={view !== 'changes'} className={cn(panel, view !== 'changes' && 'invisible')}>
               <ChangesView runID={run.id} />
             </TabsContent>
           )}
