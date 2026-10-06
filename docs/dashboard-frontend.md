@@ -10,10 +10,9 @@ and Zustand holds the state. Both gateways use the shared `internal/webgate`
 API and WebSocket surfaces; the server gateway authenticates each request with
 Tailscale WhoIs and no browser token.
 
-The visual contract is a VS Code-inspired developer workbench, not an
-official reusable VS Code component package. It follows VS Code Dark Modern
-and Light Modern semantics, dense flat panes and compact controls while
-preserving Aether's routes, capabilities, run states and startup behavior.
+The visual contract is a dense developer workbench on graphite surfaces with
+one teal accent: flat panes and compact controls. `docs/styles.md` defines the
+tokens, type and motion.
 
 The gateways and their transport boundaries are documented in
 `docs/local-gateway.md`. The same bundle serves both, gating machine-local

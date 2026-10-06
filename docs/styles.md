@@ -249,8 +249,10 @@ The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
 status vocabulary for a run's presentation state. Domain status enums remain
 unchanged.
 
-Menus and dialogs animate over `--duration-overlay` (120ms) with
-`--ease-out`; panels change instantly. The `state-pulse` dot and the
+`--duration-overlay` (120ms) and `--ease-out` are the overlay motion
+tokens. The current dialogs still animate over 150ms and HeroUI tooltips keep
+their own timing until the rebuilt menu, dialog and tooltip primitives adopt
+the tokens. Panels change instantly. The `state-pulse` dot and the
 `live-shimmer` text sweep step through a few frames per cycle rather than
 tweening, and stop under `prefers-reduced-motion: reduce`, where the shimmer
 leaves plain muted text.
