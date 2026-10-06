@@ -131,6 +131,27 @@ func (s *Scheduler) withItemLog(run domain.RunID, read func(*acphost.Log) error)
 	return read(log)
 }
 
+// recordedMode is the last mode run's item log recorded, or "".
+func (s *Scheduler) recordedMode(run domain.RunID) string {
+	log, err := s.openItemLog(run)
+	if err != nil || log == nil {
+		return ""
+	}
+	defer func() { _ = log.Close() }()
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return ""
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			if items[i].Kind == acphost.KindModeChange {
+				return items[i].Mode
+			}
+		}
+		before = items[0].Seq
+	}
+}
+
 func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 	log, err := acphost.OpenLogReadOnly(s.cfg.PTY.ItemLogPath(run))
 	if errors.Is(err, os.ErrNotExist) {

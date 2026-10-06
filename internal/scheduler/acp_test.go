@@ -335,6 +335,9 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	e, rt := newACPEnv(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", assistantSaid("pong"))
+	if err := e.sched.acp.session(run.ID).SetMode(t.Context(), "plan"); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
@@ -349,6 +352,10 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	execs := rt.all()
 	if len(execs) != 2 || !slices.Contains(execs[1].agent.Methods(), acp.AgentMethodSessionResume) {
 		t.Fatalf("reopen must resume the session in a fresh ACP server: %d execs", len(execs))
+	}
+	waitFor(t, "resumed session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if mode := e.sched.acp.session(run.ID).State().Mode; mode != "plan" || !slices.Contains(execs[1].agent.Methods(), acp.AgentMethodSessionSetMode) {
+		t.Fatalf("reopened in mode %q, want the recorded plan mode re-applied", mode)
 	}
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "after reopen", false); err != nil {
 		t.Fatal(err)

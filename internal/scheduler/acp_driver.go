@@ -194,11 +194,15 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		d.fail(entry, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable))
 		return
 	}
-	sessionID := ""
+	sessionID, mode := "", profile.ACPMode
 	if !fresh {
 		sessionID = run.HarnessSessionID
 		if sessionID == "" {
 			sessionID = cachedSession
+		}
+		// A restored session may come back in the agent's default mode.
+		if recorded := d.s.recordedMode(entry.runID); recorded != "" {
+			mode = recorded
 		}
 	}
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
@@ -250,9 +254,9 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		}
 	}
 	d.record(entry, func() { entry.agentSessionID = sess.SessionID() })
-	if fresh && profile.ACPMode != "" && sess.State().Mode != profile.ACPMode {
-		if err := sess.SetMode(ctx, profile.ACPMode); err != nil {
-			slog.Warn("scheduler: set the agent's initial mode", "run", runID, "mode", profile.ACPMode, "error", err)
+	if mode != "" && sess.State().Mode != mode {
+		if err := sess.SetMode(ctx, mode); err != nil {
+			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}

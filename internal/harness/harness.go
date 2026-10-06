@@ -274,7 +274,10 @@ type Profile struct {
 	// ACPSessionShared means the ACP server and the TUI keep one session
 	// store, so a session started in one resumes in the other.
 	ACPSessionShared bool
-	ACPMode          string
+	// ACPMode is the session mode an enhanced run starts in, for an agent
+	// whose default mode asks before most actions with nobody there to
+	// answer. Empty keeps the agent's default.
+	ACPMode string
 	// ACPDefault makes an enhanced run the agent's default once its ACP
 	// server is installed. Claude stays on its terminal by default: its
 	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
