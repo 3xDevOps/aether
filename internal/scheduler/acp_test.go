@@ -198,13 +198,13 @@ func turnEnded(reason string, n int) func([]acphost.Item) bool {
 	}
 }
 
-func (e *testEnv) waitAgentState(t *testing.T, run domain.RunID, state agentstatus.State) {
+func (e *testEnv) waitAgentWorking(t *testing.T, run domain.RunID) {
 	t.Helper()
-	waitFor(t, "agent "+string(state), func() bool {
+	waitFor(t, "agent working", func() bool {
 		e.sched.mu.Lock()
 		defer e.sched.mu.Unlock()
 		entry := e.sched.runs[run]
-		return entry != nil && entry.agentReport.State == state
+		return entry != nil && entry.agentReport.State == agentstatus.Working
 	})
 }
 
@@ -332,7 +332,7 @@ func TestEnhancedRunCancel(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptWait)
-	e.waitAgentState(t, run.ID, agentstatus.Working)
+	e.waitAgentWorking(t, run.ID)
 	if err := e.sched.ACPCancel(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -344,12 +344,12 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptWait)
-	e.waitAgentState(t, run.ID, agentstatus.Working)
+	e.waitAgentWorking(t, run.ID)
 	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "queued behind the turn", false)
 	if err != nil || outcome != acphost.OutcomeQueued {
 		t.Fatalf("Inject = %q, %v", outcome, err)
 	}
-	if _, err := rt.all()[0].Stop(t.Context(), 0); err != nil {
+	if _, err = rt.all()[0].Stop(t.Context(), 0); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "undelivered notice", func(items []acphost.Item) bool {
@@ -369,7 +369,7 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 	e, rt := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptAskPermission)
 	waitFor(t, "permission request", func() bool { return len(e.sched.PendingInputs(run.ID)) == 1 })
-	e.waitAgentState(t, run.ID, agentstatus.Working)
+	e.waitAgentWorking(t, run.ID)
 	before := len(rt.all())
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
@@ -488,12 +488,12 @@ func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range acphost.ReplayWindow + 50 {
-		if err := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "n"}}); err != nil {
+		if err = log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "n"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	last := log.LastSeq()
-	if err := log.Close(); err != nil {
+	if err = log.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -615,7 +615,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false); err != nil {
 		t.Fatal(err)
 	}
-	e.waitAgentState(t, run.ID, agentstatus.Working)
+	e.waitAgentWorking(t, run.ID)
 	if e.sched.IdleEnhanced(run.ID) {
 		t.Fatal("a session with a running turn is idle")
 	}
