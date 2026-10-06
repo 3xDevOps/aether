@@ -45,7 +45,7 @@ test('a directory exceeding request budgets imports completely and reports polic
   await wizard.expectStep('Agent')
 
   // Optional, so it waits behind its own disclosure.
-  await expect(wizard.agent.section.getByRole('region', { name: 'Bring your configuration' })).toHaveCount(0)
+  await expect(wizard.agent.section.getByRole('region', { name: 'Agent config files' })).toHaveCount(0)
   const configuration = await wizard.agent.configuration()
   await configuration.chooseDirectory(source)
   await expect(configuration.preview()).toHaveCount(0)

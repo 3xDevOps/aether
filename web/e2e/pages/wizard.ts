@@ -242,7 +242,7 @@ export class ConfigurationImport {
 
   get section(): Locator {
     return this.page.getByRole('region', {
-      name: 'Bring your configuration',
+      name: 'Agent config files',
       exact: true,
     })
   }

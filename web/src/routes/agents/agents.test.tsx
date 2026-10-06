@@ -111,7 +111,7 @@ describe('agents page', () => {
     expect(screen.getByRole('form', { name: 'Git identity' })).toBeDefined()
     expect(screen.getByRole('button', { name: /^GitHub/ })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
-    expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Agent config files' })).toBeDefined()
   })
 
   it.each(['config.roots', 'config.import'])('offers no agent config files when %s is unavailable', async (missing) => {

@@ -157,7 +157,7 @@ describe('agents step', () => {
     })
 
     expect(await screen.findByText('Claude Code')).toBeDefined()
-    expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Agent config files' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Choose directory' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code' }))
     expect(await screen.findByRole('button', { name: 'Install Claude Code' })).toBeDefined()
@@ -1073,8 +1073,8 @@ describe('onboarding route', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 
     expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
-    expect(screen.queryByRole('region', { name: 'Bring your configuration' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Agent config files' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
-    expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Agent config files' })).toBeDefined()
   })
 })

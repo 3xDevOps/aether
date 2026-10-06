@@ -516,11 +516,10 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
 
   return (
     <section
-      aria-label="Bring your configuration"
+      aria-label="Agent config files"
       className="min-w-0 space-y-4 border-t border-border/70 py-3"
     >
       <div className="space-y-1">
-        <h3 className="text-base font-semibold">Bring your configuration</h3>
         <p className="text-sm leading-6 text-muted-foreground">
           Choose an agent configuration directory to import. You can return and
           import another directory or updated files whenever needed. Supported
