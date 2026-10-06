@@ -261,7 +261,7 @@ export function Dock({
       )}
       <div
         ref={headerRef}
-        className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2"
+        className="flex min-h-8 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2 coarse:min-h-11"
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
@@ -293,7 +293,7 @@ export function Dock({
                   tabIndex={i === stop ? 0 : -1}
                   className={cn(
                     focusRing,
-                    'inline-flex min-h-9 min-w-0 max-w-40 items-center gap-0 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
+                    'inline-flex min-h-8 min-w-0 max-w-40 items-center gap-0 truncate rounded-none border-0 px-2.5 py-0 text-ui font-medium coarse:min-h-11',
                   )}
                   onFocus={() => setFocused(i)}
                   onPointerDown={(event) => {

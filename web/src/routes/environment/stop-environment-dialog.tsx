@@ -64,7 +64,7 @@ export function StopEnvironmentDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
-          <p role="alert" className="text-sm text-state-failed">
+          <p role="alert" className="text-ui text-state-failed">
             {error}
           </p>
         )}
@@ -78,7 +78,7 @@ export function StopEnvironmentDialog({
             }}
             disabled={stopping}
           >
-            {stopping ? 'Stopping...' : 'Stop environment'}
+            {stopping ? 'Stopping…' : 'Stop environment'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

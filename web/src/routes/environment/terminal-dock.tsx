@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Dock, type DockContainment } from '@/components/dock'
 import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
@@ -13,7 +13,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   Menu,
   MenuContent,
@@ -65,6 +67,8 @@ export interface TerminalDockProps {
   initialLine?: string
   /** Embedded intrinsic sections use the viewport cap; fixed flex layouts opt into 'parent'. */
   containment?: DockContainment
+  /** Draws the page header that takes the dock's actions; without it a filled dock keeps them in its tab row. */
+  header?: (actions: ReactNode, hint?: string) => ReactNode
 }
 
 export function TerminalDock({
@@ -72,6 +76,7 @@ export function TerminalDock({
   openOnMount = false,
   initialLine,
   containment = 'viewport',
+  header,
 }: TerminalDockProps) {
 
   const rpc = client
@@ -436,8 +441,73 @@ export function TerminalDock({
     if (opened) focusTerminal()
   }
 
+  const actions = (
+    (!empty || !!dock.status?.saved_image) && (
+      <div className="flex max-w-full items-center justify-end gap-1">
+        {dock.status?.running && (
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            onClick={() => void save()}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save environment'}
+          </Button>
+        )}
+        <Menu>
+          <MenuTrigger asChild>
+            <Button ref={actionsTrigger} type="button" size="icon" variant="ghost" label="Environment actions">
+              <Ellipsis />
+            </Button>
+          </MenuTrigger>
+          <MenuContent align="end" onCloseAutoFocus={(event) => {
+            if (returnToActions.current) event.preventDefault()
+          }}>
+            {dock.status?.running && capability.hasLocal('forward.start') && (
+              <MenuItem onSelect={() => {
+                returnToActions.current = true
+                openForwardDialog('terminal')
+              }}>
+                Forward port
+              </MenuItem>
+            )}
+            {!empty && (
+              <MenuItem onSelect={() => {
+                returnToActions.current = true
+                setConfirmingStop(true)
+              }}>
+                Stop environment…
+              </MenuItem>
+            )}
+            {dock.status?.saved_image && (
+              <MenuItem
+                onSelect={() => {
+                  returnToActions.current = true
+                  setResetError(null)
+                  setConfirmingReset(true)
+                }}
+                disabled={resetting}
+              >
+                Reset to standard…
+              </MenuItem>
+            )}
+          </MenuContent>
+        </Menu>
+        {savedConfirmation && (
+          <span role="status" className="text-ui-sm text-muted">
+            Saved - new runs use this environment
+          </span>
+        )}
+      </div>
+    )
+  )
+  const hint = dock.status?.running && !dock.status.saved_image ? 'Installs here reach agents after you save.' : undefined
+  const inRow = containment === 'fill' && !header
+
   return (
     <>
+      {header?.(actions, hint)}
       <Dock
         tabs={tabs}
         activeTab={activeTab ?? ''}
@@ -458,79 +528,18 @@ export function TerminalDock({
           setCollapsed(!dock.collapsed)
           if (expanding && activeTab !== null) focusTerminal()
         }}
-        actions={
-          (!empty || !!dock.status?.saved_image) && (
-            <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
-              {dock.status?.running && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="primary"
-                  onClick={() => void save()}
-                  disabled={saving}
-                >
-                  {saving ? 'Saving...' : 'Save environment'}
-                </Button>
-              )}
-              <Menu>
-                <MenuTrigger asChild>
-                  <Button ref={actionsTrigger} type="button" size="sm" variant="ghost" aria-label="Environment actions">
-                    More
-                  </Button>
-                </MenuTrigger>
-                <MenuContent align="end" onCloseAutoFocus={(event) => {
-                  if (returnToActions.current) event.preventDefault()
-                }}>
-                  {dock.status?.running && capability.hasLocal('forward.start') && (
-                    <MenuItem onSelect={() => {
-                      returnToActions.current = true
-                      openForwardDialog('terminal')
-                    }}>
-                      Forward port
-                    </MenuItem>
-                  )}
-                  {!empty && (
-                    <MenuItem onSelect={() => {
-                      returnToActions.current = true
-                      setConfirmingStop(true)
-                    }}>
-                      Stop environment
-                    </MenuItem>
-                  )}
-                  {dock.status?.saved_image && (
-                    <MenuItem
-                      onSelect={() => {
-                        returnToActions.current = true
-                        setResetError(null)
-                        setConfirmingReset(true)
-                      }}
-                      disabled={resetting}
-                    >
-                      Reset to standard
-                    </MenuItem>
-                  )}
-                </MenuContent>
-              </Menu>
-              {savedConfirmation && (
-                <span className="text-xs text-muted-foreground">
-                  Saved - new runs use this environment
-                </span>
-              )}
-            </div>
-          )
-        }
+        actions={header || inRow ? undefined : actions}
+        persistentActions={inRow ? actions : undefined}
       >
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          {dock.status?.running && !dock.status.saved_image && (
-            <p className="shrink-0 border-b border-border bg-sidebar px-3 py-1 text-[12px] text-muted-foreground">
-              Installs here reach agents after you save.
-            </p>
+          {hint && !header && (
+            <p className="shrink-0 border-b border-seam bg-chrome px-3 py-1 text-ui-sm text-muted">{hint}</p>
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {loading ? (
-              <p className="h-full bg-background p-3 text-[13px] text-muted-foreground">Checking environment...</p>
+              <p className="h-full bg-canvas p-3 text-ui text-muted">Checking environment…</p>
             ) : dock.statusError ? (
-              <div className="h-full min-h-0 min-w-0 space-y-2 overflow-y-auto break-words whitespace-pre-wrap bg-background p-3 text-[13px]">
+              <div className="h-full min-h-0 min-w-0 space-y-2 overflow-y-auto break-words whitespace-pre-wrap bg-canvas p-3 text-ui">
                 <p className="text-state-failed">{dock.statusError}</p>
                 {empty && (
                   <Button
@@ -545,15 +554,22 @@ export function TerminalDock({
                   </Button>
                 )}
               </div>
+            ) : empty && containment === 'fill' ? (
+              <EmptyState
+                title="Your environment starts on first open"
+                action={<Button ref={openTrigger} type="button" onClick={open}>Open</Button>}
+              >
+                A container with your home directory, for installing tools and logging in to agents. Save it and new runs start from it.
+              </EmptyState>
             ) : empty ? (
-              <div className="h-full space-y-2 bg-background p-3 text-[13px]">
+              <div className="h-full space-y-2 bg-canvas p-3 text-ui">
                 <p>Your environment starts on first open</p>
                 <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
-              <div className="h-full bg-background p-3">
+              <div className="h-full bg-canvas p-3">
                 <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>
@@ -604,7 +620,7 @@ export function TerminalDock({
               </AlertDialogDescription>
             </AlertDialogHeader>
             {resetError && (
-              <p role="alert" className="text-sm text-state-failed">
+              <p role="alert" className="text-ui text-state-failed">
                 {resetError}
               </p>
             )}
@@ -617,7 +633,7 @@ export function TerminalDock({
                 }}
                 disabled={resetting}
               >
-                {resetting ? 'Resetting...' : 'Reset to standard'}
+                {resetting ? 'Resetting…' : 'Reset to standard'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
