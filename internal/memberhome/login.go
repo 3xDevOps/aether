@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -207,9 +208,9 @@ func writeInPlace(root *os.Root, name string, data []byte) error {
 }
 
 // LoginFound reports whether any of the home-relative login paths rels
-// exists in member's home as a directory or a non-empty file. An empty file
-// is a mountpoint Aether created, not a login. Only presence is checked: a
-// file that is there may still hold an expired login.
+// exists in member's home as a non-empty directory or file. An empty one is
+// a mountpoint Aether created, not a login. Only presence is checked: a
+// path that is there may still hold an expired login.
 func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error) {
 	home, err := m.openHome(member)
 	if err != nil {
@@ -224,9 +225,28 @@ func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error
 		if err != nil {
 			return false, fmt.Errorf("memberhome: login path %s in %q: %w", rel, member, err)
 		}
-		if info.IsDir() || info.Size() > 0 {
-			return true, nil
+		if !info.IsDir() {
+			if info.Size() > 0 {
+				return true, nil
+			}
+			continue
+		}
+		if found, err := dirHasEntry(home, rel); err != nil || found {
+			return found, err
 		}
 	}
 	return false, nil
+}
+
+func dirHasEntry(home *os.Root, rel string) (bool, error) {
+	dir, err := home.Open(rel)
+	if err != nil {
+		return false, fmt.Errorf("memberhome: open login directory %s: %w", rel, err)
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("memberhome: read login directory %s: %w", rel, err)
+	}
+	return len(entries) > 0, nil
 }

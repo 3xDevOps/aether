@@ -203,6 +203,9 @@ func TestLoginFound(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(owner, ".pi", "agent", "auth.json"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(owner, ".omp", "agent", "agent.db"), []byte("login"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		rels []string
 		want bool
@@ -217,5 +220,9 @@ func TestLoginFound(t *testing.T) {
 		if got, err := manager.LoginFound("owner", tc.rels); err != nil || got != tc.want {
 			t.Errorf("LoginFound(%v) = %v, %v; want %v", tc.rels, got, err, tc.want)
 		}
+	}
+	// An empty directory is a mountpoint too.
+	if got, err := manager.LoginFound("other", []string{".omp/agent"}); err != nil || got {
+		t.Errorf("LoginFound of an empty .omp/agent = %v, %v; want false", got, err)
 	}
 }

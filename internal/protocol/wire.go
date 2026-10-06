@@ -762,9 +762,9 @@ type AgentInfo struct {
 	// CLI for a native agent.
 	Enhanced          string `json:"enhanced"`
 	EnhancedInstalled bool   `json:"enhanced_installed"`
-	// LoginFound reports that one of the agent's login files exists in the
-	// home the launch uses: the account owner's on a shared account. It
-	// checks for files, not for a working session.
+	// LoginFound reports that one of the agent's login paths exists, non-empty,
+	// in the home the launch uses: the account owner's on a shared account.
+	// It checks for paths, not for a working session.
 	LoginFound bool `json:"login_found"`
 	// DefaultMode is the launch mode the agent starts in unless asked
 	// otherwise: "acp" for an agent whose enhanced mode is installed and
