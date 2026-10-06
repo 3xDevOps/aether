@@ -23,8 +23,8 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
-  const drawer = page.getByRole('dialog', { name: 'Runs' })
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
+  const drawer = page.getByRole('dialog', { name: 'Aether' })
   await expect(drawer).toBeVisible()
 
   const row = drawer.getByRole('button', { name: /read the deployment log/ })
@@ -41,11 +41,13 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
     page.getByRole('heading', { name: 'read the deployment log', exact: true }),
   ).toBeVisible()
 
-  // The status bar is the tightest row in the shell, and on a coarse pointer
-  // its controls are finger-sized rather than the desktop's 22px.
-  const details = page.getByRole('button', { name: 'Show status details' })
-  await expect(details).toBeVisible()
-  expect((await details.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
+  // Focus lands on the view the drawer closed onto, and the top bar names it
+  // with its controls finger-sized.
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+  const bar = page.getByRole('banner')
+  await expect(bar).toContainText('read the deployment log')
+  const search = bar.getByRole('button', { name: 'Search', exact: true })
+  expect((await search.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
 
   // Nothing the drawer left behind is over the run: the shell still fits the
   // phone in both directions.

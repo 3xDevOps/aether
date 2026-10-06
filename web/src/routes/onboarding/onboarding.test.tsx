@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import type { AetherDesktop } from '@/components/shell/title-bar'
+import type { AetherDesktop } from '@/components/shell/window-bar'
 import type { Api } from '@/lib/api'
 import type {
   AgentInfo,

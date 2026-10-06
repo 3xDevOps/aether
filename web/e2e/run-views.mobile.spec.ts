@@ -24,9 +24,9 @@ test('a phone protects a run from More and reads its diff', async ({
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: /write the result file/ })
     .tap()
   await expect(

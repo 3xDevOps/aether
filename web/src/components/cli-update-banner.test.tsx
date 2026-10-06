@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { RECHECK_MS, UpdateBanners } from '@/components/update-banner'
+import { RECHECK_MS, UpdateCenter } from '@/components/update-banner'
 import { ApiError } from '@/lib/api'
 import type { UpdateApplyResult } from '@/lib/types'
 import { useStore } from '@/store'
@@ -15,6 +15,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useStore.setState({ updatesOpen: true })
 })
 
 afterEach(() => {
@@ -26,7 +27,7 @@ afterEach(() => {
 test('shows the CLI banner to a collaborator when the CLI is behind', async () => {
   const client = fakeApi()
   seed({ self: bob })
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
@@ -56,7 +57,7 @@ test('offers no button where the CLI cannot update itself', async () => {
     })),
   })
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   expect(await screen.findByText(/Self-update is not supported/)).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
@@ -66,7 +67,7 @@ test('offers no button where the CLI cannot update itself', async () => {
 test('the Update button applies and the banner says it is restarting', async () => {
   const client = fakeApi()
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -90,7 +91,7 @@ test('the done state names the replaced binaries and the server restart', async 
     })),
   })
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -106,7 +107,7 @@ test('the done state names the replaced binaries and the server restart', async 
 test('the done state says nothing about a server that was not replaced', async () => {
   const client = fakeApi()
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -125,7 +126,7 @@ test('a failed apply shows the gateway message and leaves the button usable', as
     }),
   })
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -156,7 +157,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
   test('names the path and the dialog before and after the click', async () => {
     const client = adminPrompt()
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(
       await screen.findByRole('button', { name: 'Install details: macOS administrator approval' }),
@@ -187,7 +188,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
       )
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -210,7 +211,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
       throw new ApiError(503, 'update.apply: install failed: checksum mismatch')
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -234,7 +235,7 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
     ),
   })
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   expect(
     await screen.findByText(
@@ -251,7 +252,7 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
 test('a dismissal hides that version and a newer release comes back', async () => {
   const client = fakeApi()
   seed()
-  const first = render(<UpdateBanners client={client} />)
+  const first = render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
   expect(useStore.getState().dismissedUpdates.cli).toBe('v1.3.0')
@@ -260,7 +261,7 @@ test('a dismissal hides that version and a newer release comes back', async () =
 
   // The same dismissal, the same release: still silent.
   useStore.setState({ update: null })
-  const again = render(<UpdateBanners client={client} />)
+  const again = render(<UpdateCenter client={client} />)
   await waitFor(() => expect(useStore.getState().update).not.toBeNull())
   expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
   again.unmount()
@@ -272,7 +273,7 @@ test('a dismissal hides that version and a newer release comes back', async () =
     }),
   })
   useStore.setState({ update: null })
-  render(<UpdateBanners client={newer} />)
+  render(<UpdateCenter client={newer} />)
   expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
 })
 
@@ -290,7 +291,7 @@ test('the done state keeps the gateway note over the restart line', async () => 
     })),
   })
   seed()
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
   expect(await screen.findByText(/rerun the update once it finishes/)).toBeTruthy()
@@ -334,7 +335,7 @@ describe('what the banner keeps after the install', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -368,7 +369,7 @@ describe('what the banner keeps after the install', () => {
       localUpdateStatus: vi.fn(async () => ({ phase: 'packaging' as const })),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -408,7 +409,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
         .mockResolvedValue({ phase: 'done' }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     // Let the initial update.check settle - a plain microtask, no timer.
     await act(async () => {
@@ -464,7 +465,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       })),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -489,7 +490,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
   test('sets gatewayRestarting as soon as the apply says the gateway is going away', async () => {
     const client = fakeApi({ localUpdateApply: rebuildApply() })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await waitFor(() => expect(useStore.getState().gatewayRestarting).toBe(true))
@@ -509,7 +510,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       })),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await screen.findByText(
@@ -533,7 +534,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       localUpdateStatus: vi.fn(async () => ({ phase: 'done' as const })),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -581,7 +582,7 @@ describe('the release the Update button installs', () => {
       ),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
     expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
 
@@ -620,7 +621,7 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -654,7 +655,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -684,7 +685,7 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -717,7 +718,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50)
     })
@@ -754,7 +755,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     await act(async () => {
@@ -782,7 +783,7 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))

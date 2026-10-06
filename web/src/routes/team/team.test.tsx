@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { StatusBar } from '@/components/shell/status-bar'
 import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
-import { TeamStatus, TeamStatusDetails } from '@/routes/team'
-import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
-import { BudgetStatus } from '@/routes/team/budget'
+import { useTeamRefresh } from '@/routes/team'
+import { ApprovalInbox } from '@/routes/team/approvals'
+import { TeamSummary } from '@/routes/team/budget'
+import { ServerSection } from '@/routes/settings/server'
+import type { Api } from '@/lib/api'
+import { pendingApprovals } from '@/store/approvals'
 import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
 import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -19,8 +21,6 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
-import { hintOn } from '@/test/tooltip'
-import { atViewport } from '@/test/viewport'
 import { fire } from '@/test/wake'
 
 const watching: PresenceEntry = {
@@ -29,6 +29,13 @@ const watching: PresenceEntry = {
   watching: ['run_1'],
   last_seen: '2026-08-14T10:04:00Z',
 }
+
+function TeamRefresh({ client }: { client: Api }) {
+  useTeamRefresh(client)
+  return null
+}
+
+const waiting = () => pendingApprovals(useStore.getState().inbox).length
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
@@ -51,9 +58,8 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
-describe('team status bar', () => {
+describe('team refresh and summary', () => {
   it('reads the roster, the queue and the budget, and renders all three', async () => {
-    atViewport(390)
     const client = fakeApi({
       presenceRoster: vi.fn(async () => [watching]),
       approvalList: vi.fn(async () => [approval()]),
@@ -65,13 +71,12 @@ describe('team status bar', () => {
       ),
     })
     seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
-    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
+    render(<><TeamRefresh client={client} /><TeamSummary /></>)
 
-    expect(await screen.findByText('1 waiting')).toBeDefined()
-    expect(screen.getByText('$0.50')).toBeDefined()
+    await vi.waitFor(() => expect(waiting()).toBe(1))
     // A budget never stops a run, so nothing here may say that it did.
-    expect(screen.getByText('nearing the cap')).toBeDefined()
-    expect(screen.getByLabelText('Bob')).toBeDefined()
+    const line = await screen.findByText('1 online · $0.50 spent, nearing the cap')
+    expect(line.getAttribute('title')).toBe('Online: Bob')
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(workspace.id)
   })
 
@@ -123,13 +128,12 @@ describe('team status bar', () => {
   })
 
   it('re-reads the queue and beats presence when the tab returns', async () => {
-    atViewport(390)
     const approvalList = vi.fn(async () => [approval()])
     const presenceHeartbeat = vi.fn(async () => 90)
     seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
-    render(<TeamStatus client={fakeApi({ approvalList, presenceHeartbeat })} />)
+    render(<TeamRefresh client={fakeApi({ approvalList, presenceHeartbeat })} />)
 
-    expect(await screen.findByText('1 waiting')).toBeDefined()
+    await vi.waitFor(() => expect(waiting()).toBe(1))
     const reads = approvalList.mock.calls.length
     const beats = presenceHeartbeat.mock.calls.length
     const mounted = Date.now()
@@ -199,11 +203,10 @@ describe('team status bar', () => {
         ),
       },
     })
-    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
+    render(<><TeamRefresh client={client} /><TeamSummary /></>)
 
-    expect(await screen.findByText('past the cap')).toBeDefined()
     // $0.50 from the live workspace and $14 from the finished one.
-    expect(screen.getByText('$14.50')).toBeDefined()
+    expect(await screen.findByText('$14.50 spent, past the cap')).toBeDefined()
   })
 
   it('rolls spend up across workspaces, worst state and unmetered floor first', () => {
@@ -230,18 +233,16 @@ describe('team status bar', () => {
         }),
       },
     })
-    render(<BudgetStatus />)
+    render(<TeamSummary />)
 
     // The trailing + is because one run reported no usage: the total is a floor.
-    expect(screen.getByText('$1.50+')).toBeDefined()
-    expect(screen.getByText('past the cap')).toBeDefined()
+    expect(screen.getByText('$1.50+ spent, past the cap')).toBeDefined()
   })
 
   it('lights the disk gauge from the read server.info cannot carry', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
     expect(screen.queryByLabelText('Disk usage')).toBeNull()
 
     await act(async () => {
@@ -249,15 +250,14 @@ describe('team status bar', () => {
     })
 
     expect(screen.getByLabelText('Disk usage').textContent).toContain(
-      '512 MB / 2.0 GB',
+      '512 MB of 2.0 GB used',
     )
   })
 
   it('breaks the disk gauge down into what an operator can reclaim', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
 
     await act(async () => {
       await refreshTeam(useStore, client)
@@ -275,8 +275,7 @@ describe('team status bar', () => {
     const client = fakeApi()
     const stale = await client.disk()
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
     expect(
       screen.getByLabelText('Disk usage').getAttribute('title'),
     ).not.toContain('Repos')
@@ -287,16 +286,6 @@ describe('team status bar', () => {
 
     expect(screen.getByLabelText('Disk usage').getAttribute('title')).toContain(
       'Repos 512 MB',
-    )
-  })
-
-  it('keeps the server refusal on the queue readout', async () => {
-    atViewport(390)
-    seed({ inboxError: 'approval.list: database is locked' })
-    render(<ApprovalStatus />)
-
-    expect(await hintOn(screen.getByRole('button', { name: 'queue unreadable' }))).toBe(
-      'approval.list: database is locked',
     )
   })
 })

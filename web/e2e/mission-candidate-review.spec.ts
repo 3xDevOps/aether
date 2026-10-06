@@ -48,8 +48,8 @@ test('launches a mission, controls a worker, and shows its candidate without a h
 
   const missionObjective = 'mission candidate browser fixture'
   await page.goto(alice.url)
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
+  await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('button', { name: 'Create swarm', exact: true }).click()
   const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
   await expect(launch).toBeVisible()
@@ -152,7 +152,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   expect(controlled.takeover_member_id).toBe(aliceID)
 
   await page.goto(alice.url)
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
+  await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
   const missionView = page.getByRole('region', { name: 'Mission tasks' })
   await expect(missionView).toBeVisible()

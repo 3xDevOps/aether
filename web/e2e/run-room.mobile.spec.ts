@@ -95,7 +95,7 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     expect(viewport).not.toBeNull()
     const beforeOpen = await sessionGeometry()
     // The room makes the background inaccessible while its modal is open.
-    const titlebar = await page.getByRole('banner', { name: 'Aether' }).boundingBox()
+    const titlebar = await page.getByRole('banner').boundingBox()
     expect(titlebar).not.toBeNull()
     await page.getByRole('button', { name: 'Open Run Room' }).tap()
     const room = page.getByRole('dialog', { name: 'Run Room' })

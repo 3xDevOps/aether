@@ -33,7 +33,7 @@ test('palette announces initial selection, scrolls keyboard results, restores br
     workspaceIDs.push(workspace.id)
   }
   await page.goto(alice.url)
-  const trigger = page.getByRole('button', { name: 'Search runs and commands' })
+  const trigger = page.getByRole('button', { name: 'Search', exact: true })
   await trigger.click()
   const dialog = page.getByRole('dialog', { name: 'Command Palette' })
   const input = dialog.getByRole('combobox')
@@ -85,7 +85,8 @@ test('palette announces initial selection, scrolls keyboard results, restores br
   await expectActiveVisible(input, list, remaining)
   await input.press('Enter')
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Palette workspace 22', exact: true })).toBeVisible()
+  // Under 768px the top bar carries the view title.
+  await expect(page.getByRole('banner')).toContainText('Palette workspace 22')
 
   await trigger.click()
   await expectActiveVisible(input, list, enabled.first())

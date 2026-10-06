@@ -36,19 +36,20 @@ test('a backgrounded tab reopens its event socket the moment it returns', async 
   })
 
   await page.goto(alice.url)
-  const bar = page.locator('footer')
-  await expect(bar).toContainText('Live')
+  const footer = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline)$/ })
+  await expect(footer).toHaveAccessibleName(/, Live$/)
 
   pocketed = true
   await connected[0].close({ code: 1011 })
   // Four failed retries is where the client gives up and says so. The next
   // one is then at least four seconds out, and climbing.
-  await expect(bar).toContainText('Offline')
+  await expect(footer).toHaveAccessibleName(/, Offline$/)
+  await expect(page.getByRole('main').getByRole('status').filter({ hasText: 'Offline' })).toBeVisible()
 
   pocketed = false
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
 
-  await expect(bar).toContainText('Live', { timeout: 2_000 })
+  await expect(footer).toHaveAccessibleName(/, Live$/, { timeout: 2_000 })
 })
 
 test('a rejected token reads as an expired link, not an unreachable server', async ({

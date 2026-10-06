@@ -87,7 +87,6 @@ describe('devices view', () => {
 
     const desktop = (await screen.findByText('desktop')).closest('li')!
     expect(desktop.textContent).not.toContain('Bob ·')
-    expect(screen.getByText('your devices')).toBeDefined()
   })
 
   it('shows whom a code admits, and approves that device once confirmed', async () => {

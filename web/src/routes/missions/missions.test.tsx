@@ -635,7 +635,6 @@ describe('mission objective', () => {
     await mount(showing({ phase: 'planning', objective }))
     const heading = screen.getByRole('heading', { level: 1 })
     expect(heading.textContent).toBe(`${firstLine.slice(0, 80).trimEnd()}…`)
-    expect(heading.getAttribute('title')).toBe(objective)
     const section = within(screen.getByRole('region', { name: 'Mission objective' }))
     const full = section.getByText((_, node) => node?.tagName === 'P' && node.textContent === objective)
     expect(full.className).toContain('line-clamp-3')

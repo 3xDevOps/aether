@@ -119,7 +119,7 @@ test('a list row is a button whose hover action shows on focus and always on a c
   expect(row.getAttribute('aria-current')).toBe('true')
   expect(row.closest('[data-slot="list-row"]')?.className).toContain('coarse:h-11')
   const action = screen.getByRole('button', { name: 'Archive' }).parentElement!
-  for (const token of ['opacity-0', 'group-focus-within/row:opacity-100', 'group-hover/row:opacity-100', 'coarse:opacity-100']) {
+  for (const token of ['hidden', 'group-focus-within/row:flex', 'group-hover/row:flex', 'coarse:flex']) {
     expect(action.className).toContain(token)
   }
 })

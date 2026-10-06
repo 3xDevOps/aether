@@ -211,7 +211,7 @@ describe('members view', () => {
 
   describe('after a first share', () => {
     const notice =
-      "Your environment terminal was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from the terminal dock on the Board. Runs you already have running keep the mounts they started with until they end."
+      "Your environment terminal was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end."
     const sharing = (running: boolean) =>
       fakeApi({
         accountList: vi
@@ -271,7 +271,7 @@ describe('members view', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
       const status = await screen.findByRole('status')
       expect(status.querySelector('p')?.textContent).toBe(
-        "Your environment terminal could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from the terminal dock on the Board. Runs you already have running keep the mounts they started with until they end.",
+        "Your environment terminal could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end.",
       )
       expect(within(status).getByRole('button', { name: 'Stop environment' })).toBeDefined()
       expect(await screen.findByText('account.list: gateway closed')).toBeDefined()

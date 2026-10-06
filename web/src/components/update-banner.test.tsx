@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { RECHECK_MS, UpdateBanners } from '@/components/update-banner'
+import { RECHECK_MS, UpdateCenter } from '@/components/update-banner'
 import type { Api } from '@/lib/api'
-import type { AetherDesktop } from '@/components/shell/title-bar'
+import type { AetherDesktop } from '@/components/shell/window-bar'
 import type {
   Event,
   Member,
@@ -65,6 +65,7 @@ function updateEvent(seq: number, payload: ServerUpdatePayload): Event {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useStore.setState({ updatesOpen: true })
   delete shellWindow.aetherDesktop
 })
 
@@ -84,7 +85,7 @@ afterEach(() => {
 test('renders nothing where the gateway does not serve update.check', async () => {
   const client = fakeApi()
   seed({ capabilities: caps({ local: ['link.status'] }) })
-  render(<UpdateBanners client={client} />)
+  render(<UpdateCenter client={client} />)
 
   await waitFor(() => expect(client.localUpdateCheck).not.toHaveBeenCalled())
   expect(screen.queryByText(/is available/)).toBeNull()
@@ -118,7 +119,7 @@ describe('the server update banner', () => {
   test('offers both buttons to an admin and nothing to anyone else', async () => {
     for (const self of [bob, vera]) {
       const other = seedServer({ self })
-      const view = render(<UpdateBanners client={other} />)
+      const view = render(<UpdateCenter client={other} />)
       await waitFor(() => expect(other.serverUpdateStatus).toHaveBeenCalled())
       expect(screen.queryByText('The server is behind.')).toBeNull()
       expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
@@ -126,7 +127,7 @@ describe('the server update banner', () => {
     }
 
     const client = seedServer()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     expect(await screen.findByText('The server is behind.')).toBeTruthy()
     expect(screen.getByText(/Server v1\.2\.3, latest v1\.3\.0/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
@@ -145,7 +146,7 @@ describe('the server update banner', () => {
         manual_commands: ['sudo aether update', 'sudo systemctl restart aether-server'],
       }),
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     expect(await screen.findByText('The server is behind.')).toBeTruthy()
     expect(
@@ -178,7 +179,7 @@ describe('the server update banner', () => {
         cli: { ...status.cli, update_available: false },
       })),
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     expect(await screen.findByText('The server is behind.')).toBeTruthy()
     expect(screen.getByText(/Server v1\.2\.9, latest v1\.3\.0/)).toBeTruthy()
@@ -198,7 +199,7 @@ describe('the server update banner', () => {
         run({ id: 'run_4', status: 'merged' }),
       ],
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -214,7 +215,7 @@ describe('the server update banner', () => {
   // right now. They keep running".
   test('the confirm dialog has a zero case', async () => {
     const client = seedServer({ runs: [run({ status: 'merged' })] })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -227,7 +228,7 @@ describe('the server update banner', () => {
 
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update when idle' }))
     await waitFor(() => expect(client.serverUpdate).toHaveBeenCalledWith('idle'))
@@ -260,7 +261,7 @@ describe('the server update banner', () => {
         waiting: { runs: 2, paused: 1, shells: 1 },
       }),
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     expect(
       await screen.findByText(
@@ -272,7 +273,7 @@ describe('the server update banner', () => {
   })
 
   test('renders every phase the server.update feed carries', async () => {
-    render(<UpdateBanners client={seedServer()} />)
+    render(<UpdateCenter client={seedServer()} />)
     await screen.findByRole('button', { name: 'Update now' })
 
     const phase = (payload: ServerUpdatePayload) =>
@@ -331,7 +332,7 @@ describe('the server update banner', () => {
     })
     seed({ capabilities: caps({ local: ['link.status'] }) })
     const stop = connect(useStore, client)
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     await subscribe()
     expect(await screen.findByText('The server is behind.')).toBeTruthy()
@@ -379,7 +380,7 @@ describe('the server update banner', () => {
         .mockRejectedValueOnce(new Error('server.update_status: server unreachable'))
         .mockResolvedValue(serverUpdateStatus({ update_available: true })),
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     expect(
       await screen.findByText(
@@ -401,7 +402,7 @@ describe('the server update banner', () => {
     useStore.setState({
       update: updateStatus({ server_version: 'v1.2.9', server_behind: true }),
     })
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
 
     expect(
       await screen.findByText('The dashboard cannot update the server. Run these on the server host:'),
@@ -414,7 +415,7 @@ describe('the server update banner', () => {
   test('a dismissal hides the offer but not an update in flight', async () => {
     const client = seedServer()
     useStore.setState({ dismissedUpdates: { cli: '', server: 'v1.3.0', shell: '' } })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     await waitFor(() => expect(client.serverUpdateStatus).toHaveBeenCalled())
     expect(screen.queryByText('The server is behind.')).toBeNull()
@@ -439,7 +440,7 @@ describe('the server update banner', () => {
         'this server cannot update itself; on the server host run: sudo aether update',
       )
     })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update when idle' }))
 
@@ -467,7 +468,7 @@ describe('the desktop app rebuild notice', () => {
       ),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
 
     expect(await screen.findByText(notice)).toBeTruthy()
     expect(screen.getByText('npm install: exit status 1')).toBeTruthy()
@@ -476,7 +477,7 @@ describe('the desktop app rebuild notice', () => {
   test('appears when the shell was built by a different CLI', async () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed()
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
     expect(await screen.findByText(notice)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Rebuild instructions' }))
     expect(screen.getByText(/aether gui build/)).toBeTruthy()
@@ -495,7 +496,7 @@ describe('the desktop app rebuild notice', () => {
       })),
     })
     seed({ capabilities: caps({ version: 'v1.3.0' }) })
-    render(<UpdateBanners client={current} />)
+    render(<UpdateCenter client={current} />)
 
     expect(await screen.findByText(notice)).toBeTruthy()
     expect(screen.queryByText(/is available\./)).toBeNull()
@@ -504,7 +505,7 @@ describe('the desktop app rebuild notice', () => {
   // A browser tab has no shell at all, so there is nothing to rebuild.
   test('stays away outside the desktop shell even with no check answer', async () => {
     seed({ capabilities: caps({ local: ['link.status'] }) })
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
     await waitFor(() => expect(screen.queryByText(notice)).toBeNull())
   })
 
@@ -512,7 +513,7 @@ describe('the desktop app rebuild notice', () => {
     // "1.2.3" and "v1.2.3" are the same build; only the prefix differs.
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.3' }
     seed()
-    const same = render(<UpdateBanners client={fakeApi()} />)
+    const same = render(<UpdateCenter client={fakeApi()} />)
     await screen.findByText('Aether v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
     same.unmount()
@@ -520,7 +521,7 @@ describe('the desktop app rebuild notice', () => {
     // A gateway too old to report its version is not a mismatch either.
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed({ capabilities: caps({ version: undefined }) })
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
     await screen.findByText('Aether v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
   })
@@ -535,7 +536,7 @@ describe('the desktop app rebuild notice', () => {
     ] as const) {
       shellWindow.aetherDesktop = { platform: 'linux', shellVersion }
       seed({ capabilities: caps({ version: cliVersion }) })
-      const view = render(<UpdateBanners client={fakeApi()} />)
+      const view = render(<UpdateCenter client={fakeApi()} />)
       await screen.findByText('Aether v1.3.0 is available.')
       expect(screen.queryByText(notice) !== null).toBe(stale)
       view.unmount()
@@ -545,14 +546,14 @@ describe('the desktop app rebuild notice', () => {
   test('does not compare a remote gateway version with the local desktop shell', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: 'v1.2.3' }
     seed({ capabilities: caps({ gateway: 'server', local: [], version: 'v9.9.9' }) })
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
     expect(screen.queryByText(notice)).toBeNull()
   })
 
   test('dismissing it lasts only until the CLI moves again', async () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed({ dismissedUpdates: { cli: '', server: '', shell: 'v1.2.3' } })
-    const hidden = render(<UpdateBanners client={fakeApi()} />)
+    const hidden = render(<UpdateCenter client={fakeApi()} />)
     await waitFor(() => expect(screen.queryByText(notice)).toBeNull())
     hidden.unmount()
 
@@ -560,7 +561,7 @@ describe('the desktop app rebuild notice', () => {
       capabilities: caps({ version: 'v1.3.0' }),
       dismissedUpdates: { cli: '', server: '', shell: 'v1.2.3' },
     })
-    render(<UpdateBanners client={fakeApi()} />)
+    render(<UpdateCenter client={fakeApi()} />)
     expect(await screen.findByText(notice)).toBeTruthy()
   })
 })
@@ -579,7 +580,7 @@ describe('the CLI release re-check', () => {
     vi.useFakeTimers()
     const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
     expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
 
@@ -606,7 +607,7 @@ describe('the CLI release re-check', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     await act(async () => {
@@ -621,7 +622,7 @@ describe('the CLI release re-check', () => {
     vi.useFakeTimers()
     const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
     hide(true)
 
@@ -645,7 +646,7 @@ describe('the CLI release re-check', () => {
         .mockResolvedValue({ ...status, cli: { ...status.cli, latest: 'v1.4.0' } }),
     })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     await act(async () => {
@@ -665,7 +666,7 @@ describe('the CLI release re-check', () => {
     vi.useFakeTimers()
     const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
     seed({ dismissedUpdates: { cli: 'v1.3.0', server: '', shell: '' } })
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
     expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
 
@@ -681,7 +682,7 @@ describe('the CLI release re-check', () => {
     vi.useFakeTimers()
     const client = fakeApi({ localUpdateCheck: cachedUntilRefreshed('v1.4.0') })
     seed()
-    render(<UpdateBanners client={client} />)
+    render(<UpdateCenter client={client} />)
     await settle()
 
     await act(async () => {
@@ -700,7 +701,7 @@ describe('the CLI release re-check', () => {
       }),
     })
     seed()
-    render(<UpdateBanners client={client} />).unmount()
+    render(<UpdateCenter client={client} />).unmount()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500)
@@ -712,7 +713,7 @@ describe('the CLI release re-check', () => {
     vi.useFakeTimers()
     const client = fakeApi({ localUpdateCheck: releasesThen('v1.4.0') })
     seed()
-    const view = render(<UpdateBanners client={client} />)
+    const view = render(<UpdateCenter client={client} />)
     await settle()
     view.unmount()
 

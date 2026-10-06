@@ -152,25 +152,22 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await expect(tabs).toHaveCount(0)
 })
 
-test('Escape closes the status popup without leaving the run', async ({
+test('Escape closes the footer menu without leaving the run', async ({
   page,
   aether,
 }) => {
-  // Narrow enough that the secondary readouts sit behind the popup.
-  await page.setViewportSize({ width: 1100, height: 700 })
   await openFirstRun(page, aether)
 
   // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
 
-  const trigger = page.getByRole('button', { name: 'Show status details' })
-  await trigger.click()
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, Live$/ }).click()
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
 
   await page.keyboard.press('Escape')
 
-  // The popup uses window listeners, not a Radix layer: ordering jsdom cannot reproduce.
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await expect(menu).toHaveCount(0)
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   await closeFirstRun(page)
@@ -196,7 +193,7 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   expectVisibleFocus('the run tab', await indicator(events))
   // Closing the run first would move its row under the collapsed Finished group.
   const row = page
-    .getByRole('complementary', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })
   await row.focus()
   await page.keyboard.press('Shift+Tab')
@@ -204,13 +201,13 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await expect(row).toBeFocused()
   expectVisibleFocus('the sidebar run row', await indicator(row))
 
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
   await board.focus()
   await page.keyboard.press('Tab')
-  const missions = surfaces.getByRole('button', { name: 'Missions', exact: true })
+  const missions = surfaces.getByRole('button', { name: 'Swarms', exact: true })
   await expect(missions).toBeFocused()
-  expectVisibleFocus('the Missions activity-rail button', await indicator(missions))
+  expectVisibleFocus('the Swarms sidebar row', await indicator(missions))
 
   await closeFirstRun(page)
   await page.keyboard.press('Escape')
@@ -228,13 +225,11 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   await page.setViewportSize({ width: 1280, height: 720 })
   await openFirstRun(page, aether)
 
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
-  const rail = page.getByRole('navigation', { name: 'Surfaces' })
+  const sidebar = page.locator('#sidebar')
   const separator = page.getByRole('separator', { name: 'Resize sidebar' })
   const before = await sidebar.boundingBox()
-  const beforeRail = await rail.boundingBox()
   const handle = await separator.boundingBox()
-  if (!before || !beforeRail || !handle) {
+  if (!before || !handle) {
     throw new Error('sidebar splitter did not render')
   }
 
@@ -249,10 +244,8 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   await page.mouse.up()
 
   const after = await sidebar.boundingBox()
-  const afterRail = await rail.boundingBox()
-  if (!after || !afterRail) throw new Error('sidebar disappeared after resize')
+  if (!after) throw new Error('sidebar disappeared after resize')
   expect(after.x).toBe(before.x)
-  expect(afterRail.width).toBe(beforeRail.width)
 
   await separator.focus()
   await page.keyboard.press('Home')
@@ -262,27 +255,17 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
     .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
     .toBe(minimumWidth)
 
-  const runs = sidebar.getByText('Runs', { exact: true })
-  const toolbar = runs.locator('..')
-  const firstGroup = sidebar.getByRole('heading').first()
-  const mine = sidebar.getByRole('button', { name: 'Mine', exact: true })
-  await expect(mine).toBeVisible()
-
-  const toolbarBox = await toolbar.boundingBox()
-  const firstGroupBox = await firstGroup.boundingBox()
-  const mineBox = await mine.boundingBox()
   const minimum = await sidebar.boundingBox()
-  if (
-    !toolbarBox ||
-    !firstGroupBox ||
-    !mineBox ||
-    !minimum
-  ) {
-    throw new Error('minimum-width sidebar controls did not render')
+  if (!minimum) throw new Error('minimum-width sidebar did not render')
+  for (const control of [
+    sidebar.getByRole('button', { name: 'Search', exact: true }),
+    sidebar.getByRole('button', { name: 'New run', exact: true }),
+    sidebar.getByRole('button', { name: 'Mine', exact: true }),
+  ]) {
+    const box = await control.boundingBox()
+    if (!box) throw new Error('a minimum-width sidebar control did not render')
+    expect(box.x).toBeGreaterThanOrEqual(minimum.x)
+    expect(box.x + box.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   }
-
-  expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
-  expect(mineBox.x).toBeGreaterThanOrEqual(minimum.x)
-  expect(mineBox.x + mineBox.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   await closeFirstRun(page)
 })

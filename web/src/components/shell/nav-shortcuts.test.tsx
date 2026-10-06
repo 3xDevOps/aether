@@ -36,7 +36,7 @@ function overlay(html: string): HTMLElement {
 }
 
 describe('navigation shortcuts', () => {
-  it('goes to the board and to all runs on the g chord', () => {
+  it('goes to the board and to all workspaces on the g chord', () => {
     render(<AppShell />)
 
     press('g')
@@ -48,10 +48,10 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().route.name).toBe('board')
   })
 
-  it('reaches every rail destination the gateway serves on its g sequence', () => {
+  it('reaches every sidebar destination the gateway serves on its g sequence', () => {
     render(<AppShell />)
 
-    for (const [key, route] of [['a', 'timeline'], ['g', 'agents'], [',', 'settings'], ['s', 'missions']]) {
+    for (const [key, route] of [['a', 'timeline'], ['g', 'agents'], ['e', 'environment'], [',', 'settings'], ['s', 'missions']]) {
       press('g')
       press(key!)
       expect(useStore.getState().route.name).toBe(route)
@@ -205,8 +205,8 @@ describe('navigation shortcuts', () => {
   // shortcut has to fire while one is showing.
   it('leaves the shortcuts alone while a tooltip is open', async () => {
     render(<AppShell />)
-    const control = screen.getByRole('button', { name: 'Keyboard shortcuts' })
-    expect(await hintOn(control)).toBe('Keyboard shortcuts')
+    const control = screen.getByRole('button', { name: 'Search' })
+    expect(await hintOn(control)).toBe('Search · Ctrl+K')
 
     press('n', control)
 
@@ -219,7 +219,7 @@ describe('navigation shortcuts', () => {
   it('lets a tooltip take the first Escape and no more than that', async () => {
     useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)
-    const control = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+    const control = screen.getByRole('button', { name: 'Search' })
     await hintOn(control)
 
     await userEvent.keyboard('{Escape}')
@@ -256,17 +256,6 @@ describe('navigation shortcuts', () => {
 
     expect(useStore.getState().paletteDialog).toBe(null)
     expect(useStore.getState().route.name).toBe('events')
-  })
-
-  it('stands down while a select has the keyboard', () => {
-    render(<AppShell />)
-    press('n')
-    expect(useStore.getState().paletteDialog).toBe('launch')
-    act(() => useStore.setState({ paletteDialog: null }))
-
-    press('n', screen.getByRole('combobox', { name: 'Workspace' }))
-
-    expect(useStore.getState().paletteDialog).toBe(null)
   })
 
   // Chromium drops focus to body without a focusout when the focused element

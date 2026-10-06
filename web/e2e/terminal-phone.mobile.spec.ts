@@ -135,9 +135,9 @@ done`)
   desktop.sendInput('start\r')
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: /watched from a phone/ })
     .tap()
 
@@ -374,8 +374,8 @@ done`)
 
   try {
     await page.goto(alice.url)
-    await page.getByRole('button', { name: 'Expand sidebar' }).tap()
-    await page.getByRole('dialog', { name: 'Runs' })
+    await page.getByRole('button', { name: /^Open sidebar/ }).tap()
+    await page.getByRole('dialog', { name: 'Aether' })
       .getByRole('button', { name: 'touch through phone history' }).tap()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live.locator(':scope > div')).toHaveCount(desktopRows)

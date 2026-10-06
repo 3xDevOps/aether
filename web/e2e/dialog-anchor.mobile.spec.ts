@@ -20,9 +20,9 @@ test('a confirm opens as a sheet along the bottom of a phone screen', async ({
   })
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: 'Templates', exact: true })
     .tap()
   await page.getByRole('button', { name: 'Delete', exact: true }).tap()
@@ -54,7 +54,7 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
   await shrinkToKeyboardHeight(page)
 
   await page
-    .getByRole('banner', { name: 'Aether' })
+    .getByRole('banner')
     .getByRole('button', { name: 'New run' })
     .tap()
 

@@ -281,21 +281,18 @@ export class OnboardingWizard {
   /**
    * Opens the dashboard on the member's tokened URL. An unlinked gateway
    * routes itself to the wizard; a linked one is already past it, so the
-   * Admin menu is the way back in.
+   * command palette is the way back in.
    */
   static async open(page: Page, url: string): Promise<OnboardingWizard> {
     const wizard = new OnboardingWizard(page)
     await page.goto(url)
     const heading = page.getByRole('heading', { name: 'Onboarding', exact: true })
-    const live = page.getByRole('contentinfo').getByText('Live', { exact: true })
+    const live = page.getByRole('button', { name: /, Live$/ })
     await expect(heading.or(live).first()).toBeVisible()
     if (!(await heading.isVisible())) {
-      const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
-      if (!(await surfaces.isVisible())) {
-        await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
-      }
-      await surfaces.getByRole('button', { name: /^Admin(?:,|$)/ }).click()
-      await page.getByRole('menuitem', { name: 'Onboarding', exact: true }).click()
+      await page.getByRole('button', { name: 'Search', exact: true }).first().click()
+      await page.getByRole('combobox').fill('Onboarding')
+      await page.getByRole('option', { name: 'Onboarding', exact: true }).click()
     }
     await expect(heading).toBeVisible()
     return wizard

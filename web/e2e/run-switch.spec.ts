@@ -322,8 +322,8 @@ done
 
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
   await open(launched[0].task)
@@ -398,7 +398,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
     return controller
   }
   await page.goto(alice.url)
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
   const open = async (task: string) => {
     await sidebar.getByRole('button', { name: task }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()

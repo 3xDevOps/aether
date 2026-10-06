@@ -495,7 +495,7 @@ describe('dock', () => {
 })
 
 const splitter = () => screen.getByRole('separator', { name: 'Resize sidebar' })
-const collapseButton = () => screen.getByRole('button', { name: 'Collapse sidebar' })
+const collapseButton = () => screen.getByRole('button', { name: 'Hide sidebar' })
 
 describe('sidebar resizer', () => {
   it('resizes from the keyboard, up to the bounds it announces', () => {
@@ -522,12 +522,12 @@ describe('sidebar resizer', () => {
 
   it.each([
     ['the splitter', () => fireEvent.keyDown(splitter(), { key: 'Enter' })],
-    ['the collapse button', () => fireEvent.click(collapseButton())],
+    ['the hide button', () => fireEvent.click(collapseButton())],
   ])('hands focus on when the sidebar is collapsed from %s', (_, collapse) => {
     render(<AppShell />)
 
     collapse()
-    const expand = screen.getByRole('button', { name: 'Expand sidebar' })
+    const expand = screen.getByRole('button', { name: 'Open sidebar' })
     expect(document.activeElement).toBe(expand)
 
     fireEvent.click(expand)

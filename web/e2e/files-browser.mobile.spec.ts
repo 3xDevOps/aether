@@ -19,12 +19,12 @@ test('mobile Files returns from one viewer to the repository tree', async ({
 
   // At a phone width the real shell starts with its mobile sidebar rail, and
   // the drawer it opens closes itself on the navigation it makes.
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: 'Files', exact: true })
     .tap()
-  await expect(page.getByRole('dialog', { name: 'Runs' })).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Aether' })).toBeHidden()
 
   await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible()
   const tree = page.getByRole('complementary', { name: 'Files' })

@@ -23,13 +23,13 @@ while :; do sleep 1; done`
 
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
-  const sidebar = page.getByRole('button', { name: 'Expand sidebar' })
-  await expect(sidebar.or(page.getByRole('complementary', { name: 'Runs' }))).toBeVisible()
+  const sidebar = page.getByRole('button', { name: /^Open sidebar/ })
+  await expect(sidebar.or(page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }))).toBeVisible()
   if (await sidebar.isVisible()) {
     await sidebar.click()
-    await page.getByRole('dialog', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('dialog', { name: 'Aether' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
-    await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }
   const dock = page.getByRole('region', { name: 'Terminal dock' })
   await dock.getByRole('tab', { name: /agent-tui/ }).click()
@@ -171,7 +171,7 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
     .getByRole('button', { name: 'Confirm stop' }).click()
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   await page.reload()
-  await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   await page.getByRole('region', { name: 'Terminal dock' }).getByRole('tab', { name: /agent-tui/ }).click()
   await expectCannotStop(page, page.getByRole('region', { name: 'Terminal dock' }))
   expect(file('starts')).toBe('start\n')

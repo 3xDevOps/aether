@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect, useRef } from 'react'
-import { CommandPalette, CommandPaletteTrigger } from '@/components/palette'
+import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
@@ -64,6 +64,10 @@ function overlay(markup: string): void {
   host.innerHTML = markup
   document.body.append(host)
   onTestFinished(() => host.remove())
+}
+
+function SearchButton() {
+  return <button type="button" onClick={() => useStore.getState().togglePalette(true)}>Search</button>
 }
 
 describe('command palette', () => {
@@ -167,11 +171,11 @@ describe('command palette', () => {
   it('returns focus to the opener when Escape dismisses the palette', async () => {
     render(
       <>
-        <CommandPaletteTrigger />
+        <SearchButton />
         <CommandPalette />
       </>,
     )
-    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
+    const trigger = screen.getByRole('button', { name: 'Search' })
     trigger.focus()
     fireEvent.click(trigger)
     await screen.findByRole('dialog')
@@ -216,8 +220,8 @@ describe('command palette', () => {
       }, [route])
       return route.name === 'terminal' ? <input ref={input} aria-label="Destination terminal" /> : null
     }
-    render(<><CommandPaletteTrigger /><CommandPalette /><Destination /></>)
-    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
+    render(<><SearchButton /><CommandPalette /><Destination /></>)
+    const trigger = screen.getByRole('button', { name: 'Search' })
     trigger.focus()
     fireEvent.click(trigger)
     fireEvent.click(await screen.findByText(active.task))
@@ -666,7 +670,7 @@ describe('command palette', () => {
 
       const search = await screen.findByRole('combobox')
       await userEvent.type(search, 'config')
-      fireEvent.click(await screen.findByText('Configuration'))
+      fireEvent.click(await screen.findByText('Agent config files'))
       expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
       expect(useStore.getState().paletteOpen).toBe(false)
 
@@ -693,7 +697,7 @@ describe('command palette', () => {
       })
       open()
       await screen.findByRole('combobox')
-      expect(screen.queryByText('Configuration')).toBeNull()
+      expect(screen.queryByText('Agent config files')).toBeNull()
     },
   )
 
