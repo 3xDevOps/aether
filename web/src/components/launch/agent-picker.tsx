@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { agentLabel } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Label } from '@/components/ui/label'
+import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import type { AgentInfo } from '@/lib/types'
 import { cn, focusRingInset } from '@/lib/utils'
 
@@ -43,18 +45,38 @@ export function AgentPicker({
   onSetUp?: () => void
   disabled?: boolean
 }) {
+  const phone = useMediaQuery(phoneScreen)
+  const [browsing, setBrowsing] = useState(false)
   const sorted = [...agents].sort((a, b) => rank(a) - rank(b))
   const rows = [
     ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent), setUp: !agent.installed && onSetUp !== undefined })),
     { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true, setUp: false },
   ]
+  const chosen = rows.find((row) => row.name === value)
+  const collapsed = phone && !browsing && chosen !== undefined
   return (
     <div className="flex flex-col gap-1">
-      <Label asChild>
-        <p>{label}</p>
-      </Label>
-      <RadioGroupPrimitive.Root aria-label={label} value={value} onValueChange={onChange} disabled={disabled} className="flex flex-col">
-        {rows.map((row) => {
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <Label asChild>
+          <p>{label}</p>
+        </Label>
+        {collapsed && (
+          <Button type="button" variant="link" size="sm" disabled={disabled} onClick={() => setBrowsing(true)} aria-label={`Change ${label.toLowerCase()}`}>
+            Change
+          </Button>
+        )}
+      </div>
+      <RadioGroupPrimitive.Root
+        aria-label={label}
+        value={value}
+        onValueChange={(name) => {
+          onChange(name)
+          setBrowsing(false)
+        }}
+        disabled={disabled}
+        className="flex flex-col"
+      >
+        {(collapsed ? [chosen] : rows).map((row) => {
           const selected = row.name === value
           return (
             <div

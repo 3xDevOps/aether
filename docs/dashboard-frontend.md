@@ -543,7 +543,9 @@ layout viewport for the keyboard, so `useKeyboardInset()`
 `visualViewport` and the sheet sits that far above the bottom edge; it is 0 on
 browsers that resize. `md` is a width breakpoint, so a desktop window
 narrower than 768px is treated as a phone here too. A menu with more than six
-items also opens as a bottom sheet below `md`.
+items also opens as a bottom sheet below `md`. On a phone (`phoneScreen`)
+the New run sheet's agent list shows only the chosen agent with **Change**,
+so **Mode** sits above the fold; picking an agent collapses the list again.
 
 What gives way first:
 

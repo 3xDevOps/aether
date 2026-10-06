@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
+import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -46,6 +47,24 @@ function setTask(task: string) {
 }
 
 describe('new run', () => {
+  it('collapses the agent list to the choice on a phone until Change', async () => {
+    atViewport(412, { pointer: 'coarse' })
+    vi.mocked(api.agentList).mockResolvedValue([
+      claude(),
+      agentInfo({ name: 'codex', display_name: 'Codex', login_found: true }),
+    ])
+    await open()
+
+    expect(screen.getAllByRole('radio', { name: /^(Claude Code|Codex)/ })).toHaveLength(1)
+    expect(screen.getByRole('radiogroup', { name: 'Mode' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change agent' }))
+    fireEvent.click(agentRow(/^Codex/))
+
+    expect(screen.getAllByRole('radio', { name: /^(Claude Code|Codex)/ })).toHaveLength(1)
+    expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true')
+  })
+
   it('lists every agent with its login and install state, and sends setup to Agents', async () => {
     vi.mocked(api.agentList).mockResolvedValue([
       claude(),
