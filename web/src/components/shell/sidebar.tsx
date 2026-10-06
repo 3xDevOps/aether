@@ -276,11 +276,11 @@ function NavRows({ surfaces: list }: { surfaces: ReturnType<typeof surfaces> }) 
   const navigate = useStore((s) => s.navigate)
   return (
     <ul>
-      {list.map(({ name, label, Icon }) => (
+      {list.map(({ name, label, Icon, tabs }) => (
         <li key={name}>
           <ListRow
-            selected={current === name}
-            aria-current={current === name ? 'page' : undefined}
+            selected={current === name || tabs?.includes(current)}
+            aria-current={current === name || tabs?.includes(current) ? 'page' : undefined}
             leading={<Icon />}
             onClick={() => navigate(name)}
           >

@@ -3,7 +3,6 @@ import { ArrowUpCircle, Keyboard, User } from '@/components/icons'
 import { ConnectionDot, connectionLabel } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Menu,
   MenuContent,
@@ -19,7 +18,7 @@ import {
 } from '@/components/ui/menu'
 import { useUpdateNotice } from '@/components/update-banner'
 import { useIsMobile } from '@/lib/breakpoints'
-import { PersonalSections } from '@/routes/members/personal'
+import { ProfileDialog } from '@/routes/members/personal'
 import { TeamSummary } from '@/routes/team/budget'
 import { useStore } from '@/store'
 import type { Theme } from '@/store/ui'
@@ -116,16 +115,7 @@ export function SidebarFooter() {
           <TeamSummary heading={<><MenuSeparator /><MenuLabel>Team</MenuLabel></>} />
         </MenuContent>
       </Menu>
-      <Dialog open={profile} onOpenChange={setProfile}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Profile</DialogTitle>
-          </DialogHeader>
-          <div className="flex min-w-0 flex-col gap-4">
-            <PersonalSections />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ProfileDialog open={profile} onOpenChange={setProfile} />
     </div>
   )
 }

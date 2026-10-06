@@ -10,7 +10,6 @@ import {
   MonitorSmartphone,
   Settings,
   ShieldQuestion,
-  SlidersHorizontal,
   SquareTerminal,
   Users,
   type LucideIcon,
@@ -25,6 +24,9 @@ export interface Surface {
   /** `nav` rows sit in the sidebar, `admin` rows under its hairline, and
    * `palette` destinations are reached from the command palette only. */
   place: 'nav' | 'admin' | 'palette'
+  keywords?: string
+  /** Other route names that are tabs of this page. */
+  tabs?: string[]
 }
 
 export function surfaces(cap: Capability, admin = false): Surface[] {
@@ -41,16 +43,14 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
   if (cap.hasWS('terminal'))
     list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav' })
   if (cap.hasMethod('agent.list'))
-    list.push({ name: 'agents', label: 'Agents', Icon: Bot, place: 'nav' })
+    list.push({ name: 'agents', label: 'Agents', Icon: Bot, place: 'nav', keywords: 'Agent config files configuration' })
   if (cap.hasMethod('template.save'))
     list.push({ name: 'templates', label: 'Templates', Icon: FileText, place: 'nav' })
   if (cap.hasMethod('member.list'))
-    list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette' })
+    list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'] })
   list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin' })
   if (cap.hasMethod('approval.list'))
     list.push({ name: 'approvals', label: 'Approvals', Icon: ShieldQuestion, place: 'palette' })
-  if (cap.hasMethod('config.roots') && cap.hasMethod('config.import'))
-    list.push({ name: 'configuration', label: 'Agent config files', Icon: SlidersHorizontal, place: 'palette' })
   if (cap.hasMethod('member.device.list'))
     list.push({ name: 'devices', label: 'Devices', Icon: MonitorSmartphone, place: 'palette' })
   if (cap.hasMethod('workspace.list'))
