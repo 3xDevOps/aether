@@ -102,7 +102,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
           author={name(row.authorID ?? ctx.ownerID)}
           meta={
             <>
-              {row.delivery && row.delivery !== 'Sent' && (
+              {row.delivery && (
                 <span className={row.delivery === 'Not sent' || row.delivery === 'Denied' ? 'text-state-failed' : undefined}>
                   {row.delivery === 'Queued' && row.deliverAfter ? <DeliveryCountdown deliverAfter={row.deliverAfter} /> : row.delivery}
                 </span>
