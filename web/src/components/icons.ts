@@ -66,6 +66,13 @@ import {
   MessageCircleQuestion as LucideMessageCircleQuestion,
   CornerDownRight as LucideCornerDownRight,
   ClipboardCheck as LucideClipboardCheck,
+  File as LucideFile,
+  Folder as LucideFolder,
+  FolderPlus as LucideFolderPlus,
+  ListFilter as LucideListFilter,
+  CircleHelp as LucideCircleHelp,
+  Reply as LucideReply,
+  ArrowRight as LucideArrowRight,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -148,3 +155,10 @@ export const CircleX = icon(LucideCircleX)
 export const MessageCircleQuestion = icon(LucideMessageCircleQuestion)
 export const CornerDownRight = icon(LucideCornerDownRight)
 export const ClipboardCheck = icon(LucideClipboardCheck)
+export const File = icon(LucideFile)
+export const Folder = icon(LucideFolder)
+export const FolderPlus = icon(LucideFolderPlus)
+export const ListFilter = icon(LucideListFilter)
+export const CircleHelp = icon(LucideCircleHelp)
+export const Reply = icon(LucideReply)
+export const ArrowRight = icon(LucideArrowRight)
