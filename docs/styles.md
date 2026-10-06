@@ -76,6 +76,10 @@ for callouts and request cards; `bg-accent-soft` likewise. Diffs use
 `text-diff-add`/`text-diff-del` (the done and failed colours) and
 `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
+`web/src/design-system.test.ts` checks every text tier on every surface, the
+accent text, the states and the diff colours for 4.5:1, and control borders
+and `--icon-faint` on canvas for 3:1, in both themes.
+
 Member colours are the only arbitrary server data applied inline, on avatars,
 attribution rails and the Map's owner boundaries. Identity colour never
 replaces run-state colour.
@@ -86,6 +90,17 @@ The pre-v2 names (`--background`, `--foreground`, `--card`, `--sidebar`,
 `--state-needs-attention`, `--state-idle` and the HeroUI names) remain as
 aliases of these tokens until every screen is rebuilt. Do not use them in new
 code.
+
+## Enforcement
+
+`web/src/design-system.test.ts` scans `web/src` and fails on sizes outside
+the scale, Tailwind palette colours, `@heroui` imports, `lucide-react`
+imports outside `web/src/components/icons.ts`, lucide's alias names
+(`XIcon`, `Loader2`), the misspelled `state-attention`, `state-success` and
+`state-warn`, bare `<button>`, `opacity-*` in the sidebar and board, and
+restyling a `components/ui` primitive through `className`. Each rule carries a legacy list of files that predate it; a
+rebuilt file leaves the list, and the test fails if a listed file already
+complies.
 
 ## Icons
 
