@@ -90,8 +90,10 @@ turn (`injected`).
 
 The session reports **working** when a turn starts and **idle** when it ends,
 so an idle enhanced run shows Needs you exactly like a Standard run whose
-agent reports its turns. Any frame from the agent counts as activity for
-stall detection.
+agent reports its turns. A turn whose prompt the agent fails parks the run
+with the reason `enhanced turn failed: <error>`; it is not a turn end, so a
+reported outcome waits for the next turn that ends normally. Any frame from
+the agent counts as activity for stall detection.
 
 ## Restarts and failures
 

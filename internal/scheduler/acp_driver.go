@@ -42,8 +42,9 @@ var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not runnin
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
 const (
-	acpFailedReason = "enhanced session failed: "
-	acpEndedReason  = "enhanced session ended: "
+	acpFailedReason     = "enhanced session failed: "
+	acpEndedReason      = "enhanced session ended: "
+	acpTurnFailedReason = "enhanced turn failed: "
 )
 
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
@@ -268,9 +269,15 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		MCPServers: mcp,
 		SessionID:  sessionID,
 		Logger:     slog.Default().With("run", runID),
-		OnState: func(working bool, _ string) {
+		OnState: func(working bool, _ string, failed error) {
 			report := agentstatus.Report{State: agentstatus.Working}
-			if !working {
+			switch {
+			case working:
+			case failed != nil:
+				// Not a turn end: a waiting outcome report must not finish
+				// the run on a turn that failed.
+				report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
+			default:
 				report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 			}
 			d.report(runID, report)

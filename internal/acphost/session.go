@@ -37,8 +37,9 @@ type Config struct {
 
 	// OnState reports execution state: working at every prompt start,
 	// idle at every turn end with the stop reason, and idle once a
-	// restored session opens.
-	OnState func(working bool, reason string)
+	// restored session opens. failed is the error a turn's prompt failed
+	// with while the agent stayed connected.
+	OnState func(working bool, reason string, failed error)
 	// OnInputs reports the complete set of pending requests whenever it
 	// changes and once a restored session opens; an empty set clears them.
 	OnInputs func(pending []domain.RunInputRequest)
@@ -164,7 +165,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.mu.Lock()
 		s.inputsLocked()
 		if s.cfg.OnState != nil {
-			s.callback(func() { s.cfg.OnState(false, "") })
+			s.callback(func() { s.cfg.OnState(false, "", nil) })
 		}
 		s.mu.Unlock()
 	}
@@ -327,7 +328,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock) *turnAck {
 	s.userMessageLocked(blocks)
 	s.callback(func() {
 		if s.cfg.OnState != nil {
-			s.cfg.OnState(true, "prompt")
+			s.cfg.OnState(true, "prompt", nil)
 		}
 	})
 	go s.runTurn(blocks, ack)
@@ -377,12 +378,13 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	}
 	s.proj.endTurn()
 	reason := stop
+	var failed error
 	if err != nil {
 		if s.conn.closed() {
 			reason = "interrupted"
 			s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
 		} else {
-			reason = "error"
+			reason, failed = "error", err
 			s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})
 		}
 	}
@@ -396,7 +398,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	}
 	s.callback(func() {
 		if s.cfg.OnState != nil {
-			s.cfg.OnState(false, reason)
+			s.cfg.OnState(false, reason, failed)
 		}
 	})
 }
@@ -643,7 +645,7 @@ func (s *Session) watch() {
 		s.turnActive = false
 		s.callback(func() {
 			if s.cfg.OnState != nil {
-				s.cfg.OnState(false, "interrupted")
+				s.cfg.OnState(false, "interrupted", nil)
 			}
 		})
 	}

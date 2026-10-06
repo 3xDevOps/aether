@@ -182,7 +182,7 @@ func newRecorder() *recorder {
 }
 
 func (r *recorder) config(c Config) Config {
-	c.OnState = func(working bool, reason string) {
+	c.OnState = func(working bool, reason string, _ error) {
 		r.mu.Lock()
 		if working {
 			r.states = append(r.states, "working:"+reason)

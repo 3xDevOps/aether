@@ -297,6 +297,32 @@ func TestEnhancedRunFormAnswerCarriesValues(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the agent's use of the form answer", assistantSaid(`form: accept {"db":"postgres"}`))
 }
 
+// A failed turn is not a turn end: an armed outcome report waits for one
+// that succeeds.
+func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.FinishReported(t.Context(), run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptRefuse, false); err == nil {
+		t.Fatal("Inject of a refused prompt succeeded")
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if !strings.HasPrefix(got.Reason, acpTurnFailedReason) || !strings.Contains(got.Reason, "Authentication required") {
+		t.Fatalf("reason %q", got.Reason)
+	}
+
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+}
+
 func TestEnhancedRunCancel(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)

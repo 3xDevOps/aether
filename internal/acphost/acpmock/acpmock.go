@@ -28,6 +28,8 @@ const (
 	// PromptAskForm makes the agent ask a form question and reply with the
 	// answer: "form: <action> <content as JSON>".
 	PromptAskForm = "ask form"
+	// PromptRefuse makes the agent refuse the prompt with authRequired.
+	PromptRefuse = "refuse"
 )
 
 type Fixture struct {
@@ -193,6 +195,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		}
 		a.text(ctx, "permission: "+answer)
 		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptRefuse:
+		return nil, acp.NewAuthRequired(nil)
 	case PromptAskForm:
 		res, err := acp.SendRequest[struct {
 			Action  string         `json:"action"`
