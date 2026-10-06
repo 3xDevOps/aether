@@ -480,11 +480,10 @@ func TestUpdateScripts(t *testing.T) {
 	}
 }
 
-// The dashboard cannot import this registry, so it repeats the shipped names
-// in the template picker and the glyph map; nothing else catches a missing one.
+// The dashboard cannot import this registry, so its glyph map repeats the
+// shipped names; nothing else catches a missing one.
 func TestDashboardListsEveryShippedHarness(t *testing.T) {
 	for _, file := range []string{
-		"../../web/src/routes/templates/index.tsx",
 		"../../web/src/components/ui/agent-glyph.tsx",
 	} {
 		source, err := os.ReadFile(file)
