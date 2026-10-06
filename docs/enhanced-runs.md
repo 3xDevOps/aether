@@ -64,10 +64,12 @@ the agent in, inspect the checkout, or run commands next to the agent
 ## Permissions and input
 
 The session starts in the agent's automatic mode: routine actions proceed
-and risky ones ask. Each question becomes pending input on the run (the run
-shows **Needs you**) and a `request` item in the log. Answer it from the
-dashboard, or with `run.input.answer` and the option id the agent offered.
-The first answer wins; a later one gets `CodeConflict` with
+and only risky ones ask, so requests are uncommon. Each request becomes
+pending input on the run (the run shows **Needs you**) and a `request` item
+in the log. The dashboard cannot answer it yet; its controls arrive with
+the Session view. Until then, answer with `run.input.answer`, the request
+id and the option id the agent offered, plus `values` for an accepted form
+question ([local-gateway.md](local-gateway.md)). The first answer wins; a later one gets `CodeConflict` with
 `data.reason: "already_answered"`. Cancelling the turn (`run.acp.cancel`)
 answers every pending request `cancelled`. `run.acp.set_option` changes a
 config option the agent lists, such as its mode or model.
