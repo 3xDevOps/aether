@@ -100,8 +100,8 @@ export function sortByCreated(approvals: Approval[]): Approval[] {
   return [...approvals].sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
-/** How long a failed single-workspace read waits before its one retry. */
 const retryMs = 5000
+const maxRetryMs = 60_000
 /** The inbox error a single-workspace read set, so only that read's success clears it. */
 const readErrors = new WeakMap<RootStore, string>()
 
@@ -121,10 +121,10 @@ export function applyApprovalEvent(store: RootStore, client: Api, ev: Event): vo
     return
   }
   if (p.decision !== 'requested' && !s.showDecided) return
-  readInbox(store, client, ev.workspace_id, true)
+  readInbox(store, client, ev.workspace_id)
 }
 
-export function readInbox(store: RootStore, client: Api, workspaceID: string, retry: boolean): void {
+export function readInbox(store: RootStore, client: Api, workspaceID: string, attempt = 0): void {
   coalesce(store, `approvals:${workspaceID}`, async () => {
     const before = store.getState()
     try {
@@ -140,13 +140,14 @@ export function readInbox(store: RootStore, client: Api, workspaceID: string, re
       now.setInbox(workspaceID, list)
       if (now.inboxError !== null && now.inboxError === readErrors.get(store)) now.setInboxError(null)
     } catch (err) {
-      // An unreadable queue must not render as empty. Full reads come only
-      // on connect, reconnect and wake, so one retry keeps a blip from
-      // pinning the error for the session.
       const error = message(err)
       readErrors.set(store, error)
       store.getState().setInboxError(error)
-      if (retry) setTimeout(() => readInbox(store, client, workspaceID, false), retryMs)
+      setTimeout(() => {
+        const now = store.getState()
+        if (attempt > 0 && (now.connection !== 'live' || now.inboxError === null)) return
+        readInbox(store, client, workspaceID, attempt + 1)
+      }, Math.min(retryMs * 2 ** attempt, maxRetryMs))
     }
   })
 }

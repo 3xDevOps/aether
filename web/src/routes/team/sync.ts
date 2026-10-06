@@ -74,7 +74,7 @@ export async function refreshInbox(store: RootStore, client: Api = api): Promise
           if (now.inboxRequest !== id) return null
           // An approval event applied meanwhile is newer than this answer.
           if (now.inboxEvents[wsp] === s.inboxEvents[wsp]) now.setInbox(wsp, list)
-          else readInbox(store, client, wsp, true)
+          else readInbox(store, client, wsp)
           return null
         })
         .catch(message),

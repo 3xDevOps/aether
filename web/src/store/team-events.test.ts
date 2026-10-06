@@ -88,6 +88,35 @@ describe('team state from events', () => {
     expect(approvalList).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps retrying a failed list read with backoff while the stream is live', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      store.setState({ connection: 'live' })
+      const approvalList = vi.fn(async () => {
+        throw new Error('approval.list: database is locked')
+      })
+      const client = fakeApi({ approvalList })
+
+      await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(approvalList).toHaveBeenCalledTimes(1)
+      let calls = 1
+      for (const wait of [5000, 10_000, 20_000, 40_000, 60_000, 60_000]) {
+        await vi.advanceTimersByTimeAsync(wait - 1)
+        expect(approvalList).toHaveBeenCalledTimes(calls)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(approvalList).toHaveBeenCalledTimes(++calls)
+      }
+
+      store.getState().setInboxError(null)
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(approvalList).toHaveBeenCalledTimes(calls)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('applies a budget event and re-reads the budget after a metered result', async () => {
     const store = seeded()
     store.getState().setBudget(budget(workspace.id))
