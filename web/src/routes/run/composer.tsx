@@ -28,6 +28,8 @@ interface ComposerProps {
   room: RunRoom
   textarea: React.RefObject<HTMLTextAreaElement | null>
   onFocusChange: (focused: boolean) => void
+  /** The gate can keep the box unmounted, so focusing waits for it to mount. */
+  autoFocus?: boolean
   dock?: React.ReactNode
 }
 
@@ -54,8 +56,9 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, value, onChange, onFocusChange, onSend, onQueue, placeholder, describedBy, menu, onKeyDown, combobox }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, placeholder, describedBy, menu, onKeyDown, combobox }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
+  autoFocus?: boolean
   value: string
   onChange: (value: string, caret: number) => void
   onFocusChange: (focused: boolean) => void
@@ -69,6 +72,9 @@ function ComposerBox({ textarea, value, onChange, onFocusChange, onSend, onQueue
 }) {
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    if (autoFocus) textarea.current?.focus()
+  }, [autoFocus, textarea])
   useKeybindings('composer', focused && !coarse ? {
     'composer-send': (event) => {
       event.preventDefault()
@@ -113,7 +119,7 @@ function ComposerBox({ textarea, value, onChange, onFocusChange, onSend, onQueue
   )
 }
 
-function StandardComposer({ run, agent, room, textarea, onFocusChange }: ComposerProps) {
+function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange }: ComposerProps) {
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -170,6 +176,7 @@ function StandardComposer({ run, agent, room, textarea, onFocusChange }: Compose
         )}
         <ComposerBox
           textarea={textarea}
+          autoFocus={autoFocus}
           value={body}
           onChange={setBody}
           onFocusChange={onFocusChange}
@@ -244,7 +251,7 @@ function useQueueHeld(active: boolean): boolean {
   return held
 }
 
-function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: ComposerProps) {
+function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock }: ComposerProps) {
   const self = useSelf()
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -388,6 +395,7 @@ function EnhancedComposer({ run, agent, textarea, onFocusChange, dock }: Compose
         )}
         <ComposerBox
           textarea={textarea}
+          autoFocus={autoFocus}
           value={body}
           onChange={(value, at) => {
             setBody(value)

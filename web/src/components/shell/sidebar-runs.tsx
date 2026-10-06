@@ -256,6 +256,7 @@ function AnswerButton({ run }: { run: RunRecord }) {
       tabIndex={-1}
       onClick={() => {
         if (action.kind === 'approve' && approval) void approveRequest(run.id, approval)
+        else if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' })
         else {
           const route = needsYouRoute(run, ctx)
           navigate(route.name, route.params)

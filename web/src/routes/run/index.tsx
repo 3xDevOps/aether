@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
@@ -37,7 +37,7 @@ function RunRoute({ params }: RouteProps) {
   const identityKey = useStore((s) => s.identityKey)
   const epoch = useStore((s) => s.terminalCacheEpoch)
   if (!run) return <MissingRun />
-  return <RunFrame key={JSON.stringify([identityKey, epoch, run.id, run.created_at])} run={run} requested={params.view} />
+  return <RunFrame key={JSON.stringify([identityKey, epoch, run.id, run.created_at])} run={run} params={params} />
 }
 
 const switchBeside = 720
@@ -59,7 +59,7 @@ function useVisited(view: RunView) {
   return visited.current
 }
 
-function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
+function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'] }) {
   const cap = useCapability()
   const mobile = useIsMobile()
   const inline = useMediaQuery(inlineDetails)
@@ -77,7 +77,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
   const [column, narrow] = useNarrow(switchBeside)
 
   const views = runViews.filter((view) => view !== 'browser' || cap.hasMethod('dev.browser.status'))
-  const asked = isRunView(requested) ? requested : remembered
+  const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
 
@@ -115,6 +115,11 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
       requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(dockedRequestID)?.focus()))
     },
   }
+
+  const [composeRequested, setComposeRequested] = useState(false)
+  useEffect(() => {
+    if (params.focus === 'composer') setComposeRequested(true)
+  }, [params])
 
   const step = (delta: number) => go(views[(views.indexOf(view) + delta + views.length) % views.length]!)
   useKeybindings('run', {
@@ -172,7 +177,11 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
                 nav={nav}
                 active={view === 'session'}
                 textarea={textarea}
-                onComposing={setComposing}
+                focusComposer={composeRequested}
+                onComposing={(focused) => {
+                  setComposing(focused)
+                  if (focused) setComposeRequested(false)
+                }}
                 shells={shells}
                 switchable={switchable}
               />

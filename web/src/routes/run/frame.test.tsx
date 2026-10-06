@@ -202,6 +202,15 @@ describe('the session composer', () => {
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
+  it('focuses the composer when the route asks for it', async () => {
+    const View = lookupRoute('run')!
+    useStore.getState().upsertRun(run())
+    const params = { runId: 'run_1', view: 'session', focus: 'composer' }
+    useStore.setState({ route: { name: 'run', params } })
+    render(<View params={params} />)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message the agent' })))
+  })
+
   it('says a message waits for delivery when the viewer does not control the run', () => {
     open({}, 'session')
     expect(screen.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeDefined()

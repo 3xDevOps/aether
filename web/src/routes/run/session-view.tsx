@@ -97,13 +97,14 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
   return text
 }
 
-export function SessionView({ run, agent, room, nav, active, textarea, onComposing, shells, switchable }: {
+export function SessionView({ run, agent, room, nav, active, textarea, focusComposer, onComposing, shells, switchable }: {
   run: RunRecord
   agent: AgentTerminal
   room: RunRoom
   nav: RunNavigation
   active: boolean
   textarea: React.RefObject<HTMLTextAreaElement | null>
+  focusComposer: boolean
   onComposing: (composing: boolean) => void
   shells: RunShells
   switchable: boolean
@@ -284,7 +285,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
         </div>
       )}
-      <Composer run={run} agent={agent} room={room} textarea={textarea} onFocusChange={onComposing} dock={dock || undefined} />
+      <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>
   )

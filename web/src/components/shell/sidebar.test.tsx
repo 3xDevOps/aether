@@ -94,6 +94,15 @@ describe('run rows', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
+  it('replies to an idle run from its Session composer', () => {
+    render(<AppShell />)
+
+    const row = runList().getByRole('button', { name: /^Needs you · answer the schema question/ })
+    fireEvent.click(within(row.closest('[data-slot="list-row"]') as HTMLElement).getByRole('button', { name: 'Reply' }))
+
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_2', view: 'session', focus: 'composer' } })
+  })
+
   it('keeps one tab stop in the list and walks it with j, k and the arrows', () => {
     render(<AppShell />)
     const rows = runList().getAllByRole('button').filter((b) => b.hasAttribute('data-run-row'))
