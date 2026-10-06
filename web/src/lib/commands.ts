@@ -1,8 +1,33 @@
 // Run and board verbs as data: the palette and the action buttons render the same list.
 
-import { Archive, ArchiveRestore, Cable, CircleCheck, Download, FileText, House, List, type LucideIcon, MessageSquarePlus, Monitor, Moon, Network, PackageX, Pause, Play, RefreshCw, Rocket, Shield, ShieldOff, Square, Sun, Trash2, UserPlus } from '@/components/icons'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
+import {
+  Archive,
+  ArchiveRestore,
+  Cable,
+  CircleCheck,
+  Download,
+  FileText,
+  House,
+  List,
+  type LucideIcon,
+  MessageSquarePlus,
+  Monitor,
+  Moon,
+  Network,
+  PackageX,
+  Pause,
+  Play,
+  RefreshCw,
+  Rocket,
+  Shield,
+  ShieldOff,
+  Square,
+  Sun,
+  Trash2,
+  UserPlus,
+} from '@/components/icons'
 import { api, ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'

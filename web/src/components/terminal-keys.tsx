@@ -2,8 +2,8 @@
 // so the replay gate and `disableStdin` apply to a tap as to a keystroke.
 
 import type { Terminal } from '@xterm/xterm'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from '@/components/icons'
 import type * as React from 'react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from '@/components/icons'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

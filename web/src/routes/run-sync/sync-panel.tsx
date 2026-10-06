@@ -1,7 +1,7 @@
 // Mirrors sync.status into the store so the board badge and this panel agree.
 
-import { CircleAlert, CircleCheck, RefreshCw } from '@/components/icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { CircleAlert, CircleCheck, RefreshCw } from '@/components/icons'
 import { message } from '@/lib/format'
 import type { CardSlotProps } from '@/components/slots'
 import { Button } from '@/components/ui/button'

@@ -1,5 +1,5 @@
-import { TriangleAlert } from '@/components/icons'
 import { Fragment } from 'react'
+import { TriangleAlert } from '@/components/icons'
 import { registerSlot, type CardSlotProps } from '@/components/slots'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'

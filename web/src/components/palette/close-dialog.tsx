@@ -1,8 +1,8 @@
 // Recording either outcome also makes the server stop a still-live container.
 
-import { Archive, GitMerge } from '@/components/icons'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { Archive, GitMerge } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

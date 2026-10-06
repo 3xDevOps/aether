@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CircleAlert, MonitorCog, ServerCog } from '@/components/icons'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
+import { CircleAlert, MonitorCog, ServerCog } from '@/components/icons'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import {

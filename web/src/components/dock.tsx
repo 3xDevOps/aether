@@ -1,6 +1,6 @@
-import { ChevronDown, ChevronsDown, ChevronsUp, ChevronUp, Plus, X } from '@/components/icons'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
+import { ChevronDown, ChevronsDown, ChevronsUp, ChevronUp, Plus, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { coarsePointer, useDrag, useMediaQuery, useWindowHeight } from '@/lib/hooks'
 import { onTabListKeyDown, splitterTarget } from '@/lib/keys'

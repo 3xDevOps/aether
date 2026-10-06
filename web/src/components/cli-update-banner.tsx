@@ -5,8 +5,8 @@
 // hands over the sudo command rather than a button that could not work.
 
 import { useEffect, useState } from 'react'
-import { CircleCheck, Download, LoaderCircle, TriangleAlert } from '@/components/icons'
 import { CopyableCommand } from '@/components/copyable-command'
+import { CircleCheck, Download, LoaderCircle, TriangleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,

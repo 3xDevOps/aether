@@ -1,5 +1,5 @@
-import { Copy } from '@/components/icons'
 import { useRef } from 'react'
+import { Copy } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { cn, focusRing } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'

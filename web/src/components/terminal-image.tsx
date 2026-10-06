@@ -1,5 +1,4 @@
 import type * as React from 'react'
-import { LoaderCircle } from '@/components/icons'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import {
@@ -10,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, MAX_TERMINAL_IMAGE_BYTES, TERMINAL_IMAGE_TYPES } from '@/lib/api'
 import { message } from '@/lib/format'
