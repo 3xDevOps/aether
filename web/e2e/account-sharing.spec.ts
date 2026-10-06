@@ -109,7 +109,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     dialog = await openLaunch()
     await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to claude, codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
+      `${aliceName} is not logged in to Claude Code, Codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
     )
     for (const agent of [/^Claude Code/, /^Codex/]) {
       await expect(dialog.getByRole('radio', { name: agent })).toBeDisabled()
@@ -126,7 +126,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
+      `${aliceName} is not logged in to Codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
     )
     await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()

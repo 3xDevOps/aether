@@ -13,7 +13,7 @@ export function sameWorker(a: WorkerChoice, b: WorkerChoice): boolean {
 }
 
 function refusal(member: Member, agent: AgentInfo): string | null {
-  if (agent.login_missing) return `${member.display_name} is not logged in to ${agent.name}`
+  if (agent.login_missing) return `${member.display_name} is not logged in to ${agentLabel(agent, agent.name)}`
   if (agent.own_account_only) return 'your own definition runs only on your own account'
   return agent.unavailable ?? null
 }

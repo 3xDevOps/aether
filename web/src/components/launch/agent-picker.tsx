@@ -88,7 +88,7 @@ export function RefusalNotes({ agents, accountName, accountField }: { agents: Ag
   const ownOnly = agents.filter((agent) => agent.installed && agent.own_account_only)
   const unavailable = agents.filter((agent) => agent.installed && agent.unavailable)
   if (!loggedOut.length && !ownOnly.length && !unavailable.length) return null
-  const names = (list: AgentInfo[]) => list.map((agent) => agent.name).join(', ')
+  const names = (list: AgentInfo[]) => list.map((agent) => agentLabel(agent, agent.name)).join(', ')
   return (
     <Callout tone="needs-you" role="status">
       {loggedOut.length > 0 && (
@@ -103,7 +103,7 @@ export function RefusalNotes({ agents, accountName, accountField }: { agents: Ag
       )}
       {unavailable.map((agent) => (
         <p key={agent.name}>
-          {agent.name} cannot launch on this account: {agent.unavailable}
+          {agentLabel(agent, agent.name)} cannot launch on this account: {agent.unavailable}
         </p>
       ))}
     </Callout>

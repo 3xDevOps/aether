@@ -213,7 +213,7 @@ describe('new run', () => {
 
       const notes = await screen.findByRole('status')
       expect(notes.textContent).toBe(
-        'Bob is not logged in to claude, so it cannot launch on this account. Bob logs in from the terminal dock on their own Board; then open this dialog again.'
+        'Bob is not logged in to Claude Code, so it cannot launch on this account. Bob logs in from the terminal dock on their own Board; then open this dialog again.'
           + 'Your own agent definitions run only on your own account: myagent. To launch one, choose your own account, marked (you), under Account.'
           + `codex cannot launch on this account: ${refusal}`,
       )
@@ -307,7 +307,7 @@ describe('swarm', () => {
 
     const label = (name: RegExp) => screen.getByRole('checkbox', { name }).closest('label')?.textContent
     expect(screen.getByRole('checkbox', { name: /Bob · Claude Code/ }).hasAttribute('disabled')).toBe(true)
-    expect(label(/Bob · Claude Code/)).toBe('Bob · Claude CodeBob is not logged in to claude')
+    expect(label(/Bob · Claude Code/)).toBe('Bob · Claude CodeBob is not logged in to Claude Code')
     expect(label(/Bob · codex/)).toBe(`Bob · codex${refusal}`)
     expect(label(/Bob · myagent/)).toBe('Bob · myagentyour own definition runs only on your own account')
   })
