@@ -16,7 +16,7 @@ import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
 import { needsYou } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
-import { modeLabel, useAgentName } from '@/routes/run/agent-name'
+import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
@@ -98,10 +98,9 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
   }
 }
 
-function StateLine({ run }: { run: RunRecord }) {
+function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const { state, reason } = useRunPresentation(run)
   const owner = useStore((s) => s.members[run.member_id])
-  const agentName = useAgentName(run.harness)
   const meta = [agentName, modeLabel[run.mode] ?? run.mode].join(' · ')
   return (
     <div className="@container/state w-full min-w-0">
@@ -153,8 +152,10 @@ export function RunHeader({
   onDetails,
   onCaptures,
   onEvents,
+  agentName,
 }: {
   run: RunRecord
+  agentName: string
   view: RunView
   views: RunView[]
   agent: AgentTerminal
@@ -181,7 +182,7 @@ export function RunHeader({
             {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can steer or stop this run" className="size-3.5 shrink-0 text-muted" />}
           </span>
         }
-        stateLine={!composing && <StateLine run={run} />}
+        stateLine={!composing && <StateLine run={run} agentName={agentName} />}
         onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
         viewSwitch={!narrow && <ViewSwitch views={views} />}
         actionsLabel="Run actions"

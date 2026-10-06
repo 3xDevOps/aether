@@ -5,7 +5,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { api, ApiError } from '@/lib/api'
 import { canLaunch } from '@/lib/commands'
 import { message } from '@/lib/format'
-import type { AgentInfo } from '@/lib/types'
+import type { AgentsState } from '@/routes/agents/use-agents'
 import { useStore } from '@/store'
 import type { OnboardingStep } from '@/store/ui'
 import { useCapability, useSelfRole } from '@/store/hooks'
@@ -14,8 +14,6 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 const codeUnavailable = -32004
 
 type BaseCheck = { workspace: string; missing: boolean; error: string | null }
-
-export type AgentsState = AgentInfo[] | 'loading' | 'unknown'
 
 export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentsState; hiddenByMine: boolean }) {
   const caps = useCapability()

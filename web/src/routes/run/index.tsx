@@ -8,6 +8,7 @@ import { useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import { BrowserView } from '@/routes/browser'
 import { ChangesView } from '@/routes/diff'
+import { agentDisplayNames, useAgents } from '@/routes/agents/use-agents'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useAgentTerminal } from '@/routes/run/agent-terminal'
 import { CapturesDialog } from '@/routes/run/captures'
@@ -80,6 +81,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
   const visited = useVisited(view)
 
   const agent = useAgentTerminal(run)
+  const agentName = agentDisplayNames(useAgents())[run.harness] ?? run.harness
   const shells = useRunShells(run.id)
   const room = useRunRoom(run, agent.roomControl)
 
@@ -125,7 +127,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
   }
   const openCaptures = openDialog('captures')
   const details = (inset: boolean) => (
-    <RunDetails run={run} agent={agent} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
+    <RunDetails run={run} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
@@ -149,6 +151,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
           }}
           onCaptures={openCaptures}
           onEvents={openDialog('events')}
+          agentName={agentName}
         />
         <div className="relative min-h-0 flex-1">
           {visited.has('session') && (

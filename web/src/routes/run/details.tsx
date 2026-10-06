@@ -11,7 +11,7 @@ import { isRetainedRun } from '@/lib/commands'
 import { deletesInLabel } from '@/lib/format'
 import type { RoomMessage, RunMessage } from '@/lib/types'
 import { runLabel } from '@/lib/status'
-import { modeLabel, useAgentName } from '@/routes/run/agent-name'
+import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import { NeedsYouCards, useRunRequests } from '@/routes/run/requests'
@@ -138,8 +138,7 @@ function container(run: RunRecord): string {
   return isRetainedRun(run) ? 'Stopped, kept for reopening' : 'Removed'
 }
 
-function Facts({ run, agent, inset }: { run: RunRecord; agent: AgentTerminal; inset: boolean }) {
-  const agentName = useAgentName(run.harness)
+function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentTerminal; agentName: string; inset: boolean }) {
   const status = useStore((s) => s.roomStatus[run.id])
   const selfID = useStore((s) => s.info?.member.id)
   const controllerID = agent.localControl ? selfID : status?.controller?.member_id
@@ -170,8 +169,9 @@ function Facts({ run, agent, inset }: { run: RunRecord; agent: AgentTerminal; in
   )
 }
 
-export function RunDetails({ run, agent, room, nav, inset, noteDraft }: {
+export function RunDetails({ run, agent, agentName, room, nav, inset, noteDraft }: {
   run: RunRecord
+  agentName: string
   agent: AgentTerminal
   room: RunRoom
   nav: RunNavigation
@@ -193,7 +193,7 @@ export function RunDetails({ run, agent, room, nav, inset, noteDraft }: {
       </Section>
       <AgentMessages run={run} inset={inset} />
       <Notes run={run} room={room} inset={inset} draft={noteDraft} />
-      <Facts run={run} agent={agent} inset={inset} />
+      <Facts run={run} agent={agent} agentName={agentName} inset={inset} />
     </div>
   )
 }

@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { ViewHeader } from '@/components/view-header'
-import { api } from '@/lib/api'
 import { clearDonePlan, releaseFinishedPlan } from '@/lib/commands'
 import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { Column, type Placeholder } from '@/routes/board/column'
-import { EmptyBoard, type AgentsState } from '@/routes/board/empty-board'
+import { agentDisplayNames, useAgents } from '@/routes/agents/use-agents'
+import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -37,9 +37,7 @@ export function Board() {
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   const placeholder: Placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
-  const agentNames = Array.isArray(agents)
-    ? Object.fromEntries(agents.map((agent) => [agent.name, agent.display_name ?? agent.name]))
-    : {}
+  const agentNames = agentDisplayNames(agents)
 
   const column = (key: BoardColumn['key']) => columns.find((c) => c.key === key)!
   const finished = showArchived ? { ...column('finished'), cards: archivedCards } : column('finished')
@@ -152,24 +150,6 @@ function FinishedFooter({
       )}
     </div>
   )
-}
-
-function useAgents(): AgentsState {
-  const caps = useCapability()
-  const listable = caps.hasMethod('agent.list')
-  const [agents, setAgents] = useState<AgentsState>('loading')
-  useEffect(() => {
-    if (!listable) return
-    let live = true
-    api
-      .agentList()
-      .then((list) => live && setAgents(list))
-      .catch(() => live && setAgents('unknown'))
-    return () => {
-      live = false
-    }
-  }, [listable])
-  return listable ? agents : 'unknown'
 }
 
 registerRoute('board', Board)
