@@ -121,11 +121,13 @@ function accountsFor(access: AccountAccess, self: Member): Member[] {
 }
 
 export function UsageSection({ client = api }: { client?: UsageClient }) {
-  const member = useStore((s) => s.info?.member)
+  const selfID = useStore((s) => s.info?.member?.id ?? null)
   const connection = useStore((s) => s.connection)
-  const selfID = member?.id ?? null
   const [selectedID, setSelectedID] = useState<string | null>(selfID)
-  const [accounts, setAccounts] = useState<Member[]>(member ? [member] : [])
+  const [accounts, setAccounts] = useState<Member[]>(() => {
+    const self = useStore.getState().info?.member
+    return self ? [self] : []
+  })
   const [providers, setProviders] = useState<{ accountID: string; list: UsageProvider[] } | null>(null)
   const [failure, setFailure] = useState<Failure | null>(null)
   const [loading, setLoading] = useState(false)
@@ -142,16 +144,17 @@ export function UsageSection({ client = api }: { client?: UsageClient }) {
   }, [selfID])
 
   useEffect(() => {
-    if (!member || connection !== 'live') return
+    const self = useStore.getState().info?.member
+    if (!self || connection !== 'live') return
     let live = true
     client.accountList().then(
-      (access) => live && setAccounts(accountsFor(access, member)),
-      () => live && setAccounts([member]),
+      (access) => live && setAccounts(accountsFor(access, self)),
+      () => live && setAccounts([self]),
     )
     return () => {
       live = false
     }
-  }, [client, connection, member])
+  }, [client, connection, selfID])
 
   const request = useCallback(async (refresh: boolean) => {
     const account = selected.current
@@ -192,7 +195,7 @@ export function UsageSection({ client = api }: { client?: UsageClient }) {
   }, [connection, request, selectedID])
 
   const byName = useMemo(() => new Map((providers?.list ?? []).map((provider) => [provider.provider, provider])), [providers])
-  if (!member) return null
+  if (!selfID) return null
 
   return (
     <SettingsSection title="Usage">
