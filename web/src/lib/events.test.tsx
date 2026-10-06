@@ -3,7 +3,7 @@ import { FeedEntry } from '@/components/feed-entry'
 import { typeLabel } from '@/lib/events'
 import type { Event } from '@/lib/types'
 import { useStore } from '@/store'
-import { alice } from '@/test/fixtures'
+import { alice, run } from '@/test/fixtures'
 
 function renderRow(type: string, payload: unknown): HTMLElement {
   const event: Event = {
@@ -37,6 +37,19 @@ describe('feed rows', () => {
     const text = renderRow('run.outcome_seen', {}).textContent ?? ''
     expect(text).toContain('Outcome seen')
     expect(text).toContain('owner opened the finished run')
+  })
+
+  it('names both runs of an agent message and opens the sender', () => {
+    useStore.getState().upsertRun(run({ id: 'run_planner', title: 'Planner' }))
+    useStore.getState().upsertRun(run({ id: 'run_backend', title: 'Backend' }))
+    const row = renderRow('coord.message', {
+      message_id: 'msg-1', from_run_id: 'run_planner', to_run_id: 'run_backend', kind: 'question',
+    })
+    expect(row.textContent).toContain('Agent message')
+    expect(row.textContent).toContain('Planner → Backend · question')
+
+    within(row).getByRole('button', { name: 'Planner' }).click()
+    expect(useStore.getState().route).toMatchObject({ name: 'terminal', params: { runId: 'run_planner' } })
   })
 
   it('falls back to the wire string for a type it has never heard of', () => {

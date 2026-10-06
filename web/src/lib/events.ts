@@ -24,6 +24,8 @@ export const eventLabel = {
   'server.update': 'Server update',
   'workspace.room_message': 'Run Room message',
   'workspace.evidence_packet': 'Evidence packet',
+  'coord.message': 'Agent message',
+  'coord.message.acked': 'Agent message acknowledged',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel

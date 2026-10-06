@@ -3,6 +3,8 @@ import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
 import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
+  CoordMessageAckedPayload,
+  CoordMessagePayload,
   Event,
   GatewayCapabilities,
   GitBranchPayload,
@@ -23,6 +25,7 @@ import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
+import { inMessageScope, loadMessagePage } from '@/store/messages'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
@@ -556,6 +559,23 @@ export async function applyEvent(
       }
       break
     }
+    case 'coord.message': {
+      // The event carries no body: every loaded list the message belongs to
+      // re-reads its newest page.
+      const p = ev.payload as CoordMessagePayload
+      const scopes = Object.values(store.getState().messageLists)
+        .map((list) => list.scope)
+        .filter((scope) => inMessageScope(scope, p))
+      await Promise.all(scopes.map((scope) => loadMessagePage(store, client, scope)))
+      if (!(await refreshUnacked(store, client, p.to_run_id))) return false
+      break
+    }
+    case 'coord.message.acked': {
+      const p = ev.payload as CoordMessageAckedPayload
+      store.getState().applyMessageAcked(p.message_id, p.acked_at)
+      if (!(await refreshUnacked(store, client, p.to_run_id))) return false
+      break
+    }
     case 'workspace.evidence_packet': {
       // Only lists already visible; runs with no drawer open stay lazy.
       const runID = ev.run_id
@@ -575,6 +595,19 @@ export async function applyEvent(
   }
   store.getState().appendLiveEvent(ev)
   store.getState().noteSeq(ev.seq)
+  return true
+}
+
+/** False means the server could not be reached; a deleted run is not an error. */
+async function refreshUnacked(store: RootStore, client: Api, runID: string): Promise<boolean> {
+  if (!store.getState().runs[runID]) return true
+  try {
+    store.getState().upsertRun(await client.runGet(runID))
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return true
+    store.getState().setUnreachable(classifyUnreachable(err, store))
+    return false
+  }
   return true
 }
 

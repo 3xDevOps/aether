@@ -38,6 +38,7 @@ const filterTypes: EventType[] = [
   'workspace.budget',
   'run.cost',
   'run.overlap',
+  'coord.message',
   'git.branch',
   'run.protected',
   'sync.conflict',

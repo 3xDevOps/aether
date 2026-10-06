@@ -81,6 +81,33 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
   'server.update': (p) => join([p.phase, p.version, p.detail]),
   'workspace.room_message': (p) => join([p.kind, p.state, p.message_id]),
   'workspace.evidence_packet': (p) => join([p.trigger, p.packet_id]),
+  'coord.message': (p) => (
+    <span>
+      <RunName id={p.from_run_id} /> → <RunName id={p.to_run_id} /> · {String(p.kind ?? 'message')}
+    </span>
+  ),
+  'coord.message.acked': (p) => (
+    <span>
+      <RunName id={p.to_run_id} /> acknowledged <code>{String(p.message_id ?? '')}</code>
+    </span>
+  ),
+}
+
+/** A run named the way its card names it, opening the run when clicked. */
+function RunName({ id }: { id: unknown }) {
+  const runID = typeof id === 'string' ? id : ''
+  const run = useStore((s) => s.runs[runID])
+  const navigate = useStore((s) => s.navigate)
+  if (!run) return <code>{runID}</code>
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('terminal', { runId: run.id })}
+      className={cn(focusRing, 'hover:underline')}
+    >
+      {runLabel(run)}
+    </button>
+  )
 }
 
 function describe(event: Event): ReactNode {

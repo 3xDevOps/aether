@@ -50,6 +50,8 @@ export interface Run {
   profile_snapshot_id?: string
   /** Server-computed unanswered room questions; absent on older gateways. */
   unanswered_questions?: number
+  /** Agent mail addressed to the run that it has not acknowledged. */
+  unacked_messages?: number
   /** Correlated native requests; independent of execution status. */
   pending_inputs?: RunInputRequest[]
   /** Last run.status reason, sanitized like the event payload. */
@@ -636,6 +638,46 @@ export interface RunArchivedPayload {
   deletes_at: string | null
 }
 
+export type RunMessageKind = 'message' | 'question' | 'reply' | 'report'
+
+export interface RunMessage {
+  id: string
+  workspace_id: string
+  mission_id?: string
+  from_run_id: string
+  to_run_id: string
+  kind: RunMessageKind
+  correlation_id?: string
+  body: string
+  created_at: string
+  delivered_at?: string
+  acked_at?: string
+  outcome?: string
+  summary?: string
+  next_action?: string
+}
+
+export interface CoordMessagesListResult {
+  messages: RunMessage[]
+  next_before?: string
+}
+
+export interface CoordMessagePayload {
+  message_id: string
+  workspace_id: string
+  mission_id?: string
+  from_run_id: string
+  to_run_id: string
+  kind: RunMessageKind
+  correlation_id?: string
+}
+
+export interface CoordMessageAckedPayload {
+  message_id: string
+  to_run_id: string
+  acked_at: string
+}
+
 export type ApprovalDecision = 'requested' | 'approved' | 'denied'
 
 export interface Approval {
@@ -697,6 +739,7 @@ export interface TimelinePage {
 export interface TimelineQuery {
   workspace_id: string
   run_id?: string
+  mission_id?: string
   member_id?: string
   types?: string[]
   after_seq?: number

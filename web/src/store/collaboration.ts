@@ -79,7 +79,7 @@ function compareInstants(left: string, right: string): number {
 }
 
 
-const byCreated = <T extends { created_at: string; id: string }>(items: T[]) =>
+export const byCreated = <T extends { created_at: string; id: string }>(items: T[]) =>
   [...items].sort((a, b) => compareInstants(a.created_at, b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
 function mergeByID<T extends { id: string; updated_at: string }>(current: T[], incoming: T[]): T[] {

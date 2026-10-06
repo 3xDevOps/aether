@@ -518,6 +518,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runClose: vi.fn(async () => run({ status: 'merged' })),
     runHandoff: vi.fn(async () => ({})),
     runRoomList: vi.fn(async () => ({ messages: [] })),
+    coordMessagesList: vi.fn(async () => ({ messages: [] })),
     runRoomStatus: vi.fn(async (): Promise<RoomStatusResult> => ({
       workspace_id: workspace.id,
       run_id: 'run_1',

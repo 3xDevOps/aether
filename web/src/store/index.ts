@@ -18,6 +18,7 @@ import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
+import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import {
   createUiSlice,
@@ -56,6 +57,7 @@ export type RootState = ServerSlice &
   CollaborationSlice &
   LocalSlice &
   MissionsSlice &
+  MessagesSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -107,6 +109,7 @@ export function createRootStore() {
         ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
         ...createMissionsSlice(...a),
+        ...createMessagesSlice(...a),
         ...createUiSlice(...a),
       }),
       {

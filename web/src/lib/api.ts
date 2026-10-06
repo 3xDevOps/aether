@@ -10,6 +10,7 @@ import type {
   ConfigImportParams,
   ConfigImportResult,
   ConfigRoot,
+  CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
   Device,
@@ -593,6 +594,14 @@ export const api = {
     before?: string
     limit?: number
   }) => call<RoomMessageListResult>('run.room.list', params),
+  coordMessagesList: (params: {
+    workspace_id: string
+    mission_id?: string
+    run_id?: string
+    correlation_id?: string
+    before?: string
+    limit?: number
+  }) => call<CoordMessagesListResult>('coord.messages.list', params),
   runRoomStatus: (params: { workspace_id: string; run_id: string }, signal?: AbortSignal) =>
     call<RoomStatusResult>('run.room.status', params, signal),
   runRoomPost: (params: {
