@@ -2284,7 +2284,7 @@ count, and neither creates a second action inbox.
     decided requests are hidden); an unknown one reads that one workspace's
     `approval.list`. Each such event is counted per workspace, and a read
     that started before it - full or single - does not overwrite its
-    workspace; a single read is then repeated. A failed single read sets
+    workspace; that workspace is then read again on its own. A failed single read sets
     the inbox error and retries once after 5 s; its success clears the
     error.
   - `workspace.budget` carries the state, cap and spend, applied as they

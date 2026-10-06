@@ -68,16 +68,24 @@ describe('team state from events', () => {
     expect(store.getState().approvalsByRun.run_1).toBeUndefined()
   })
 
-  it('does not let a full read that started before an event overwrite it', async () => {
+  it('does not let a full read that started before an event overwrite it, and reads that workspace again', async () => {
     const store = seeded()
     store.getState().setInbox(workspace.id, [approval({ id: 'apr_1' })])
     const stale = Promise.withResolvers<ReturnType<typeof approval>[]>()
-    const read = refreshInbox(store, fakeApi({ approvalList: () => stale.promise }))
+    const fresh = Promise.withResolvers<ReturnType<typeof approval>[]>()
+    const approvalList = vi
+      .fn()
+      .mockImplementationOnce(() => stale.promise)
+      .mockImplementation(() => fresh.promise)
+    const read = refreshInbox(store, fakeApi({ approvalList }))
 
     await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_1', action: 'Bash', decision: 'approved' }), fakeApi())
     stale.resolve([approval({ id: 'apr_1' })])
     await read
     expect(store.getState().inbox[workspace.id]).toEqual([])
+    fresh.resolve([approval({ id: 'apr_2' })])
+    await vi.waitFor(() => expect(store.getState().inbox[workspace.id].map((a) => a.id)).toEqual(['apr_2']))
+    expect(approvalList).toHaveBeenCalledTimes(2)
   })
 
   it('applies a budget event and re-reads the budget after a metered result', async () => {

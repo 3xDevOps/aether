@@ -124,7 +124,7 @@ export function applyApprovalEvent(store: RootStore, client: Api, ev: Event): vo
   readInbox(store, client, ev.workspace_id, true)
 }
 
-function readInbox(store: RootStore, client: Api, workspaceID: string, retry: boolean): void {
+export function readInbox(store: RootStore, client: Api, workspaceID: string, retry: boolean): void {
   coalesce(store, `approvals:${workspaceID}`, async () => {
     const before = store.getState()
     try {

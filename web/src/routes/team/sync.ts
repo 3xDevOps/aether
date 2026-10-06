@@ -9,6 +9,7 @@ import { api, type Api } from '@/lib/api'
 import { onWake } from '@/lib/stream'
 import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
+import { readInbox } from '@/store/approvals'
 import type { FeedFilters } from '@/store/timeline'
 
 /** Presence expires after 45s server-side; a third of it keeps us online. */
@@ -70,10 +71,10 @@ export async function refreshInbox(store: RootStore, client: Api = api): Promise
         .approvalList(wsp, s.showDecided)
         .then((list) => {
           const now = store.getState()
+          if (now.inboxRequest !== id) return null
           // An approval event applied meanwhile is newer than this answer.
-          if (now.inboxRequest === id && now.inboxEvents[wsp] === s.inboxEvents[wsp]) {
-            now.setInbox(wsp, list)
-          }
+          if (now.inboxEvents[wsp] === s.inboxEvents[wsp]) now.setInbox(wsp, list)
+          else readInbox(store, client, wsp, true)
           return null
         })
         .catch(message),
