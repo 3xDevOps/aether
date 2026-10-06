@@ -134,7 +134,7 @@ const rows: {
     reason: 'Enhanced unavailable: adapter handshake failed',
   },
   {
-    id: 'worker-blocked',
+    id: 'blocked',
     run: record({ ...worker, status: 'needs-attention', reason: 'blocked: no database access' }),
     ctx: { runs: runRecords(integrator), missions: { mission_1: mission() } },
     reason: 'Worker blocked: no database access',
@@ -169,6 +169,14 @@ describe('needs you conditions', () => {
   it('needs nobody for a plain working run', () => {
     expect(needsYou(record(), stateContext())).toBeUndefined()
     expect(presentRun(record({ status: 'queued' }), stateContext()).state).toBe('working')
+  })
+
+  it("needs the owner for a standalone run's blocked report", () => {
+    const blocked = record({ status: 'needs-attention', reason: 'blocked: need database credentials' })
+    expect(presentRun(blocked, stateContext())).toMatchObject({
+      state: 'needs-you',
+      reason: 'Blocked: need database credentials',
+    })
   })
 
   it('says the agent idled when the turn ended without a stall', () => {

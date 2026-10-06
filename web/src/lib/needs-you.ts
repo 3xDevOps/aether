@@ -48,7 +48,7 @@ export type NeedsYouID =
   | 'integrator-down'
   | 'control-hold'
   | 'enhanced-failure'
-  | 'worker-blocked'
+  | 'blocked'
   | 'stopped'
   | 'unreviewed-finish'
 
@@ -316,16 +316,14 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) => `Enhanced unavailable: ${run.reason?.slice(enhancedPrefix.length).trim()}`,
   }),
   condition({
-    id: 'worker-blocked',
-    target: 'swarm',
+    id: 'blocked',
+    target: 'run',
     background: true,
     supervised: true,
-    holds: (run) =>
-      run.mission_role === 'worker' &&
-      run.status === 'needs-attention' &&
-      run.reason?.startsWith(blockedPrefix) === true,
-    resolvers: (run, ctx) => [swarmHuman(run, ctx)],
-    reason: (run) => `Worker blocked: ${run.reason?.slice(blockedPrefix.length)}`,
+    holds: (run) => run.status === 'needs-attention' && run.reason?.startsWith(blockedPrefix) === true,
+    resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
+    reason: (run) =>
+      `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
   }),
   condition({
     id: 'stopped',

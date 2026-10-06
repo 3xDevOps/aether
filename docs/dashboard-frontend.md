@@ -1020,7 +1020,7 @@ first that applies:
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
 | Enhanced failure (`enhanced:` reason) | owner | Enhanced unavailable: … |
-| Worker parked `blocked: <summary>` | accountable human | Worker blocked: … |
+| Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | Parked at `needs-attention` | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed finish (`outcome_unseen`) | owner | Finished, review the result |
 
@@ -1028,7 +1028,7 @@ A condition that applies to someone else leaves the run Working with
 "Waiting for Alice". A worker in a running swarm with a live integrator
 counts only for a control hold or a blocked report: the integrator handles
 its stops and requests. A Background (`headless`) run reaches Needs you only
-through the swarm rows, an Enhanced failure or an unreviewed finish. A
+through the swarm rows, a blocked report, an Enhanced failure or an unreviewed finish. A
 Working run's reason is what its agent is doing ("Reading src/auth.ts", from
 `run.agent`), else "Queued", "Starting" or "Agent working".
 
