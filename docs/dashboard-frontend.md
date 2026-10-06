@@ -1439,8 +1439,10 @@ epoch. Session and Terminal mount on first visit and stay mounted, laid out but
 and would resize the shared PTY; Changes and Browser mount only while shown, so
 a hidden Browser streams no screencast. The agent's attach lives in
 `useAgentTerminal` at frame level, so switching views never reattaches, and
-`useRunRoom` reads room history once per frame and polls presence every ten
-seconds with an abortable 15-second deadline.
+`useRunRoom` reads the newest room page once per frame, then follows
+`workspace.room_message` events; after the event stream reconnects it reads
+back to the cached history, as one page or more, so a gap is closed. It polls
+presence every ten seconds with an abortable 15-second deadline.
 
 The header is `PaneHeader size="run"`: title, then a state line with the
 shaped dot, the reason, "Claude Code · Standard" (`agent.list` display names,
@@ -1496,7 +1498,9 @@ terminal**, or "Answer it from the agent's session." when the run has no agent
 terminal; a teammate question offers **Reply**, the owner's own question is a
 plain message), `event` and `finished`. Request titles and that copy live in
 `lib/run-requests.ts`, shared with Details. A timeline steer that matches a
-room message is shown once. The log keeps the
+room message is shown once. **Show older messages** at the top pages room
+history back 100 messages at a time, and a failed history read shows the
+server's error with **Retry**. The log keeps the
 last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
 row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 `steer_request` with the lease the tab holds; its rules are in

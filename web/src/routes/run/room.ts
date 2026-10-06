@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { RoomMessageKind, Run } from '@/lib/types'
+import type { RoomMessage, RoomMessageKind, Run } from '@/lib/types'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 
@@ -18,11 +18,20 @@ export interface RoomPost {
 export interface RunRoom {
   post: (post: RoomPost) => Promise<boolean>
   decide: (messageID: string, decision: 'approve' | 'deny') => Promise<void>
+  loadOlder: () => Promise<void>
+  refresh: () => Promise<void>
   busy: boolean
   error: string | undefined
   /** A failed steer is shown at the composer that sent it, every other failure in Details. */
   errorFromComposer: boolean
   clearError: () => void
+}
+
+const pageLimit = 100
+
+function overlaps(messages: RoomMessage[], cached: RoomMessage[]): boolean {
+  const cachedIDs = new Set(cached.map((m) => m.id))
+  return messages.some((m) => cachedIDs.has(m.id))
 }
 
 export function useRunRoom(run: Run, control: ControlMetadata | undefined, client: Api = api): RunRoom {
@@ -31,6 +40,8 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   const error = useStore((s) => s.roomActionError[runID])
   const [busy, setBusy] = useState(false)
   const [errorFromComposer, setErrorFromComposer] = useState(false)
+  const live = useStore((s) => s.connection === 'live')
+  const loaded = useRef(false)
   const retry = useRef<{ post: RoomPost; key: string } | null>(null)
   const controlRef = useRef(control)
   controlRef.current = control
@@ -40,7 +51,7 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
     const s = useStore.getState()
     s.initializeRoomPagination(runID)
     s.setRoomLoading(runID, true)
-    client.runRoomList({ workspace_id: workspaceID, run_id: runID, limit: 100 }).then(
+    client.runRoomList({ workspace_id: workspaceID, run_id: runID, limit: pageLimit }).then(
       (page) => {
         if (active) useStore.getState().setRoomPage(runID, page.messages, page.next_before)
       },
@@ -48,12 +59,53 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
         if (active) useStore.getState().setRoomError(runID, message(cause))
       },
     ).finally(() => {
+      loaded.current = true
       if (active) useStore.getState().setRoomLoading(runID, false)
     })
     return () => {
       active = false
     }
   }, [runID, workspaceID, client])
+
+  const refresh = useCallback(async () => {
+    const visited = new Set<string>()
+    const cached = useStore.getState().roomMessages[runID] ?? []
+    useStore.getState().setRoomError(runID)
+    let before: string | undefined
+    try {
+      for (;;) {
+        const page = await client.runRoomList({ workspace_id: workspaceID, run_id: runID, before, limit: pageLimit })
+        useStore.getState().setRoomPage(runID, page.messages, page.next_before)
+        // Each cursor is walked once so a malformed response cannot loop.
+        if (!cached.length || overlaps(page.messages, cached) || !page.next_before || visited.has(page.next_before)) return
+        visited.add(page.next_before)
+        before = page.next_before
+      }
+    } catch (cause) {
+      useStore.getState().setRoomError(runID, message(cause))
+    }
+  }, [client, runID, workspaceID])
+
+  useEffect(() => {
+    if (live && loaded.current) void refresh()
+  }, [live, refresh])
+
+  const loadOlder = useCallback(async () => {
+    const state = useStore.getState()
+    const before = state.roomNextBefore[runID]
+    const pagination = state.roomPagination[runID]
+    if (!pagination?.initialized || pagination.exhausted || before === undefined || state.roomLoading[runID]) return
+    state.setRoomLoading(runID, true)
+    state.setRoomError(runID)
+    try {
+      const page = await client.runRoomList({ workspace_id: workspaceID, run_id: runID, before, limit: pageLimit })
+      useStore.getState().setRoomPage(runID, page.messages, page.next_before, true)
+    } catch (cause) {
+      useStore.getState().setRoomError(runID, message(cause))
+    } finally {
+      useStore.getState().setRoomLoading(runID, false)
+    }
+  }, [client, runID, workspaceID])
 
   useEffect(() => {
     let active = true
@@ -140,5 +192,5 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   }, [client, runID])
 
   const clearError = useCallback(() => useStore.getState().setRoomActionError(runID), [runID])
-  return { post, decide, busy, error, errorFromComposer, clearError }
+  return { post, decide, loadOlder, refresh, busy, error, errorFromComposer, clearError }
 }

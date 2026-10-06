@@ -99,6 +99,12 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   const log = useStore((s) => s.sessionLogs[run.id])
   const messages = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
   const members = useStore((s) => s.members)
+  const roomError = useStore((s) => s.roomError[run.id])
+  const roomLoading = useStore((s) => s.roomLoading[run.id] === true)
+  const older = useStore((s) => {
+    const page = s.roomPagination[run.id]
+    return Boolean(page?.initialized && !page.exhausted && s.roomNextBefore[run.id] !== undefined)
+  })
   const events = log?.events
   const rows = useMemo(() => rowsForRun({
     run,
@@ -109,9 +115,10 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   const list = useRef<VListHandle>(null)
   const pinned = useRef(true)
 
+  const items = rows.length + (older ? 1 : 0)
   useLayoutEffect(() => {
-    if (active && pinned.current && rows.length > 0) list.current?.scrollToIndex(rows.length - 1, { align: 'end' })
-  }, [active, rows.length])
+    if (active && pinned.current && items > 0) list.current?.scrollToIndex(items - 1, { align: 'end' })
+  }, [active, items])
 
   const live = useStore((s) => s.connection === 'live')
   useEffect(() => {
@@ -132,6 +139,17 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
             </Callout>
           </div>
         )}
+        {roomError && (
+          <div className="mx-auto max-w-[736px] px-4 pt-3">
+            <Callout
+              tone="failed"
+              title="Messages could not be read"
+              actions={<Button size="sm" variant="secondary" onClick={() => void room.refresh()}>Retry</Button>}
+            >
+              {roomError}
+            </Callout>
+          </div>
+        )}
         <VList
           ref={list}
           className="h-full"
@@ -140,6 +158,13 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
             if (handle) pinned.current = offset + handle.viewportSize >= handle.scrollSize - bottomSlack
           }}
         >
+          {older && (
+            <div className="mx-auto flex w-full max-w-[736px] justify-center px-4 pt-4">
+              <Button size="sm" variant="ghost" disabled={roomLoading} onClick={() => void room.loadOlder()}>
+                {roomLoading ? 'Loading…' : 'Show older messages'}
+              </Button>
+            </div>
+          )}
           {rows.map((row, index) => (
             <div
               key={row.id}
