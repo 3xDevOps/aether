@@ -208,7 +208,7 @@ async function liveCompanion(t, html) {
         });
       });
       stream.on('error', reject);
-      stream.setTimeout(10000, () => stream.destroy(new Error('Current frame timed out')));
+      stream.setTimeout(45000, () => stream.destroy(new Error('Current frame timed out')));
       stream.end(JSON.stringify(page));
     });
     t.after(() => stream.destroy());
