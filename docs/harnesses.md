@@ -1082,8 +1082,9 @@ account, and the server refuses such a launch.
 [enhanced-mode adapter](#enhanced-mode-adapters).
 
 For an unshipped name the command takes the Standard and Background
-templates from `--tui <argv>` and `--headless <argv>`, or prompts
-`TUI command [<name> {task}]:` and `Headless command [<name> -p {task}]:`;
+templates from `--standard <argv>` and `--background <argv>`, or prompts
+`Standard command [<name> {task}]:` and
+`Background command [<name> -p {task}]:`;
 `--acp <argv>` records the command that serves ACP, split on spaces; a
 shipped name refuses it. Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
