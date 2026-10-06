@@ -71,6 +71,9 @@ func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protoc
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
+	if m.ArchivedAt == nil {
+		return protocol.MissionArchiveResult{Mission: protocol.MissionFromDomain(m)}, nil
+	}
 	retire, err := s.retirer()
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
