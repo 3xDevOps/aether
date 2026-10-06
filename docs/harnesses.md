@@ -8,10 +8,11 @@ plugin system.
 
 Two rules shape everything below:
 
-1. **Aether does not install agents for you.** A member runs the displayed
-   vendor install command in their environment terminal. The command should
-   install the executable into `~/.local/bin`. Once a shipped agent is
-   installed there, Aether keeps it current; see
+1. **Aether installs an agent only when a member asks.** The member runs the
+   displayed vendor install command in their environment terminal, or asks
+   the server to run it there (`agent.install`). The command should install
+   the executable into `~/.local/bin`. Once a shipped agent is installed
+   there, Aether keeps it current; see
    [Updates before launch](#updates-before-launch).
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
@@ -50,15 +51,15 @@ window has passed without a new measurement.
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
-| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
-| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
-| `fake` | a script you name | - | - | - | - | - | PTY | no |
-| `custom` | deployment-supplied | - | - | - | - | - | PTY | no |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes | adapter `@agentclientprotocol/claude-agent-acp@0.86.0` |
+| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes | adapter `@agentclientprotocol/codex-acp@2.1.1` |
+| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes | adapter `pi-acp@0.0.34` |
+| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no | native (`omp acp`) |
+| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no | native (`opencode acp`) |
+| `fake` | a script you name | - | - | - | - | - | PTY | no | none |
+| `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user). **Login state** is the path an
@@ -95,6 +96,60 @@ The **Env setup** column marks harnesses that can participate in agent setup:
 the dashboard can open the member's environment terminal for installation and
 login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
 launchable for runs but is not offered in that setup flow.
+
+The **Enhanced** column is how the agent serves the Agent Client Protocol
+(ACP): JSON-RPC over the agent's stdio, through which an enhanced run reads
+the agent's messages, tool calls, and permission requests instead of its
+terminal. `run.launch` does not accept an enhanced mode yet. See
+[Enhanced mode adapters](#enhanced-mode-adapters).
+
+### Enhanced mode adapters
+
+A **native** agent serves ACP from its own CLI (`omp acp`, `opencode acp`), so
+installing the agent installs it. An **adapter** agent needs a separate npm
+package that drives the CLI. Aether pins one version of each, taken from the
+[ACP registry](https://agentclientprotocol.com) and recorded in
+`internal/harness/acpregistry.json`, a snapshot of only the entries Aether
+uses. A custom definition is enhanced only when it names its ACP server's
+argv: `ACPArgs` in `--harness-definitions`, `acp_args` in `agent.register`, or
+`--acp` on `aether agent add`.
+
+An adapter installs into the member home like an npm agent:
+
+```sh
+npm install -g --prefix "$HOME/.local" @agentclientprotocol/claude-agent-acp@0.86.0
+```
+
+which links `~/.local/bin/claude-agent-acp` (`codex-acp`, `pi-acp`) to the
+package in `~/.local/lib/node_modules`. Install the agent and its adapter in
+one step:
+
+```sh
+aether agent add claude --enhanced
+```
+
+types the agent's install command followed by that line into the environment
+terminal (or prints it when no terminal opens). The dashboard calls
+`agent.install` with `{"name":"claude","enhanced":true}` instead: the server
+runs the same command in the member's environment terminal, starting it if
+needed, waits up to 10 minutes, and answers with the last 8 KiB of output,
+the exit status, and whether the agent and its adapter now resolve. One
+install runs per member at a time.
+
+The pre-launch update brings an installed adapter to its pinned version after
+the agent's own update, through the same staged exchange as `codex`. It never
+installs a missing one: a member who never asked for enhanced mode downloads
+nothing. On another member's shared account, a launch that borrows the
+owner's installation borrows the owner's adapter with it, read-only.
+
+`agent.list` reports, per agent, `enhanced` (`native`, `adapter`, or `none`),
+`enhanced_installed` (the adapter, or the native CLI, resolves for that
+launch), `login_found` (a **Login state** file exists in the home the launch
+signs in with: the owner's on a shared account; it checks for the file, not
+for a working session), and `default_mode`: `acp` for `codex`, `omp`, and
+`opencode` once their ACP server is installed, `tui` for everything else.
+Claude Code stays on its terminal by default because its adapter runs on the
+Claude Agent SDK, whose terms favour API keys.
 
 Every newly created managed runtime container receives the verified
 `/usr/local/bin/aether-internal` CLI, including taskless runs, custom images,
@@ -965,8 +1020,12 @@ definition resolves to the server-wide one, so it can report
 `login_missing`. The launch dialog does not offer a refused agent on that
 account, and the server refuses such a launch.
 
+`aether agent add <name> --enhanced` also installs a shipped agent's
+[enhanced-mode adapter](#enhanced-mode-adapters).
+
 For an unshipped name the command asks for interactive and headless launch
-templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
+templates first (`<name> {task}` and `<name> -p {task}` by default); `--acp
+<argv>` records the command that serves ACP. Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
 complete its login.
 
@@ -1162,6 +1221,10 @@ update.
 | `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix <stage> "@openai/codex@<version>"` |
 | `pi` | reads the latest version with `npm view @earendil-works/pi-coding-agent version`; when `pi --version` differs, runs `npm install -g --prefix <stage> --ignore-scripts "@earendil-works/pi-coding-agent@<version>"` |
 | `omp` | `omp update` |
+
+For `claude`, `codex`, and `pi`, an installed
+[enhanced-mode adapter](#enhanced-mode-adapters) is then brought to its pinned
+version when `~/.local/lib/node_modules/<package>/package.json` names another.
 
 For `codex` and `pi`, npm installs the new version into a stage directory
 beside the old one in `~/.local/lib`. Aether resolves its server executable

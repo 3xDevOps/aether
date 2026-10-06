@@ -61,6 +61,10 @@ install the agent into `~/.local/bin`, and complete the vendor login there:
 aether terminal
 ```
 
+`aether agent add <name> --enhanced` also installs the agent's pinned
+enhanced-mode adapter into `~/.local` (see
+[harnesses.md](harnesses.md#enhanced-mode-adapters)).
+
 After setup, every run you launch sees the same executable and login state.
 A member-defined agent also records its launch arguments for later runs.
 The terminal command ships in this release series.

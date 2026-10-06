@@ -606,6 +606,17 @@ runs it under `bun` against a recording stand-in for the server binary, so
 a turn's reports are proven to come out in order and to end exactly once.
 Those tests skip where `bun` is not installed.
 
+`TestACPAdapterInstall` installs the pinned Claude Code and Codex
+[enhanced-mode adapters](harnesses.md#enhanced-mode-adapters) into a home
+mounted at `/home/aether` in the standard image, as uid 1000, and completes
+the ACP `initialize` handshake with each, logging the cold start. It needs
+the npm registry and skips without it:
+
+```sh
+AETHER_ACP_IMAGE=aether-standard:local \
+  go test -tags integration -run TestACPAdapterInstall -v ./internal/harness/
+```
+
 ### Native mailbox lifecycle and idle-wake smoke
 
 Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures
