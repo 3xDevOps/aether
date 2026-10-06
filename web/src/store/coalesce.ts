@@ -28,3 +28,8 @@ export function coalesce(owner: object, key: string, read: () => Promise<boolean
     }
   })()
 }
+
+/** Backoff before retrying a failed read: 5s doubling, capped at a minute. */
+export function readRetryDelay(attempt: number): number {
+  return Math.min(5000 * 2 ** attempt, 60_000)
+}

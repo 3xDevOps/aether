@@ -2,7 +2,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { Approval, ApprovalDecision, Event } from '@/lib/types'
 import type { RootStore } from '@/store'
-import { coalesce } from '@/store/coalesce'
+import { coalesce, readRetryDelay } from '@/store/coalesce'
 import type { SliceCreator } from '@/store/slice'
 
 export interface ApprovalsSlice {
@@ -107,9 +107,6 @@ export function sortByCreated(approvals: Approval[]): Approval[] {
   return [...approvals].sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
-const retryMs = 5000
-const maxRetryMs = 60_000
-
 /**
  * The payload carries no request text, so an unknown request is read with its
  * workspace's list without holding up the events behind it.
@@ -148,7 +145,7 @@ export function readInbox(store: RootStore, client: Api, workspaceID: string, at
         const now = store.getState()
         if (attempt > 0 && (now.connection !== 'live' || now.inboxErrors[workspaceID] === undefined)) return
         readInbox(store, client, workspaceID, attempt + 1)
-      }, Math.min(retryMs * 2 ** attempt, maxRetryMs))
+      }, readRetryDelay(attempt))
     }
   })
 }

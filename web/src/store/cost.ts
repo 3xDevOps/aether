@@ -1,7 +1,7 @@
 import type { Api } from '@/lib/api'
 import type { BudgetReport, BudgetState, CostRollup } from '@/lib/types'
 import type { RootStore } from '@/store'
-import { coalesce } from '@/store/coalesce'
+import { coalesce, readRetryDelay } from '@/store/coalesce'
 import type { SliceCreator } from '@/store/slice'
 
 /** The `workspace.budget` event payload. */
@@ -69,20 +69,34 @@ const budgetReadDelayMs = 1500
 const budgetTimers = new WeakMap<RootStore, Map<string, ReturnType<typeof setTimeout>>>()
 
 export function scheduleBudgetRead(store: RootStore, client: Api, workspaceID: string): void {
+  readBudget(store, client, workspaceID, budgetReadDelayMs, 0)
+}
+
+/** A failed read retries until one succeeds, a budget event supersedes it, or the stream drops. */
+function readBudget(store: RootStore, client: Api, workspaceID: string, delay: number, attempt: number): void {
   let timers = budgetTimers.get(store)
   if (!timers) {
     timers = new Map()
     budgetTimers.set(store, timers)
   }
-  clearTimeout(timers.get(workspaceID))
-  timers.set(workspaceID, setTimeout(() => {
-    timers.delete(workspaceID)
+  const pending = timers
+  const scheduledStamp = store.getState().budgetEvents[workspaceID]
+  clearTimeout(pending.get(workspaceID))
+  pending.set(workspaceID, setTimeout(() => {
+    pending.delete(workspaceID)
+    const now = store.getState()
+    if (attempt > 0 && (now.connection !== 'live' || now.budgetEvents[workspaceID] !== scheduledStamp)) return
     coalesce(store, `budget:${workspaceID}`, async () => {
       const stamp = store.getState().budgetEvents[workspaceID]
       const report = await client.budgetGet(workspaceID).catch(() => null)
-      if (report && store.getState().budgetEvents[workspaceID] === stamp) store.getState().setBudget(report)
+      if (!report) {
+        // A newer result's read is already waiting; it replaces this retry.
+        if (!pending.has(workspaceID)) readBudget(store, client, workspaceID, readRetryDelay(attempt), attempt + 1)
+        return
+      }
+      if (store.getState().budgetEvents[workspaceID] === stamp) store.getState().setBudget(report)
     })
-  }, budgetReadDelayMs))
+  }, delay))
 }
 
 /** Worst first: a warning anywhere outranks every workspace that is fine. */

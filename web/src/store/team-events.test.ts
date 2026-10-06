@@ -202,6 +202,51 @@ describe('team state from events', () => {
     }
   })
 
+  it('retries a failed budget read until one succeeds, a budget event lands, or the stream drops', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      store.setState({ connection: 'live' })
+      store.getState().setBudget(budget(workspace.id))
+      let failures = 2
+      const budgetGet = vi.fn(async (id: string) => {
+        if (failures-- > 0) throw new Error('budget.get: database is locked')
+        return budget(id, { state: 'warn' })
+      })
+      const client = fakeApi({ budgetGet })
+
+      await applyEvent(store, event(1, 'run.cost', { metered: true }), client)
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(budgetGet).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(budgetGet).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(budgetGet).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(budgetGet).toHaveBeenCalledTimes(3)
+      expect(store.getState().budgets[workspace.id].state).toBe('warn')
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(budgetGet).toHaveBeenCalledTimes(3)
+
+      failures = Infinity
+      await applyEvent(store, event(2, 'run.cost', { metered: true }), client)
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(budgetGet).toHaveBeenCalledTimes(4)
+      await applyEvent(store, event(3, 'workspace.budget', { state: 'exceeded', spend_usd: 6, limit_usd: 5 }, { run_id: '' }), client)
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(budgetGet).toHaveBeenCalledTimes(4)
+
+      await applyEvent(store, event(4, 'run.cost', { metered: true }), client)
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(budgetGet).toHaveBeenCalledTimes(5)
+      store.setState({ connection: 'offline' })
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(budgetGet).toHaveBeenCalledTimes(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('drops a budget read that a budget event overtook', async () => {
     vi.useFakeTimers()
     try {
