@@ -66,7 +66,8 @@ type Reader struct {
 	missions MissionRuns
 }
 
-// NewReader returns a Reader over log.
+// NewReader returns a Reader over log that resolves mission filters through
+// missions, which must not be nil.
 func NewReader(log events.EventLog, missions MissionRuns) *Reader {
 	return &Reader{log: log, missions: missions}
 }

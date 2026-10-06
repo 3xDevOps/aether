@@ -570,7 +570,7 @@ func TestSweepArchivedPublishesTimelineNote(t *testing.T) {
 		t.Fatalf("timeline note message = %q, want it to say the run was deleted", p.Message)
 	}
 
-	reader := timeline.NewReader(log, nil)
+	reader := timeline.NewReader(log, e.db)
 	page, err := reader.Page(ctx, timeline.Filter{
 		Workspace: e.ws.ID, Run: r.ID, Types: []events.Type{events.TypeTimeline},
 	}, 0, 0)
