@@ -15,8 +15,8 @@ describe('terminal zoom', () => {
   })
 
   /** Rehydrates a fresh store from a payload this build's own version wrote. */
-  function rehydrate(state: Record<string, unknown>) {
-    window.localStorage.setItem('aether.ui', JSON.stringify({ state, version: 3 }))
+  function rehydrate(state: Record<string, unknown>, version = 6) {
+    window.localStorage.setItem('aether.ui', JSON.stringify({ state, version }))
     const hydrated = createRootStore().getState()
     window.localStorage.removeItem('aether.ui')
     return hydrated
@@ -56,6 +56,10 @@ describe('terminal zoom', () => {
     expect(hydrated.theme).toBe('dark')
     expect(hydrated.sidebarWidth).toBe(320)
     expect(hydrated.terminalFontSize).toBe(20)
+  })
+
+  it('drops the old run pane width from before the sidebar', () => {
+    expect(rehydrate({ sidebarWidth: 320 }, 5).sidebarWidth).toBe(createRootStore().getState().sidebarWidth)
   })
 })
 
