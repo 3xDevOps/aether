@@ -52,10 +52,10 @@ func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.
 	return "", d.pty.Inject(ctx, ptyhost.RunSession(run.ID), member.DisplayName, member.Color, message, harness.SubmitSequence(run.Harness))
 }
 
-// driver returns the agent driver for mode. Headless runs also host their
-// one-shot agent on the primary PTY.
-func (s *Scheduler) driver(mode domain.LaunchMode) AgentDriver {
-	if mode == domain.LaunchACP {
+// driver returns the agent driver for a run's Run.ACP. Headless runs without
+// it host their one-shot agent on the primary PTY.
+func (s *Scheduler) driver(acp bool) AgentDriver {
+	if acp {
 		return s.acp
 	}
 	return tuiDriver{pty: s.cfg.PTY}

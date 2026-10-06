@@ -35,6 +35,8 @@ export interface Run {
   title?: string
   harness: string
   mode: string
+  /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
+  acp?: boolean
   status: RunStatus
   branch: string
   last_commit?: string

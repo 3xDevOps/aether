@@ -175,18 +175,16 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 }
 
 // agentInstalled looks in member's home, or on another member's account in
-// the owner's home whose installation the launch borrows. The ACP server
-// counts only in the home the CLI comes from: that is the ~/.local the launch sees.
+// the owner's home whose installation the launch borrows.
 func (s *Server) agentInstalled(member, account domain.MemberID, executable string, profile harness.Profile) (installed, acp bool, err error) {
 	if s.cfg.Homes == nil {
 		return true, len(profile.ACPArgs) > 0, nil
 	}
-	owner, err := s.cfg.Homes.Installation(member, account, executable, profile.InstallPaths)
-	if err != nil || owner == "" || len(profile.ACPArgs) == 0 {
-		return owner != "", false, err
+	var adapter string
+	if len(profile.ACPArgs) > 0 {
+		adapter = profile.ACPArgs[0]
 	}
-	acpOwner, err := s.cfg.Homes.Installation(member, account, profile.ACPArgs[0], profile.InstallPaths)
-	return true, acpOwner == owner, err
+	return s.cfg.Homes.AgentInstalled(member, account, executable, adapter, profile.InstallPaths)
 }
 
 // agentInstall runs a shipped agent's install command in the caller's own

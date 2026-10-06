@@ -37,7 +37,7 @@ func TestMemberHarnessDefinitionResolution(t *testing.T) {
 		CredentialPaths: []string{"/root/.aider"},
 	})
 
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "go")
+	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "go")
 	if err != nil {
 		t.Fatalf("member definition did not resolve: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestMemberHarnessDefinitionResolution(t *testing.T) {
 	if err := e.db.CreateMember(t.Context(), other); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	if _, _, err := e.sched.command(t.Context(), other.ID, other.ID, "aider", domain.LaunchHeadless, "go"); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), other.ID, other.ID, "aider", domain.LaunchHeadless, "go"); err == nil {
 		t.Fatal("another member resolved a definition they do not own")
 	}
 }
@@ -73,7 +73,7 @@ func TestShippedNameWinsOverAStoredDefinition(t *testing.T) {
 		CredentialPaths: []string{"/root/.myomp"},
 	})
 
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "omp", domain.LaunchTUI, "go")
+	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "omp", domain.LaunchTUI, "go")
 	if err != nil {
 		t.Fatalf("omp did not resolve: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestServerSpecWinsOverMemberDefinition(t *testing.T) {
 		Name: "aider", TUIArgs: []string{"aider", "{task}"}, HeadlessArgs: []string{"aider", "--member", "{task}"},
 		Executable: "aider",
 	})
-	argv, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x")
+	argv, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestCorruptMemberDefinitionFails(t *testing.T) {
 	if err := e.db.UpsertHarnessDefinition(t.Context(), row); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x"); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x"); err == nil {
 		t.Fatal("invalid stored definition accepted")
 	}
 }
@@ -131,7 +131,7 @@ func TestCorruptMemberDefinitionFails(t *testing.T) {
 func TestUnknownHarnessErrorNamesAgentAdd(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	_, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "nope", domain.LaunchTUI, "x")
+	_, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "nope", domain.LaunchTUI, "x")
 	if err == nil {
 		t.Fatal("unknown harness accepted")
 	}

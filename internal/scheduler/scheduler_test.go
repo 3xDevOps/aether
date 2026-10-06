@@ -998,7 +998,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 func TestCommandTemplates(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	argv, profile, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it")
+	argv, profile, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -1009,7 +1009,7 @@ func TestCommandTemplates(t *testing.T) {
 	if profile.Name != "claude" || len(profile.CredentialPaths) == 0 {
 		t.Fatalf("claude profile = %+v, want registry profile with credential paths", profile)
 	}
-	if _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
+	if _, _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
 		t.Fatalf("codex tui: %v", codexErr)
 	}
 	// A Config.Harnesses argv override replaces the registry template but
@@ -1017,7 +1017,7 @@ func TestCommandTemplates(t *testing.T) {
 	e2 := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"my-claude", "{task}"}}}
 	})
-	argv, profile, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go")
+	argv, profile, _, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go")
 	if err != nil {
 		t.Fatalf("command with override: %v", err)
 	}
@@ -1028,7 +1028,7 @@ func TestCommandTemplates(t *testing.T) {
 		t.Fatalf("override lost registry profile: %+v", profile)
 	}
 	// "custom" ships with no command of its own: it requires an override.
-	if _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
 		t.Fatal("custom without an override accepted")
 	}
 }
@@ -1464,7 +1464,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 			},
 		}
 	})
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
+	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
@@ -1508,7 +1508,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	argv, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task")
+	argv, _, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task")
 	if err != nil {
 		t.Fatalf("fake command: %v", err)
 	}

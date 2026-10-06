@@ -34,6 +34,9 @@ type Config struct {
 	// SessionID is the agent session to restore; empty starts a new one.
 	SessionID string
 	Logger    *slog.Logger
+	// AutoAllow answers every permission request with its first allow_*
+	// option, for a session no one is expected to watch.
+	AutoAllow bool
 
 	// OnState reports execution state: working at every prompt start,
 	// idle at every turn end with the stop reason, and idle once a
@@ -153,6 +156,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	}
 
 	s.conn = newConn(r, w, s, cfg.Logger)
+	s.conn.autoAllow = cfg.AutoAllow
 	if err := s.open(ctx); err != nil {
 		_ = w.Close()
 		s.stop()

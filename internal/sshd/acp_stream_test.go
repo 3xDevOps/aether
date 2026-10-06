@@ -19,7 +19,7 @@ import (
 func newACPEnv(t *testing.T) (*testEnv, *domain.Run) {
 	t.Helper()
 	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
-	run := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "t", Harness: "codex", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	run := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "t", Harness: "codex", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
 	if err := e.store.CreateRun(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}

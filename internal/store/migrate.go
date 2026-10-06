@@ -1526,6 +1526,13 @@ ALTER TABLE coord_audit_publications_v50 RENAME TO coord_audit_publications;
 CREATE INDEX idx_coord_audit_publications_due
 	ON coord_audit_publications(quarantined_at, next_attempt_at, created_at, event_id);
 `,
+	// v51: a run whose agent the server drives over the Agent Client
+	// Protocol: every enhanced run, and a background run whose agent
+	// serves it.
+	`
+ALTER TABLE runs ADD COLUMN acp INTEGER NOT NULL DEFAULT 0;
+UPDATE runs SET acp = 1 WHERE mode = 'acp';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

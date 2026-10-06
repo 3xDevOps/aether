@@ -213,7 +213,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.driver(entry.launchMode).Stop(context.WithoutCancel(ctx), run)
+		_ = s.driver(entry.acp).Stop(context.WithoutCancel(ctx), run)
 		mustPause := resumed || !paused
 		var pauseErr error
 		if mustPause {
@@ -327,7 +327,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, rollback(err)
 	}
-	if startSessionErr := s.driver(entry.launchMode).Resume(ctx, entry, att); startSessionErr != nil {
+	if startSessionErr := s.driver(entry.acp).Resume(ctx, entry, att); startSessionErr != nil {
 		_ = att.Close()
 		return nil, rollback(startSessionErr)
 	}
@@ -1352,7 +1352,7 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 }
 
 func (s *Scheduler) resumeRecoveredAgent(ctx context.Context, entry *supervised, att runtime.Attachment) error {
-	driver := s.driver(entry.launchMode)
+	driver := s.driver(entry.acp)
 	backoff := recoveryPTYRetryInitial
 	for {
 		if err := ctx.Err(); err != nil {
@@ -1527,6 +1527,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		blockedReportID:     sc.BlockedReportID,
 		blockedReportAt:     blockedAt,
 		launchMode:          mode,
+		acp:                 r.ACP,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		startedAt:           started,

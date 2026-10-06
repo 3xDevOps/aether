@@ -135,8 +135,8 @@ func (s *Server) acpRun(ctx context.Context, id string) (domain.RunID, *protocol
 	if err != nil {
 		return "", rpcError(err)
 	}
-	if run.Mode != domain.LaunchACP {
-		return "", invalidParams(fmt.Sprintf("run %s is not an enhanced run", id))
+	if !run.ACP {
+		return "", invalidParams(fmt.Sprintf("run %s does not run its agent over ACP", id))
 	}
 	return run.ID, nil
 }

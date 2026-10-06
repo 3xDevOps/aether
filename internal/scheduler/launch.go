@@ -217,7 +217,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err := s.checkFreeSpace(); err != nil {
 		return nil, err
 	}
-	argv, profile, err := s.command(ctx, member, account, harness, mode, task)
+	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, task)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +288,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Task:            task,
 		Harness:         harness,
 		Mode:            mode,
+		ACP:             acp,
 		Status:          domain.RunQueued,
 		BaseCommit:      base.Commit,
 		BaseBranch:      base.Branch,
@@ -322,6 +323,7 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		task:            run.Task,
 		memberID:        run.HomeMember(),
 		launchMode:      run.Mode,
+		acp:             run.ACP,
 		missionAssigned: persistSupervisor,
 		status:          domain.RunProvisioning,
 		startedAt:       time.Now().UTC(),
@@ -398,7 +400,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if coordErr != nil {
 		return coordErr
 	}
-	if run.Mode == domain.LaunchACP {
+	if run.ACP {
 		// The session host reports both ends of every turn itself.
 		s.mu.Lock()
 		entry.reporter = harness.ReporterFull
@@ -452,7 +454,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return fail("attach", err)
 	}
-	driver := s.driver(run.Mode)
+	driver := s.driver(run.ACP)
 	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
 		return fail("start pty session", perr)

@@ -520,7 +520,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		return errors.Join(err, s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid))
 	}
 	s.setPaused(entry, false)
-	if entry.launchMode == domain.LaunchACP {
+	if entry.acp {
 		s.acp.resumeAfterPause(ctx, entry)
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
@@ -576,7 +576,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return "", err
 	}
-	outcome, err := s.driver(r.Mode).Deliver(ctx, r, m, message, steer)
+	outcome, err := s.driver(r.ACP).Deliver(ctx, r, m, message, steer)
 	if err != nil {
 		return "", err
 	}
@@ -824,7 +824,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 		// Detach before committing so no PTY client can continue typing while
 		// the close operation snapshots the worktree.
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.driver(mode).Stop(context.WithoutCancel(ctx), run)
+		_ = s.driver(entry.acp).Stop(context.WithoutCancel(ctx), run)
 		s.cfg.PTY.StopSessionsWithPrefix(context.WithoutCancel(ctx), string(ptyhost.RunShellSession(run, "")))
 		paused := alreadyPaused
 		if !paused {
@@ -1028,7 +1028,7 @@ func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervi
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
 			fmt.Errorf("scheduler: restore closed run: attach: %w", err))
 	}
-	driver := s.driver(entry.launchMode)
+	driver := s.driver(entry.acp)
 	if err := driver.Resume(ctx, entry, att); err != nil {
 		_ = att.Close()
 		_ = driver.Stop(context.WithoutCancel(ctx), entry.runID)

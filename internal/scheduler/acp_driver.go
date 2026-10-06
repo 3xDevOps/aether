@@ -35,6 +35,7 @@ const (
 	// acpSteerTimeout bounds a delivery, which runs under the run's
 	// admission lock and may wait on the agent's answer to a steer.
 	acpSteerTimeout = 15 * time.Second
+	oneShotResume   = "Aether's server restarted and interrupted your previous turn. Continue the task where you stopped."
 )
 
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
@@ -235,7 +236,11 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		d.fail(entry, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable))
 		return
 	}
+	oneShot := entry.launchMode == domain.LaunchHeadless
 	sessionID, mode := "", profile.ACPMode
+	if oneShot && profile.ACPAutoMode != "" {
+		mode = profile.ACPAutoMode
+	}
 	if !fresh {
 		sessionID = run.HarnessSessionID
 		if sessionID == "" {
@@ -272,7 +277,14 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		MCPServers: mcp,
 		SessionID:  sessionID,
 		Logger:     slog.Default().With("run", runID),
-		OnState: func(working bool, _ string, failed error) {
+		AutoAllow:  oneShot,
+		OnState: func(working bool, reason string, failed error) {
+			if oneShot && !working {
+				if reason != "" {
+					go d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
+				}
+				return
+			}
 			report := agentstatus.Report{State: agentstatus.Working}
 			switch {
 			case working:
@@ -312,10 +324,73 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
-	if fresh && task != "" {
+	switch {
+	case oneShot:
+		d.startOneShot(ctx, entry, sess, fresh, task)
+	case fresh && task != "":
 		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false); err != nil {
 			slog.Warn("scheduler: send the task to the agent", "run", runID, "error", err)
 		}
+	}
+}
+
+// startOneShot runs a background run's single turn. A restored session
+// continues a turn the restart interrupted and ends at once when its turn
+// had already ended.
+func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
+	prompt := d.s.withCoAuthorInstruction(task)
+	if !fresh {
+		switch last := lastItem(sess.Log(), acphost.KindTurnEnd); last.StopReason {
+		case "":
+		case "interrupted":
+			prompt = oneShotResume
+		default:
+			go d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
+			return
+		}
+	}
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false); err != nil {
+		go d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+	}
+}
+
+func turnEndReport(stop string) agentstatus.Report {
+	if stop == "end_turn" {
+		return agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
+	}
+	return agentstatus.Report{State: agentstatus.Idle, Reason: "the agent's turn ended: " + stop}
+}
+
+// endOneShot ends a background run after its turn as a one-shot agent's
+// exit does: a swarm worker keeps its container, and any other run's
+// container exits 0 for a normal turn end and 1 otherwise.
+func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Report) {
+	d.mu.Lock()
+	r := d.runs[entry.runID]
+	skip := d.closed || r == nil || r.stopping
+	live := r != nil && r.session != nil
+	d.mu.Unlock()
+	if skip {
+		return
+	}
+	if live {
+		d.stopAdapter(context.Background(), entry.runID)
+	}
+	d.s.mu.Lock()
+	assigned, cid := entry.missionAssigned, entry.containerID
+	d.s.mu.Unlock()
+	if assigned {
+		d.report(entry.runID, idle)
+		return
+	}
+	signal := "USR2"
+	if ok {
+		signal = "USR1"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
+	defer cancel()
+	if code, _, stderr, err := d.s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", "kill -" + signal + " 1"}, ""); err != nil || code != 0 {
+		slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
 	}
 }
 
@@ -335,7 +410,12 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
 	d.notice(entry.runID, "Enhanced session failed", err.Error())
-	go d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()})
+	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
+	if entry.launchMode == domain.LaunchHeadless {
+		go d.endOneShot(entry, false, idle)
+		return
+	}
+	go d.report(entry.runID, idle)
 }
 
 // notice appends to the item log of a run with no live session. The caller
@@ -386,7 +466,12 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 		return
 	}
 	d.notice(entry.runID, "Enhanced session ended", cause.Error())
-	d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()})
+	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
+	if entry.launchMode == domain.LaunchHeadless {
+		go d.endOneShot(entry, false, idle)
+		return
+	}
+	d.report(entry.runID, idle)
 }
 
 func adapterError(err error, stderr *tailBuffer) error {

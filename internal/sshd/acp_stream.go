@@ -81,8 +81,8 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 		refuse(e.Code, e.Message)
 		return
 	}
-	if run.Mode != domain.LaunchACP {
-		refuse(protocol.CodeInvalidParams, "run "+req.RunID+" is not an enhanced run")
+	if !run.ACP {
+		refuse(protocol.CodeInvalidParams, "run "+req.RunID+" does not run its agent over ACP")
 		return
 	}
 	if (req.Write || req.ReleaseControl) && req.ControlSessionID == "" {

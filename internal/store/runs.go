@@ -96,12 +96,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
-		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -122,7 +122,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.UnansweredQuestions,
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.ACP, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at, runs.outcome_unseen`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.acp`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply

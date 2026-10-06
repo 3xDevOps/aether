@@ -141,7 +141,7 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID) {
 		slog.Warn("adapter: resolve run failed", "run", run, "error", err)
 		return
 	}
-	if r.Mode != domain.LaunchHeadless {
+	if r.Mode != domain.LaunchHeadless || r.ACP {
 		return
 	}
 	a, ok := ForHarness(r.Harness)

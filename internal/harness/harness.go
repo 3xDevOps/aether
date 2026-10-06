@@ -239,6 +239,10 @@ type Profile struct {
 	// ACPMode is the session mode an enhanced run starts in, for agents whose
 	// default mode asks before most actions. Empty keeps the agent's default.
 	ACPMode string
+	// ACPAutoMode is the session mode a background run's one-shot session
+	// starts in: the agent's mode that acts without asking. Empty keeps
+	// ACPMode.
+	ACPAutoMode string
 	// ACPDefault makes an enhanced run the agent's default once its ACP
 	// server is installed. Claude stays on its terminal by default: its
 	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
@@ -349,6 +353,7 @@ var profiles = map[string]Profile{
 		ACPArgs:        []string{claudeACP.Binary},
 		ACPInstall:     claudeACP,
 		ACPMode:        "auto",
+		ACPAutoMode:    "bypassPermissions",
 		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the
@@ -384,6 +389,7 @@ var profiles = map[string]Profile{
 		ACPArgs:         []string{codexACP.Binary},
 		ACPInstall:      codexACP,
 		ACPMode:         "agent",
+		ACPAutoMode:     "agent-full-access",
 		ACPDefault:      true,
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},

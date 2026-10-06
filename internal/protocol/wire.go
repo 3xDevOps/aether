@@ -22,8 +22,10 @@ type Run struct {
 	Title           string `json:"title,omitempty"`
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
-	Status          string `json:"status"`
-	Reason          string `json:"reason,omitempty"`
+	// ACP marks a run whose agent session /ws/acp streams.
+	ACP    bool   `json:"acp,omitempty"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
@@ -143,6 +145,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Title:               r.Title,
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
+		ACP:                 r.ACP,
 		Status:              string(r.Status),
 		Reason:              r.Reason,
 		PendingInputs:       []domain.RunInputRequest{},

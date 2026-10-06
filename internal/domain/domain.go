@@ -556,7 +556,11 @@ type Run struct {
 	Title   string
 	Harness string
 	Mode    LaunchMode
-	Status  RunStatus
+	// ACP is true when the server drives the agent over the Agent Client
+	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
+	// serves ACP. Such a run has a session item log.
+	ACP    bool
+	Status RunStatus
 	// Reason is the last run.status reason, sanitized like the event
 	// payload; empty when the last transition carried no reason.
 	Reason string

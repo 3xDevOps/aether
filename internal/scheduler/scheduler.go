@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"strings"
@@ -267,10 +268,12 @@ type supervised struct {
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
-	missionAssigned  bool
-	retained         bool
-	retainedUntil    *time.Time
-	destroyPending   bool
+	// acp mirrors Run.ACP: the acp driver hosts the agent.
+	acp             bool
+	missionAssigned bool
+	retained        bool
+	retainedUntil   *time.Time
+	destroyPending  bool
 	// evidencePending persists a completed terminalization whose required
 	// evidence capture did not finish, so a same-status retry resolves it first.
 	evidencePending bool
@@ -637,28 +640,53 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 // command resolves argv and profile for one launch by member on account's
-// shared account, with the profile from launchProfile.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
+// shared account, with the profile from launchProfile. acp reports that the
+// acp driver hosts the agent, which then has no argv: the task travels over
+// the protocol.
+func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) (argv []string, profile harness.Profile, acp bool, err error) {
 	task = s.withCoAuthorInstruction(task)
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
-		return nil, harness.Profile{}, err
+		return nil, harness.Profile{}, false, err
 	}
 	if !mode.Valid() {
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: invalid launch mode %q", mode)
 	}
-	argv := argvs[mode]
-	if harnessName == "fake" && len(argv) == 0 && mode != domain.LaunchACP {
+	acp = mode == domain.LaunchACP ||
+		(mode == domain.LaunchHeadless && s.backgroundACP(member, account, profile, argvs))
+	argv = argvs[mode]
+	if acp {
+		argv = argvs[domain.LaunchACP]
+	}
+	if harnessName == "fake" && len(argv) == 0 && !acp {
 		argv = strings.Fields(os.Getenv(fakeAgentEnv))
 	}
 	if len(argv) == 0 {
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
-	if mode == domain.LaunchACP {
-		// The task travels over the protocol, not argv.
-		return nil, profile, nil
+	if acp {
+		return nil, profile, true, nil
 	}
-	return harness.Argv(argv, task), profile, nil
+	return harness.Argv(argv, task), profile, false, nil
+}
+
+// backgroundACP reports whether a background run of the agent goes through
+// its ACP server: the agent has one, and it is installed in the home whose
+// CLI the launch runs.
+func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
+	adapter := argvs[domain.LaunchACP]
+	if len(adapter) == 0 || s.cfg.Homes == nil {
+		return false
+	}
+	cli := adapter[0]
+	if tui := argvs[domain.LaunchTUI]; len(tui) > 0 {
+		cli = tui[0]
+	}
+	_, installed, err := s.cfg.Homes.AgentInstalled(member, account, cli, adapter[0], profile.InstallPaths)
+	if err != nil {
+		slog.Warn("scheduler: look for the agent's ACP server; the background run uses its command line", "agent", profile.Name, "error", err)
+	}
+	return installed
 }
 
 // errMemberDefinitionOnly refuses member's own harness definition on
@@ -723,7 +751,9 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 // supervisor. Harness arguments stay positional parameters so argv can never
 // become shell source. After the harness exits, a login shell keeps the
 // container available until the run is closed or killed; with no argv (an
-// enhanced run) the login shell is the first child.
+// ACP-driven run) the login shell is the first child. SIGUSR1 and SIGUSR2
+// end the container with 0 and 1, which is how a background run over ACP
+// reports its one turn's outcome.
 func wrapTUICommand(argv []string) []string {
 	const script = `exec 3<&0
 child=
@@ -750,6 +780,8 @@ request_shutdown() {
 trap 'request_shutdown TERM 143' TERM
 trap 'request_shutdown INT 130' INT
 trap 'request_shutdown HUP 129' HUP
+trap 'request_shutdown USR1 0' USR1
+trap 'request_shutdown USR2 1' USR2
 
 run_child() {
 	child_signal=$1
@@ -847,13 +879,15 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
-	if run.Mode == domain.LaunchACP {
+	if run.ACP {
 		// An adapter cannot open a browser in a container; its login
 		// prints a URL instead.
 		env["NO_BROWSER"] = "1"
+	}
+	if run.Mode == domain.LaunchACP {
 		env[coordtransport.EnhancedEnv] = "1"
 	}
-	if run.Mode.Interactive() || persistSupervisor {
+	if run.Mode.Interactive() || persistSupervisor || run.ACP {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{
