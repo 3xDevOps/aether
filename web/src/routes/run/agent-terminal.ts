@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { toast } from 'sonner'
 import type { TerminalReadSurface } from '@/components/terminal-pane'
@@ -14,6 +14,7 @@ import { useRunTerminalSession } from '@/routes/terminal/session'
 import { useTakeover } from '@/routes/terminal/use-takeover'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
+import { requestSessionControl, requestSessionTakeover, sessionStreamOpen, subscribeSession } from '@/store/session-stream'
 import type { RunRecord } from '@/store/runs'
 
 /**
@@ -105,23 +106,45 @@ export function useAgentTerminal(run: RunRecord) {
   sendRef.current = session.send
   resizeRef.current = session.resize
 
-  const { state, replaying, controlMetadata } = session
-  const live = state.connection === 'live'
+  const acp = run.acp === true
+  const streamed = acp && !run.switching
+  const autoWrite = useRef(automaticWrite)
+  autoWrite.current = automaticWrite
+  useEffect(() => {
+    if (!streamed) return
+    const unsubscribe = subscribeSession(useStore, runID, autoWrite.current)
+    useStore.getState().touchAcpSession(runID, sessionStreamOpen)
+    return unsubscribe
+  }, [streamed, runID])
+  const acpStream = useStore((s) => s.acpSessions[runID]?.stream)
+  const acpControl = useStore((s) => s.acpSessions[runID]?.control)
+  const acpTakeover = useStore((s) => s.acpSessions[runID]?.takeover)
+  const acpTakeoverError = useStore((s) => s.acpSessions[runID]?.takeoverError)
+
+  const { state, replaying } = session
+  const live = acp ? acpStream === 'live' : state.connection === 'live'
+  const controlMetadata = acp ? acpControl : session.controlMetadata
   const roomControl = live && steerable && !state.steerDenied ? controlMetadata : undefined
-  const localControl = live && state.write && controlMetadata?.has_control === true && steerable && !state.steerDenied
+  const localControl = live && (acp || state.write) && controlMetadata?.has_control === true && steerable && !state.steerDenied
   const takeover = useTakeover({
-    state: session.takeover,
-    error: session.takeoverError,
+    state: acp ? acpTakeover : session.takeover,
+    error: acp ? acpTakeoverError : session.takeoverError,
     control: controlMetadata,
     enabled: live && steerable && !state.steerDenied,
     occupied: Boolean(roomStatus?.controller),
-    request: session.requestTakeover,
+    request: acp ? (action, id, generation) => requestSessionTakeover(runID, action, id, generation) : session.requestTakeover,
   })
+  const control = useMemo(() => acp ? {
+    ...session,
+    takeoverError: acpTakeoverError,
+    takeControl: () => void requestSessionControl(runID, true),
+    releaseControl: () => void requestSessionControl(runID, false),
+  } : session, [acp, session, acpTakeoverError, runID])
 
   return {
     hasAgentTerminal,
     controller,
-    session,
+    session: control,
     takeover,
     starting,
     steerable,

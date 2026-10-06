@@ -7,11 +7,13 @@ import {
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
   ChevronRight as LucideChevronRight,
+  ChevronLeft as LucideChevronLeft,
   ChevronUp as LucideChevronUp,
   Copy as LucideCopy,
   Ellipsis as LucideEllipsis,
   Eye as LucideEye,
   FileText as LucideFileText,
+  Folder as LucideFolder,
   FolderGit2 as LucideFolderGit2,
   GitBranch as LucideGitBranch,
   History as LucideHistory,
@@ -65,13 +67,24 @@ import {
   CircleX as LucideCircleX,
   ClipboardCheck as LucideClipboardCheck,
   File as LucideFile,
-  Folder as LucideFolder,
   FolderPlus as LucideFolderPlus,
   ListFilter as LucideListFilter,
   CircleHelp as LucideCircleHelp,
   Reply as LucideReply,
   ArrowRight as LucideArrowRight,
   WrapText as LucideWrapText,
+  Pencil as LucidePencil,
+  Globe as LucideGlobe,
+  Trash2 as LucideTrash2,
+  Circle as LucideCircle,
+  CircleDot as LucideCircleDot,
+  MessageCircleQuestionMark as LucideMessageCircleQuestionMark,
+  FileCheck as LucideFileCheck,
+  ArrowRightLeft as LucideArrowRightLeft,
+  Brain as LucideBrain,
+  ListPlus as LucideListPlus,
+  CornerUpRight as LucideCornerUpRight,
+  ExternalLink as LucideExternalLink,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -160,3 +173,16 @@ export const ListFilter = icon(LucideListFilter)
 export const CircleHelp = icon(LucideCircleHelp)
 export const Reply = icon(LucideReply)
 export const ArrowRight = icon(LucideArrowRight)
+export const Pencil = icon(LucidePencil)
+export const Globe = icon(LucideGlobe)
+export const Trash2 = icon(LucideTrash2)
+export const Circle = icon(LucideCircle)
+export const CircleDot = icon(LucideCircleDot)
+export const MessageCircleQuestion = icon(LucideMessageCircleQuestionMark)
+export const FileCheck = icon(LucideFileCheck)
+export const ArrowRightLeft = icon(LucideArrowRightLeft)
+export const Brain = icon(LucideBrain)
+export const ListPlus = icon(LucideListPlus)
+export const CornerUpRight = icon(LucideCornerUpRight)
+export const ExternalLink = icon(LucideExternalLink)
+export const ChevronLeft = icon(LucideChevronLeft)

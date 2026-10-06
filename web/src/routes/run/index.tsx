@@ -16,6 +16,7 @@ import { RawEventsDialog } from '@/routes/run/raw-events'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
 import { useRunRoom } from '@/routes/run/room'
+import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
 import { TerminalView } from '@/routes/run/terminal-view'
@@ -77,11 +78,13 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
 
   const views = runViews.filter((view) => view !== 'browser' || cap.hasMethod('dev.browser.status'))
   const asked = isRunView(requested) ? requested : remembered
-  const view = asked && views.includes(asked) ? asked : defaultView(run.mode)
+  const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
 
   const agent = useAgentTerminal(run)
-  const agentName = agentDisplayNames(useAgentList().agents)[run.harness] ?? run.harness
+  const { agents } = useAgentList()
+  const agentName = agentDisplayNames(agents)[run.harness] ?? run.harness
+  const switchable = agents?.find((entry) => entry.name === run.harness)?.switchable === true
   const shells = useRunShells(run.id)
   const room = useRunRoom(run, agent.roomControl)
 
@@ -106,6 +109,10 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
     focusComposer: () => {
       go('session')
       requestAnimationFrame(() => textarea.current?.focus())
+    },
+    focusRequest: () => {
+      go('session')
+      requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(dockedRequestID)?.focus()))
     },
   }
 
@@ -153,6 +160,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
           onCaptures={openCaptures}
           onEvents={openDialog('events')}
           agentName={agentName}
+          switchable={switchable}
         />
         <div className="relative min-h-0 flex-1">
           {visited.has('session') && (
@@ -165,6 +173,8 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
                 active={view === 'session'}
                 textarea={textarea}
                 onComposing={setComposing}
+                shells={shells}
+                switchable={switchable}
               />
             </TabsContent>
           )}

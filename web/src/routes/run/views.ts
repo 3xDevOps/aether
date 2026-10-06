@@ -23,6 +23,6 @@ export function runRoute(runID: string, view?: RunView): Route {
   return { name: 'run', params: view ? { runId: runID, view } : { runId: runID } }
 }
 
-export function defaultView(mode: string): RunView {
-  return mode === 'acp' ? 'session' : 'terminal'
+export function defaultView(run: { mode: string; acp?: boolean }): RunView {
+  return run.mode === 'acp' || run.acp ? 'session' : 'terminal'
 }

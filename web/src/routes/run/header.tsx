@@ -17,6 +17,7 @@ import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { ModeSwitch } from '@/routes/run/mode-switch'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -37,6 +38,7 @@ export interface RunNavigation {
   go: (view: RunView) => void
   reveal: (cardID: string) => void
   focusComposer: () => void
+  focusRequest: () => void
 }
 
 interface FrameAction {
@@ -52,6 +54,7 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
   const room = useStore((s) => s.roomMessages[run.id])
   const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
+  const mobile = useIsMobile()
   const [busy, setBusy] = useState(false)
   if (!condition) return null
 
@@ -86,6 +89,9 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
       if (action.label === 'Open terminal') return openTerminal()
       const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
       const input = run.pending_inputs?.[0]
+      if (!steer && input && run.acp && !mobile) {
+        return { label: 'Answer', act: () => nav.focusRequest() }
+      }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
       return { label, act: () => nav.reveal(card) }
     }
@@ -95,7 +101,10 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
 }
 
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
-  const { state, reason } = useRunPresentation(run)
+  const presented = useRunPresentation(run)
+  const { state, reason } = run.switching
+    ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
+    : presented
   const owner = useStore((s) => s.members[run.member_id])
   const meta = [agentName, modeLabel[run.mode] ?? run.mode].join(' · ')
   return (
@@ -149,9 +158,11 @@ export function RunHeader({
   onCaptures,
   onEvents,
   agentName,
+  switchable,
 }: {
   run: RunRecord
   agentName: string
+  switchable: boolean
   view: RunView
   views: RunView[]
   agent: AgentTerminal
@@ -184,6 +195,7 @@ export function RunHeader({
         actionsLabel="Run actions"
         actions={
           <>
+            {!mobile && !narrow && <ModeSwitch run={run} agent={agent} switchable={switchable} />}
             {primary && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}
             <Button
               variant="ghost"

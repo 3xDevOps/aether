@@ -553,11 +553,12 @@ export const api = {
       ...(opts?.steer ? { steer: true } : {}),
       ...opts?.lease,
     }),
-  runInputAnswer: (runID: string, requestID: string, optionID: string, lease: SessionLease) =>
+  runInputAnswer: (runID: string, requestID: string, optionID: string, lease: SessionLease, values?: Record<string, unknown>) =>
     call<unknown>('run.input.answer', {
       run_id: runID,
       request_id: requestID,
       option_id: optionID,
+      ...(values ? { values } : {}),
       ...lease,
     }),
   runACPCancel: (runID: string, lease: SessionLease) =>
@@ -572,6 +573,8 @@ export const api = {
     }).then((r) => r.frames),
   runACPItem: (runID: string, seq: number) =>
     call<{ item: SessionItem }>('run.acp.item', { run_id: runID, seq }).then((r) => r.item),
+  runModeSwitch: (runID: string, mode: 'tui' | 'acp', lease?: SessionLease) =>
+    call<{ run: Run }>('run.mode.switch', { run_id: runID, mode, ...lease }).then((r) => r.run),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
@@ -938,6 +941,8 @@ export const api = {
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
+  acpSocket: (runID: string) =>
+    socketURL(`/ws/acp/${encodeURIComponent(runID)}`),
   attachShellSocket: (runID: string, tab: string) =>
     socketURL(
       `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,

@@ -1,9 +1,10 @@
-import { memo, useState } from 'react'
-import { ArrowRight, CircleHelp, ClipboardCheck, type LucideIcon, MessageSquare, Reply } from '@/components/icons'
+import { memo, useLayoutEffect, useRef, useState } from 'react'
+import { ArrowRight, CircleHelp, ClipboardCheck, FileCheck, type LucideIcon, MessageCircleQuestion, MessageSquare, Reply } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { runLabel } from '@/lib/status'
 import type { RunMessage, RunMessageKind } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
@@ -102,3 +103,59 @@ export const MessageRow = memo(function MessageRow({
     </article>
   )
 })
+
+const kindGlyph: Record<RunMessageKind, { Icon: LucideIcon; label: string }> = {
+  message: { Icon: MessageSquare, label: 'Message' },
+  question: { Icon: MessageCircleQuestion, label: 'Question' },
+  reply: { Icon: Reply, label: 'Reply' },
+  report: { Icon: FileCheck, label: 'Report' },
+}
+
+function bodyOf(m: RunMessage): string {
+  if (m.kind !== 'report') return m.body
+  return [m.outcome && `Outcome: ${m.outcome}`, m.summary, m.body, m.next_action && `Next: ${m.next_action}`]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function AgentMessageRow({ message, label, onOpenRun }: {
+  message: RunMessage
+  label: (runID: string) => string
+  onOpenRun: (runID: string) => (() => void) | undefined
+}) {
+  const { Icon, label: kind } = kindGlyph[message.kind] ?? kindGlyph.message
+  const body = useRef<HTMLParagraphElement>(null)
+  const [long, setLong] = useState(false)
+  const [open, setOpen] = useState(false)
+  const text = bodyOf(message)
+  useLayoutEffect(() => {
+    const node = body.current
+    if (node) setLong(node.scrollHeight > node.clientHeight + 1)
+  }, [text])
+  const participant = (runID: string) => {
+    const open = onOpenRun(runID)
+    return open
+      ? <Button variant="link" size="sm" onClick={open}><span className="max-w-40 truncate">{label(runID)}</span></Button>
+      : <span className="max-w-40 truncate text-text">{label(runID)}</span>
+  }
+  return (
+    <article data-slot="agent-message" aria-label={`${kind} from ${label(message.from_run_id)} to ${label(message.to_run_id)}`} className="flex min-w-0 flex-col gap-0.5 text-ui-sm">
+      <div className="flex min-w-0 items-center gap-1.5 text-muted">
+        <Icon role="img" aria-label={kind} className="size-3.5 shrink-0" />
+        {participant(message.from_run_id)}
+        <span aria-hidden>→</span>
+        {participant(message.to_run_id)}
+        <RelativeTime at={message.created_at} className="ml-auto shrink-0 tabular-nums" />
+      </div>
+      <p ref={body} className={cn('pl-5 break-words whitespace-pre-wrap text-text', !open && 'line-clamp-3')}>{text}</p>
+      <div className="flex items-center gap-2 pl-5 text-muted">
+        <span>{deliveryWord(message)}</span>
+        {(long || open) && (
+          <Button variant="link" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? 'Show less' : 'Show more'}
+          </Button>
+        )}
+      </div>
+    </article>
+  )
+}

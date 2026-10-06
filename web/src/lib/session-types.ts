@@ -88,10 +88,10 @@ export interface SessionItem {
   plan?: { content: string; priority?: string; status?: string }[]
   request?: SessionRequest
   mode?: string
-  config_options?: unknown
-  commands?: unknown
+  config_options?: ConfigOption[]
+  commands?: SessionCommand[]
   usage?: { used: number; size: number; cost?: number; currency?: string }
-  auth?: unknown
+  auth?: AuthStatusUpdate
   title?: string
   notice?: { severity: string; title: string; description?: string }
   stop_reason?: string
@@ -115,9 +115,45 @@ export interface SessionState {
   pending: SessionRequest[]
   last_activity: string
   mode?: string
-  config_options?: unknown
-  commands?: unknown
-  auth?: unknown
+  config_options?: ConfigOption[]
+  commands?: SessionCommand[]
+  auth?: AuthStatusUpdate
+  steering?: boolean
+  auth_methods?: AuthMethod[]
+}
+
+export interface ConfigOption {
+  id: string
+  name: string
+  description?: string
+  category?: string
+  type: 'select' | 'boolean' | string
+  currentValue?: string | boolean
+  options?: (ConfigValue | { group: string; name: string; options: ConfigValue[] })[]
+}
+
+export interface ConfigValue {
+  value: string
+  name: string
+  description?: string
+}
+
+export interface SessionCommand {
+  name: string
+  description?: string
+  input?: { hint?: string } | null
+}
+
+export interface AuthMethod {
+  id: string
+  name: string
+  description?: string
+  type?: string
+  args?: string[]
+}
+
+export interface AuthStatusUpdate {
+  authStatus?: { kind?: string; label?: string; detail?: string }
 }
 
 /** The /ws/acp header; write asks for the run's control lease. */
@@ -134,6 +170,7 @@ export interface SessionStreamAck {
   ok: boolean
   seq: number
   replay: number
+  oldest_seq?: number
   epoch: number
   live: boolean
   state?: SessionState

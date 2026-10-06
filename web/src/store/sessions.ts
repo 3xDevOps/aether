@@ -1,12 +1,29 @@
-import type { Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
+import type { StreamState } from '@/lib/acp-stream'
+import type { SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
+import type { ControlMetadata } from '@/routes/terminal/attach'
+import type { TakeoverSnapshot } from '@/routes/terminal/session'
 import type { RootStore } from '@/store'
 import { toolTenses, type AgentPayload } from '@/store/activity'
 import { isTerminal, type RunRecord } from '@/store/runs'
+import {
+  appendItems,
+  itemCount,
+  prependItems,
+  replaceItem,
+  trimTurns,
+  workSummary,
+  type Delivery,
+  type SessionRow,
+  type Turn,
+  type WorkItem,
+} from '@/store/session-rows'
 import type { SliceCreator } from '@/store/slice'
+
+export type { Delivery, SessionRow }
 
 export const sessionEventTypes = ['run.agent', 'workspace.timeline', 'run.status']
 
@@ -20,13 +37,49 @@ export interface SessionLog {
   error: string | null
 }
 
+export interface AcpSession {
+  epoch: number
+  seq: number
+  oldestSeq: number
+  more: boolean
+  turns: Turn[]
+  state: SessionState | null
+  pending: SessionRequest[]
+  live: boolean
+  stream: StreamState
+  streamError?: string
+  control?: ControlMetadata
+  controlError?: string
+  takeover?: TakeoverSnapshot
+  takeoverError?: string
+  olderLoading: boolean
+  olderError?: string
+  touched: number
+}
+
 export interface SessionsSlice {
   sessionLogs: Record<string, SessionLog>
   beginSessionLog: (runID: string) => void
   addSessionEvents: (runID: string, events: Event[], cursor?: number) => void
   setSessionLogError: (runID: string, error: string | null) => void
   appendSessionEvent: (event: Event) => void
+
+  acpSessions: Record<string, AcpSession>
+  expandedRows: Record<string, Record<string, true>>
+  acpAck: (runID: string, ack: SessionStreamAck) => void
+  acpFrames: (runID: string, frames: SessionFrame[]) => void
+  acpOlder: (runID: string, frames: SessionFrame[], more: boolean) => void
+  acpOlderState: (runID: string, loading: boolean, error?: string) => void
+  acpReplaceItem: (runID: string, item: SessionItem) => void
+  acpStream: (runID: string, stream: StreamState, error?: string) => void
+  acpControl: (runID: string, control: ControlMetadata | undefined, error?: string) => void
+  acpTakeover: (runID: string, takeover: TakeoverSnapshot | undefined, error?: string) => void
+  touchAcpSession: (runID: string, open: (runID: string) => boolean) => void
+  toggleSessionRow: (runID: string, rowID: string) => void
 }
+
+export const residentSessions = 3
+export const keptItems = 200
 
 const emptyLog: SessionLog = { events: [], cursor: 0, loading: false, error: null }
 
@@ -35,6 +88,62 @@ function merge(current: Event[], incoming: Event[]): Event[] {
   const fresh = incoming.filter((event) => !seen.has(event.seq))
   if (fresh.length === 0) return current
   return [...current, ...fresh].sort((a, b) => a.seq - b.seq).slice(-residentEvents)
+}
+
+const emptySession: AcpSession = {
+  epoch: 0,
+  seq: 0,
+  oldestSeq: 0,
+  more: false,
+  turns: [],
+  state: null,
+  pending: [],
+  live: false,
+  stream: 'connecting',
+  olderLoading: false,
+  touched: 0,
+}
+
+function itemsOf(frames: SessionFrame[]): SessionItem[] {
+  return frames.flatMap((frame) => (frame.item ? [frame.truncated ? { ...frame.item, truncated: true } : frame.item] : []))
+}
+
+function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 'state' | 'pending'> {
+  let state = session.state
+  let pending = session.pending
+  for (const item of items) {
+    switch (item.kind) {
+      case 'request': {
+        const request = item.request
+        if (!request) break
+        pending = pending.filter((open) => open.id !== request.id)
+        if (request.status === 'pending') pending = [...pending, request]
+        break
+      }
+      case 'turn_start':
+      case 'turn_end':
+        if (state) state = { ...state, turn_in_flight: item.kind === 'turn_start' }
+        if (item.kind === 'turn_end') pending = []
+        break
+      case 'mode_change':
+        if (state) state = { ...state, mode: item.mode }
+        break
+      case 'config_options':
+        if (state) state = { ...state, config_options: item.config_options }
+        break
+      case 'commands':
+        if (state) state = { ...state, commands: item.commands }
+        break
+      case 'auth_status':
+        if (state) state = { ...state, auth: item.auth }
+        break
+    }
+  }
+  return { state, pending }
+}
+
+function patchSession(s: SessionsSlice, runID: string, patch: Partial<AcpSession>): Pick<SessionsSlice, 'acpSessions'> {
+  return { acpSessions: { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), ...patch } } }
 }
 
 export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
@@ -61,6 +170,88 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
     if (!get().sessionLogs[event.run_id] || !sessionEventTypes.includes(event.type)) return
     get().addSessionEvents(event.run_id, [event])
   },
+
+  acpSessions: {},
+  expandedRows: {},
+  acpAck: (runID, ack) =>
+    set((s) => {
+      const held = s.acpSessions[runID] ?? emptySession
+      const restart = ack.epoch !== held.epoch || ack.oldest_seq !== undefined
+      const base = restart
+        ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1 }
+        : {}
+      return patchSession(s, runID, { ...base, epoch: ack.epoch, live: ack.live, state: ack.state ?? null, pending: ack.state?.pending ?? [] })
+    }),
+  acpFrames: (runID, frames) =>
+    set((s) => {
+      let session = s.acpSessions[runID] ?? emptySession
+      let batch: SessionItem[] = []
+      const flush = () => {
+        if (batch.length === 0) return
+        session = {
+          ...session,
+          ...advance(session, batch),
+          turns: appendItems(session.turns, batch),
+          seq: batch.at(-1)!.seq,
+          oldestSeq: session.oldestSeq || batch[0]!.seq,
+        }
+        batch = []
+      }
+      for (const frame of frames) {
+        if (frame.reset) {
+          flush()
+          session = { ...session, turns: [], seq: 0, oldestSeq: 0, more: false, pending: [], epoch: frame.epoch ?? session.epoch + 1 }
+          continue
+        }
+        const [item] = itemsOf([frame])
+        if (item && item.seq > (batch.at(-1)?.seq ?? session.seq)) batch.push(item)
+      }
+      flush()
+      return { acpSessions: { ...s.acpSessions, [runID]: session } }
+    }),
+  acpOlder: (runID, frames, more) =>
+    set((s) => {
+      const session = s.acpSessions[runID]
+      if (!session) return {}
+      const older = itemsOf(frames).filter((item) => !session.oldestSeq || item.seq < session.oldestSeq)
+      return patchSession(s, runID, {
+        turns: prependItems(session.turns, older),
+        oldestSeq: older[0]?.seq ?? session.oldestSeq,
+        more: more && older.length > 0,
+        olderLoading: false,
+        olderError: undefined,
+      })
+    }),
+  acpOlderState: (runID, loading, error) => set((s) => patchSession(s, runID, { olderLoading: loading, olderError: error })),
+  acpReplaceItem: (runID, item) =>
+    set((s) => {
+      const session = s.acpSessions[runID]
+      return session ? patchSession(s, runID, { turns: replaceItem(session.turns, item) }) : {}
+    }),
+  acpStream: (runID, stream, error) => set((s) => patchSession(s, runID, { stream, streamError: error })),
+  acpControl: (runID, control, error) => set((s) => patchSession(s, runID, { control, controlError: error })),
+  acpTakeover: (runID, takeover, error) => set((s) => patchSession(s, runID, { takeover, takeoverError: error })),
+  touchAcpSession: (runID, open) =>
+    set((s) => {
+      const sessions = { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), touched: Date.now() } }
+      const idle = Object.entries(sessions)
+        .filter(([id]) => id !== runID && !open(id))
+        .sort(([, a], [, b]) => b.touched - a.touched)
+      const room = Math.max(0, residentSessions - 1 - Object.keys(sessions).filter((id) => id !== runID && open(id)).length)
+      for (const [id, session] of idle.slice(room)) {
+        if (itemCount(session.turns) <= keptItems) continue
+        const turns = trimTurns(session.turns, keptItems)
+        sessions[id] = { ...session, turns, oldestSeq: turns[0]?.items[0]?.seq ?? session.oldestSeq, more: true }
+      }
+      return { acpSessions: sessions }
+    }),
+  toggleSessionRow: (runID, rowID) =>
+    set((s) => {
+      const rows = { ...s.expandedRows[runID] }
+      if (rows[rowID]) delete rows[rowID]
+      else rows[rowID] = true
+      return { expandedRows: { ...s.expandedRows, [runID]: rows } }
+    }),
 })
 
 export async function readSessionLog(store: RootStore, client: Api, run: { id: string; workspace_id: string }): Promise<void> {
@@ -87,8 +278,6 @@ export async function readSessionLog(store: RootStore, client: Api, run: { id: s
   }
 }
 
-export type Delivery = 'Queued' | 'Sent' | 'Not sent' | 'Delivery uncertain' | 'Denied' | 'Cancelled'
-
 const deliveryWord: Record<RoomMessageState, Delivery> = {
   queued: 'Queued',
   sent: 'Sent',
@@ -98,29 +287,13 @@ const deliveryWord: Record<RoomMessageState, Delivery> = {
   cancelled: 'Cancelled',
 }
 
-export interface WorkEntry {
-  id: string
-  label: string
-  status: 'running' | 'done' | 'failed'
-  at: string
+export function deliveryOf(m: RoomMessage): Pick<Extract<SessionRow, { kind: 'user' }>, 'delivery' | 'deliverAfter' | 'failure'> {
+  return {
+    delivery: deliveryWord[m.state],
+    deliverAfter: m.state === 'queued' ? m.deliver_after : undefined,
+    failure: m.failure?.message,
+  }
 }
-
-export type SessionRow =
-  | { kind: 'user'; id: string; at: string; authorID: string; body: string; delivery: Delivery; deliverAfter?: string; failure?: string }
-  | { kind: 'note'; id: string; at: string; authorID: string; body: string; question?: boolean }
-  | { kind: 'work'; id: string; at: string; summary: string; entries: WorkEntry[] }
-  | {
-      kind: 'request'
-      id: string
-      at: string
-      answer: 'input' | 'reply'
-      title: string
-      body?: string
-      authorID?: string
-      reply?: { authorID: string; body: string }
-    }
-  | { kind: 'event'; id: string; at: string; text: string }
-  | { kind: 'finished'; id: string; at: string; text: string; tone: Tone }
 
 export interface SessionSources {
   run: RunRecord
@@ -133,41 +306,16 @@ type Item =
   | { at: string; order: number; row: SessionRow }
   | { at: string; order: number; tool: AgentPayload; id: string }
 
-const categories: [RegExp, string, string, string][] = [
-  [/^(bash)$/, 'Ran', 'command', 'commands'],
-  [/^(read)$/, 'Read', 'file', 'files'],
-  [/^(edit|multiedit|notebookedit|write)$/, 'Edited', 'file', 'files'],
-  [/^(grep|glob|websearch)$/, 'Ran', 'search', 'searches'],
-  [/^(webfetch)$/, 'Fetched', 'page', 'pages'],
-  [/^(todowrite)$/, 'Updated', 'plan', 'plans'],
-]
-
-export function workSummary(tools: AgentPayload[]): string {
-  const counts = new Map<string, { verb: string; one: string; many: string; n: number }>()
-  for (const tool of tools) {
-    const name = (tool.tool ?? '').toLowerCase()
-    const match = tool.kind === 'subagent'
-      ? (['', 'Delegated', 'task', 'tasks'] as const)
-      : categories.find(([pattern]) => pattern.test(name)) ?? ['', 'Used', 'tool', 'tools']
-    const key = `${match[1]} ${match[3]}`
-    const entry = counts.get(key) ?? { verb: match[1], one: match[2], many: match[3], n: 0 }
-    entry.n++
-    counts.set(key, entry)
-  }
-  const parts = [...counts.values()].map(({ verb, one, many, n }, index) =>
-    `${index === 0 ? verb : verb.toLowerCase()} ${n} ${n === 1 ? one : many}`)
-  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? ''
-}
-
 function workRow(calls: { id: string; at: string; tool: AgentPayload }[], results: Map<string, AgentPayload>): SessionRow {
-  const entries = calls.map(({ id, at, tool }): WorkEntry => {
+  const tools = calls.map(({ tool }) => (tool.kind === 'subagent' ? 'subagent' : tool.tool ?? ''))
+  const entries = calls.map(({ id, at, tool }, index): WorkItem => {
     const result = tool.tool_use_id ? results.get(tool.tool_use_id) : undefined
     const [present, past] = toolTenses(tool)
     const target = tool.detail || tool.tool || ''
     const status = result ? (result.is_error ? 'failed' : 'done') : 'running'
-    return { id, at, status, label: `${status === 'running' ? present : past} ${target}`.trimEnd() }
+    return { id, at, status, tool: tools[index]!, label: `${status === 'running' ? present : past} ${target}`.trimEnd() }
   })
-  return { kind: 'work', id: `work:${calls[0]!.id}`, at: calls[0]!.at, summary: workSummary(calls.map((c) => c.tool)), entries }
+  return { kind: 'work', id: `work:${calls[0]!.id}`, at: calls[0]!.at, summary: workSummary(tools), entries }
 }
 
 interface TimelinePayload {
@@ -261,8 +409,7 @@ export function rowsForRun({ run, events, room, memberName }: SessionSources): S
     const order = events.length + index
     if (m.kind === 'steer_request') {
       items.push({ at: m.created_at, order, row: {
-        ...base, kind: 'user', authorID: m.actor_id, body: m.body, delivery: deliveryWord[m.state],
-        deliverAfter: m.state === 'queued' ? m.deliver_after : undefined, failure: m.failure?.message,
+        ...base, kind: 'user', authorID: m.actor_id, body: m.body, ...deliveryOf(m),
       } })
     } else if (m.kind === 'comment') {
       items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body } })

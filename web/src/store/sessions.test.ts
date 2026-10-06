@@ -1,7 +1,8 @@
 import type { Event } from '@/lib/types'
 import { createRootStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { readSessionLog, rowsForRun, workSummary, type SessionRow } from '@/store/sessions'
+import { workSummary } from '@/store/session-rows'
+import { readSessionLog, rowsForRun, type SessionRow } from '@/store/sessions'
 import { alice, bob, fakeApi, roomMessage, run } from '@/test/fixtures'
 
 let seq = 0
@@ -40,10 +41,9 @@ describe('session rows', () => {
   })
 
   it('names mixed work in one sentence', () => {
-    expect(workSummary([{ kind: 'tool_call', tool: 'Bash' }, { kind: 'tool_call', tool: 'Bash' }])).toBe('Ran 2 commands')
-    expect(workSummary([
-      { kind: 'tool_call', tool: 'Edit' }, { kind: 'subagent', tool: 'Task' }, { kind: 'tool_call', tool: 'Grep' },
-    ])).toBe('Edited 1 file, delegated 1 task and ran 1 search')
+    expect(workSummary(['Bash', 'execute'])).toBe('Ran 2 commands')
+    expect(workSummary(['Edit', 'subagent', 'Grep'])).toBe('Edited 1 file, delegated 1 task and ran 1 search')
+    expect(workSummary(['execute', 'execute', 'read', 'read', 'read'])).toBe('Ran 2 commands and read 3 files')
   })
 
   it('shows a room message to the agent once, with its delivery word, even after the inject records it', () => {

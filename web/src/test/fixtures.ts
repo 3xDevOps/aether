@@ -515,6 +515,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runACPSetOption: vi.fn(async () => needsOverride('runACPSetOption')),
     runACPHistory: vi.fn(async () => needsOverride('runACPHistory')),
     runACPItem: vi.fn(async () => needsOverride('runACPItem')),
+    runModeSwitch: vi.fn(async () => needsOverride('runModeSwitch')),
     runClose: vi.fn(async () => run({ status: 'merged' })),
     runHandoff: vi.fn(async () => ({})),
     runRoomList: vi.fn(async () => ({ messages: [] })),
@@ -592,6 +593,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
+    acpSocket: vi.fn((runID: string) => `ws://localhost/ws/acp/${runID}`),
     attachShellSocket: vi.fn(
       (runID: string, tab: string) =>
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,

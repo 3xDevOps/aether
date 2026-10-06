@@ -6,10 +6,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputHint, inputTitle } from '@/lib/run-requests'
+import type { SessionRequest } from '@/lib/session-types'
 import type { Approval, RoomMessage } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
+import { SessionRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { RunRecord } from '@/store/runs'
@@ -23,6 +25,7 @@ export const requestCardID = {
 
 const emptyMessages: RoomMessage[] = []
 const emptyApprovals: Approval[] = []
+const emptyRequests: SessionRequest[] = []
 
 function secondsUntil(at: string | undefined): number {
   return at ? Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000)) : 0
@@ -47,8 +50,10 @@ export function useRunRequests(run: RunRecord) {
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
   const approvals = useStore((s) => s.approvalsByRun[run.id] ?? emptyApprovals)
   const selfID = useStore((s) => s.info?.member.id)
+  const sessionRequests = useStore((s) => (run.acp ? s.acpSessions[run.id]?.pending : undefined)) ?? emptyRequests
   return {
-    inputs: run.pending_inputs ?? [],
+    inputs: run.acp ? [] : run.pending_inputs ?? [],
+    sessionRequests,
     approvals,
     steers: queuedSteers(room).filter((m) => m.actor_id !== selfID),
     questions: unansweredQuestions(room).filter((m) => m.actor_id !== run.member_id),
@@ -91,7 +96,7 @@ export function NeedsYouCards({ run, agent, room, nav }: {
   nav: RunNavigation
 }) {
   const members = useStore((s) => s.members)
-  const { inputs, approvals, steers, questions } = useRunRequests(run)
+  const { inputs, sessionRequests, approvals, steers, questions } = useRunRequests(run)
   const [deciding, setDeciding] = useState<string | null>(null)
   const name = (id: string, snapshot?: string) => members[id]?.display_name ?? snapshot ?? id
   const openTerminal = () => {
@@ -106,11 +111,14 @@ export function NeedsYouCards({ run, agent, room, nav }: {
     ).finally(() => setDeciding(null))
   }
 
-  if (inputs.length + approvals.length + steers.length + questions.length === 0) {
+  if (inputs.length + sessionRequests.length + approvals.length + steers.length + questions.length === 0) {
     return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
   }
   return (
     <div className="flex flex-col gap-2">
+      {sessionRequests.map((request) => (
+        <SessionRequestCard key={request.id} id={requestCardID.input(request.id)} runID={run.id} request={request} agent={agent} />
+      ))}
       {inputs.map((input) => (
         <RequestCard
           key={input.id}

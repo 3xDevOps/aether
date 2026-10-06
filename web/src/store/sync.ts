@@ -433,6 +433,17 @@ export async function applyEvent(
       store.getState().applyRunProtected(ev.run_id, p.protected)
       break
     }
+    case 'run.mode': {
+      try {
+        store.getState().upsertRun(await client.runGet(ev.run_id))
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 404)) {
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          return false
+        }
+      }
+      break
+    }
     case 'run.controller':
       // A run this client has not loaded arrives with the holder in its snapshot.
       store.getState().applyRunController(ev.run_id, (ev.payload as RunControllerPayload).member_id)

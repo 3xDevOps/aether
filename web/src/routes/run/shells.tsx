@@ -55,7 +55,7 @@ export function useRunShells(runID: string) {
   }, [refresh])
 
   const running = dock.terminals.filter((terminal) => terminal.process.state === 'running').length
-  const open = useCallback(async () => {
+  const open = useCallback(async (): Promise<DevTerminal | undefined> => {
     setBusy(true)
     setError(null)
     try {
@@ -65,8 +65,10 @@ export function useRunShells(runID: string) {
       const current = s.shellDocks[runID]?.terminals ?? []
       s.syncShellTerminals(runID, [...current.filter((item) => item.terminal_id !== result.terminal.terminal_id), result.terminal])
       s.selectShellTab(runID, result.terminal.terminal_id)
+      return result.terminal
     } catch (cause) {
       setError(message(cause))
+      return undefined
     } finally {
       setBusy(false)
     }

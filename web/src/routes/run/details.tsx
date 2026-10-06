@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
+import { AgentMessageRow } from '@/components/messages/message-row'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -9,7 +10,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
 import { isRetainedRun } from '@/lib/commands'
 import { deletesInLabel } from '@/lib/format'
-import type { RoomMessage, RunMessage } from '@/lib/types'
+import type { RoomMessage } from '@/lib/types'
 import { runLabel } from '@/lib/status'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -47,34 +48,50 @@ function Person({ id }: { id: string }) {
   )
 }
 
-const delivery = (m: RunMessage) => (m.acked_at ? 'Acknowledged' : m.delivered_at ? 'Delivered' : 'Sent')
+const recentMessages = 5
 
 function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const scope: MessageScope = { kind: 'run', workspaceID: run.workspace_id, runID: run.id }
   const key = messageScopeKey(scope)
   const messages = useStore(useShallow((s) => (s.messageLists[key]?.ids ?? []).map((id) => s.runMessages[id]!)))
+  const olderCursor = useStore((s) => s.messageLists[key]?.nextBefore)
+  const error = useStore((s) => s.messageErrors[key])
   const runs = useStore((s) => s.runs)
+  const navigate = useStore((s) => s.navigate)
+  const [all, setAll] = useState(false)
+  const [loading, setLoading] = useState(false)
   useEffect(() => {
     void loadMessagePage(useStore, api, { kind: 'run', workspaceID: run.workspace_id, runID: run.id })
   }, [run.workspace_id, run.id])
   if (messages.length === 0 && !run.mission_id) return null
   const label = (id: string) => (id === run.id ? 'This run' : runs[id] ? runLabel(runs[id]) : id)
+  const shown = all ? messages : messages.slice(-recentMessages)
+  const older = async () => {
+    setLoading(true)
+    await loadMessagePage(useStore, api, scope, true)
+    setLoading(false)
+  }
   return (
     <Section title="Agent messages" count={messages.length} inset={inset}>
       {messages.length === 0 && <p className="text-ui-sm text-muted">No messages between agents yet.</p>}
-      <ol className="flex flex-col gap-2">
-        {messages.map((m) => (
-          <li key={m.id} className="flex flex-col gap-0.5 text-ui-sm">
-            <span className="flex min-w-0 items-center gap-1 text-muted">
-              <span className="min-w-0 truncate text-text">{label(m.from_run_id)} → {label(m.to_run_id)}</span>
-              <span className="shrink-0">· {m.kind}</span>
-              <RelativeTime at={m.created_at} className="ml-auto shrink-0 tabular-nums" />
-            </span>
-            <span className="line-clamp-3 break-words whitespace-pre-wrap text-text">{m.body}</span>
-            <span className="text-muted">{delivery(m)}</span>
+      {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
+      {all && olderCursor && (
+        <Button size="sm" variant="ghost" disabled={loading} onClick={() => void older()}>{loading ? 'Loading…' : 'Show older'}</Button>
+      )}
+      <ol className="flex flex-col gap-3">
+        {shown.map((m) => (
+          <li key={m.id}>
+            <AgentMessageRow
+              message={m}
+              label={label}
+              onOpenRun={(runID) => (runID === run.id ? undefined : () => navigate('run', { runId: runID }))}
+            />
           </li>
         ))}
       </ol>
+      {!all && (messages.length > recentMessages || olderCursor) && (
+        <Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show all</Button>
+      )}
     </Section>
   )
 }
@@ -179,7 +196,7 @@ export function RunDetails({ run, agent, agentName, room, nav, inset, noteDraft 
   noteDraft: { text: string } | null
 }) {
   const requests = useRunRequests(run)
-  const waiting = requests.inputs.length + requests.approvals.length + requests.steers.length + requests.questions.length
+  const waiting = requests.inputs.length + requests.sessionRequests.length + requests.approvals.length + requests.steers.length + requests.questions.length
   return (
     <div className="flex flex-col">
       {room.error && !room.errorFromComposer && (

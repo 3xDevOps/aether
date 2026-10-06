@@ -597,3 +597,61 @@
   transform: none !important;
   min-width: 0 !important;
 }
+
+@layer components {
+  .markdown > * + * {
+    margin-top: 0.5rem;
+  }
+  .markdown :is(ul, ol) {
+    padding-left: 1.25rem;
+  }
+  .markdown ul {
+    list-style: disc;
+  }
+  .markdown ol {
+    list-style: decimal;
+  }
+  .markdown li + li {
+    margin-top: 0.125rem;
+  }
+  .markdown :is(h1, h2, h3, h4) {
+    font-weight: 600;
+  }
+  .markdown blockquote {
+    border-left: 2px solid var(--seam);
+    padding-left: 0.75rem;
+    color: var(--text-muted);
+  }
+  .markdown table {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+  .markdown :is(th, td) {
+    border: 1px solid var(--seam);
+    padding: 0.125rem 0.5rem;
+  }
+
+  .tok-keyword,
+  .tok-operator {
+    color: var(--state-working);
+  }
+  .tok-string,
+  .tok-string2 {
+    color: var(--state-done);
+  }
+  .tok-number,
+  .tok-bool,
+  .tok-atom {
+    color: var(--state-needs-you);
+  }
+  .tok-comment,
+  .tok-meta {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .tok-typeName,
+  .tok-className {
+    color: var(--accent-text);
+  }
+}

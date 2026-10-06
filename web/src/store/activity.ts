@@ -37,6 +37,13 @@ const toolVerbs: Record<string, [string, string]> = {
   websearch: ['Searching', 'Searched'],
   webfetch: ['Fetching', 'Fetched'],
   todowrite: ['Planning', 'Planned'],
+  execute: ['Running', 'Ran'],
+  search: ['Searching', 'Searched'],
+  fetch: ['Fetching', 'Fetched'],
+  delete: ['Deleting', 'Deleted'],
+  move: ['Moving', 'Moved'],
+  think: ['Thinking', 'Thought'],
+  switch_mode: ['Switching mode', 'Switched mode'],
 }
 
 const delegating: [string, string] = ['Delegating', 'Delegated']
