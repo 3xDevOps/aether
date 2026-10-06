@@ -306,7 +306,9 @@ AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
 # Real dashboard interaction through the built gateway/server, as root like the
 # installed service. Without sudo the suite runs the server as your uid; a
 # passing test's teardown chowns what root containers left back to you with
-# the scenario's standard image before deleting its scratch directory.
+# the scenario's standard image before deleting its scratch directory. A failed
+# scenario keeps /tmp/aether-e2e-*, root-owned files included: remove it with
+# sudo rm -rf.
 sudo env "PATH=$PATH" "HOME=$HOME" \
   "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
   AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \
@@ -1007,7 +1009,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `reconnect` | The events socket dropped until the sidebar reads Offline, then a `visibilitychange` reopening it to Live at once instead of waiting out the backoff; and a rejected gateway token reading "This dashboard link has expired" with the gateway's own refusal, not a network guess |
 | `remote-development-git/github.spec.ts` | Opt-in real GitHub publication; see [Headless browser and remote-development acceptance](#headless-browser-and-remote-development-acceptance). Attaches `safe-github-acceptance-evidence` |
 | `remote-development-git/import.spec.ts` | **Import repository** from Manage workspaces against a real HTTPS source: the outcome reads `Created: yes`, and **Continue to Repository** opens Workspace Source with the observed commit pending until **Adopt candidate**; a failed fetch keeps the created workspace, offers no second import and leads to the same repair dialog. It needs network access to `AETHER_E2E_GIT_SOURCE_URL` (default `https://github.com/3xDevOps/Aether.git`) |
-| `remote-development-git/native.spec.ts` | On the real standard image: **Changes > Publish…** commits only a selected path while unrelated staging survives, reports `Index updated: no` against a real `index.lock`, pushes the reviewed branch to a local bare remote, shows the native `gh` failure without erasing the push, and rejects a non-fast-forward without forcing. It needs the root server shown in [Headless browser and remote-development acceptance](#headless-browser-and-remote-development-acceptance): under an unprivileged server the run checkout is owned by your uid, and Git in the root standard image refuses it as "dubious ownership" |
+| `remote-development-git/native.spec.ts` | On the real standard image: **Changes > Publish…** commits only a selected path while unrelated staging survives, reports `Index updated: no` against a real `index.lock`, pushes the reviewed branch to a local bare remote, shows the native `gh` failure without erasing the push, and rejects a non-fast-forward without forcing. It runs with or without sudo: every run container trusts `/workspace` as Git's `safe.directory`, so the root standard image accepts a checkout owned by your uid |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration with the token gone and `?run=<id>` kept, a reload reopens it, Settings pushes `?page=settings`, back returns to the run, and Escape leaves for the Board with a bare address |
 | `run-evidence.spec.ts` | Retained finish evidence after run cleanup through **More > Captures…**: retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape returning focus to More |
