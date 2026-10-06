@@ -218,9 +218,10 @@ The Session view's composer sends a message to the agent: type it and press
 **Send** is the only way, and Enter inserts a newline. The paperclip attaches
 images. A message from the current controller session, with its current
 lease, is delivered to the PTY at once; the composer says so ("You control
-this run, so your message reaches the agent now"). A message from anyone
-else, or to a run with no controller, waits with a **45-second countdown**
-shown on its row (**Delivers in 32s**). During the countdown the controller
+this run: it goes to the agent now"). A message from anyone else, or to a
+run with no controller, waits with a **45-second countdown** shown on its row
+(**Delivers in 32s**). A send the server refuses keeps the draft and shows the
+server's error above the composer. During the countdown the controller
 sees it in **Details > Needs you** with **Approve** and **Deny**; anyone else
 there sees **Take control to decide**. When the timer expires Aether attempts
 delivery. The row then reads **Sent** (`sent`), **Not sent** (`not_sent`),

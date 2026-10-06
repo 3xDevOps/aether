@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { formatKeys } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -37,12 +38,14 @@ export function Composer({ run, agent, room, textarea, onFocusChange }: {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string>()
   const picker = useRef<HTMLInputElement>(null)
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, cap.hasMethod('run.relaunch') && run.mode === 'tui')
   const hint = agent.localControl
-    ? 'You control this run, so your message reaches the agent now.'
-    : 'Your message waits 45 s before it reaches the agent. Whoever controls the run can deliver or deny it sooner.'
+    ? 'You control this run: it goes to the agent now.'
+    : 'Delivers in 45 s unless the controller decides sooner.'
+  const error = uploadError ?? (room.errorFromComposer ? room.error : undefined)
 
   const send = async () => {
     const text = body.trim()
@@ -56,11 +59,12 @@ export function Composer({ run, agent, room, textarea, onFocusChange }: {
   const upload = async (file: File) => {
     if (uploading || attachments.length >= maxAttachments) return
     setUploading(true)
+    setUploadError(undefined)
     try {
       const result = await api.uploadTerminalImage(file, run.id)
       setAttachments((current) => [...current, result.path].slice(0, maxAttachments))
     } catch (cause) {
-      useStore.getState().setRoomActionError(run.id, message(cause))
+      setUploadError(`Image upload failed: ${message(cause)}`)
     } finally {
       setUploading(false)
     }
@@ -77,6 +81,15 @@ export function Composer({ run, agent, room, textarea, onFocusChange }: {
   return (
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
       <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 py-3">
+        {error && (
+          <div role="alert" className="flex items-start gap-2 text-ui-sm text-state-failed">
+            <span className="min-w-0 flex-1 break-words">{error}</span>
+            <Button size="sm" variant="ghost" onClick={() => {
+              setUploadError(undefined)
+              if (room.errorFromComposer) room.clearError()
+            }}>Dismiss</Button>
+          </div>
+        )}
         <Textarea
           ref={textarea}
           aria-label="Message the agent"
@@ -123,12 +136,12 @@ export function Composer({ run, agent, room, textarea, onFocusChange }: {
               <X />
             </Button>
           )}
-          <p id="composer-hint" className="min-w-0 flex-1 truncate text-ui-sm text-muted" title={hint}>
+          <p id="composer-hint" className="line-clamp-2 min-w-0 flex-1 text-ui-sm text-muted">
             {uploading ? 'Uploading…' : hint}
           </p>
           <Button
             size="sm"
-            hint={coarse ? undefined : 'Send (Ctrl+Enter)'}
+            hint={coarse ? undefined : `Send (${formatKeys('$mod+Enter')})`}
             disabled={!body.trim() || room.busy || uploading}
             onClick={() => void send()}
           >

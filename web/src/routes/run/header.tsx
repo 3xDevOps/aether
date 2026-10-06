@@ -11,6 +11,7 @@ import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { useClock } from '@/lib/clock'
+import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, openAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { approveRequest } from '@/routes/board/card-action'
@@ -188,7 +189,7 @@ export function RunHeader({
               variant="ghost"
               size="icon"
               label={detailsOpen ? 'Hide details' : 'Show details'}
-              hint={mobile ? 'Details' : 'Details (Ctrl+.)'}
+              hint={mobile ? 'Details' : `Details (${shortcutLabel('run-details')})`}
               aria-expanded={detailsOpen}
               aria-controls="run-details"
               onClick={(event) => onDetails(event.currentTarget)}

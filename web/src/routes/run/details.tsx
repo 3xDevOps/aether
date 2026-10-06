@@ -182,7 +182,7 @@ export function RunDetails({ run, agent, agentName, room, nav, inset, noteDraft 
   const waiting = requests.inputs.length + requests.approvals.length + requests.steers.length + requests.questions.length
   return (
     <div className="flex flex-col">
-      {room.error && (
+      {room.error && !room.errorFromComposer && (
         <div role="alert" className={cn('flex items-start gap-2 border-b border-seam py-2 text-ui-sm text-state-failed', inset && 'px-4')}>
           <span className="min-w-0 flex-1 break-words">{room.error}</span>
           <Button size="sm" variant="ghost" onClick={room.clearError}>Dismiss</Button>

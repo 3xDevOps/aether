@@ -1497,7 +1497,9 @@ timeline steer that matches a room message is shown once. The log keeps the
 last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
 row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 `steer_request` with the lease the tab holds; its rules are in
-[Run control](terminal.md#run-control).
+[Run control](terminal.md#run-control). A refused send or image upload shows
+the error above the textarea (`role="alert"`, **Dismiss**); Details shows
+only the failures of its own actions.
 
 ### Details
 

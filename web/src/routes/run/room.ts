@@ -20,6 +20,8 @@ export interface RunRoom {
   decide: (messageID: string, decision: 'approve' | 'deny') => Promise<void>
   busy: boolean
   error: string | undefined
+  /** A failed steer is shown at the composer that sent it, every other failure in Details. */
+  errorFromComposer: boolean
   clearError: () => void
 }
 
@@ -28,6 +30,7 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   const workspaceID = run.workspace_id
   const error = useStore((s) => s.roomActionError[runID])
   const [busy, setBusy] = useState(false)
+  const [errorFromComposer, setErrorFromComposer] = useState(false)
   const retry = useRef<{ post: RoomPost; key: string } | null>(null)
   const controlRef = useRef(control)
   controlRef.current = control
@@ -90,6 +93,7 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
       (previous.post.attachments ?? []).join('\n') === (next.attachments ?? []).join('\n') ? previous.key : crypto.randomUUID()
     retry.current = { post: next, key }
     setBusy(true)
+    setErrorFromComposer(next.kind === 'steer_request')
     useStore.getState().setRoomActionError(runID)
     try {
       const result = await client.runRoomPost({
@@ -118,6 +122,7 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   const decide = useCallback(async (messageID: string, decision: 'approve' | 'deny') => {
     const held = controlRef.current
     setBusy(true)
+    setErrorFromComposer(false)
     useStore.getState().setRoomActionError(runID)
     try {
       const result = await client.runRoomDecide({
@@ -135,5 +140,5 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
   }, [client, runID])
 
   const clearError = useCallback(() => useStore.getState().setRoomActionError(runID), [runID])
-  return { post, decide, busy, error, clearError }
+  return { post, decide, busy, error, errorFromComposer, clearError }
 }

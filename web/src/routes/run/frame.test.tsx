@@ -182,7 +182,7 @@ describe('the session composer', () => {
     open({}, 'session')
     attached(true)
     const box = screen.getByRole('textbox', { name: 'Message the agent' })
-    expect(screen.getByText('You control this run, so your message reaches the agent now.')).toBeDefined()
+    expect(screen.getByText('You control this run: it goes to the agent now.')).toBeDefined()
     await userEvent.type(box, 'run the tests')
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
@@ -193,7 +193,17 @@ describe('the session composer', () => {
 
   it('says a message waits for delivery when the viewer does not control the run', () => {
     open({}, 'session')
-    expect(screen.getByText(/waits 45 s before it reaches the agent/)).toBeDefined()
+    expect(screen.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeDefined()
+  })
+
+  it('shows a failed send at the composer and keeps the draft', async () => {
+    vi.mocked(api.runRoomPost).mockRejectedValueOnce(new Error('403 forbidden: steering is not allowed'))
+    open({}, 'session')
+    const box = screen.getByRole('textbox', { name: 'Message the agent' })
+    await userEvent.type(box, 'run the tests')
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    expect((await screen.findByRole('alert')).textContent).toContain('403 forbidden: steering is not allowed')
+    expect((box as HTMLTextAreaElement).value).toBe('run the tests')
   })
 
   it.each([

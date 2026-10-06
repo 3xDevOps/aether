@@ -89,7 +89,7 @@ export function isSingleKey(binding: Keybinding): boolean {
 }
 
 const modifierLabels: Record<string, string> = { Control: 'Ctrl', Meta: '⌘', Alt: 'Alt', Shift: 'Shift' }
-const keyLabels: Record<string, string> = { Escape: 'Esc' }
+const keyLabels: Record<string, string> = { Escape: 'Esc', Enter: 'Enter' }
 
 /** A tinykeys string as this platform writes it: `⌘K` on macOS, `Ctrl+K`
  * elsewhere, `g then b` for a sequence. Optional modifiers are left out. */
