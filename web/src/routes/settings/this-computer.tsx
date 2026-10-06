@@ -142,7 +142,7 @@ function DaemonRow({ client }: { client: Api }) {
   return (
     <SettingRow
       label="Sync daemon"
-      help="Fetches each run's branch into your clone as the agent commits, so the work is there for git without a manual fetch."
+      help="Fetches each run's branch into your clone as the agent commits."
       control={offered && (
         <Button size="sm" variant="secondary" type="submit" form="daemon-install" disabled={busy || !server || !repo}>
           {busy ? 'Installing…' : 'Install'}
