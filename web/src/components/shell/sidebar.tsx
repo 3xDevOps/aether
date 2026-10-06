@@ -24,7 +24,8 @@ import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
 function moveRowFocus(step: 1 | -1) {
   const rows = [...document.querySelectorAll<HTMLElement>(runRowSelector)]
   if (rows.length === 0) return
-  const index = rows.indexOf(document.activeElement as HTMLElement)
+  const focused = rows.indexOf(document.activeElement as HTMLElement)
+  const index = focused === -1 ? rows.findIndex((row) => row.getAttribute('aria-current') === 'page') : focused
   const next = index === -1 ? (step === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + step))
   rows[next]?.focus()
 }

@@ -12,7 +12,7 @@ import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useRun, useSidebarGroups, useStateContext } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
-import type { RunTree, SidebarGroup, SwarmSummary } from '@/store/selectors'
+import { stateContextOf, type RunTree, type SidebarGroup, type SwarmSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
 
 export const runRowSelector = '#sidebar-runs [data-run-row]'
@@ -40,7 +40,6 @@ function swarmCounts({ counts }: SwarmSummary): string {
   ].filter(Boolean).join(' · ')
 }
 
-/** One tab stop for the whole list; Arrow keys, Home and End move within it. */
 function useRovingRows(region: React.RefObject<HTMLElement | null>) {
   const last = useRef<Element | null>(null)
   useLayoutEffect(() => {
@@ -211,15 +210,20 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
   nested: boolean
 }) {
   const navigate = useStore((s) => s.navigate)
+  const self = useStore((s) => s.info?.member.id)
   const mission = useStore((s) => (swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
   const selected = useStore((s) =>
     swarm ? s.route.name === 'missions' && s.route.params.missionId === run.mission_id : isRunRoute(s.route, run.id))
   const title = swarm ? mission?.objective.split('\n')[0] || runLabel(run) : runLabel(run)
   const counts = swarm ? swarmCounts(swarm) : ''
   const open = () => {
-    if (swarm && run.mission_id) navigate('missions', { missionId: run.mission_id })
+    if (state === 'needs-you') {
+      const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
+      navigate(route.name, route.params)
+    } else if (swarm && run.mission_id) navigate('missions', { missionId: run.mission_id })
     else navigate('terminal', { runId: run.id })
   }
+  const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
   const label = [stateLabel[state], workspaceName, title, swarm ? counts : reason].filter(Boolean).join(' · ')
   return (
     <ListRow
@@ -239,7 +243,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
       hoverAction={state === 'needs-you' && <AnswerButton run={run} />}
     >
       {workspaceName && <span className="text-muted">{workspaceName} · </span>}
-      <span className={cn(state !== 'needs-you' && !selected && 'text-muted')}>{title}</span>
+      <span className={cn(recedes && !selected && 'text-muted')}>{title}</span>
     </ListRow>
   )
 }

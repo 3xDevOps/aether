@@ -352,12 +352,13 @@ top to bottom:
 A run row is a 28px `ListRow` (44px on a coarse pointer): a shaped state dot,
 the title, and the agent's monochrome glyph. Its accessible name starts with
 the state word, then the workspace when it is another one, the title and the
-reason. Rows that do not need the viewer show their title in the muted colour.
-A Needs you row offers its answer on hover, focus and a coarse pointer:
-**Reply** for a question, **Review** for an unreviewed finish, otherwise
-**Open**; each goes to the view the condition names. The list is one tab stop
-(roving `tabindex`); Arrow keys, Home and End move within it, `j` and `k` move
-from anywhere, and `u` opens the next run that needs you, oldest first.
+reason. Paused, finished and other members' working rows recede: their title
+is in the muted colour. A Needs you row offers its answer on hover, focus and
+a coarse pointer: **Reply** for a question, **Review** for an unreviewed
+finish, otherwise **Open**; the action and the row itself both go to the view
+the condition names. The list is one tab stop (roving `tabindex`); Arrow
+keys, Home and End move within it, `j` and `k` move from anywhere (starting
+at the open run), and `u` opens the next run that needs you, oldest first.
 
 A swarm is a mission whose integrator coordinates worker runs. It is one row
 showing the objective and the workers' counts ("3 working · 1 needs you");
