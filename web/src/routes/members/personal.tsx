@@ -126,9 +126,14 @@ function ColorPicker({ client, current }: { client: Api; current: string }) {
     setError(null)
     try {
       await client.memberColor(color)
-      setMembers(await client.memberList())
     } catch (err) {
       setError(message(err))
+      return
+    }
+    try {
+      setMembers(await client.memberList())
+    } catch (err) {
+      setError(`Colour saved. Refreshing the member list failed: ${message(err)}`)
     }
   }
   return (
