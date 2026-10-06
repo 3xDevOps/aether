@@ -1209,6 +1209,7 @@ layer that owns them.
 | Scheduled run on stale base | `internal/templates` schedule tests |
 | Container wait transport error | `TestSuperviseWaitRetriesTransportErrorUntilExit`, `TestSuperviseWaitCancellationDuringRetryLeavesRunLive`, and the terminal equivalent in `internal/scheduler` |
 | Exited environment cleanup | `TestExitedTerminalCleanupRetainsStateForRetry`, `TestRecoveredTerminalAttachFailurePreservesAndRetries`, and `TestRecoveredTerminalPutFailurePreservesAndRetries` in `internal/scheduler` |
+| Unprivileged server, root run image | `TestIntegrationRootContainerTrustsUnprivilegedCheckout` in `internal/runrepo`: root git in a real container refuses a checkout another uid owns without `safe.directory`, and both `git status` and the Git panel's status read succeed with it |
 | Docker init and orphan reaping | `TestDockerInitReapsOrphanedDescendants` in `internal/runtime` against a real Docker daemon |
 | SSH port forwarding disconnect | `TestDirectTCPIPOwnerEchoAndHalfClose`, `TestDirectTCPIPFullDisconnectReleasesBackend`, and `TestDirectTCPIPDisconnectCancelsAddressResolution` |
 | Git ignored-tree watch pressure | `TestDiffWatchPrunesGitIgnoredTrees`, live-rule/tracked/negated-path regressions, `TestDiffWatchIgnoresDirectoryCreatedAfterStart`, and `TestDiffWatchPrunesExistingTreeAfterIgnoreUpdate` against real git; kernel watch counts are checked on Linux |
