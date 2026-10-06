@@ -1,6 +1,7 @@
 package acphost
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -49,5 +50,28 @@ func TestLogRecoversFromAShortWrite(t *testing.T) {
 	}
 	if got := seqs(its); len(got) != 4 || got[3] != 4 || its[3].Kind != KindUsage {
 		t.Fatalf("items after reopen %v", got)
+	}
+}
+
+func TestOpenLogIsOwnerOnly(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "runs", "run_1", "items.jsonl")
+	l, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	for p, want := range map[string]os.FileMode{
+		filepath.Join(root, "runs"):          0o700,
+		filepath.Join(root, "runs", "run_1"): 0o700,
+		path:                                 0o600,
+	} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", p, got, want)
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -40,7 +41,10 @@ type itemHeader struct {
 // OpenLog opens or creates the item log at path. A torn final line from an
 // earlier crash is cut off; any other unreadable line is an error.
 func OpenLog(path string) (*Log, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("acphost: create item log directory: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("acphost: open item log: %w", err)
 	}
