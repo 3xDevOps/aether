@@ -109,8 +109,11 @@ turn:
 | --- | --- | --- |
 | **Send** | no turn is running | starts a turn |
 | **Steer** | a turn runs and the agent supports steering | joins the running turn |
-| **Queue** | a turn runs and you hold `Mod`, or the agent cannot steer (`Mod+Shift+Enter`) | runs after this turn |
+| **Queue** | a turn runs and you hold `Mod+Shift`, or the agent cannot steer | runs after this turn |
 | **Interrupt** | a turn runs and the box is empty | `run.acp.cancel`: stops the turn and cancels its requests |
+
+`Mod+Enter` does what the button says, and nothing while the box is empty, so
+it never interrupts; `Mod+Shift+Enter` always queues.
 | **Resume** | the run is paused | resumes it |
 
 The menus under the box set the agent's mode, model and effort
@@ -120,7 +123,8 @@ run's control lease: the tab that opens the run takes it when nobody holds
 it, and the composer offers **Take control** otherwise.
 
 A pending request docks above the composer, one at a time with `1/N`, and
-the composer stays shut until it is answered. **Approve**-style options are
+the composer stays shut until it is answered; **Interrupt** stays, to stop
+the turn and cancel the request instead. **Approve**-style options are
 the filled button; `1` to `4` pick an option while the card has focus, and
 the header's **Answer** focuses it. A form question shows its fields; a link
 request shows the URL with **Copy link** and **Open**. Details lists the same
@@ -246,7 +250,8 @@ enhanced session ended: the agent's ACP server exited with code 1; stderr: ...
 ```
 
 Fix the cause (for a login, run the agent's login command in the Terminal
-tab), then Close and Reopen the run to start a fresh session. A paused run's
+tab), then choose **Retry Enhanced** in the Session view, or pause and resume
+the run, to start a fresh ACP server. A paused run's
 adapter is frozen with its container; one that could not start while the
 container was paused starts on Resume. See
 [failure-handling.md](failure-handling.md#enhanced-runs).
@@ -266,8 +271,8 @@ The server method is `run.mode.switch` with `mode` `acp` or `tui`
 **Steer**. While someone holds the run's control lease, only that session
 can switch; the CLI holds none, so it switches only a run nobody controls.
 In the dashboard the run header's **Standard | Enhanced** control does the
-same with the tab's lease; for an agent that is not `switchable` it is
-disabled with "Chosen when the run starts".
+same with the tab's lease; it appears only for a `switchable` agent, and
+the state line names the mode otherwise.
 
 **Which agents.** `agent.list` reports `switchable`. Claude Code and
 oh-my-pi switch: their ACP server and terminal share one session store, and

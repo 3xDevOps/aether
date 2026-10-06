@@ -499,7 +499,7 @@ replaces at every reattach.
 
 | Failure | What happens |
 | --- | --- |
-| The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Close and Reopen start a fresh session. |
+| The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and resumes the stored session in a fresh one: `session/resume`, else `session/load` without re-logging the replay. A turn cut off by the restart is logged as **Turn interrupted**. |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
