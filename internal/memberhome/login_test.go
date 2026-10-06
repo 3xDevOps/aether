@@ -14,7 +14,7 @@ import (
 
 func newLoginHomes(t *testing.T) (*Manager, string, string) {
 	t.Helper()
-	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func replaceWithSymlink(t *testing.T, name, target string) {
 // lets one through, and the other re-reads what it wrote.
 func TestMarkBorrowedStateConcurrentCreate(t *testing.T) {
 	t.Parallel()
-	m, err := New(t.TempDir())
+	m, err := New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

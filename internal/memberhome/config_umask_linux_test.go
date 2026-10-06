@@ -20,7 +20,7 @@ func TestConfigWritePreservesModeWithRestrictiveUmask(t *testing.T) {
 	}
 
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root)
+	manager, err := New(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

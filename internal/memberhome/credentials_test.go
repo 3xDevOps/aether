@@ -7,7 +7,7 @@ import (
 )
 
 func TestReadCredentialIsRootConfinedAndBounded(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestReadCredentialIsRootConfinedAndBounded(t *testing.T) {
 }
 
 func TestReadCredentialMissingAndUnsupported(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ import (
 
 func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {
 	t.Parallel()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {
 
 func TestOpenCodeConfigUsesNativeHomeAndPreservesAuth(t *testing.T) {
 	t.Parallel()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestOpenCodeConfigUsesNativeHomeAndPreservesAuth(t *testing.T) {
 
 func TestConfigImportPartialResultSurvivesCancellation(t *testing.T) {
 	t.Parallel()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestConfigImportPartialResultSurvivesCancellation(t *testing.T) {
 }
 
 func TestConfigImportReportsZeroWritesAfterPreflightFailure(t *testing.T) {
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func (c *cancelWhenFileAppears) Err() error {
 func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

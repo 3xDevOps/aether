@@ -261,11 +261,13 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		}
 		s.rt = s.docker
 	}
+	removeAgentFiles := runtime.Remover(s.rt, cfg.StandardImage)
 
 	if s.git, err = gitengine.New(gitengine.Config{
-		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
-		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
-		Bus:          s.bus,
+		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
+		CheckoutsDir:   filepath.Join(cfg.DataDir, "checkouts"),
+		Bus:            s.bus,
+		RemoveCheckout: removeAgentFiles,
 		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
 			if s.sched == nil {
 				return
@@ -294,7 +296,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, perr
 	}
 	homesRoot := filepath.Join(cfg.DataDir, "homes")
-	homes, herr := memberhome.New(homesRoot)
+	homes, herr := memberhome.New(homesRoot, removeAgentFiles)
 	if herr != nil {
 		return nil, fmt.Errorf("server: create member homes: %w", herr)
 	}

@@ -49,7 +49,7 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	if err = db.CreateRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(dir, "homes"))
+	homes, err := memberhome.New(filepath.Join(dir, "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

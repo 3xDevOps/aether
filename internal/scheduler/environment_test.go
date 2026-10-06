@@ -15,7 +15,7 @@ import (
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	t.Parallel()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}

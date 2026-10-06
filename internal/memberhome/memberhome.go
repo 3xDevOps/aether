@@ -2,6 +2,7 @@
 package memberhome
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,18 +14,23 @@ import (
 
 // Manager owns the per-member home directories under <data>/homes.
 type Manager struct {
-	root  string
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	root       string
+	removeHome func(ctx context.Context, path string) error
+	mu         sync.Mutex
+	locks      map[string]*sync.Mutex
 }
 
 // New creates a manager rooted at root. The root is created when the first
-// member home is requested.
-func New(root string) (*Manager, error) {
+// member home is requested. removeHome deletes a home in Remove; nil uses
+// os.RemoveAll.
+func New(root string, removeHome func(ctx context.Context, path string) error) (*Manager, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("memberhome: root is required")
 	}
-	return &Manager{root: filepath.Clean(root), locks: make(map[string]*sync.Mutex)}, nil
+	if removeHome == nil {
+		removeHome = func(_ context.Context, path string) error { return os.RemoveAll(path) }
+	}
+	return &Manager{root: filepath.Clean(root), removeHome: removeHome, locks: make(map[string]*sync.Mutex)}, nil
 }
 
 // Root returns the manager's root directory.
@@ -50,12 +56,12 @@ func (m *Manager) Path(member domain.MemberID) (string, error) {
 
 // Remove deletes a member's persistent home. Removing an absent home is a
 // successful no-op.
-func (m *Manager) Remove(member domain.MemberID) error {
+func (m *Manager) Remove(ctx context.Context, member domain.MemberID) error {
 	if err := validateMemberID(string(member)); err != nil {
 		return fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
 	home := filepath.Join(m.root, string(member))
-	if err := os.RemoveAll(home); err != nil {
+	if err := m.removeHome(ctx, home); err != nil {
 		return fmt.Errorf("memberhome: remove home %q: %w", home, err)
 	}
 	return nil

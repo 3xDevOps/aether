@@ -163,7 +163,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("create member: %v", cerr)
 	}
 
-	homes, err := memberhome.New(filepath.Join(dir, "homes"))
+	homes, err := memberhome.New(filepath.Join(dir, "homes"), nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}

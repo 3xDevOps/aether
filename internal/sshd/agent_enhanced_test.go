@@ -42,7 +42,7 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 func TestAgentInstall(t *testing.T) {
 	t.Parallel()
 	s, member := newAgentTestServer(t)
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
