@@ -21,8 +21,8 @@ request ([What an edge stores](#what-an-edge-stores)).
   storage. Nothing else the app writes is its own.
 - **The WebView's ordinary cache** of the dashboard's files, and the
   dashboard's own local record of how you use it. That record holds how the
-  dashboard looks (theme, sidebar width and whether it is collapsed, terminal
-  font size, dock heights, diff wrapping, whether single-key shortcuts are
+  dashboard looks (theme, text size, sidebar width and whether it is
+  collapsed, terminal font size, dock heights, diff wrapping, whether single-key shortcuts are
   on); where you were (the workspace you last opened, whether the sidebar
   lists only your own runs); the mode you last launched each agent in; which
   update notices you dismissed, by version; and

@@ -516,7 +516,7 @@ agent to continue; a turn that had already ended finishes the run.
 ### Disk pressure
 
 Four things grow without bound, and the dashboard's gauge covers all four
-(`GET /api/v1/disk`, shown in Settings > Server with the breakdown under
+(`GET /api/v1/disk`, shown in Settings > **Server** with the breakdown under
 it):
 
 | Growing | Reclaimed by |

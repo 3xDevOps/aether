@@ -220,8 +220,8 @@ one file each (`server`, `workspaces`, `runs`, `members`, `env-terminal`,
 new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences and local progress (theme,
-sidebar width and collapse state, dock heights, terminal zoom, single-key
-shortcuts, diff wrap, `activeWorkspace`, the **Mine** toggle, launch defaults,
+sidebar width and collapse state, dock heights, terminal zoom, text size,
+single-key shortcuts, diff wrap, `activeWorkspace`, the **Mine** toggle, launch defaults,
 dismissed update versions, onboarding progress) are persisted;
 `persistedUi` in `store/index.ts` is the list that decides. Server data is
 always re-fetched.
@@ -338,8 +338,8 @@ top to bottom:
    [Update prompts](#update-prompts).
 6. **Footer**: the member's avatar and name and a connection dot, whose word
    ("Live", "Reconnecting", "Offline") is in the button's name and tooltip.
-   Its menu holds **Profile** (the personal sections of Members: account
-   sharing and colour), **Keyboard shortcuts**, **Theme**, **Update…** when an
+   Its menu holds **Profile** (colour, git identity and agent account
+   sharing; see [Members and devices](#members-and-devices)), **Keyboard shortcuts**, **Theme**, **Update…** when an
    update exists, and a **Team** line with who is online and the spend
    against workspace budgets.
 
@@ -411,15 +411,14 @@ These redirects replace the history entry (`redirectRoute`), so back does not
 return to the dead link. A `?page=missions&id=` link to a swarm the server
 does not know stays on the Swarms page and shows the server's error.
 
-## Configuration view
+## Agent config files
 
-The permanent `configuration` route renders the shared
-`src/components/profile-import.tsx` importer. It is available whenever
-`config.roots` and `config.import` are advertised, through both the local and
-server-hosted gateways, without a workspace or onboarding prerequisite.
-**Agents** and onboarding's Agent step show it under an **Agent config files**
-disclosure, and `src/lib/surfaces.ts` lists the route in the command palette
-under the same name.
+`src/components/profile-import.tsx` is the configuration importer. **Agents**
+and onboarding's Agent step show it under an **Agent config files**
+disclosure whenever `config.roots` and `config.import` are advertised, on both
+gateways, without a workspace. There is no separate route: typing "config
+files" in the command palette finds **Agents**, through the `keywords` its
+entry in `src/lib/surfaces.ts` carries.
 
 The browser directory picker grants access to the directory the user selects
 even when the dashboard is server-hosted; it does not grant access to arbitrary
@@ -795,7 +794,7 @@ base64 in control JSON. The shared browser's observation-only WebSocket is
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
 server-hosted gateway sends no token; WhoIs authenticates each request.
 
-The disk gauge in Settings > Server renders when `server.info` carries a `disk`
+The disk gauge in Settings > **Server** renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
 `server.info`: `protocol.ServerInfoResult` is shared with the CLI and frozen,
 so the gateway serves the number on `GET /api/v1/disk` and the team reads
@@ -806,16 +805,17 @@ itself, and the gauge is labelled as that: it is the number that says whether
 the box is running out of room, and claiming it as Aether's own usage would
 be an invention.
 
-`account.usage` is the quota RPC used by **Usage** in Settings > Server. Its params
+`account.usage` is the quota RPC used by Settings > **Usage**. Its params
 are `{account_member_id?: string, refresh?: boolean}` and its result is
 `{account_member_id, providers}` with independently decoded Claude/Codex
 provider rows (`status`, `windows`, optional `plan`, `updated_at`, `retry_at`,
 `error`, and `checked_at`). The provider endpoints are subscription services
 whose response shapes can change; the server owns credentials, fixed provider
 hosts, bounded fetches and cache policy. The dashboard does not refresh
-tokens, run provider CLIs, or infer billing/history, and an older server that
-does not know this method is shown as needing an update rather than polled
-forever.
+tokens, run provider CLIs, or infer billing/history. The section reads on
+open, on an account change, on reconnect and on its refresh button; nothing
+polls. An older server that does not know this method is shown as needing an
+update.
 
 ## Board
 
@@ -1834,12 +1834,12 @@ for; a second tab, a tab switch or an expanded dock is **Connecting to your
 environment**, with no container to start. A refused or failed start replaces
 the terminal with the gateway's own error instead.
 
-The same stop confirmation (`StopEnvironmentDialog`) backs the Members
-page's notice after a member's first account share: containers started
+The same stop confirmation (`StopEnvironmentDialog`) backs the Profile
+dialog's notice after a member's first account share: containers started
 before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
-terminal is running, or that re-read fails, **Your agent account** says so
+terminal is running, or that re-read fails, **Agent account sharing** says so
 (that the terminal could not be checked, on a failed read) and offers **Stop
 environment**. A share while another grant already exists shows nothing,
 because the page cannot tell whether the terminal predates the first one.
@@ -2302,92 +2302,108 @@ questions and queued messages stay contextual to their run, in its Details
   `warn`, `exceeded`) - every workspace, ones with nothing running included,
   which is what the wide read above is for - and says so in those words. A spend that includes unmetered runs renders as a floor
   (`$1.20+`), because a harness with no adapter reports nothing.
-- **Workspace controls live on the workspace view.** The workspace switcher's
-  **Repository** item opens it.
-  `routes/workspace.tsx` is one workspace: its name, its base branch, its runs,
-  and buttons for the budget (`budget.set`), the steering policy
-  (`workspace.settings`) and, for admins, Source control. Each is gated by its
-  server-side permission. A spend ceiling and a steering policy belong beside
-  the thing they govern rather than in a header two views away. The settings
-  dialog shows the base branch without offering to change it: runs have already
-  forked from it, so editing it there would only make the displayed branch
-  disagree with the branches on disk.
-  Source control reports local-only, pending, ready or failure, including the
-  configured source, branch, accepted SHA and last check time. One-time Configure
-  starts from `Workspace.Origin` and offers public or deploy-key access; the
-  latter exposes only a public key to copy and the GitHub deploy-key link.
-  Verify/Refresh reports the server's result; **Adopt candidate** and
-  **Disable mirror** require explicit confirmations.
+- **Workspace controls live on the repository page.** The workspace switcher's
+  **Repository** item and the **Repository** item of a row's menu in Manage
+  workspaces open `routes/workspace.tsx`. It is one workspace in sections:
+  **Base branch**, read-only because runs have already forked from it;
+  **Source and clone**, the shared `components/workspace-repository.tsx`
+  (link a local clone, the server-fetched source with its mirror status and
+  deploy key, the checkout Origin) with its Advanced part open; and **Team**,
+  the budget with **Set budget…** (`budget.set`) and who may message others'
+  runs with **Change…** (`workspace.settings`). Each button is gated by its
+  server-side permission; a member without it reads the same facts. The
+  page lists no runs: the board does.
+  The source mirror dialog reports local-only, pending, ready or failure,
+  including the configured source, branch, accepted SHA and last check time.
+  One-time Configure starts from `Workspace.Origin` and offers public or
+  deploy-key access; the latter exposes only a public key to copy and the
+  GitHub deploy-key link. Verify/Refresh reports the server's result;
+  **Adopt candidate** and **Disable mirror** require explicit confirmations.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write
   it onto the stored `server.info`, which is what fills the disk gauge in
   Settings > Server.
 
-## Devices and invitations
+## Members and devices
 
-`src/routes/devices/` lists the computers members reach the server with
-through an edge, with each device key's fingerprint: the member's own, or
-every member's for an admin, and each device's status: `approved`,
-`pending`, `registered` (admitted by signing in under `edge-access
-account`) or `revoked`. It approves a pending or registered device only by
-the code typed in from that device, which no row shows: **Review** looks the
-code up with `member.device.lookup`, and a dialog shows the device, the
-account it signed in as, and the member and role approving admits it as,
-before **Approve** sends `member.device.approve` with that device's id. It
-revokes a device too, and shows every server refusal verbatim. Device management
-is its own capability-gated view rather than a machine-local Settings section:
-both gateways can serve it, and the sidebar and palette show it whenever the
-gateway serves `member.device.list`.
+`src/routes/members/` is one page with two tabs, **Members** and **Devices**.
+Each tab has its own route name (`members`, `devices`), so the address, back
+button and the palette's **Devices** entry land on the right tab, and the
+sidebar's **Members** row stays current on both.
 
-The Members view carries an admin-only **Invitations** section
-(`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
-an email, a role, and revoke. Its button reads **Invite account**, so it is
-not confused with **Invite**, which mints one-time codes for SSH-key joins.
-The server records every new invitation for a GitHub account; an email
+**Members** is a roster table: name, role, whether you and that member share
+an agent account, and last seen (**Online**, a relative time, or
+**Offline**). An admin changes a role or removes a member from the row's
+menu; giving up your own admin role, and removing anyone, ask first. Members
+waiting for approval are listed above the roster with **Approve**. Below it,
+admins see **Open invitations** with **Revoke**.
+
+**Invite…** in the header is the one way to invite. Its dialog has two tabs
+when the gateway serves both: **Account** invites a GitHub login or an email
+with a role (`member.invitation.create`), and **Invite code** mints a
+one-time code for an SSH-key join (`member.invite`), shown only there. The
+server records every new invitation for a GitHub account; an email
 invitation an earlier version stored for another provider shows that
-provider as stored, such as `dana@example.com on google`. The section says
-what an invitation admits under each policy, because `server.info` does not
-report the policy: under `account` the first connection makes the account a
-member; under `approved-devices` its device waits until an admin approves
-it with its code.
+provider, such as `dana@example.com on google`. **Learn more** says what an
+invitation admits under each policy, because `server.info` does not report
+the policy: under `account` the first connection makes the account a member;
+under `approved-devices` its device waits until approved with its code.
+
+**Devices** (`src/routes/devices/`) lists the computers members reach the
+server with through an edge: the member's own, or every member's for an
+admin, with status **Approved**, **Pending**, **Registered** (admitted by
+signing in under `edge-access account`) or **Revoked**. The key fingerprint
+is the row's tooltip. It approves a pending or registered device only by the
+code typed in from that device, which no row shows: **Review** looks the code
+up with `member.device.lookup`, and a dialog shows the device, its account,
+its fingerprint, and the member and role approving admits it as, before
+**Approve** sends `member.device.approve`. It revokes a device too, and shows
+every server refusal verbatim.
+
+Personal settings are not on this page. The sidebar footer menu's
+**Profile** opens `src/routes/members/personal.tsx`: your colour, your git
+identity, and **Agent account sharing** (share or revoke per teammate, with
+the omp warning behind **Learn more**). Display names are set when a member
+joins; the dashboard has no rename.
 
 ## Manage workspaces
 
-`src/routes/workspaces/` lists workspaces and offers **Add a workspace** even
-when others already exist. Open it from the workspace selector, shared
-navigation, the command palette, or **Add another workspace** on a workspace
-page. Each row shows its name, creation time, base branch and steering policy,
-with **Open** and **Link local repository** actions.
+`src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
+workspace: it becomes the active one and the board shows. Each row's menu
+holds **Repository** (the repository page), **Settings…** (who may message
+others' runs) and **Delete…**, each gated by its permission. **Add
+workspace** in the header shows the creation choices above the list; with no
+workspace yet they show without it. Open the page from the workspace
+switcher or the command palette.
 
-The same creation choices appear in onboarding:
+The creation choices are the shared `src/components/workspace-create.tsx`,
+the same ones onboarding's Repository step shows:
 
-- **Public or private remote repository** opens **Import repository**.
+- **Import a remote repository** opens **Import repository**.
   Public sources use credential-free HTTPS. Private sources use a server-held,
   read-only deploy key, installed by an administrator of the upstream
   repository. Generic SSH sources also require independently verified
   `known_hosts` entries. Import retains the new workspace even if fetching
-  fails; continue to **Source control** on that workspace rather than creating
-  it again. Verify the key, review the observed commit, and explicitly adopt
-  its generation. Reconfiguring rotates the key; verifying does not.
-- **Local clone** opens **Create from local clone** on a local gateway.
-  Name the workspace and the base branch that exists in the clone, then link
-  its absolute path and push that branch. A hosted gateway instead gives the
-  desktop/CLI path; it neither creates an unusable local workspace nor pretends
-  to browse the member's filesystem.
+  fails and then opens its repository page; repair the source there rather
+  than importing again. Verify the key, review the observed commit, and
+  explicitly adopt its generation. Reconfiguring rotates the key; verifying
+  does not.
+- **From a local clone** opens **Create from local clone** on a local
+  gateway. Name the workspace and the base branch that exists in the clone;
+  the repository page then opens with the clone link started. A hosted
+  gateway instead gives the desktop/CLI path; it neither creates an unusable
+  local workspace nor pretends to browse the member's filesystem.
 
 Creation and remote source administration require an administrator. A
 collaborator can link a clone to an existing workspace; a viewer cannot push
-its base. **Repository settings** on the workspace page, also reachable from
-**Workspace settings**, reopens source setup and local linking without restarting
-onboarding. It names the workspace ID, base branch and checkout Origin.
+its base.
 
-Admins also get **Delete**. The confirmation lists what is permanently
-removed; **Cancel** leaves the workspace untouched. The server refuses active
-work, pending cleanup and configured schedules rather than stopping them.
-Failures remain in the dialog verbatim, so the admin can resolve the blocker
-and retry. See [workspace deletion](teams.md#workspaces) for the CLI and
-cleanup rules.
+**Delete…** asks first and lists what is permanently removed; **Cancel**
+leaves the workspace untouched. The server refuses active work, pending
+cleanup and configured schedules rather than stopping them. Failures remain
+in the dialog verbatim, so the admin can resolve the blocker and retry. See
+[workspace deletion](teams.md#workspaces) for the CLI and cleanup rules.
 
 ![Workspace deletion confirmation](media/workspace-delete-confirmation.webp)
 
@@ -2399,27 +2415,30 @@ their selection and any open deleted workspace or run.
 
 ## Settings
 
-`src/routes/settings/` is available through every gateway. **Appearance**
-provides explicit **System**, **Light** and **Dark** choices, backed by the
-existing persisted theme preference and live system-scheme effect. The palette
-and the sidebar footer menu offer the same choices.
-**Single-key shortcuts** turns the character keys of the keybinding table on
-or off (see [Keyboard and focus](#keyboard-and-focus)). **Server** names the
-server version and protocol, shows the disk gauge with what is filling it
-(worktrees, transcripts, database, repos, free space), and holds **Usage**,
-the subscription usage reader.
+`src/routes/settings/` is one column of four sections, available through
+every gateway:
 
-Machine settings keep their exact local capability gates. The machine section
-requires `daemon.status` or `sync.status`; within it, the local link requires
-`link.status`, the daemon requires `daemon.status`, and **Mirror run files to
-your repository** requires `sync.status`. The latter starts and stops a live
-run's sync overlay. The server-hosted dashboard omits these machine-local
-controls, not Appearance.
-The local link section points to **Manage repositories and workspaces**.
-Workspace repository settings, base freshness and Source control live on the
-workspace page on either gateway. A configured mirror is refreshed there with
-**Verify/Refresh**; a local-only workspace uses its pushed base. There is no
-recurring base-refresh button.
+- **Appearance**: **Theme** (System, Light, Dark; the palette and the
+  footer menu offer the same), **Text size** (Default, Large, Larger; it
+  scales the interface type tokens through `data-text-size` on the root
+  element and leaves terminal zoom alone), and **Single-key shortcuts** (see
+  [Keyboard and focus](#keyboard-and-focus)).
+- **This computer**, only on the local gateway: the linked **Server** and
+  **Repository** (`link.status`), **Saved servers** with **Switch**, the
+  **Sync daemon** install (`daemon.status`), and **Mirror run files**, which
+  starts and stops a live run's sync overlay (`sync.status`). The
+  server-hosted dashboard omits the section.
+- **Server**: the server version and protocol, with **Update…** when an
+  update is waiting; the disk gauge with what Aether holds on that
+  filesystem (worktrees, transcripts, database, repositories) and the free
+  space; and, for admins, **Free retained containers…**, which opens the same
+  confirmation as the board's Finished menu for the active workspace.
+- **Usage**: the subscription usage of your account, or of an account
+  shared with you.
+
+Repository settings, base freshness and the source mirror live on the
+repository page on either gateway. A configured mirror is refreshed there with
+**Verify/Refresh**; a local-only workspace uses its pushed base.
 
 ## Onboarding wizard
 

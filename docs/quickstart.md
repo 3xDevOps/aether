@@ -220,13 +220,11 @@ clone**. A member who is not an admin and finds no workspace sees **Ask an
 admin to add a workspace** and can still **Continue to Agent**. Once a
 workspace is chosen, **Change** returns to the list.
 
-For another workspace, open **Manage workspaces** from the navigation,
-workspace selector, or command palette (**Ctrl/Cmd+K**). The same public,
-private, and local choices remain available. On an existing **Workspace**
-page, use **Repository settings** or **Link local repository**; admins can
-also reach **Repository settings** from **Workspace settings**. **Add another workspace**
-returns to management, and **Set up agents / first run** resumes onboarding
-for the selected workspace.
+For another workspace, open **Manage workspaces** from the workspace selector
+or command palette (**Ctrl/Cmd+K**) and press **Add workspace**. The same
+public, private, and local choices remain available. An existing workspace's
+repository page (**Repository** in the workspace selector) links a clone and
+manages the source.
 
 The **base branch** is the branch new runs start from. Use the repository's
 actual branch, not `main` merely because the form defaults to it. Creating an
@@ -325,12 +323,13 @@ aether workspace mirror adopt --workspace myproject --generation <n> --yes
 Replace `<n>` with the reviewed generation from `status`. After installing a
 key, use **Verify** / **Refresh**, not **Save source** or `configure`:
 reconfiguration rotates the key and generation. To recover a misplaced public
-key, reopen **Source control** or run `mirror status` on the same workspace.
+key, reopen the source mirror on the workspace's repository page or run
+`mirror status` on the same workspace.
 
 ### Remote import and source recovery
 
 **Created: yes** means the workspace exists even if configuration or fetch
-failed. Keep its name/ID and repair it in **Workspace → Source control**;
+failed. Keep its name/ID and repair it on the workspace's repository page;
 do not import a duplicate. If the response was lost, inspect **Manage
 workspaces** or `aether workspace list` before trying creation again.
 Switching members or servers, or closing the import dialog, does not cancel
@@ -386,8 +385,8 @@ after [linking to the server](#3-link-from-your-machine).
    Divergence shows commands to resolve it yourself; the dashboard never
    force-pushes. **Continue** to the **Agent** step after the base is available.
 
-For an existing workspace, choose **Link local repository** in **Manage
-workspaces**, or **Workspace → Repository settings → Link local repository**.
+For an existing workspace, open its repository page (**Repository** in the
+workspace selector) and choose **Link local repository**.
 Use **Use a different repository** to relink. Each local server profile keeps
 one current clone, not one per workspace; check the displayed workspace and
 path before pushing after a switch. Relinking leaves the previous clone and
@@ -423,8 +422,8 @@ shown in its settings. `link` requires the server argument even if the client
 is already linked. With `--repo`, it adds or updates the clone's `aether`
 remote; it does not change its `origin`.
 The push is non-force and does not send tags. Do not push a mirrored base:
-linking a clone there is for pulling run branches; use **Source control** to
-refresh or adopt the server-owned base.
+linking a clone there is for pulling run branches; use the source mirror on
+the repository page to refresh or adopt the server-owned base.
 
 On the first eligible link, Aether records the clone's `origin` as the
 workspace's checkout Origin if none is set, printing `workspace origin ->

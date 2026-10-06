@@ -133,7 +133,7 @@ With a member's GitHub account, the edge honest:
 | Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a GitHub account](#recovering-a-github-account)) | A pending device and a device token remain, with no access |
 | Get a device approved | Not needed | Only by having an approver type the code shown on the attacker's device. The approver is shown the member and role the code admits the device as before anything is approved |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
-| Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Devices view and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
+| Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Members > Devices tab and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
 
 With the edge, or its signing key:
 

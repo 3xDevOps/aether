@@ -1104,8 +1104,8 @@ the server snapshot from loading.
   generic SSH) the `known_hosts` file contents; the server generates and stores
   any deploy key.
   Results expose source, branch, status, observed/accepted commits, check
-  times, and the public key only. The dashboard's Workspace **Source control**
-  panel calls these same methods.
+  times, and the public key only. The source mirror dialog on the dashboard's
+  repository page calls these same methods.
   If refresh fails before observing a commit, `status` retains the last observed
   and accepted commits alongside the new status and `last_error`. Sources with no
   observation keep empty commit fields. Retention does not make the source

@@ -177,7 +177,7 @@ Whoever holds this device gets that member's access. approve it? [y/N]:
 ```
 
 Only `y` or `yes` approves. `sudo aether-server device approve <code>`
-shows the same and asks the same, and the dashboard's Devices view shows it
+shows the same and asks the same, and the dashboard's Members > Devices tab shows it
 in a dialog before **Approve**.
 
 ```sh
@@ -349,8 +349,7 @@ aether workspace add myproject [--base <branch>]
 ```
 
 In the dashboard, open **Manage workspaces** from the workspace selector or
-navigation. **Add a workspace** remains available after the first workspace:
-choose **Import repository** for public HTTPS or a private read-only deploy
+the command palette and press **Add workspace**: choose **Import repository** for public HTTPS or a private read-only deploy
 key, or **Create from local clone** in the desktop app or `aether gui`.
 Onboarding offers the same choices. A hosted gateway can import remotely but
 cannot browse a clone on your computer; its local-clone choice shows the
@@ -358,11 +357,10 @@ desktop and CLI handoff.
 
 For a local clone, select its existing base branch when creating the workspace,
 then link its absolute path and use **Push now**. For a remote import, creation
-retains a workspace even if configuring or fetching fails. Open that workspace's
-**Repository settings** or **Source control**, repair the source, verify it,
-and explicitly adopt the observed generation; do not import again. Use
-**Repository settings** to link or relink a clone later, with the workspace ID
-and base branch shown before the operation.
+retains a workspace even if configuring or fetching fails. On that
+workspace's repository page (**Repository** in the workspace selector),
+repair the source, verify it, and explicitly adopt the observed generation;
+do not import again. Link or relink a clone later from the same page.
 
 An admin can permanently delete an inactive workspace by name or ID:
 
@@ -370,7 +368,8 @@ An admin can permanently delete an inactive workspace by name or ID:
 aether workspace delete myproject --yes
 ```
 
-`--yes` is required. In **Manage workspaces**, admins use **Delete** and confirm
+`--yes` is required. In **Manage workspaces**, admins use **Delete…** in the
+workspace's row menu and confirm
 **Delete workspace** in the warning dialog. Both remove the workspace, finished
 runs (including completed runs), retained containers, checkouts, transcripts, evidence,
 integration candidates, missions, templates, budget, costs, timeline,
@@ -442,8 +441,8 @@ Four settings belong to the workspace rather than to any run in it:
   or sent to a member. Installing the public key needs upstream repository
   administration; an Aether admin role alone does not grant that access.
 
-Configuration starts **pending**. In the dashboard's Workspace **Source
-control** panel, use **Verify** or **Refresh**; from the CLI:
+Configuration starts **pending**. On the dashboard's repository page, open
+the source mirror and use **Verify** or **Refresh**; from the CLI:
 
   ```sh
   aether workspace mirror refresh --workspace myproject
@@ -469,7 +468,7 @@ control** panel, use **Verify** or **Refresh**; from the CLI:
   aether workspace settings --steer-others everyone      # back to the default
   ```
 
-  The dashboard's Workspace settings dialog has the same switch. A member
+  The repository page's **Change…** has the same switch. A member
   refused by it reads
   `workspace restricts steer of others' runs to their owner and admins`.
   `aether protect <run>` does the same for one run alone, whatever the
@@ -824,9 +823,9 @@ A member's **agent account** is their vendor login for each agent CLI, the
 subscription a run spends. A member may explicitly let another collaborator
 launch runs on that account. In the dashboard:
 
-- **Share or revoke:** the owner opens **Members** and, under **Your agent
-  account**, presses **Share account** beside the teammate, or **Revoke
-  access** to take it back.
+- **Share or revoke:** the owner opens **Profile** from the sidebar footer
+  menu and, under **Agent account sharing**, presses **Share account** beside
+  the teammate, or **Revoke access** to take it back.
 - **Launch on it:** the recipient presses **New run**, opens **Options** and
   picks the owner, listed as `<name> (shared)`, under **Account**
   (**Integrator account** on the **Swarm** tab).
@@ -900,7 +899,7 @@ path, a file with another hard link) is a disabled row reading
 A Claude Code login refreshed in the owner's environment terminal reaches
 recipients' runs only if that terminal was started after the owner's first
 share ([security.md](security.md#account-sharing) explains why). When the
-terminal is running at that share, **Members** says so and offers **Stop
+terminal is running at that share, **Profile** says so and offers **Stop
 environment**; the owner then reopens it with **Open** in the **Environment**
 view. From the CLI: `aether terminal stop`, then `aether terminal`.
 
@@ -940,7 +939,7 @@ first if access must end immediately, with **Kill** in the run's header
 upgrade that narrowed shares to the login file still mounts the owner's whole
 home until it ends, and cannot be relaunched.
 
-**Usage** in the dashboard's Settings > Server reads the selected account's
+**Usage** in the dashboard's Settings reads the selected account's
 subscription quota through the read-only `account.usage` RPC. An empty
 `account_member_id` means the caller's account; selecting another account
 requires the same explicit share as a launch, and an admin has no implicit
