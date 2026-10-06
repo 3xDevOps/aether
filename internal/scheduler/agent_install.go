@@ -69,7 +69,8 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 	return tail, code, nil
 }
 
-// updateHarness starts no update into a home agentInstalls holds.
+// holdHomeForInstall claims homePath once no harness update runs in it;
+// updateHarness starts no update into a claimed home.
 func (s *Scheduler) holdHomeForInstall(ctx context.Context, member domain.MemberID, homePath string) error {
 	for {
 		s.mu.Lock()
