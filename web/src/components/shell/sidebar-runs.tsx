@@ -172,9 +172,11 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         ))}
       </ul>
       {expanded && capped && (
-        <Button variant="ghost" size="sm" className="w-full justify-start text-muted" onClick={() => setShowAll(true)}>
-          Show all {group.count}
-        </Button>
+        <div className="pl-4.5">
+          <Button variant="ghost" size="sm" onClick={() => setShowAll(true)}>
+            Show all {group.count}
+          </Button>
+        </div>
       )}
     </div>
   )
