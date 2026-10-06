@@ -1001,7 +1001,8 @@ same run can need one member and read Working for another. The wire status
 enum is unchanged; the run header's **Task and details** shows it as
 **Lifecycle**. The run header also prints the server's `run.reason` under the
 reason line whenever that line does not already contain it, so a parked
-error or stall detail is never hidden.
+error or stall detail is never hidden. Both sit in a scrollable **State
+reason** note that takes keyboard focus so a long reason can be scrolled.
 
 | State | Wire status | Group |
 | --- | --- | --- |

@@ -181,6 +181,8 @@ export function RunHeader({
             </div>
           </details>
           <div
+            role="note"
+            aria-label="State reason"
             tabIndex={0}
             className={`${focusRing} col-span-2 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonClass[state]}`}
           >

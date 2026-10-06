@@ -85,8 +85,9 @@ describe('run header', () => {
     seed({ status: 'needs-attention', reason: 'StopFailure: rate limit exceeded' })
     const bar = runHeader('events')
 
-    expect(within(bar).getByText('Agent idle')).toBeDefined()
-    expect(within(bar).getByText('StopFailure: rate limit exceeded')).toBeDefined()
+    const note = within(bar).getByRole('note', { name: 'State reason' })
+    expect(within(note).getByText('Agent idle')).toBeDefined()
+    expect(within(note).getByText('StopFailure: rate limit exceeded')).toBeDefined()
   })
 
   it('updates outstanding native requests and ignores a stale route snapshot', () => {
