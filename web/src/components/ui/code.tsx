@@ -5,7 +5,7 @@ export function Code({ className, ...props }: React.ComponentProps<'code'>) {
   return (
     <code
       data-slot="code"
-      className={cn('rounded-control bg-chrome px-1 font-code text-ui-sm break-words text-text', className)}
+      className={cn('box-decoration-clone rounded-control bg-chrome px-1 font-code text-ui-sm break-words text-text', className)}
       {...props}
     />
   )
