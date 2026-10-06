@@ -123,8 +123,9 @@ export type MessageGroup =
   | { kind: 'thread'; question: RunMessage; replies: RunMessage[] }
   | { kind: 'run'; from: string; to: string; messages: RunMessage[] }
 
-/** Oldest first. A reply joins its question when that question is loaded;
- * adjacent plain messages between one pair collapse into a run. */
+/** Ordered by each group's latest message, oldest first. A reply joins its
+ * question when that question is loaded; adjacent plain messages between one
+ * pair collapse into a run. */
 export function groupMessages(messages: RunMessage[]): MessageGroup[] {
   const threads = new Map<string, RunMessage[]>()
   for (const m of messages) if (m.kind === 'question') threads.set(m.correlation_id || m.id, [])
@@ -138,7 +139,20 @@ export function groupMessages(messages: RunMessage[]): MessageGroup[] {
     else if (last?.kind === 'run' && last.from === m.from_run_id && last.to === m.to_run_id) last.messages.push(m)
     else groups.push({ kind: 'run', from: m.from_run_id, to: m.to_run_id, messages: [m] })
   }
-  return groups.map((g) => (g.kind === 'run' && g.messages.length === 1 ? { kind: 'single', message: g.messages[0] } : g))
+  return groups
+    .map((g): MessageGroup => (g.kind === 'run' && g.messages.length === 1 ? { kind: 'single', message: g.messages[0] } : g))
+    .sort((a, b) => latestAt(a).localeCompare(latestAt(b)))
+}
+
+function latestAt(group: MessageGroup): string {
+  switch (group.kind) {
+    case 'single':
+      return group.message.created_at
+    case 'thread':
+      return (group.replies.at(-1) ?? group.question).created_at
+    case 'run':
+      return group.messages.at(-1)!.created_at
+  }
 }
 
 export function deliveryWord(m: Pick<RunMessage, 'delivered_at' | 'acked_at'>): 'Acknowledged' | 'Delivered' | 'Sent' {

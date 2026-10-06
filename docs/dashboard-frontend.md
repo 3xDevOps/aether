@@ -3351,8 +3351,9 @@ a kind icon (message, question, reply, report), both runs named by their
 swarm task title, else `Integrator`, else the run title, each opening its
 run; the relative time; and the delivery word `Sent`, `Delivered` or
 `Acknowledged`. A report shows `<Outcome>: <summary>` and `Next: <next
-action>`. Bodies clamp at three lines with **Show more**. The newest six
-groups show first; **Show all** shows every loaded group and then **Show
+action>`. Bodies clamp at three lines with **Show more**. Groups order by
+their latest message, so a fresh reply brings its thread forward. The newest
+six groups show first; **Show all** shows every loaded group and then **Show
 earlier messages** pages older history. Rows use `content-visibility: auto`
 rather than a virtualizer: history arrives only as the viewer pages it.
 

@@ -110,14 +110,14 @@ describe('message grouping', () => {
     expect(shape(groups)).toEqual(['[a,b,c]', 'q<>', 'd', 'r', 'e', '[f,g]'])
   })
 
-  it('threads a reply under its loaded question and keeps an orphan reply on its own', () => {
+  it('threads a reply under its loaded question, moves the thread to its latest reply and keeps an orphan reply on its own', () => {
     const groups = groupMessages([
       runMessage({ id: 'q', kind: 'question', correlation_id: 'q', created_at: at(1) }),
       runMessage({ id: 'm', created_at: at(2) }),
       runMessage({ id: 'r1', kind: 'reply', correlation_id: 'q', from_run_id: 'run_1', to_run_id: 'run_worker', created_at: at(3) }),
       runMessage({ id: 'r2', kind: 'reply', correlation_id: 'paged-out', created_at: at(4) }),
     ])
-    expect(shape(groups)).toEqual(['q<r1>', 'm', 'r2'])
+    expect(shape(groups)).toEqual(['m', 'q<r1>', 'r2'])
   })
 
   it('names the delivery state', () => {
