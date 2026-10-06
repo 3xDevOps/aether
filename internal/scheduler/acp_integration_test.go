@@ -46,7 +46,7 @@ func TestIntegrationBackgroundRunDocker(t *testing.T) {
 		cfg.WorktreeMount = "/workspace"
 		cfg.ServerBinary = server
 		cfg.Harnesses = map[string]HarnessSpec{
-			"fake": {HeadlessArgs: []string{"sh", "-c", "exit 3"}, ACPArgs: []string{"acp-mock"}},
+			enhancedAgent: {HeadlessArgs: []string{"sh", "-c", "exit 3"}, ACPArgs: []string{"acp-mock"}},
 		}
 	})
 	e.sched.UseCoordination(&fakeCoordinator{root: t.TempDir()}, t.TempDir(), false)
@@ -67,7 +67,7 @@ func TestIntegrationBackgroundRunDocker(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "say pong", "fake", domain.LaunchHeadless)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
