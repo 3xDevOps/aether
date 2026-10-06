@@ -203,7 +203,9 @@ described under [managed loading](#managed-native-loading).
 - **Headless.** The harness is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
-  and is never relaunchable.
+  and is never relaunchable. An agent whose ACP server is installed runs its
+  background task over ACP instead and finishes the same way after its one
+  turn ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
 Close a TUI run explicitly:
 
@@ -238,24 +240,33 @@ Coordination uses the durable run mailbox, not terminal keystrokes. An
 tells Aether what the agent is doing. They are separate even when both load
 through the same native extension/plugin mechanism.
 
-| Integration | Launch profile | Mail at next boundary | Native idle wake | Copyable asset |
-| --- | --- | --- | --- | --- |
-| Claude Code | `claude` | yes | no | `claude.json` |
-| Codex | `codex` | yes | no | `codex.json` |
-| Native pi | `pi` | yes | yes, owning session only | `pi.ts` |
-| OMP | `omp` | yes | yes, main agent only | `omp.ts` |
-| OpenCode V1 | `opencode` | yes | yes, selected root only | `opencode-v1.js` |
-| OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | `opencode-v2.js` |
-| Copilot CLI | custom definition required | yes | no | `copilot.json` |
-| Gemini CLI | custom definition required | yes | no | `gemini.json` |
-| Cursor CLI | custom definition required | yes | no | `cursor.json` |
-| Fake | scheduler test profile | explicit inbox only | no | none |
-| Other/custom | deployment/member definition | adapter required | native API required | `generic.sh` |
+| Integration | Launch profile | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | `claude` | yes | no | yes | `claude.json` |
+| Codex | `codex` | yes | no | yes | `codex.json` |
+| Native pi | `pi` | yes | yes, owning session only | yes | `pi.ts` |
+| OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
+| OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
+| OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | yes | `opencode-v2.js` |
+| Copilot CLI | custom definition required | yes | no | with `ACPArgs` | `copilot.json` |
+| Gemini CLI | custom definition required | yes | no | with `ACPArgs` | `gemini.json` |
+| Cursor CLI | custom definition required | yes | no | with `ACPArgs` | `cursor.json` |
+| Fake | scheduler test profile | explicit inbox only | no | with `ACPArgs` | none |
+| Other/custom | deployment/member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
 
 “Yes” requires the matching integration to be loaded and executing in the
 owning live session. It is not a promise that a copied file, a registry
 profile, or a status reporter activates inbox delivery. Native idle wake is
 for eligible TUI runs, not a way to restart headless or exited processes.
+
+**Enhanced run wake** needs no asset: in an enhanced run the server sends the
+idle ACP session one prompt per new unread message
+([enhanced-runs.md](enhanced-runs.md#mail)). The container sets
+`AETHER_ENHANCED=1`, and there every `aether-internal hook` exits without
+output, so hooks the agent loads from the member's own settings do not
+announce the same mail again. A native wake receiver in such a run stops with
+`hook wake: this is an enhanced run, whose agent Aether wakes with a session
+prompt; stop this receiver`.
 
 ### Installation and activation
 
@@ -781,7 +792,8 @@ with a reason that leads with `stalled:`. See
 The following disable or exclude automatic reporting:
 
 - **Background runs.** `--mode background` never gets the reporter: the
-  agent exits when it is done and never waits for anyone.
+  agent exits when it is done and never waits for anyone. A background run
+  over ACP reports its turn's start from the session host.
 - **Enhanced runs.** `--mode enhanced` needs no reporter: the session host
   reports both ends of every turn itself ([enhanced-runs.md](enhanced-runs.md)).
 - **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
@@ -832,7 +844,8 @@ bytes.
 Only `claude` has a **structured-output adapter** today, so its headless runs
 produce typed tool-call and token events. Everything else degrades to the PTY
 transcript plus the diff timeline, which is always enough. Adding an adapter is
-[adapters.md](adapters.md).
+[adapters.md](adapters.md). A background run over ACP has the session item
+log instead, and the adapter does not read it.
 
 ## How Aether launches them
 
@@ -849,7 +862,9 @@ replacement shell.
 machine-readable mode as a one-shot:
 on exit Aether commits and publishes the branch, records `completed` or
 `failed`, and destroys the container immediately. Headless runs never open a
-replacement shell and are not relaunchable.
+replacement shell and are not relaunchable. When the agent's ACP server is
+installed, the one-shot is a single ACP turn instead
+([enhanced-runs.md](enhanced-runs.md#background-runs)).
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 

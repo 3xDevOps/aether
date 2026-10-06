@@ -122,7 +122,7 @@ project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 
-An [enhanced run](enhanced-runs.md) records its agent session on your server
+An [enhanced run](enhanced-runs.md), and a background run over ACP, records its agent session on your server
 in `<data-dir>/transcripts/<run_id>.items.jsonl`: the prompts members send, the
 agent's messages and thoughts, tool call inputs, command output and diffs,
 permission requests and their answers. Whatever the agent or a tool prints,

@@ -972,7 +972,11 @@ shared account named by `--account`) with the `--agent` harness in
 ([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on a
 harness, in `standard` mode unless the value ends in `:enhanced` or
 `:background`; workers may use the integrator's harness. `-` in place of the
-objective reads it from stdin.
+objective reads it from stdin. An enhanced integrator or worker is prompted
+when mail reaches its idle session, so worker reports reach an enhanced
+integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
+`:background` worker whose agent's ACP server is installed runs its task as
+one ACP turn ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \

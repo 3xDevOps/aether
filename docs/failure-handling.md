@@ -506,6 +506,13 @@ replaces at every reattach.
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
 | The agent sends more than 64 MiB to the item log | From then on only requests, turn boundaries and notices are recorded, with a **Session log is full** notice. |
 
+A background run over ACP ([enhanced-runs.md](enhanced-runs.md#background-runs))
+differs: an ACP server that fails to start or exits, a cancelled turn, or any
+stop reason other than `end_turn` ends the container with exit code 1, so the
+run records `failed` with `agent exited 1` and the real error is the item
+log's notice. A server restart mid-turn resumes the session and asks the
+agent to continue; a turn that had already ended finishes the run.
+
 ### Disk pressure
 
 Four things grow without bound, and the dashboard's gauge covers all four

@@ -182,7 +182,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
-| `GET` | `/ws/acp/<run_id>` | an enhanced run's session item stream (WebSocket) |
+| `GET` | `/ws/acp/<run_id>` | the session item stream of a run with `acp: true` (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
@@ -546,7 +546,9 @@ Both transports therefore expose the same API shape and authorization checks.
 
 ### Enhanced-run methods
 
-These act on an [enhanced run](enhanced-runs.md)'s agent session. The first
+These act on the agent session of a run with `acp: true`: an
+[enhanced run](enhanced-runs.md), or a
+[background run over ACP](enhanced-runs.md#background-runs). The first
 three need **Steer** and the run's control lease (`control_session_id` and
 `control_generation`, from `/ws/acp` or a terminal attach); without them the
 call is refused with `-32602`, and with a lease another session holds with
@@ -1733,10 +1735,10 @@ not create new shell tabs.
 
 ### `GET /ws/acp/<run_id>`
 
-An [enhanced run](enhanced-runs.md)'s session item log: the items already
-logged after the client's cursor, then each new one as the agent sends it.
-A run that is not enhanced is refused with `-32602`. Every frame is JSON
-text.
+The session item log of a run with `acp: true` ([enhanced-runs.md](enhanced-runs.md)):
+the items already logged after the client's cursor, then each new one as the
+agent sends it. Any other run is refused with `-32602` and `run <run_id>
+does not run its agent over ACP`. Every frame is JSON text.
 
 1. Client sends one header frame. `write` asks for the run's control lease
    with the same fields a terminal attach uses (`takeover`,

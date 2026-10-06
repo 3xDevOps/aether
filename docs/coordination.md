@@ -181,7 +181,7 @@ request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
 Aether does not type automated coordination messages into terminals. There
-are three ways to notice mail:
+are four ways to notice mail:
 
 1. **An active inbox wait wins.** An agent expecting a reply should use
    `aether-internal inbox --wait 30`. The current tool call receives the
@@ -195,6 +195,12 @@ are three ways to notice mail:
    Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI command hooks do not
    watch an already-idle session. Mail arriving after their last hook waits
    for the next supported boundary or explicit inbox read.
+4. **An enhanced run is prompted by the server.** When mail arrives or a
+   turn ends with mail unread, and the run's ACP session is idle with nothing
+   queued, the server sends one `session/prompt` carrying the inbox
+   instruction, under the same admission as a native wake. Each unread
+   message starts at most one such turn. Hooks stay silent in these runs
+   (`AETHER_ENHANCED=1`); see [enhanced-runs.md](enhanced-runs.md#mail).
 
 See [per-harness setup and limits](harnesses.md#incoming-coordination-hooks).
 All integrations add only a trusted instruction to read the inbox. They
@@ -781,13 +787,13 @@ inbox as an ordinary message: `from_run_id` is the worker, `body` is the
 report summary, and `correlation_id` is the report ID; `worker list` shows the
 outcome. A worker whose run ends without reporting sends nothing, so check
 `worker list` before declaring completion. The integrator's hooks announce a
-changed mission phase or open-question count once. The integrator is always
-interactive (TUI): `mission.create` and
-`mission.replace-integrator` refuse any other mode with `-32602` and
-`integrator mode must be tui: a headless integrator exits after one turn and
-cannot be asked or told`, or, for `acp`, `integrator mode must be tui: an
-enhanced integrator is not woken when a worker reports`. `mission.create` needs the integrator's exact
-account, harness, and `tui` mode among the execution choices;
+changed mission phase or open-question count once; an enhanced integrator
+is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries).
+The integrator is always interactive (`tui` or `acp`): `mission.create` and
+`mission.replace-integrator` refuse `headless` with `-32602` and
+`integrator mode must be tui or acp: a headless integrator exits after one
+turn and cannot be asked or told`. `mission.create` needs the integrator's exact
+account, harness, and mode among the execution choices;
 `mission.replace-integrator` accepts any listed account and harness in `tui`,
 so a swarm whose choices are all headless can still get an interactive
 integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
