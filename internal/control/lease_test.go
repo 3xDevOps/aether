@@ -646,7 +646,7 @@ func TestHolderChangeIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("acquire", 1)
-	if _, _, err := service.Acquire("run-1", "member-2", "tab-b", false); !errors.Is(err, ErrOccupied) {
+	if _, _, err = service.Acquire("run-1", "member-2", "tab-b", false); !errors.Is(err, ErrOccupied) {
 		t.Fatalf("occupied acquire: %v", err)
 	}
 	expect("refused acquire", 0)
@@ -655,11 +655,11 @@ func TestHolderChangeIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("takeover", 1)
-	if err := service.Release("run-1", "member-1", first.SessionID, first.Generation); !errors.Is(err, ErrStale) {
+	if err = service.Release("run-1", "member-1", first.SessionID, first.Generation); !errors.Is(err, ErrStale) {
 		t.Fatalf("stale release: %v", err)
 	}
 	expect("stale release", 0)
-	if err := service.Release("run-1", "member-2", second.SessionID, second.Generation); err != nil {
+	if err = service.Release("run-1", "member-2", second.SessionID, second.Generation); err != nil {
 		t.Fatal(err)
 	}
 	expect("release", 1)
