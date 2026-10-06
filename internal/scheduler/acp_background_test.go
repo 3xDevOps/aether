@@ -135,8 +135,8 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != exitedFailedReasonPrefix+"1" {
-		t.Fatalf("reason %q, want %q", got.Reason, exitedFailedReasonPrefix+"1")
+	if want := exitedFailedReasonPrefix + "1: the agent's turn ended: cancelled"; got.Reason != want {
+		t.Fatalf("reason %q, want %q", got.Reason, want)
 	}
 }
 

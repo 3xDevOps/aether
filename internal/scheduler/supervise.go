@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
@@ -171,6 +173,11 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	}
 	s.mu.Unlock()
 
+	var detail string
+	if !killed && reported == "" && code != 0 {
+		detail = s.exitDetail(ctx, entry)
+	}
+
 	msg := "wip: "
 	if !killed && (reported == domain.RunCompleted || (reported == "" && code == 0)) {
 		msg = "aether: "
@@ -203,6 +210,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		to, reason = domain.RunCompleted, exitedCompletedReason
 	default:
 		to, reason = domain.RunFailed, fmt.Sprintf(exitedFailedReasonPrefix+"%d", code)
+		if detail != "" {
+			reason += ": " + detail
+		}
 	}
 	s.mu.Lock()
 	// A Kill accepted after the snapshot above still owns the outcome: the
@@ -813,4 +823,33 @@ func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutof
 	s.publishTimeline(ctx, fresh.WorkspaceID, id, "", events.TimelineNote,
 		"archived run deleted after the retention period")
 	return nil
+}
+
+const (
+	exitDrainWait = 2 * time.Second
+	maxExitDetail = 200
+)
+
+// exitDetail is the last non-empty line the failed agent printed.
+func (s *Scheduler) exitDetail(ctx context.Context, entry *supervised) string {
+	s.mu.Lock()
+	detail, acp := entry.exitDetail, entry.acp
+	s.mu.Unlock()
+	if detail == "" && !acp {
+		line, err := s.cfg.PTY.LastLine(ctx, entry.runID, exitDrainWait)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("scheduler: read the agent's last output", "run", entry.runID, "error", err)
+		}
+		detail = line
+	}
+	lines := strings.FieldsFunc(detail, func(r rune) bool { return r == '\n' || r == '\r' })
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			if runes := []rune(line); len(runes) > maxExitDetail {
+				line = string(runes[:maxExitDetail-3]) + "..."
+			}
+			return line
+		}
+	}
+	return ""
 }

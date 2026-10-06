@@ -424,6 +424,9 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 		unlock()
 		d.s.mu.Lock()
 		assigned, cid := entry.missionAssigned, entry.containerID
+		if !ok && !assigned {
+			entry.exitDetail = idle.Reason
+		}
 		d.s.mu.Unlock()
 		if assigned {
 			d.report(entry.runID, idle)

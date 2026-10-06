@@ -297,6 +297,9 @@ type supervised struct {
 	// before finalize so a crash can resume the original exit.
 	exitObserved bool
 	exitCode     int
+	// exitDetail is the enhanced background session's failure, which its
+	// terminal does not show.
+	exitDetail string
 	// evidenceIdentity is the stable finish-capture identity. It is mirrored
 	// to the sidecar so a retry after a crash cannot create another packet.
 	evidenceIdentity string

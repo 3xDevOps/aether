@@ -392,8 +392,9 @@ rule in settings the run commits. When the turn ends, the container
 exits 0 for `end_turn` and 1 for any other stop reason (a cancelled turn, a
 refusal, an adapter that exited or failed to start), and the run finishes
 like any background run: commit, publish, `completed` or `failed` with
-`agent exited; results committed` or `agent exited 1`. The real error is
-the notice in the item log. A swarm worker keeps its container and parks
+`agent exited; results committed` or `agent exited 1: <cause>`, the cause
+being the session's failure or stop reason. The notice in the item log
+carries the full error. A swarm worker keeps its container and parks
 at `needs-attention` instead, as its headless agent's exit does. A server
 restart mid-turn resumes the session and prompts the agent to continue
 where it stopped. Mail does not wake a background run.

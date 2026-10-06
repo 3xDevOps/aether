@@ -382,7 +382,10 @@ containers:
 Ordinary headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
 `failed` for an error - or the outcome the agent reported, whatever the exit
-code - and destroys the container immediately. A report that reaches the
+code - and destroys the container immediately. A failed exit's reason is
+`agent exited <code>: <line>`, where `<line>` is the last non-empty line the
+agent printed, cut at 200 characters; the full output stays in the run's
+terminal transcript. A report that reaches the
 server after the exit still sets the run's status; the commit the exit
 already published keeps the exit's `aether:` or `wip:` prefix, and the
 status and report are the record. A `completed`
@@ -509,8 +512,9 @@ replaces at every reattach.
 A background run over ACP ([enhanced-runs.md](enhanced-runs.md#background-runs))
 differs: an ACP server that fails to start or exits, a cancelled turn, or any
 stop reason other than `end_turn` ends the container with exit code 1, so the
-run records `failed` with `agent exited 1` and the real error is the item
-log's notice. A server restart mid-turn resumes the session and asks the
+run records `failed` with `agent exited 1: <cause>`, for example
+`agent exited 1: the agent's turn ended: cancelled`. The item log's notice
+carries the full error. A server restart mid-turn resumes the session and asks the
 agent to continue; a turn that had already ended finishes the run.
 
 ### Disk pressure

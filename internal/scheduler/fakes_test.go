@@ -878,6 +878,30 @@ func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {
 	return sess.last, true
 }
 
+func (p *fakePTY) LastLine(ctx context.Context, run domain.RunID, wait time.Duration) (string, error) {
+	sess := p.session(run)
+	if sess == nil {
+		return "", os.ErrNotExist
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		sess.mu.Lock()
+		ended := sess.ended
+		sess.mu.Unlock()
+		if ended || time.Now().After(deadline) || ctx.Err() != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	lines := strings.Split(sess.output(), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line, nil
+		}
+	}
+	return "", nil
+}
+
 func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error {
 	run, _ := key.Run()
 	p.mu.Lock()
