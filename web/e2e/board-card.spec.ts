@@ -46,6 +46,7 @@ test('an idle agent takes a reply from its Needs you card', async ({ page, aethe
   await composer.getByRole('button', { name: 'Send' }).click()
 
   await expect(composer).toBeHidden()
+  await expect(card.getByRole('button', { name: task, exact: true })).toBeFocused()
   await expect(page.getByText(/^Message (sent|queued)$/)).toBeVisible()
   const { messages } = await alice.api.rpc<{ messages: { body: string }[] }>('run.room.list', {
     workspace_id: workspaces[0].id,

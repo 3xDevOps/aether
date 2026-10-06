@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { PaletteDialogs } from '@/components/palette/dialogs'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
+import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import '@/routes/missions'
 import { useStore } from '@/store'
@@ -17,6 +18,7 @@ import {
   fakeApi,
   mission,
   otherWorkspace,
+  roomMessage,
   run,
   serverInfo,
   workspace,
@@ -200,14 +202,46 @@ describe('board columns', () => {
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
   })
 
-  it('renders card meta contributions: a conflict count and a swarm role', () => {
-    seed([run({ ...archivedMerged, mission_id: 'mission_9', mission_role: 'worker' }), working])
-    useStore.setState({ overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] } })
+  it('renders card meta contributions: an overlap count and a swarm conflict count', () => {
+    const integrator = run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })
+    seed([integrator, working])
+    useStore.setState({
+      missions: { mission_1: mission() },
+      missionDetails: {
+        mission_1: {
+          mission: mission(), tasks: [], attempts: [], submissions: [], questions: [],
+          diagnostics: [{ task_id: 't1', task_revision: 1, run_id: 'run_w1', kind: 'observed_overlap', paths: ['src/a.ts'] }],
+        },
+      },
+      overlaps: { [working.id]: [{ run_id: 'run_peer', member_id: bob.id, files: ['src/a.ts'] }] },
+    })
     renderBoard()
 
     expect(cardOf('still going').getByRole('button', { name: '1 overlap' })).toBeDefined()
+    expect(cardOf('coordinate checkout work').getByRole('button', { name: '1 conflict' })).toBeDefined()
+  })
+
+  it('folds archived swarm workers into one card and honours Mine there', () => {
+    const archived = (id: string, member = alice.id) =>
+      run({ ...archivedMerged, id, task: `archived ${id}`, member_id: member, mission_id: 'mission_1', mission_role: 'worker' })
+    seed([archived('a1'), archived('a2'), run({ ...archivedMerged, member_id: bob.id, task: 'bob archived' }), working])
+    useStore.setState({ missions: { mission_1: mission({ phase: 'completed' }) }, mineOnly: true })
+    renderBoard()
+
     fireEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
-    expect(cardOf('already archived').getByText('Worker')).toBeDefined()
+    expect(column('Finished').getAllByRole('article')).toHaveLength(1)
+    expect(cardOf('coordinate checkout work').getByText('Swarm completed')).toBeDefined()
+    expect(screen.queryByText('bob archived')).toBeNull()
+  })
+
+  it('keeps unchanged cards as the same objects across unrelated updates', () => {
+    seed([working, merged])
+    const { result } = renderHook(() => useBoard())
+    const before = result.current.columns.flatMap((c) => c.cards)
+    act(() => useStore.setState({ runs: { ...useStore.getState().runs, [stopped.id]: toRecord(stopped) } }))
+    const after = result.current.columns.flatMap((c) => c.cards)
+    expect(after.find((card) => card.run.id === working.id)).toBe(before.find((card) => card.run.id === working.id))
+    expect(after.find((card) => card.run.id === merged.id)).toBe(before.find((card) => card.run.id === merged.id))
   })
 })
 
@@ -287,10 +321,36 @@ describe('Needs you actions', () => {
     await userEvent.keyboard('r')
     expect(await screen.findByRole('dialog', { name: 'Reply to waiting on you' })).toBeDefined()
     await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'waiting on you' })))
 
     screen.getByRole('button', { name: 'waiting on you' }).focus()
     await userEvent.keyboard('o')
     expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: stopped.id } })
+  })
+
+  it('leaves a, r and o alone when no card has focus or the card has no such action', () => {
+    seed([stopped, run({ ...merged, status: 'completed', outcome_unseen: true })])
+    renderBoard()
+
+    expect(fireEvent.keyDown(document.body, { key: 'a' })).toBe(true)
+    act(() => screen.getByRole('button', { name: 'landed already' }).focus())
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'a' })).toBe(true)
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'r' })).toBe(true)
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'o' })).toBe(false)
+  })
+
+  it('opens the run for a Run Room question', () => {
+    seed([working])
+    useStore.setState({
+      roomMessages: {
+        [working.id]: [roomMessage({ run_id: working.id, actor_id: bob.id, kind: 'question', body: 'which flag?' })],
+      },
+    })
+    renderBoard()
+
+    expect(column('Needs you').getByText('still going')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'still going' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: working.id } })
   })
 
   it('offers no action on Working and Finished cards', () => {
@@ -374,13 +434,45 @@ describe('empty board', () => {
 
   it('asks for the base branch when the server cannot read it, with its error', async () => {
     seed([])
-    vi.mocked(api.filesTree).mockRejectedValueOnce(new Error('files.tree: reference main not found'))
+    vi.mocked(api.filesTree).mockRejectedValueOnce(
+      new ApiError(200, 'files.tree: workspace has no repository yet', -32004),
+    )
     renderBoard()
 
     expect(await screen.findByRole('heading', { name: 'Base branch missing' })).toBeDefined()
-    expect(screen.getByText(/reference main not found/)).toBeDefined()
+    expect(screen.getByText(/workspace has no repository yet/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Push your base branch' }))
     expect(useStore.getState().onboardingStep).toBe('Repository')
+  })
+
+  it('checks the base branch again when the window regains focus', async () => {
+    seed([])
+    vi.mocked(api.filesTree).mockRejectedValueOnce(
+      new ApiError(200, 'files.tree: workspace has no repository yet', -32004),
+    )
+    renderBoard()
+    expect(await screen.findByRole('heading', { name: 'Base branch missing' })).toBeDefined()
+
+    act(() => window.dispatchEvent(new Event('focus')))
+    expect(await screen.findByRole('heading', { name: 'No runs yet' })).toBeDefined()
+  })
+
+  it('shows any other base-branch check failure as an error', async () => {
+    seed([])
+    vi.mocked(api.filesTree).mockRejectedValueOnce(new Error('files.tree: fetch failed'))
+    renderBoard()
+
+    expect((await screen.findByRole('alert')).textContent).toContain('files.tree: fetch failed')
+    expect(screen.queryByRole('button', { name: 'Push your base branch' })).toBeNull()
+  })
+
+  it("says when Mine hides every run and offers everyone's", async () => {
+    seed([run({ ...working, member_id: bob.id })])
+    useStore.setState({ mineOnly: true })
+    renderBoard()
+
+    fireEvent.click(await screen.findByRole('button', { name: "Show everyone's runs" }))
+    expect(column('Working').getByText('still going')).toBeDefined()
   })
 
   it('asks for an agent when none is installed', async () => {
