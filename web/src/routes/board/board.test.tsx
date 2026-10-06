@@ -416,6 +416,7 @@ describe('board', () => {
     render(<Board />)
 
     expect(column('Needs you').getByText(stalled.task)).toBeDefined()
+    expect(column('Needs you').getByText(`${otherWorkspace.name} ·`)).toBeDefined()
     expect(column('Working').getByText(working.task)).toBeDefined()
   })
 

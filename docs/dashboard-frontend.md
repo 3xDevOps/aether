@@ -322,8 +322,9 @@ The sidebar lists runs in three groups, **Needs you**, **Working** and
 **Finished** (see [Run state](#run-state)). Needs you lists every workspace;
 a row outside the selected workspace leads with that workspace's name.
 Working and Finished list the selected workspace, and only the viewer's own
-runs while **Mine** (`mineOnly`, persisted) is pressed. The switcher names
-each workspace's Needs you count.
+runs while **Mine** (`mineOnly`, persisted) is pressed. Board cards from
+another workspace lead with its name the same way. The switcher names each
+workspace's Needs you count.
 
 A swarm is a mission whose integrator coordinates worker runs. It is one row,
 its current integrator's, carrying an **Integrator** badge and the workers'

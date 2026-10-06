@@ -48,12 +48,14 @@ export const RunCard = memo(function RunCard({
   state,
   reason,
   swarm,
+  workspaceName,
   variant = 'cards',
 }: {
   run: RunRecord
   state: PresentationState
   reason: string
   swarm?: SwarmSummary
+  workspaceName?: string
   variant?: 'cards' | 'map'
 }) {
   const owner = useStore((s) => s.members[run.member_id])
@@ -225,6 +227,7 @@ export const RunCard = memo(function RunCard({
               state === 'needs-you' ? 'text-foreground/85' : 'text-muted-foreground',
             )}
           >
+            {workspaceName && <span className="text-muted-foreground">{workspaceName} · </span>}
             {reason}
           </p>
           {swarm && <p className="text-xs text-muted-foreground">{swarmCounts(swarm)}</p>}

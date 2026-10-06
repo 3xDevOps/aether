@@ -394,7 +394,7 @@ function MapViewport({
             return (
               <div key={node.key} role="group" aria-label={description} className="absolute cursor-default" style={{ left: node.x, top: node.y, width: node.width, height: node.height }}>
                 {node.role !== 'standalone' && <span className={cn('pointer-events-none absolute -top-5 text-[11px] font-medium text-muted-foreground', node.role === 'worker' ? 'right-0' : 'left-0')}>{node.role === 'integrator' ? 'Integrator' : 'Worker'}</span>}
-                <RunCard run={node.card.run} state={node.card.state} reason={node.card.reason} variant="map" />
+                <RunCard run={node.card.run} state={node.card.state} reason={node.card.reason} workspaceName={node.card.workspaceName} variant="map" />
               </div>
             )
           })}

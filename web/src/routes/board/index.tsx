@@ -290,7 +290,7 @@ function Column({
       />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
-          <RunCard key={card.run.id} run={card.run} state={card.state} reason={card.reason} swarm={card.swarm} />
+          <RunCard key={card.run.id} run={card.run} state={card.state} reason={card.reason} swarm={card.swarm} workspaceName={card.workspaceName} />
         ))}
         {column.cards.length === 0 && placeholder === 'skeleton' && (
           <>
