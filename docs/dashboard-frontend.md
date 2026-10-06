@@ -2089,10 +2089,11 @@ phase word (`Planning`, `Planning · N questions for you`, `Active`,
 viewer, the unread reason when the integrator has left mail unread for over
 two minutes, or `Integrator did not launch: <error>` while
 `integrator_launch_error` is set. When a Needs you reason leads, the unread
-sentence follows the counts in muted text. Swarms that need you sort first, then by last update; completed and
-cancelled swarms fold behind **Finished (n)**, listed openly when no swarm
-is open. Archived swarms (`archived_at` set) leave both and fold behind a
-second, always collapsed **Archived (n)**. With no swarms the page shows one sentence and **New swarm**. On a
+sentence follows the counts in muted text. Swarms that need you sort first,
+then by last update; completed and cancelled swarms fold behind **Finished
+(n)**, listed openly when no swarm is open. Archived swarms (`archived_at`
+set) leave both and fold behind a second, always collapsed **Archived
+(n)**. With no swarms the page shows one sentence and **New swarm**. On a
 phone **New swarm** is a secondary button under the cards, since the top bar
 already has **New run**. Counts come from one pass over the run store
 (`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
