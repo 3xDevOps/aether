@@ -100,11 +100,14 @@ func TestCoordAuditOutboxSurvivesRunDeletion(t *testing.T) {
 	if err := db.MarkCoordAuditPublished(ctx, CoordAuditEventID(published.ID)); err != nil {
 		t.Fatalf("MarkCoordAuditPublished: %v", err)
 	}
+	if _, err := db.GetCoordAuditPublication(ctx, CoordAuditEventID(published.ID)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("published audit = %v, want ErrNotFound", err)
+	}
+	if err := db.MarkCoordAuditPublished(ctx, CoordAuditEventID(published.ID)); err != nil {
+		t.Fatalf("MarkCoordAuditPublished twice: %v", err)
+	}
 	if err := db.DeleteRun(ctx, to.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
-	}
-	if _, err := db.GetCoordAuditPublication(ctx, CoordAuditEventID(published.ID)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("published audit after run deletion = %v, want ErrNotFound", err)
 	}
 	if pub, getErr = db.GetCoordAuditPublication(ctx, CoordAuditEventID(pending.ID)); getErr != nil {
 		t.Fatalf("pending audit after run deletion: %v", getErr)
@@ -112,11 +115,8 @@ func TestCoordAuditOutboxSurvivesRunDeletion(t *testing.T) {
 	if err := db.MarkCoordAuditPublished(ctx, pub.EventID); err != nil {
 		t.Fatalf("MarkCoordAuditPublished after deletion: %v", err)
 	}
-	if _, err := db.ListPendingCoordAuditPublications(ctx, 10); err != nil {
-		t.Fatalf("ListPendingCoordAuditPublications cleanup: %v", err)
-	}
-	if _, err := db.GetCoordAuditPublication(ctx, pub.EventID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("published orphan audit = %v, want ErrNotFound after cleanup", err)
+	if left, err := db.ListPendingCoordAuditPublications(ctx, 10); err != nil || len(left) != 0 {
+		t.Fatalf("pending after publication = %d, %v; want none", len(left), err)
 	}
 }
 
@@ -331,8 +331,7 @@ func TestMessageHistoryMigrationKeepsMailAndTypesTheOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrated audit publication: %v", err)
 	}
-	if pub.EventType != CoordAuditMessage || pub.Kind != "question" || pub.CorrelationID != "msg1" ||
-		pub.State != CoordAuditPublicationPending {
+	if pub.EventType != CoordAuditMessage || pub.Kind != "question" || pub.CorrelationID != "msg1" {
 		t.Fatalf("migrated audit publication = %+v, want a pending typed question", pub)
 	}
 }
