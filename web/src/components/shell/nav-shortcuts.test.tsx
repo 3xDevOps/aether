@@ -213,10 +213,9 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().paletteDialog).toBe('launch')
   })
 
-  // A tooltip closes on the first key of any kind. Where that key is Escape,
-  // React Aria stops it rather than marking it handled, so the shell never
-  // hears that one and the run stays open - one press to dismiss the tooltip,
-  // and the next leaves, which is the whole cost of showing hints on focus.
+  // The tooltip marks its Escape handled, so the shell never hears that one
+  // and the run stays open - one press to dismiss the tooltip, and the next
+  // leaves, which is the whole cost of showing hints on focus.
   it('lets a tooltip take the first Escape and no more than that', async () => {
     useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)

@@ -111,6 +111,41 @@ test('a dialog is named by its title and closes from its Close button', async ()
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
 
+test('a dialog that opens on its own shows no hint on the control it focuses', async () => {
+  fireEvent.keyDown(document.body, { key: 'Tab' })
+  await act(() => new Promise((resolve) => setTimeout(resolve)))
+  render(
+    <Dialog defaultOpen>
+      <DialogContent>
+        <DialogTitle>Takeover request</DialogTitle>
+        <DialogDescription>Someone wants the terminal.</DialogDescription>
+      </DialogContent>
+    </Dialog>,
+  )
+  await waitFor(() => expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true))
+  expect(screen.queryByRole('tooltip')).toBeNull()
+})
+
+test('one Escape closes a hint and the dialog under it', async () => {
+  render(
+    <Dialog defaultOpen>
+      <DialogContent>
+        <DialogTitle>Rename run</DialogTitle>
+        <DialogDescription>Give the run a name.</DialogDescription>
+        <input aria-label="Name" />
+      </DialogContent>
+    </Dialog>,
+  )
+  const dialog = screen.getByRole('dialog', { name: 'Rename run' })
+  within(dialog).getByRole('textbox').focus()
+  await userEvent.tab()
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close' }))
+  await screen.findByRole('tooltip')
+  await userEvent.keyboard('{Escape}')
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
 test('a centred dialog becomes a bottom sheet below md, and stills under reduced motion', () => {
   render(<OpenDialog />)
   const dialog = screen.getByRole('dialog')

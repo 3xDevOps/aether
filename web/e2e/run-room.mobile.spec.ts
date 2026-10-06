@@ -123,11 +123,6 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
       await page.keyboard.press(step === 11 ? 'Shift+Tab' : 'Tab')
       await expect.poll(() => room.evaluate((element) => element.contains(document.activeElement))).toBe(true)
     }
-    // Tab may land on an icon button whose hint takes the first Escape.
-    if (await page.getByRole('tooltip').isVisible()) {
-      await page.keyboard.press('Escape')
-      await expect(page.getByRole('tooltip')).toBeHidden()
-    }
     await page.keyboard.press('Escape')
     await expect(room).toBeHidden()
     await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeFocused()

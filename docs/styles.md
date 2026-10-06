@@ -314,7 +314,9 @@ becomes its accessible name and its Tooltip; `hint` replaces the tooltip
 text on any button. A Tooltip opens after a 300ms hover, or at once when the
 keyboard moves focus to its control, not when a click or a script does. It
 points `aria-describedby` at the control and supplements rather than replaces
-an accessible name. An open tooltip takes the first Escape. Focusable controls
+an accessible name. Escape closes an open tooltip and, with the same press,
+the dialog or drawer under it; a shell binding on Escape, such as leaving a
+run, waits for the next press. Focusable controls
 use Tooltip descriptions instead of `title`; `title` remains for
 non-focusable paths, timestamps and breakdowns. Actor marks that need a name
 use `role="img"` and an `aria-label`, rather than leaving a named generic span.
