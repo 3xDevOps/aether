@@ -14,7 +14,6 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | --- | --- | --- |
 | Inter (variable, Latin subset) | All UI text | `@fontsource-variable/inter`, one WOFF2 |
 | Saira 600 (Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
-| VT323 | The `aether` wordmark | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-mono`, `--font-code`) | system |
 

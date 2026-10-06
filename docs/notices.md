@@ -41,7 +41,7 @@ The dashboard ships four fonts under the SIL Open Font License 1.1:
   The normal-width variable WOFF2 covers weights 100-900 in the Latin subset,
   downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
-- VT323 for the wordmark
+- VT323 for the wordmark on the Play listing's feature graphic
   ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
 - `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for terminal
   output

@@ -107,9 +107,8 @@ FEATURE_TAGLINE_GAP_PX = 54
 FEATURE_WORDMARK_INK = (255, 255, 255)
 FEATURE_TAGLINE_INK = (234, 242, 251)
 
-# VT323 carries the `aether` wordmark on the dashboard and JetBrains Mono its
-# terminals (web/src/index.css). Reading both from web/public/fonts keeps the
-# banner reproducible without a system font or a second copy in the tree.
+# Reading both from web/public/fonts keeps the banner reproducible without a
+# system font or a second copy in the tree.
 WORDMARK_FONT = FONTS / "vt323-latin.woff2"
 TAGLINE_FONT = FONTS / "jetbrains-mono-nfm-regular.woff2"
 

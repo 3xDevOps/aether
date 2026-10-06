@@ -2965,8 +2965,7 @@ about itself and appears wherever the member is an admin.
   There is no additional theme mode or cycling status icon.
 - **Typography and density.** Inter at 13px with 12px supporting copy, on
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
-  terminal's alone; code uses the system monospace stack; VT323 remains only
-  the Aether wordmark. Use the 28px control and row, 44px pane header and
+  terminal's alone; code uses the system monospace stack. Use the 28px control and row, 44px pane header and
   24px small-control geometry, and avoid promotional titles or oversized
   cards.
 - **Flat shell and palette host.** One 220-400px sidebar beside the content
@@ -2984,9 +2983,8 @@ about itself and appears wherever the member is an admin.
   stops.
 - **Motion is optional.** The controlling terminal's 1px teal outline is always
   static. Working dots and the sidebar pulse stop moving under
-  `prefers-reduced-motion: reduce`. The original
-  shooting-star scene appears only at desktop startup and is skipped under
-  reduced motion. There is no reveal-flash animation. Spinner and skeleton
+  `prefers-reduced-motion: reduce`. There is no startup scene or reveal-flash
+  animation. Spinner and skeleton
   feedback remains available.
 - **Primitives first.** `src/components/ui/` holds the shadcn/ui pieces:
   `Button`, `Input`, `Textarea`, `Label`, `Select`, `Checkbox`, `Collapsible`,

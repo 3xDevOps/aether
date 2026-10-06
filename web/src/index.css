@@ -61,16 +61,6 @@
   font-display: block;
 }
 
-/* VT323: the landing page's display face, carried by `--font-pixel` for the
-   `aether` wordmark alone. Latin subset; OFL, see
-   public/fonts/LICENSE-vt323.txt. */
-@font-face {
-  font-family: 'VT323';
-  src: url('/fonts/vt323-latin.woff2') format('woff2');
-  font-weight: 400;
-  font-display: swap;
-}
-
 /* The DOM renderer measures wide glyphs in one context and renders them in
    another; Chromium's default CJK punctuation compression (text-spacing-trim)
    makes the two disagree, drifting CJK-heavy rows off the cell grid
@@ -266,7 +256,6 @@
   /* `font-mono` is code text; only xterm uses JetBrainsMono NFM. */
   --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --font-mono: var(--font-code);
-  --font-pixel: 'VT323', monospace;
 
   --text-ui-xs: 11px;
   --text-ui-xs--line-height: 16px;
