@@ -16,11 +16,6 @@ import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/route
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
-function focusedCard(selector: string) {
-  const card = document.activeElement?.closest('[data-run-id]')
-  card?.querySelector<HTMLElement>(selector)?.click()
-}
-
 export function Board() {
   const { columns, archivedCards } = useBoard()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -31,6 +26,7 @@ export function Board() {
   const agents = useAgents()
   const caps = useCapability()
   const [showArchived, setShowArchived] = useState(false)
+  const [focusedCard, setFocusedCard] = useState<Element | null>(null)
 
   useEffect(() => {
     setShowArchived(false)
@@ -38,12 +34,6 @@ export function Board() {
   useEffect(() => {
     if (archivedCards.length === 0) setShowArchived(false)
   }, [archivedCards.length])
-
-  useKeybindings('card', {
-    'card-approve': () => focusedCard('[data-card-action="approve"]'),
-    'card-reply': () => focusedCard('[data-card-action="reply"]'),
-    'card-open': () => focusedCard('[data-card-open]'),
-  })
 
   const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
   const unreachable = error !== null
@@ -75,6 +65,12 @@ export function Board() {
     body = (
       <div
         className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
+        onFocus={(event) => setFocusedCard(event.target.closest('[data-run-id]'))}
+        onBlur={(event) => {
+          if (!(event.relatedTarget instanceof Element && event.currentTarget.contains(event.relatedTarget))) {
+            setFocusedCard(null)
+          }
+        }}
       >
         <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
@@ -93,6 +89,7 @@ export function Board() {
             />
           }
         />
+        {focusedCard && <CardKeys card={focusedCard} />}
       </div>
     )
   }
@@ -106,6 +103,17 @@ export function Board() {
       </div>
     </div>
   )
+}
+
+function CardKeys({ card }: { card: Element }) {
+  const control = (selector: string) => card.querySelector<HTMLElement>(selector)
+  const press = (selector: string) => () => control(selector)?.click()
+  useKeybindings('card', {
+    ...(control('[data-card-action="approve"]') && { 'card-approve': press('[data-card-action="approve"]') }),
+    ...(control('[data-card-action="reply"]') && { 'card-reply': press('[data-card-action="reply"]') }),
+    'card-open': press('[data-card-open]'),
+  })
+  return null
 }
 
 function FinishedFooter({
