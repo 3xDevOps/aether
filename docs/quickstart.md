@@ -198,20 +198,27 @@ aether member git --name "Ada Lovelace" --email ada@example.com
 ```
 
 Commits Aether makes for your runs use that name and address. Without it, the
-fallback is your display name at `<member-id>@aether.local`. Both dashboards
-ask for these fields in onboarding's **Git identity** step; only the local
-gateway can prefill them from this computer's `git config`. Change them later
-at **Agents → Git commit identity**, or inspect them with `aether member git`.
-Author identity is not repository authentication.
+fallback is your display name at `<member-id>@aether.local`. The local
+dashboard shows these fields at the bottom of onboarding's **Connect** step,
+prefilled from this computer's `git config`; the hosted dashboard shows them at
+the top of **Repository**, prefilled from your member record. **Save identity**
+stores them. Change them later under **Agents → Git identity**, or inspect them
+with `aether member git`. Author identity is not repository authentication.
 
 ## 4. Create a workspace
 
-In the dashboard, open **Onboarding**. After **Git identity**, the **Workspace**
-step offers **Import repository** and **Create from local clone** under
-**Add a workspace**, or lets you choose an existing workspace. The local
-dashboard starts with **Link**. The authenticated hosted dashboard opens
-onboarding for new members even when shared workspaces already exist, and
-skips that machine-local step.
+In the dashboard, open **Onboarding**. Its header lists four steps:
+**Connect**, **Repository**, **Agent** and **First run**. The local dashboard
+starts at **Connect**; the hosted dashboard has no machine-local link and
+starts at **Repository**, and opens onboarding for new members even when shared
+workspaces already exist.
+
+A **workspace** is one repository and base branch, and the runs started from
+it. **Repository** lists your workspaces with **Use**, and offers two cards
+under **Add a workspace**: **Import repository** and **Create from local
+clone**. A member who is not an admin and finds no workspace sees **Ask an
+admin to add a workspace** and can still **Continue to Agent**. Once a
+workspace is chosen, **Change** returns to the list.
 
 For another workspace, open **Manage workspaces** from the navigation,
 workspace selector, or command palette (**Ctrl/Cmd+K**). The same public,
@@ -225,7 +232,8 @@ The **base branch** is the branch new runs start from. Use the repository's
 actual branch, not `main` merely because the form defaults to it. Creating an
 empty workspace does not upload code.
 
-Keep these settings separate:
+The settings below sit under the step's **Advanced** disclosure. Keep them
+separate:
 
 - **Source authentication** lets the server read an upstream branch into its
   **source mirror**. A deploy key is read-only and is not your Git/`gh` login.
@@ -365,18 +373,18 @@ See [workspace source operations](teams.md#workspaces) and the
 On the computer holding the clone, open the desktop app or run `aether gui`
 after [linking to the server](#3-link-from-your-machine).
 
-1. In **Onboarding → Workspace** or **Manage workspaces**, choose **Create from
-   local clone**. Enter **Workspace name** and the clone's existing **Base
-   branch**, then **Create workspace**.
-2. The repository screen names the workspace ID and base branch. Enter the
-   absolute **Repository path**, or use the desktop app's **Choose folder**,
-   then **Add remote**.
+1. In **Onboarding → Repository** or **Manage workspaces**, choose **Create
+   from local clone**. Enter **Workspace name** and the clone's existing
+   **Base branch**, then **Create workspace**.
+2. Under **Local clone**, enter the absolute **Repository path**, or use the
+   desktop app's **Choose folder**, then **Add remote**. For a workspace you
+   picked with **Use**, choose **Link local repository** first.
 3. Check the connected path and destination, then **Push now**. **What git
    did** retains Git's output. A fresh workspace receives the base branch; an
    existing one reports whether it is current, ahead, or diverged.
 4. If offered, **Fast-forward my clone** catches up without a merge commit.
    Divergence shows commands to resolve it yourself; the dashboard never
-   force-pushes. Continue to agent setup after the base is available.
+   force-pushes. **Continue** to the **Agent** step after the base is available.
 
 For an existing workspace, choose **Link local repository** in **Manage
 workspaces**, or **Workspace → Repository settings → Link local repository**.
@@ -435,39 +443,64 @@ the image new containers use.
 
 ## 5. Set up your agent
 
-In **Onboarding → Agents**, choose **Set up** beside an agent. Return later
-through **Workspace → Set up agents / first run** or the **Agents** page.
-Setup belongs to your member account, not to one workspace. CLI registration:
+An **agent** is the coding CLI a run starts. **Onboarding → Agent** and the
+**Agents** page list each one with **Installed** or **Not installed**,
+**Login found** or **No login found**, and the modes it supports
+(**Standard · Enhanced**, or **Standard**). Setup belongs to your member
+account, not to one workspace. **Set up** opens three numbered steps:
+
+1. **Choose how runs show it.** Two cards draw the same moment of one run:
+   - **Standard** - the agent's own terminal, exactly as on your machine. It
+     acts without asking; anything it asks is answered in the terminal.
+   - **Enhanced** - Aether reads what the agent is doing: messages, tool
+     activity, file changes, approvals and progress appear as native
+     controls. It runs through an adapter, misses some agent-specific
+     commands and screens, starts a few seconds slower, and asks before risky
+     actions by default ([enhanced-runs.md](enhanced-runs.md)).
+
+   Below the cards, one line each says how the agent supports Enhanced, how
+   it is installed, whether a running agent can switch, what happens when the
+   adapter fails, and for Claude Code which login pays. An agent without
+   Enhanced shows that card disabled with the reason. The choice starts on
+   the agent's default and becomes its default in **New run**.
+2. **Install and log in.** **Install <agent>** runs the vendor's install
+   command in your **environment**, the container Aether keeps for you on the
+   server, followed by the pinned adapter when Enhanced is chosen. A failed
+   command shows **Install failed** with the exit status and the command's
+   output. Once the agent is installed, the environment terminal opens with
+   its login command typed: `claude` then `/login`, `codex login`, `pi` then
+   `/login`, `omp`, or `opencode auth login`.
+3. **Check** reads `agent.list` again and shows **Installed**, **Enhanced
+   installed**, and **Login found** or **No login found**. Aether only looks
+   for the agent's login file; the agent itself proves the login when it
+   starts. **Done** returns to the list, where **Run** starts the agent.
+
+From the CLI:
 
 ```sh
-aether agent add claude
-```
-
-The setup screen opens your environment terminal and supplies the vendor
-install command when one is known; otherwise it shows manual instructions.
-Install the executable into `~/.local/bin` and complete its vendor login
-there. **I've installed and logged in** checks the executable and saves the
-environment image. It does not verify vendor login; the agent checks that
-when it starts. To open the environment terminal from the CLI:
-
-```sh
+aether agent add claude --enhanced
 aether terminal
 ```
 
-For a name Aether does not ship, the command first asks for interactive and
-headless launch templates. Install that executable into `~/.local/bin` using
-the vendor's instructions, then complete its login in the environment terminal.
-Return to the dashboard when finished.
+**Add agent…** registers a CLI Aether does not ship: a **Name**, a
+**Standard command** whose first word is the executable, a **Background
+command**, and an optional **Enhanced command** that serves the Agent Client
+Protocol. Install that executable into `~/.local/bin` from the terminal in its
+setup.
 
 The member home persists the executable and vendor login state across
-containers. Import configuration from the browser and edit it in **Files**.
-See [the environment terminal guide](terminal.md) for tab and stop behavior.
+containers. See [the environment terminal guide](terminal.md) for tab and
+stop behavior.
+
+No vendor login yet? [Prove the plumbing without an agent
+subscription](#prove-the-plumbing-without-an-agent-subscription) runs the
+whole path with a scripted stand-in.
 
 ### Import configuration
 
 Configuration import is separate from installing an agent or logging in.
-Use **Bring your configuration** in **Onboarding → Agents**, or open
-**Agents → Configuration** (also in navigation and the command palette).
+Open **Agent config files** under **Onboarding → Agent** or the **Agents**
+page, or **Agent config files** from the command palette.
 It works through either gateway, without a workspace, for members with
 launch permission.
 
@@ -562,8 +595,8 @@ If runs should publish to GitHub, connect an account with write permission
 to the checkout Origin from step 4. Source deploy keys do not grant that
 permission, and enterprise policy may require additional authorization.
 
-In **Onboarding → Agents** or **Agents**, **Connect GitHub** opens the
-environment terminal with the login command. **I've logged in** finishes
+In **Onboarding → Agent** or **Agents**, open **GitHub**, then **Connect
+GitHub**: it opens the environment terminal with the login command. **I've logged in** finishes
 setup and reports the account and registered signing key.
 
 From the CLI it is two commands. In the environment terminal:
@@ -585,11 +618,15 @@ What each step writes, how to re-run it, and how to revoke are in
 
 ## 6. Launch a run
 
-The dashboard's **First run** step names the workspace/base and checks source
-readiness. If no agent is installed, use **Set up an agent**. For an empty or
-unaccepted base, use **Review repository setup**, finish the push or source
-adoption, then **Check source again**. Installation readiness does not prove
-vendor login or upstream publishing permission.
+The dashboard's **First run** step is the **New run** form below, with the
+same rules: task, agent and mode. It names the workspace and base branch and
+checks that the server can read the base. If no agent is installed it says
+**No agent is installed yet** and offers **Set up an agent**. For an empty or
+unaccepted base, use **Review repository**, finish the push or source
+adoption, then **Check again**. After **Launch** the run starts its
+container, pulls the image the first time the server uses it, then starts
+the agent (about 5 s more in Enhanced). Installation does not prove vendor
+login or upstream publishing permission.
 
 ```sh
 aether run "add a health check endpoint" --workspace myproject --agent claude

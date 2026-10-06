@@ -676,11 +676,11 @@ They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
 rules as `files.write`, while `config.import` installs an explicitly selected
 directory into that home and may be used repeatedly.
-The permanent **Configuration** route appears in shared navigation and the
-command palette, and as an action on **Agents**, whenever `config.roots` and
+The permanent **Configuration** route appears in the command palette as
+**Agent config files**, and the same importer sits under that disclosure on
+**Agents** and onboarding's Agent step, whenever `config.roots` and
 `config.import` are advertised. It works through both gateways without a
-workspace or onboarding prerequisite; local onboarding is another optional
-entrypoint to the same importer. A server-hosted page can read local files
+workspace or onboarding prerequisite. A server-hosted page can read local files
 explicitly selected in the browser directory picker.
 All runs the member launches and the environment terminal mount one shared
 read-write persistent HOME; an account share exposes only the agent login
@@ -959,7 +959,7 @@ or ask this method to read an arbitrary path.
   `HTTP 401: Bad credentials`, so the dashboard and the CLI can show what
   gh said rather than a summary. `signing_key` is the public key line and
   `fingerprint` its `SHA256:` fingerprint; the private key never leaves
-  the server. The dashboard's Agents step calls this after the member
+  the server. The dashboard's Agent step calls this after the member
   finishes `gh auth login` in the terminal dock; see
   [environment-home.md](environment-home.md#connect-github).
 

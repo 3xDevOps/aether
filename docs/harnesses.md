@@ -139,10 +139,9 @@ terminal (or prints it when no terminal opens). The server RPC
 command in the member's environment terminal, starting it if needed, waits
 up to 10 minutes, and answers with the last 8 KiB of output, the exit
 status, and whether the agent and its adapter now resolve. The dashboard's
-agent setup does not call it yet; it types the install command into the
-terminal as the CLI does. One install runs per member at a time. It first waits for a pre-launch update
-writing into the same home, and a launch skips that update while an install
-runs. The server wraps the command in `mktemp` and `timeout`, so the
+agent setup calls it. One install runs per member at a time. It first waits
+for a pre-launch update writing into the same home, and a launch skips that
+update while an install runs. The server wraps the command in `mktemp` and `timeout`, so the
 environment image must provide both (coreutils or busybox); without them the
 install fails with `timeout: not found` and exit status 127.
 
@@ -1022,9 +1021,18 @@ Once per person, per agent:
 aether agent add <name>
 ```
 
-For a shipped name, the local dashboard's Agents step opens the live
-environment terminal dock and types the vendor install script for you. In the
-CLI, run:
+In either dashboard, **Set up** on onboarding's **Agent** step or the
+**Agents** page runs three numbered steps. **Choose how runs show it**
+compares Standard and Enhanced for that agent and starts on its
+`default_mode`. **Install <agent>** calls `agent.install` with `enhanced` set
+when Enhanced is chosen, then shows the command's output, and on failure
+**Install failed** with the exit status. Once the agent is installed the
+environment terminal opens with its login command typed (`claude` then
+`/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`).
+**Check** reads `agent.list` again and shows **Installed**, **Enhanced
+installed** and **Login found** or **No login found**, from `installed`,
+`enhanced_installed` and `login_found`. A gateway without `agent.install`
+types the install command into the terminal instead. In the CLI, run:
 
 ```sh
 aether terminal
@@ -1033,12 +1041,12 @@ aether terminal
 Install the executable into `~/.local/bin`, complete the vendor login in that
 terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
-name also records a launch definition under that member.
+name also records a launch definition under that member; **Add agent…**
+registers one with a Standard, a Background and an optional Enhanced command.
 
-The local dashboard's **I've installed and logged in** button checks `agent.list`
-before confirming installation. The Agents page shows **Installed** or
-**Not installed** for your account. These checks verify the executable;
-the agent verifies its vendor login when it starts. Shipped agents need no
+The Agents page shows **Installed** or **Not installed** and **Login found**
+or **No login found** for your account. These checks look for the executable
+and the login file; the agent verifies its vendor login when it starts. Shipped agents need no
 separate registration record. Sharing your account lends other members your
 login, and your installation to a recipient who has none of their own; a
 recipient need not install the agent ([teams.md](teams.md#agent-accounts)).
@@ -1325,12 +1333,11 @@ To turn updates off for the whole server, start it with
 
 ## Agent configuration: import and Files
 
-Open **Configuration** from the Agents page or **Agent config files** in
-the command palette in either the local dashboard (`aether gui`) or the
-server-hosted dashboard. This permanent route is available whenever the
+Open **Agent config files** on the Agents page or in the command palette in
+either the local dashboard (`aether gui`) or the server-hosted dashboard. This permanent route is available whenever the
 gateway advertises `config.roots` and `config.import`; it needs no workspace
-or onboarding progress. The local onboarding Agents step offers the same
-importer as an optional entrypoint.
+or onboarding progress. Onboarding's Agent step offers the same importer
+behind the same disclosure.
 
 Choose one directory such as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`
 with **Choose directory**. A hosted page can read a directory you explicitly

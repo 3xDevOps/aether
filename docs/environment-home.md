@@ -28,9 +28,9 @@ terminal turns that layer into your member image so later runs get it; see
 
 ## Setting up an agent
 
-The local dashboard (`aether gui`) and CLI list both the agents Aether ships
-and the ones members define. Its launch form and onboarding wizard's First run
-step only offer agents whose executable is installed in your own
+Both dashboards and the CLI list the agents Aether ships and the ones members
+define. The launch form, which onboarding's First run step reuses, only offers
+agents whose executable is installed in your own
 `~/.local/bin` or, when launching on a shared account, in the owner's, since a
 run there uses the owner's installation when you have none. You need not
 install an agent to launch it on a shared account. With none installed they
@@ -38,8 +38,16 @@ say so and offer **Set up an agent** rather than a launch the server would
 refuse; the Agents page still lists uninstalled shipped agents so
 you can set them up. On a shared account, an agent whose owner has no login
 for it is not offered either, nor is your own member-defined agent, which
-runs only on your own account. The server-hosted dashboard has no onboarding
-wizard.
+runs only on your own account.
+
+In either dashboard, **Set up** on **Onboarding → Agent** or the **Agents**
+page compares Standard and Enhanced, then **Install <agent>** runs the install
+command in this home through `agent.install`, with the pinned adapter when
+Enhanced is chosen, and shows the command's output and any failure. The
+environment terminal then opens with the agent's login command typed, and
+**Check** reads `agent.list` back: **Installed**, **Enhanced installed**, and
+**Login found** when the agent's login file exists in this home. It does not
+save the environment image; the home already persists the install.
 
 Discovery follows relative symlinks and absolute links under `/root` or
 `/home/aether` within your home. Claude's native installer uses an
@@ -259,8 +267,8 @@ rm ~/.local/bin/gh
 
 ## Importing and editing configuration
 
-Open **Agents → Configuration** in either dashboard and use **Choose
-directory**. Import is explicit and repeatable. A known unique basename
+Open **Agent config files** on the **Agents** page or onboarding's **Agent**
+step in either dashboard and use **Choose directory**. Import is explicit and repeatable. A known unique basename
 automatically selects its **Configuration destination**; an unknown or
 ambiguous basename requires a choice. Any destination can be changed before
 import. The browser waits for root metadata, then previews paths without

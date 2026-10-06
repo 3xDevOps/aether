@@ -86,8 +86,8 @@ the server's MagicDNS name on a phone joined to the tailnet
 ([Testing on a real phone](#testing-on-a-real-phone)). The connection is
 HTTPS and carries no browser token; Tailscale WhoIs identifies the phone's
 source address on every request. New members enter hosted onboarding even
-when the server already has workspaces: Git identity, workspace selection or
-repository import, agents and the first run. Machine-local linking, folder
+when the server already has workspaces: Repository with the git identity on
+top, Agent and First run. Machine-local linking, folder
 picking and updates still require the desktop app or `aether gui`.
 
 For a contributor's loop against a dashboard build that is not embedded in a
@@ -415,9 +415,9 @@ The permanent `configuration` route renders the shared
 `src/components/profile-import.tsx` importer. It is available whenever
 `config.roots` and `config.import` are advertised, through both the local and
 server-hosted gateways, without a workspace or onboarding prerequisite.
-**Agents** provides a **Configuration** action, and `src/lib/surfaces.ts`
-lists it in the command palette as **Agent config files**.
-The local onboarding Agents step is an optional consumer of the same component.
+**Agents** and onboarding's Agent step show it under an **Agent config files**
+disclosure, and `src/lib/surfaces.ts` lists the route in the command palette
+under the same name.
 
 The browser directory picker grants access to the directory the user selects
 even when the dashboard is server-hosted; it does not grant access to arbitrary
@@ -885,7 +885,7 @@ a retained container and keeps the run and its history.
 **Empty board.** With no runs in scope the board names the first unmet
 requirement, with one sentence and one button:
 
-1. no workspace: **Add your repository** (onboarding, Workspace step);
+1. no workspace: **Add your repository** (onboarding, Repository step);
 2. `files.tree` answers `CodeUnavailable` (no repository yet): **Push your
    base branch**, with the server's error (onboarding, Repository step); any
    other failure shows as an error instead. The check repeats when the window
@@ -2477,47 +2477,65 @@ recurring base-refresh button.
 
 ## Onboarding wizard
 
-`src/routes/onboarding/` is the guided first-run path. A local gateway offers
-Link, Git identity, Workspace, Repository, Agents and First run. A hosted
-gateway starts at Git identity: remote import, server-side agent setup and
-configuration do not require a clone or SSH identity on the browser's machine.
-Only the local clone controls require local capabilities, and their hosted
-replacement names the exact desktop/CLI handoff.
+`src/routes/onboarding/` is the guided first-run path: four steps under one
+header, **Connect**, **Repository**, **Agent** and **First run**. The header is
+the view's `PaneHeader` with the steps as numbered chips in its right-hand
+slot; there is no step counter or second header. A local gateway starts at
+Connect. A hosted gateway, which has no `link.status`, starts at Repository:
+remote import, server-side agent setup and configuration do not require a
+clone or SSH identity on the browser's machine. Only the local clone controls
+require local capabilities, and their hosted replacement names the exact
+desktop/CLI handoff.
 
-Link, Workspace and First run live in `steps.tsx`. The shared
+Each step is a file: `connect-step.tsx` (with `edge-link.tsx`),
+`repository-step.tsx`, `agent-step.tsx` and `first-run-step.tsx`, all built on
+`Step` from `layout.tsx`, which draws the step's `<section aria-label>`, its
+title and lead line, and the sticky action row. Git identity is
+`git-identity.tsx`, a form rather than a step. The shared
 `workspace-create.tsx` and `workspace-repository.tsx` components keep initial
-and subsequent workspace setup on the same paths. Local linking is
-`repo-step.tsx`, Git identity is `git-identity-step.tsx`, and Agents is
-`agents-step.tsx`, using `github-connect.tsx` and `profile-import.tsx`.
+and later workspace setup on the same paths; local linking is `repo-step.tsx`.
+The Agent step and the **Agents** page share `src/components/agents/`.
 
 Navigation is two levels: the step index, and one sub-screen name owned by
-whichever step has sub-screens. The Agents step owns both of today's - a
-harness's setup screen, named by the harness, and the GitHub connect screen,
-named `@github` - and the wizard holds the name, so **Back** closes an open
-sub-screen first and leaves the step only from the step's own screen. A step
-with sub-screens takes them as `setup` and `onSetup` rather than keeping them
-in its own state.
+whichever step has sub-screens. The Agent step owns all of today's - an
+agent's setup, named by the agent, **Add agent…** (`@custom`) and the GitHub
+connect screen (`@github`) - and the wizard holds the name, so **Back**
+closes an open sub-screen first and leaves the step only from the step's own
+screen. A step with sub-screens takes them as `setup` and `onSetup` rather
+than keeping them in its own state.
 
-The wizard passes a **Back** action to each step. Repository setup also has
-**Back to repository choices** while a local clone is open. Returning from
-Agents preserves the selected workspace and repository state; changing
-workspaces never applies the previous workspace's link or Git result.
+The wizard passes a **Back** action to each step. While a local clone form
+is open, its **Cancel** closes it. Returning from Agent preserves the selected
+workspace and repository state; changing workspaces never applies the
+previous workspace's link or Git result.
 
 In the step header, every step the member has already reached carries a check
 and is a button that jumps to it, forwards as well as back, so walking
 backwards does not strand them on a step they cannot leave. The current step
 and the ones never reached are inert text.
 
-The Git identity step collects the name and email the member's commits are
-authored as, saved on the server with `member.git`. Where the gateway serves
-`git.identity` it prefills them from this machine's own `git config`, without
-overwriting a field the user has typed in; what the member already saved wins
-over both. **Skip** moves on and leaves the server's fallback in place, so the
-step never blocks the wizard. See [teams.md](teams.md) for what the identity
-does once it is set.
+Git identity is the name and email the member's commits are authored as,
+saved on the server with `member.git` by **Save identity**. A local gateway
+shows it at the bottom of Connect once the server is linked; a hosted one at
+the top of Repository. Where the gateway serves `git.identity` it prefills
+them from this machine's own `git config`, without overwriting a field the
+user has typed in; what the member already saved wins over both. Moving on
+without saving leaves the server's fallback in place, so it never blocks the
+wizard. See [teams.md](teams.md) for what the identity does once it is set.
 
-The Repository step offers remote source setup before any local clone is
-linked. **Link local repository** opens the local path form; its path must be
+Repository's first line defines the word: a workspace is one repository and
+base branch, and the runs started from it. With no workspace chosen it lists
+the member's workspaces with **Use** and, for an admin whose gateway serves
+`workspace.import` or `workspace.add`, the two **Add a workspace** cards. A
+member who cannot add one and finds none gets **Ask an admin to add a
+workspace** and **Continue to Agent**, because Agent setup does not depend on
+a workspace. Once a workspace is chosen the step shows it as one row with
+**Change**, then the **Local clone** section and one **Advanced** disclosure
+holding the server-fetched source status, the checkout origin and the
+deploy-key note. The source status stays mounted while collapsed, so a source
+that is not ready says so above the disclosure.
+
+**Link local repository** opens the local path form; its path must be
 absolute, accepting a leading `/`, a drive letter or a UNC prefix. The field
 offers folders `link.status` already knows: the current clone and named
 profiles as a `datalist`. In the desktop shell it also gets a **Choose
@@ -2613,10 +2631,12 @@ as the steps they named; versions 0 and 1 stored a Repository answer this build
 cannot use - version 0's predates the comparison states and version 1's carries
 no link id - so it is dropped rather than rehydrating a blank panel; and
 no version before 4 has a furthest step, so the resume point becomes it, or
-the first backward jump would turn every later step inert. Anything it cannot
-place starts over. Repository is where the workspace first becomes
-load-bearing, so resuming onto it or any later step without one falls back to
-the workspace picker; the steps before it resume where they were.
+the first backward jump would turn every later step inert. Versions before 8
+named the six steps of the old wizard; each maps to the step that absorbed it
+(Link and Git identity to Connect, Workspace to Repository, Agents to Agent).
+Anything it cannot place starts over. Repository without a workspace opens on
+the workspace list; Agent never needs one; First run without one says so and
+offers **Choose a repository**.
 
 Hydration reads `link.status` first for a local gateway. A linked machine with
 no in-progress workspace is marked onboarded on initial hydration. An
@@ -2627,54 +2647,67 @@ or draft, and a reconnect must not redirect navigation.
 Authorized run deep links take precedence. Completing the final step or
 navigating elsewhere marks the UI onboarded and clears wizard state.
 
-The Link step first offers signing in to an edge
+Connect first offers signing in to an edge
 (`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
 through the local gateway, which keeps the device token, shows the code
-while it polls `edge.status`, then links a server or claims a new one
-with the code `aether-server setup` printed. Signed in to more than one
-edge, it lists them and shows nothing to link until one is chosen; the
-server list, link by id and claim then pass that edge to the gateway, as
-`--edge` does on the command line. **Server id from your admin**
-links by an id typed in, which the edge cannot substitute. A server picked
-from the account's list opens a **Confirm server** panel with its id and
-the host key fingerprint `edge.hostkey` read, and links only on **Link and
-pin**, because that id comes from the edge. **Link by
-address** swaps the sign-in for the address form, for a tailnet or SSH
-server, and **Sign in instead** swaps it back; showing one at a time keeps
-the address field above a phone's soft keyboard. The Link step
-distinguishes no configured server, a server with no repository,
-and a fully linked server. It refreshes on Retry and when the window regains
-focus, so a separate `aether link` command appears without restarting the GUI.
+while it polls `edge.status`, then lists the servers the account reaches,
+each with one **Link**. Signed in to more than one edge, it lists them and
+shows nothing to link until one is chosen; the server list, link by id and
+claim then pass that edge to the gateway, as `--edge` does on the command
+line. A server picked from the list opens a **Confirm server** panel with its
+id and the host key fingerprint `edge.hostkey` read, and links only on **Link
+and pin**, because that id comes from the edge. **Other ways to link** holds
+**Server id from your admin**, which the edge cannot substitute, and the
+claim code `aether-server setup` printed. **Link by address** is a second
+disclosure below the sign-in, for a tailnet or SSH server. Connect
+distinguishes no configured server from a linked one, shows **Continue** only
+once a server is configured, and refreshes on Retry and when the window
+regains focus, so a separate `aether link` command appears without
+restarting the GUI.
 
-The Agents step has three optional parts and never blocks: **Skip for now**
-is reachable from every state, including an open setup shell and a failed
-configuration import.
+The Agent step and the **Agents** page render the same parts from
+`src/components/agents/`: `AgentList` rows (the agent's coloured
+`AgentGlyph`, its display name, **Installed** or **Not installed**, **Login
+found** or **No login found** from `login_found`, "Standard · Enhanced" or
+"Standard", and one button: **Set up**, or **Run** once the agent is installed
+with no missing login), **Add agent…** (`add-agent.tsx`: a name, a Standard
+and a Background command, and an optional Enhanced command, sent through
+`agent.register`), and `AgentExtras`, the collapsed **Git identity** (Agents
+page only), **GitHub** and **Agent config files** disclosures. The Agents
+page adds a **Default mode** select per row, which writes `launchDefaults`
+without changing which agent **New run** preselects. **Run** on the page
+opens **New run** on that agent; in onboarding it moves to First run with
+that agent preselected. The Agent step's primary action is **Continue** once
+any agent is installed and **Skip for now** before that.
 
-Part A lists the server's `agent.list` inventory on either gateway. An
-installed executable is reported as installed in the member's server
-environment, not on the browser's computer and not as proof of vendor login.
-**Set up** embeds the same `AgentWizard` as the Agents page; the harness is
-already selected, so it opens the `agent-setup` shell without another form.
-An empty inventory offers the custom-agent form. Setup confirmation checks
-`agent.list` for an installed
-executable, then runs `env.save` - the call the dock's **Save environment**
-button makes - before handing that agent to the First run step, which
-preselects it. The save is the point: an executable that exists only in the
-running container is not in the image runs start from. The done screen names
-the saved image. A missing executable, a failed check or a failed save keeps
-setup open for retry with the real error. The vendor login is not checkable
-from here, and the copy says so.
-Reopening setup for an existing member-defined agent does not register it
-again or replace its launch arguments, profile root or credential policy.
-Custom agents without an installer command use their vendor's installation
-instructions; the dashboard does not type a fabricated command.
+**Set up** opens `agent-setup.tsx`, three numbered steps. **Choose how runs
+show it** is `mode-comparison.tsx`: a `radiogroup` of two cards, side by side
+when its container is at least 640px wide and stacked below, each with a mock
+at least 160px tall above its description, trade-off and note. The mocks
+draw one canned item log (`mock-moment.ts`, `SessionItem` shapes): the
+Standard card as a terminal still, the Enhanced card through `session-mock.tsx`
+with the permission request as a card. Both are spans with `aria-hidden`,
+static, so they can sit inside the radio's button; the description and
+trade-off are its `aria-describedby`. Below the cards a `dl` gives the
+per-agent lines from `agent-copy.ts`: support, setup, switching (from
+`switchable`, otherwise "Chosen when the run starts"), fallback, and billing
+for Claude Code. An agent whose `enhanced` is not `native` or `adapter` gets
+the Enhanced card disabled with the reason as its note. The selection starts
+on the remembered default, else `default_mode`.
 
-The permanent **Agents** page also exposes **Set up / log in** per agent,
-**Git commit identity**, **Connect GitHub** and configuration import, so
-returning members do not have to reopen the wizard. Git identity records
-commit attribution; vendor login and native Git publishing credentials are
-separate. GitHub controls use server RPC and work on hosted gateways that
-advertise those methods.
+**Install and log in** calls `agent.install` with `enhanced` set when Enhanced
+is chosen and shows the answer: the log tail in an **Install output**
+disclosure, open when `error` is set, and **Install failed** with the error.
+Once the agent is installed it mounts the environment terminal with the
+agent's login command typed. A gateway without `agent.install` types the
+install command there instead, and one without a terminal socket prints the
+`aether terminal` commands. **Check** re-reads `agent.list` and lists
+**Installed**, **Enhanced installed** and **Login found** or **No login
+found**; the copy never says "signed in", because the probe checks for a
+file. **Done** appears once the agent is installed with no missing login and
+calls `rememberLaunch` with the chosen mode, which seeds **New run** and
+First run. Setup no longer saves the environment image: the install lands in
+the member home, which every container already mounts.
 
 Between the two, `github-connect.tsx` connects the member's GitHub account.
 The closed `<section aria-label="Connect GitHub">` says what a connection
@@ -2739,11 +2772,9 @@ already retrying.
 
 **I've logged in** calls `github.connect`, which does the non-interactive
 rest on the server; success names the account and the signing key's
-fingerprint, and **Close** returns to the step, which then
-reads "Connected in this session as `<login>`" - the connection is React
-state that a reload loses, said the way the agent rows say "Set up in this
-session". A connection counts the way a set-up agent does for the step's
-primary **Continue**. Server refusals - most often "not logged in to
+fingerprint, and **Close** returns to the step, whose **GitHub** disclosure
+then opens on "Connected in this session as `<login>`" - the connection is
+React state that a reload loses. Server refusals - most often "not logged in to
 github.com in the environment terminal" - render verbatim in the same
 monospace pane the Repository step gives git's output, because gh's answer
 runs to several lines, and leave the screen open to retry.
@@ -2755,10 +2786,10 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-**Configuration import** in this step renders the same
+**Agent config files** in this step renders the same
 `src/components/profile-import.tsx` component as the permanent
-[Configuration view](#configuration-view). It is optional here and remains
-available from Agents, shared navigation, and the palette on either gateway,
+[Configuration view](#configuration-view), collapsed until opened. It remains
+available from the Agents page and the palette on either gateway,
 independently of onboarding or workspaces. `config.roots` supplies destinations
 such as `~/.claude` and their runtime exclusions. A unique basename selects
 the destination automatically; an unknown or ambiguous basename requires a
@@ -2775,30 +2806,31 @@ and warns that copied files remain. A lost RPC response leaves the outcome
 unknown; inspect **Files** before explicitly importing again. Auth/vendor login
 is separate.
 
-The First run step is the last one, and launches a run in the workspace the
-Workspace step settled on. Its **Agent** select offers only the entries
-`agent.list` reports as `installed` in this account - the launch form's rule
-without its `custom` escape hatch - and the agent the Agents step just set up
-is preselected when it is one of them. With none installed the step drops the
-picker: it says a run launches an agent in a container and none is installed
-yet, and offers **Set up an agent**, which jumps back to the Agents step.
-Skipping setup and then picking a shipped name is how a member used to reach
-the server's refusal only after the run had launched. A failed `agent.list`
-shows the server's error with **Retry** as the primary action and no setup
-button, because a gateway that could not answer is not the same fact as an
-account with nothing installed.
+First run is the launch form, not a copy of it: `RunFields` and
+`useAgentChoice` from `src/components/launch/run-fields.tsx` are what the
+**New run** dialog's run tab renders, so the task, the agent picker and the
+**Mode** control follow the same rules - task optional except for
+Background, a mode the agent cannot use disabled with its reason. The persisted
+draft's agent wins the first pick, then the most recently remembered launch
+default, which the Agent step's **Done** or **Run** just set. With nothing
+installed the step drops the form, says **No agent is installed yet** and
+offers **Set up an agent**, which jumps back to Agent. A failed `agent.list`
+shows the server's error with **Retry**, because a gateway that could not
+answer is not the same fact as an account with nothing installed. Launch
+sends `mode` unless it is Standard and records it with `rememberLaunch`.
 
 Before enabling **Launch**, the step checks the selected workspace's base
 through `files.tree` where available and reads available mirror status for
 every role. A mirrored workspace must have a ready source and an accepted
-commit. Missing branches, pending authorization and source errors remain
-visible with **Review repository setup** and **Check source again**. Empty
-workspace creation is not source readiness. The server rechecks permission
-and source policy at launch.
-
-The step's "No agent subscription yet?" note points at the CLI and stays on
-screen once a workspace is chosen; "Prove the plumbing without an agent subscription" in
-[quickstart.md](quickstart.md) covers what `fake` is and how to launch it.
+commit. Missing branches, pending authorization and source errors show as
+**The base branch is not ready** with **Check again** and **Review
+repository**. Empty workspace creation is not source readiness. The server
+rechecks permission and source policy at launch. One line says what happens
+between **Launch** and the first output: the container starts, the image is
+pulled the first time the server uses it, then the agent starts, about 5 s
+more in Enhanced. The fake agent is documented in
+[quickstart.md](quickstart.md#prove-the-plumbing-without-an-agent-subscription),
+not on the step.
 
 ## Update prompts
 

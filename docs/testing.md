@@ -908,9 +908,9 @@ tears it down with everything it created:
   `internal/runtime`'s integration tests already pin, so a run of either
   suite warms the other's pull. Nothing is seeded into the store: the
   first identity to authenticate becomes the admin, which is what the
-  wizard's Link step does.
+  wizard's Connect step does.
 - One `aether gui` per member, each with its own `HOME` and
-  `AETHER_CONFIG_DIR`, so the SSH key the Link step generates, the
+  `AETHER_CONFIG_DIR`, so the SSH key the Connect step generates, the
   `known_hosts` entry it writes, the saved link config and the member's
   persistent agent/configuration home all belong to that member and never touch
   the developer's own. `PATH` and `SHELL` are fixed too, because
@@ -974,13 +974,13 @@ runtime state.
 | Spec | Scenario |
 | --- | --- |
 | `board-card` | A run whose agent reports an idle turn lands in Needs you; its **Reply** stays hidden until the card is hovered, sits above the card's open target, and posts through `run.inject` into the Run Room history; `o` on the focused card opens the run - hit testing and hover only a real browser does |
-| `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
-| `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
-| `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
-| `onboarding-github` | The Agents step's Connect GitHub screen against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
-| `onboarding-configuration` | An explicit browser directory import: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
-| `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the harness exits, and explicitly closing the run; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
-| `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
+| `onboarding-first-member` | A fresh server through the four steps: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
+| `onboarding-second-member` | A collaborator joining on an invite code, onto a workspace someone else seeded: Repository offers no way to add a workspace, the workspace is picked rather than created, the source status sits under Advanced, and a mirrored workspace says its server copy is pending and offers no push |
+| `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on `default_mode`, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to Run. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output |
+| `onboarding-github` | The Agent step's Connect GitHub screen, opened from its GitHub disclosure, against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
+| `onboarding-configuration` | An explicit browser directory import from the Agent step's collapsed Agent config files disclosure: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
+| `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the harness exits, and explicitly closing the run; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
+| `onboarding-navigation` | Back from every step and the header's jump to a reached step, with the workspace and the connected clone still settled on the way through, and picking the same workspace again keeping its clone |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
@@ -1022,8 +1022,12 @@ duplicating the browser smoke path:
   reads, revision conflicts, import exclusions and unsafe-file preflight.
 - `internal/sshd/config_test.go` covers authenticated own-member config RPC
   authorization and lifecycle behavior.
-- `web/src/routes/onboarding/agents-step.test.tsx` covers the import UI's
-  explicit action, destination selection and excluded-file reporting.
+- `web/src/routes/onboarding/agent-step.test.tsx` covers the import UI's
+  explicit action, destination selection and excluded-file reporting, and the
+  Agent step's setup, Run and Add agent paths.
+- `web/src/components/agents/agent-setup.test.tsx` covers the Standard and
+  Enhanced comparison, `agent.install` with and without the adapter, the
+  install failure, and the login wording.
 - `web/src/store/files.test.ts` covers drafts surviving live-run cache
   invalidation and newer typing surviving an in-flight save.
 - `web/e2e/onboarding-configuration.spec.ts` covers the browser import and
@@ -1042,7 +1046,7 @@ covered - WebKit is not installed.
 | Spec | Scenario |
 | --- | --- |
 | `files-browser.mobile.spec.ts` | On a phone, opening Files through the top bar's sidebar sheet, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
-| `onboarding-link.mobile.spec.ts` | The Link step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px, repository settings has no whole-dialog horizontal overflow and its title, description and introductory text remain readable |
+| `onboarding-link.mobile.spec.ts` | The Connect step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px, repository settings has no whole-dialog horizontal overflow and its title, description and introductory text remain readable |
 | `shell-drawer.mobile.spec.ts` | On a phone, the sidebar as a modal sheet: it opens from the top bar, its rows are finger-sized, and tapping a run closes the sheet onto that run with focus on its heading, the top bar naming it and no page overflow |
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell a sheet from a centred box opening as a full-width sheet along the bottom edge, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling 8px clear of the bottom edge, which is what `sonner` needs `mobileOffset` for |

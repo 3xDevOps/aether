@@ -724,7 +724,7 @@ Permissive by default, always attributed.
 
 That attribution reaches git too. Each member has a git identity - the real
 name and email their commits are authored as - collected by onboarding on
-either gateway and editable from **Agents → Git commit identity** or
+either gateway and editable from **Agents → Git identity** or
 `aether member git`. This is attribution, not repository authentication. The
 agent in a run container commits with the identity of the member who launched
 it, baked into the container when it is created, and the commits Aether makes
@@ -870,7 +870,7 @@ login is present.
 
 Before launching on a shared account, the recipient connects their own
 GitHub; the run pushes and opens pull requests as the recipient. **Connect
-GitHub** is available from the Agents page and the onboarding Agents step on
+GitHub** is available from the Agents page and the onboarding Agent step on
 local and hosted gateways. `aether github connect`
 ([environment-home.md](environment-home.md#connect-github)) is the CLI
 equivalent.
@@ -1150,9 +1150,9 @@ evidence remains provenance of what Aether captured or a participant reported,
 not independent verification.
 
 Agent configuration is not watched or inventoried automatically. Open
-**Agents → Configuration** in either dashboard to choose a local directory,
+**Agents → Agent config files** in either dashboard to choose a local directory,
 review its files, and explicitly import or update the remote configuration.
-The local onboarding Agents step uses the same importer. Known credential
+The onboarding Agent step uses the same importer. Known credential
 names and runtime/history defaults are skipped locally; remaining bytes are
 uploaded and server-scanned, so do not assume all secret content stays local.
 Directory-wide count and byte budgets do not truncate imports; bounded batches

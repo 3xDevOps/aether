@@ -747,9 +747,9 @@ they launch.
 
 The permanent **Configuration** route provides explicit, repeatable browser
 directory import on both local and server-hosted dashboards when `config.roots`
-and `config.import` are advertised. The Agents page and the
-command palette expose it; no workspace or onboarding progress is required.
-Local onboarding is an optional entrypoint to the same importer. After a result,
+and `config.import` are advertised. The Agents page, onboarding's Agent step
+and the command palette expose it as **Agent config files**; no workspace or
+onboarding progress is required. After a result,
 the user can select another directory or choose **Open remote files** to visit
 the existing **Files** editor. The browser waits for `config.roots` and a known
 destination before previewing or reading bytes. A known unique basename selects
