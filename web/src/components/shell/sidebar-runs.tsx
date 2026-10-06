@@ -8,8 +8,8 @@ import { useDelayed } from '@/lib/hooks'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
-import { approveRequest } from '@/routes/board/card-action'
-import { isRunRoute, runRoute } from '@/routes/run/views'
+import { approveRequest, targetRoute } from '@/routes/board/card-action'
+import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useRun, useSidebarGroups, useStateContext } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -19,10 +19,7 @@ import type { Route } from '@/store/ui'
 export const runRowSelector = '#sidebar-runs [data-run-row]'
 
 export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
-  const condition = needsYou(run, ctx)
-  if (condition?.target === 'changes') return runRoute(run.id, 'changes')
-  if (condition?.target === 'swarm' && run.mission_id) return { name: 'missions', params: { missionId: run.mission_id } }
-  return runRoute(run.id)
+  return targetRoute(run, needsYou(run, ctx)?.target)
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {

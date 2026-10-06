@@ -875,15 +875,17 @@ both show:
 | Condition | Action |
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
-| Agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run |
-| Native permission or question on a Standard run | **Open terminal** |
-| Native question on an Enhanced run, Run Room or swarm question | **Answer** |
+| Agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
+| Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
+| Native permission or question on an Enhanced run, Run Room or swarm question | **Answer** |
+| Teammate's message waiting for the controller | **Review message** |
+| Integrator down | **Open swarm** |
 | Unreviewed finish | **Review** |
-| Anything else | **Open** |
 
 Every action but Approve and the card's Reply goes where the condition's
-`target` points: the run (requests, Run Room questions, holds), its Diff for
-an unreviewed finish, or the swarm page.
+`target` points: the run (requests and questions), its Terminal view
+(blocked, held, Enhanced unavailable), its Changes view for an unreviewed
+finish, or the swarm page.
 
 While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
@@ -1460,10 +1462,10 @@ action is the one the condition names in `lib/needs-you.ts`, the same label
 the board card and sidebar row show, performed inside the frame: **Approve**
 resolves the approval in place, **Reply** focuses the Session composer,
 **Open terminal** switches to Terminal and asks for the lease, **Answer**
-reveals the question's card in Details with its reply field focused,
-**Review** opens Changes for a finish, or reveals the request's card in
-Details where the board would just open the run, and a swarm condition opens
-the swarm page. A held run with no request offers **Open terminal**. On the
+focuses the docked request on Session or reveals the question's card in
+Details with its reply field focused, **Review message** reveals the queued
+message's card in Details, **Review** opens Changes for a finish, and
+**Open swarm** opens the swarm page. On the
 Terminal view there is no terminal action in the header; the toolbar has
 **Take control**. It is the only filled button on the frame: Session rows and
 Details cards that send the member elsewhere use secondary buttons. **More**

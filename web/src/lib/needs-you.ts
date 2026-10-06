@@ -26,7 +26,7 @@ export interface StateContext {
   now: number
 }
 
-export type NeedsYouTarget = 'request' | 'run' | 'changes' | 'notes' | 'swarm'
+export type NeedsYouTarget = 'request' | 'run' | 'terminal' | 'changes' | 'notes' | 'swarm'
 
 export type NeedsYouID =
   | 'permission'
@@ -68,7 +68,7 @@ interface Spec {
   reason: (run: RunRecord, ctx: StateContext) => string
   since?: (run: RunRecord, ctx: StateContext) => string | undefined
   target: NeedsYouTarget
-  action?: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
+  action: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
 }
 
 function condition(spec: Spec): NeedsYouCondition {
@@ -79,7 +79,7 @@ function condition(spec: Spec): NeedsYouCondition {
   return {
     id: spec.id,
     target: spec.target,
-    action: spec.action ?? (() => openAction),
+    action: spec.action,
     reason: spec.reason,
     since: (run, ctx) => spec.since?.(run, ctx) ?? run.stateChangedAt,
     applies: (run, ctx) => {
@@ -96,8 +96,10 @@ export function isEnhanced(run: Pick<Run, 'acp'>): boolean {
   return run.acp === true
 }
 
+export const terminalAction: PrimaryAction = { kind: 'open', label: 'Open terminal' }
+
 const answerIn = (run: RunRecord, enhancedLabel: string): PrimaryAction =>
-  ({ kind: 'open', label: isEnhanced(run) ? enhancedLabel : 'Open terminal' })
+  isEnhanced(run) ? { kind: 'open', label: enhancedLabel } : terminalAction
 
 // `outcome_unseen` is owner-scoped on the server.
 export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
@@ -232,7 +234,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       if (approval) return `Permission: ${approval.action}`
       return isEnhanced(run) ? 'Permission requested' : 'Permission: answer in the terminal'
     },
-    action: (run, approval) => (approval ? { kind: 'approve', label: 'Approve' } : answerIn(run, 'Open')),
+    action: (run, approval) => (approval ? { kind: 'approve', label: 'Approve' } : answerIn(run, 'Answer')),
     since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
   }),
   condition({
@@ -256,6 +258,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       const sender = message ? message.actor_display_name ?? memberName(message.actor_id, ctx) : 'A teammate'
       return `${sender} sent a message, approve to deliver`
     },
+    action: () => ({ kind: 'open', label: 'Review message' }),
     since: (run, ctx) => queuedMessages(run, ctx)[0]?.created_at,
   }),
   condition({
@@ -306,34 +309,38 @@ export const needsYouConditions: NeedsYouCondition[] = [
       missionOf(run, ctx)?.integrator_launch_error
         ? 'Integrator failed to launch, replace it to continue'
         : 'Integrator stopped, replace it to continue',
+    action: () => ({ kind: 'open', label: 'Open swarm' }),
     since: (run, ctx) => missionOf(run, ctx)?.integrator_launch_error_at,
   }),
   condition({
     id: 'control-hold',
-    target: 'run',
+    target: 'terminal',
     background: true,
     supervised: true,
     holds: (run, ctx) => attemptHold(run, ctx)?.takeover_member_id !== undefined,
     resolvers: (run, ctx) => [attemptHold(run, ctx)?.takeover_member_id],
     reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
+    action: () => terminalAction,
   }),
   condition({
     id: 'enhanced-failure',
-    target: 'run',
+    target: 'terminal',
     background: true,
     holds: (run) => enhancedFailure(run) !== undefined,
     resolvers: (run) => [run.member_id],
     reason: (run) => `Enhanced unavailable: ${enhancedFailure(run)}`,
+    action: () => terminalAction,
   }),
   condition({
     id: 'blocked',
-    target: 'run',
+    target: 'terminal',
     background: true,
     supervised: true,
     holds: (run) => run.status === 'needs-attention' && run.reason?.startsWith(blockedPrefix) === true,
     resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
     reason: (run) =>
       `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
+    action: () => terminalAction,
   }),
   condition({
     id: 'stopped',

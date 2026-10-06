@@ -215,7 +215,7 @@ describe('needs you conditions', () => {
     const background = record({ mode: 'headless', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'permission' }] })
     const shown = presentRun(background, stateContext())
     expect(shown.reason).toBe('Permission requested')
-    expect(shown.needsYou?.action(background, undefined)).toEqual({ kind: 'open', label: 'Open' })
+    expect(shown.needsYou?.action(background, undefined)).toEqual({ kind: 'open', label: 'Answer' })
   })
 
   it.each([

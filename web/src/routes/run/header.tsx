@@ -12,7 +12,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
-import { needsYou, openAction } from '@/lib/needs-you'
+import { needsYou, terminalAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -62,8 +62,7 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
   const openTerminal = (): FrameAction | null =>
     !agent.hasAgentTerminal || view === 'terminal'
       ? null
-      : { label: 'Open terminal', act: () => { nav.go('terminal'); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
-  const label = action.label === openAction.label ? 'Review' : action.label
+      : { label: action.label, act: () => { nav.go('terminal'); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
 
   if (action.kind === 'approve' && approval) {
     return {
@@ -83,20 +82,20 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
       return run.mission_id ? { label: action.label, act: () => navigate('missions', { missionId: run.mission_id! }) } : null
     case 'notes': {
       const question = unansweredQuestions(room ?? []).find((m) => m.actor_id !== run.member_id)
-      return { label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }
+      return { label: action.label, act: () => nav.reveal(question ? requestCardID.question(question.id) : 'details-needs-you') }
     }
     case 'request': {
-      if (action.label === 'Open terminal') return openTerminal()
+      if (action.label === terminalAction.label) return openTerminal()
       const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
       const input = run.pending_inputs?.[0]
-      if (!steer && input && run.acp && !mobile) {
-        return { label: 'Answer', act: () => nav.focusRequest() }
-      }
+      if (!steer && input && run.acp && !mobile) return { label: action.label, act: () => nav.focusRequest() }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
-      return { label: !steer && input && run.acp ? 'Answer' : label, act: () => nav.reveal(card) }
+      return { label: action.label, act: () => nav.reveal(card) }
     }
-    case 'run':
+    case 'terminal':
       return openTerminal()
+    case 'run':
+      return null
   }
 }
 

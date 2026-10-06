@@ -9,7 +9,10 @@ import { message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
+import { runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
+import type { Route } from '@/store/ui'
 
 const conditionOf = (card: BoardCard) => needsYouConditions.find((c) => c.id === card.needsYou)
 
@@ -18,11 +21,16 @@ export function cardAction(card: BoardCard, approval: Approval | undefined): Pri
   return conditionOf(card)?.action(card.run, approval) ?? openAction
 }
 
+const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
+
+export function targetRoute(run: RunRecord, target: NeedsYouTarget | undefined): Route {
+  if (target === 'swarm' && run.mission_id) return { name: 'missions', params: { missionId: run.mission_id } }
+  return runRoute(run.id, target && targetView[target])
+}
+
 export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
-  const { run } = card
-  const target: NeedsYouTarget = conditionOf(card)?.target ?? (card.swarm ? 'swarm' : 'run')
-  if (target === 'swarm' && run.mission_id) navigate('missions', { missionId: run.mission_id })
-  else navigate('run', target === 'changes' ? { runId: run.id, view: 'changes' } : { runId: run.id })
+  const route = targetRoute(card.run, conditionOf(card)?.target ?? (card.swarm ? 'swarm' : undefined))
+  navigate(route.name, route.params)
 }
 
 export async function approveRequest(runID: string, approval: Approval) {
