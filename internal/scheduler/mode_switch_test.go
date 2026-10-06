@@ -108,6 +108,7 @@ type switchEnv struct {
 func newSwitchEnv(t *testing.T, opts ...func(*Config)) *switchEnv {
 	t.Helper()
 	e, rt := newACPEnv(t, append(opts, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))...)
+	installInHome(t, e, "omp")
 	coord, _ := withCoordination(t, e)
 	sup := &fakeSupervisor{coord: coord}
 	rt.execHandler = sup.exec
@@ -463,8 +464,8 @@ func TestSwitchRefusals(t *testing.T) {
 	e := newSwitchEnv(t)
 	run := e.launch(t, "fix the bug", domain.LaunchTUI)
 
-	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchACP, admitNow); !errors.Is(err, ErrInvalidTransition) ||
-		!strings.Contains(err.Error(), "has not reported its session") {
+	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchACP, admitNow); !errors.Is(err, ErrSessionNotReported) ||
+		!errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("switch before a session id: %v", err)
 	}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "tui-session"}); err != nil {
@@ -494,6 +495,28 @@ func TestSwitchRefusals(t *testing.T) {
 	}
 	if err := e.sched.SwitchMode(t.Context(), fake.ID, e.member.ID, domain.LaunchTUI, admitNow); !errors.Is(err, ErrNotSwitchable) {
 		t.Fatalf("switch of an agent without a verified switch: %v", err)
+	}
+}
+
+func TestSwitchToEnhancedNeedsTheAdapter(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	run := e.launch(t, "fix the bug", domain.LaunchTUI)
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "tui-session"}); err != nil {
+		t.Fatal(err)
+	}
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(home, ".local", "bin", "omp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchACP, admitNow); !errors.Is(err, ErrAdapterNotInstalled) {
+		t.Fatalf("switch without the adapter: %v", err)
+	}
+	if len(e.sup.ran()) != 0 || e.sched.Switching(run.ID) != "" {
+		t.Fatal("a refused switch touched the run")
 	}
 }
 

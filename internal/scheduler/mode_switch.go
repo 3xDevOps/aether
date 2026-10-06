@@ -22,6 +22,11 @@ import (
 
 var ErrNotSwitchable = errors.New("scheduler: this agent cannot move a running session between Standard and Enhanced")
 
+var (
+	ErrSessionNotReported  = fmt.Errorf("%w: the agent has not reported its session yet; it does on its first turn", ErrInvalidTransition)
+	ErrAdapterNotInstalled = fmt.Errorf("%w: the agent's ACP server is not installed; install it with Enhanced selected on the Agents page", ErrInvalidTransition)
+)
+
 var ErrSwitching = errors.New("scheduler: the run is switching between Standard and Enhanced")
 
 // tuiSettle is how long a resumed terminal must keep running for a switch to
@@ -65,12 +70,21 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 	if err != nil {
 		return err
 	}
-	profile, _, err := s.launchProfile(ctx, r.MemberID, r.AccountMember(), r.Harness)
+	profile, argvs, err := s.launchProfile(ctx, r.MemberID, r.AccountMember(), r.Harness)
 	if err != nil {
 		return err
 	}
 	if !profile.Switchable() {
 		return fmt.Errorf("%w: %s", ErrNotSwitchable, r.Harness)
+	}
+	if mode == domain.LaunchACP && s.cfg.Homes != nil {
+		installed, lookErr := s.adapterInstalled(r.MemberID, r.AccountMember(), profile, argvs)
+		if lookErr != nil {
+			return fmt.Errorf("look for the agent's ACP server: %w", lookErr)
+		}
+		if !installed {
+			return ErrAdapterNotInstalled
+		}
 	}
 	c := s.coordinationSeam()
 	if c == nil || c.svc == nil {
@@ -99,7 +113,7 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 		}
 		switch {
 		case session == "":
-			return fmt.Errorf("%w: the agent has not reported its session yet; it does on its first turn", ErrInvalidTransition)
+			return ErrSessionNotReported
 		case !domain.ValidAgentSessionID(session):
 			return fmt.Errorf("%w: the agent's session id %q cannot be resumed", ErrInvalidTransition, session)
 		}

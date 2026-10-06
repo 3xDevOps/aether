@@ -570,9 +570,13 @@ call is refused with `-32602`, and with a lease another session holds with
 A run whose session is not running answers `-32004` with the reason.
 `run.mode.switch` also takes a Standard run, needs **Steer**, and while
 anyone holds the run's control needs that lease (`-32003` otherwise). It
-answers `-32002` with `data.reason` `not_switchable` for an agent whose
-`agent.list` entry has `switchable: false`, and `-32002` with the reason for
-a run it cannot switch now. A run snapshot carries `switching` (`tui` or
+answers `-32002` with the real error as the message and a `data.reason` the
+dashboard can act on: `not_switchable` for an agent whose `agent.list` entry
+has `switchable: false`, `session_not_reported` for a Standard run whose
+agent has not reported its session yet (it does on its first turn), and
+`adapter_not_installed` for a switch to Enhanced while the agent's ACP
+server is not installed. Any other run it cannot switch now answers
+`-32002` with the reason and no `data`. A run snapshot carries `switching` (`tui` or
 `acp`) while a switch is in flight; a `run.mode` event
 `{mode, previous, switching, reason}` with the same `switching` opens each
 switch, and one without `switching` closes it.

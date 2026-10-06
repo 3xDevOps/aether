@@ -675,19 +675,29 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 }
 
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
-	adapter := argvs[domain.LaunchACP]
-	if !profile.ACPDefault || len(adapter) == 0 || s.cfg.Homes == nil {
+	if !profile.ACPDefault || s.cfg.Homes == nil {
 		return false
+	}
+	installed, err := s.adapterInstalled(member, account, profile, argvs)
+	if err != nil {
+		slog.Warn("scheduler: look for the agent's ACP server; the background run uses its command line", "agent", profile.Name, "error", err)
+	}
+	return installed
+}
+
+// adapterInstalled reports whether the agent's ACP server is installed next
+// to its CLI in the home a launch by member on account uses.
+func (s *Scheduler) adapterInstalled(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) (bool, error) {
+	adapter := argvs[domain.LaunchACP]
+	if len(adapter) == 0 {
+		return false, nil
 	}
 	cli := adapter[0]
 	if tui := argvs[domain.LaunchTUI]; len(tui) > 0 {
 		cli = tui[0]
 	}
 	_, installed, err := s.cfg.Homes.AgentInstalled(member, account, cli, adapter[0], profile.InstallPaths)
-	if err != nil {
-		slog.Warn("scheduler: look for the agent's ACP server; the background run uses its command line", "agent", profile.Name, "error", err)
-	}
-	return installed
+	return installed, err
 }
 
 // errMemberDefinitionOnly refuses member's own harness definition on

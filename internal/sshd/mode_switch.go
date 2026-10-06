@@ -65,11 +65,20 @@ func (s *Server) admitControl(ctx context.Context, member domain.MemberID, run d
 }
 
 func modeSwitchError(err error) *protocol.Error {
+	reason := ""
 	switch {
 	case errors.Is(err, scheduler.ErrNotSwitchable):
-		data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonNotSwitchable})
+		reason = protocol.ErrorReasonNotSwitchable
+	case errors.Is(err, scheduler.ErrSessionNotReported):
+		reason = protocol.ErrorReasonSessionNotReported
+	case errors.Is(err, scheduler.ErrAdapterNotInstalled):
+		reason = protocol.ErrorReasonAdapterNotInstalled
+	}
+	if reason != "" {
+		data, _ := json.Marshal(map[string]string{"reason": reason})
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: data}
-	case errors.Is(err, control.ErrOccupied):
+	}
+	if errors.Is(err, control.ErrOccupied) {
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
 	}
 	return acpError(err)

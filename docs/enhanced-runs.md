@@ -319,7 +319,15 @@ to `/run/aether/next-command`, and signals the run supervisor, which ends
 the login shell and runs that command in its place. The command must still
 be running 3 seconds later.
 
-**To Enhanced.** The supervisor ends the agent's terminal (SIGTERM, SIGKILL
+**To Enhanced** needs the agent's ACP server installed in the run's home
+(`enhanced_installed` in `agent.list`); without it the switch is refused
+before the terminal is touched:
+
+```
+scheduler: invalid run state transition: the agent's ACP server is not installed; install it with Enhanced selected on the Agents page
+```
+
+The supervisor ends the agent's terminal (SIGTERM, SIGKILL
 10 seconds later; the SIGKILL reaches only the agent's own process, so
 anything it started that outlives it, such as a dev server, keeps running)
 and starts a login shell; the server then starts the ACP

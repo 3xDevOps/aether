@@ -22,9 +22,12 @@ const (
 	// Enhanced (acp). It needs Steer and, while anyone holds the run's
 	// control, that lease.
 	MethodRunModeSwitch = "run.mode.switch"
-	// ErrorReasonNotSwitchable is the data.reason of the CodeInvalidState
-	// run.mode.switch returns for an agent that cannot switch.
-	ErrorReasonNotSwitchable = "not_switchable"
+	// The data.reason of the CodeInvalidState run.mode.switch returns for an
+	// agent that cannot switch, a run whose agent has not reported its
+	// session yet, and a switch to Enhanced without the agent's ACP server.
+	ErrorReasonNotSwitchable       = "not_switchable"
+	ErrorReasonSessionNotReported  = "session_not_reported"
+	ErrorReasonAdapterNotInstalled = "adapter_not_installed"
 )
 
 // RunModeSwitchParams.Mode is "tui" or "acp". The lease may be empty while

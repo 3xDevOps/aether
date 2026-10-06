@@ -73,13 +73,22 @@ func TestRunModeSwitchNeedsSteerAndAHeldLease(t *testing.T) {
 	}
 }
 
-func TestRunModeSwitchNotSwitchableIsTyped(t *testing.T) {
-	perr := modeSwitchError(fmt.Errorf("wrapped: %w", scheduler.ErrNotSwitchable))
-	var data struct {
-		Reason string `json:"reason"`
-	}
-	if perr == nil || perr.Code != protocol.CodeInvalidState || json.Unmarshal(perr.Data, &data) != nil || data.Reason != protocol.ErrorReasonNotSwitchable {
-		t.Fatalf("not switchable: %+v", perr)
+func TestRunModeSwitchRefusalsAreTyped(t *testing.T) {
+	for err, want := range map[error]string{
+		fmt.Errorf("wrapped: %w", scheduler.ErrNotSwitchable): protocol.ErrorReasonNotSwitchable,
+		scheduler.ErrSessionNotReported:                       protocol.ErrorReasonSessionNotReported,
+		scheduler.ErrAdapterNotInstalled:                      protocol.ErrorReasonAdapterNotInstalled,
+	} {
+		perr := modeSwitchError(err)
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if perr == nil || perr.Code != protocol.CodeInvalidState || json.Unmarshal(perr.Data, &data) != nil || data.Reason != want {
+			t.Fatalf("%v: %+v, want data.reason %s", err, perr, want)
+		}
+		if perr.Message != err.Error() {
+			t.Fatalf("message %q, want the real error %q", perr.Message, err.Error())
+		}
 	}
 	if perr := modeSwitchError(fmt.Errorf("%w: paused", scheduler.ErrInvalidTransition)); perr.Code != protocol.CodeInvalidState {
 		t.Fatalf("invalid state: %+v", perr)
