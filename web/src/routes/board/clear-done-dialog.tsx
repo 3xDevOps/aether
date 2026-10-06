@@ -31,9 +31,15 @@ export function ClearDoneConfirm({
             {n === 0 ? 'No closed runs to archive' : `Archive ${n} closed ${n === 1 ? 'run' : 'runs'}?`}
           </DialogTitle>
           <DialogDescription>
-            Archive hides these runs and schedules their deletion after the retention
-            period. It does not free container memory; release resources separately
-            before archiving if you want to free them now.
+            {n === 0 ? (
+              'Archive acts on merged, abandoned, failed and interrupted runs you may act on.'
+            ) : (
+              <>
+                Archive hides these runs and schedules their deletion after the retention
+                period. It does not free container memory; release resources separately
+                before archiving if you want to free them now.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         {(plan.notClosed > 0 || plan.notAllowed > 0) && (
@@ -91,8 +97,14 @@ export function ReleaseFinishedConfirm({
               : `Release resources for ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
           </DialogTitle>
           <DialogDescription>
-            Their retained containers will be removed and cannot be relaunched.
-            Run records and history remain visible; this does not archive or delete them.
+            {n === 0 ? (
+              'Release acts on finished runs you may act on that still keep their container.'
+            ) : (
+              <>
+                Their retained containers will be removed and cannot be relaunched.
+                Run records and history remain visible; this does not archive or delete them.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

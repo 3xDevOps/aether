@@ -969,8 +969,9 @@ archived run leaves. Each archived card, and the run header for one, show
 palette carries the same command whenever the gateway serves `run.archive`.
 All open `ClearDoneConfirm` (`src/routes/board/clear-done-dialog.tsx`) over
 the `clearDonePlan()` (`src/lib/commands.ts`) snapshot taken when opened;
-the palette's dialog takes it from the board as it stands then and says
-"No closed runs to archive" when none qualify. Eligible runs are
+the palette's dialog takes it from the board as it stands then. When none
+qualify, the dialog says "No closed runs to archive" and which runs archive
+acts on. Eligible runs are
 `isArchivable`, not already archived, and killable by the caller. The dialog
 says archiving hides runs and schedules their deletion after retention, but
 does not free container memory. It counts completed runs awaiting Close and
@@ -983,7 +984,8 @@ error in Done order.
 **Release finished resources... frees retained containers without archiving.**
 The same Cards/Map header and the command palette offer workspace-scoped bulk
 release; the palette offers it whenever the gateway serves `run.release`, and
-its dialog says "No finished runs hold resources" when none qualify. Its
+its dialog says "No finished runs hold resources" and which runs release
+acts on when none qualify. Its
 `releaseFinishedPlan()` searches all runs in the active workspace,
 including archived runs behind the toggle and finished runs still awaiting
 review; it does not depend on visible Done cards. It requires `run.release`,

@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
-import { ClearDoneDialog } from '@/components/palette/clear-done-dialog'
+import { ClearDoneDialog, ReleaseFinishedDialog } from '@/components/palette/clear-done-dialog'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
 const archiveMocks = vi.hoisted(() => ({
   runArchive: vi.fn(),
+  runRelease: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: archiveMocks }))
@@ -54,8 +55,39 @@ describe('archive confirmation dialog', () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
     expect(screen.getByText('No closed runs to archive')).toBeDefined()
+    expect(screen.queryByText(/schedules their deletion/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()
+  })
+})
+
+describe('release confirmation dialog', () => {
+  it('releases every finished run that keeps its container', async () => {
+    useStore.setState({
+      paletteDialog: 'release-finished',
+      runs: {
+        run_a: toRecord(run({ id: 'run_a', status: 'merged', reason: 'closed; retained container' })),
+        run_b: toRecord(run({ id: 'run_b', status: 'merged' })),
+      },
+    })
+    render(<ReleaseFinishedDialog />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release 1' }))
+
+    await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
+    expect(archiveMocks.runRelease).toHaveBeenCalledTimes(1)
+    expect(archiveMocks.runRelease).toHaveBeenCalledWith('run_a')
+  })
+
+  it('says so when no finished run keeps its container', () => {
+    useStore.setState({ paletteDialog: 'release-finished' })
+    render(<ReleaseFinishedDialog />)
+    expect(screen.getByText('No finished runs hold resources')).toBeDefined()
+    expect(screen.queryByText(/cannot be relaunched/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Release/ })).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
+    expect(useStore.getState().paletteDialog).toBeNull()
+    expect(archiveMocks.runRelease).not.toHaveBeenCalled()
   })
 })
