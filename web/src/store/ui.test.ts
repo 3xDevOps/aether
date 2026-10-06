@@ -15,7 +15,7 @@ describe('terminal zoom', () => {
   })
 
   /** Rehydrates a fresh store from a payload this build's own version wrote. */
-  function rehydrate(state: Record<string, unknown>, version = 6) {
+  function rehydrate(state: Record<string, unknown>, version = 7) {
     window.localStorage.setItem('aether.ui', JSON.stringify({ state, version }))
     const hydrated = createRootStore().getState()
     window.localStorage.removeItem('aether.ui')
@@ -60,6 +60,19 @@ describe('terminal zoom', () => {
 
   it('drops the old run pane width from before the sidebar', () => {
     expect(rehydrate({ sidebarWidth: 320 }, 5).sidebarWidth).toBe(createRootStore().getState().sidebarWidth)
+  })
+
+  it('drops the per-account agent memory from a version 5 payload', () => {
+    const hydrated = rehydrate({ lastHarnessByAccount: { mem_1: 'claude' }, theme: 'dark' }, 5)
+    expect(hydrated).not.toHaveProperty('lastHarnessByAccount')
+    expect(hydrated.theme).toBe('dark')
+  })
+
+  it('drops the board map view from a version 6 payload', () => {
+    const hydrated = rehydrate({ boardView: 'map', boardMapViewports: { '': { x: 0, y: 0, zoom: 1 } }, theme: 'dark' }, 6)
+    expect(hydrated).not.toHaveProperty('boardView')
+    expect(hydrated).not.toHaveProperty('boardMapViewports')
+    expect(hydrated.theme).toBe('dark')
   })
 })
 
@@ -357,7 +370,7 @@ describe('a persisted store from an older release', () => {
       'aether.ui',
       JSON.stringify({
         state: { onboardingStep: 'Agents', onboardingFurthest: 'First run' },
-        version: 4,
+        version: 7,
       }),
     )
 
