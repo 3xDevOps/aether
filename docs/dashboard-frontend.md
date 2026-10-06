@@ -1036,7 +1036,8 @@ its stops and requests. A stopped integrator counts only while the swarm
 record names it as current; the dashboard loads the selected workspace's
 swarms, so another workspace's stopped integrator appears once you select
 that workspace. A Background (`headless`) run reaches Needs you only
-through the swarm rows, a blocked report, an Enhanced failure or an unreviewed finish. A
+through a pending Aether approval, the swarm rows, a blocked report, an
+Enhanced failure or an unreviewed finish. A
 Working run's reason is what its agent is doing ("Reading src/auth.ts", from
 `run.agent`), else "Queued", "Starting" or "Agent working".
 

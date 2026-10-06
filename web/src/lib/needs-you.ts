@@ -183,6 +183,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
   condition({
     id: 'permission',
     target: 'request',
+    background: true,
     holds: (run, ctx) =>
       nativeRequests(run, ['permission']).length > 0 || (ctx.approvalsByRun[run.id]?.length ?? 0) > 0,
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],

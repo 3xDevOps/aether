@@ -280,10 +280,13 @@ describe('stopped integrators', () => {
 })
 
 describe('background runs', () => {
-  it('reach Needs you only on an unreviewed finish or a failure', () => {
+  it('reach Needs you on a pending Aether approval', () => {
     const ctx = stateContext({ approvalsByRun: { run_1: [approval()] } })
-    expect(needsYou(record({ mode: 'headless' }), ctx)).toBeUndefined()
+    expect(needsYou(record({ mode: 'headless' }), ctx)?.id).toBe('permission')
+  })
+
+  it('reach Needs you on an unreviewed failure', () => {
     const finished = record({ mode: 'headless', status: 'failed', outcome_unseen: true })
-    expect(presentRun(finished, ctx)).toMatchObject({ state: 'needs-you', reason: 'Failed, review the result' })
+    expect(presentRun(finished, stateContext())).toMatchObject({ state: 'needs-you', reason: 'Failed, review the result' })
   })
 })
