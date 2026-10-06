@@ -216,7 +216,7 @@ var ErrACPBusy = errors.New("scheduler: the enhanced session is busy")
 func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 	s.mu.Lock()
 	entry := s.runs[run]
-	enhanced := entry != nil && entry.launchMode == domain.LaunchACP
+	enhanced := entry != nil && entry.launchMode == domain.LaunchACP && !entry.paused
 	s.mu.Unlock()
 	if !enhanced {
 		return false

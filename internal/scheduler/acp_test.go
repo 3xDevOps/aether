@@ -598,6 +598,20 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		t.Fatal("the wake prompt is not in the item log")
 	}
 
+	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if e.sched.IdleEnhanced(run.ID) {
+		t.Fatal("a paused run is idle")
+	}
+	wakes := len(coord.idleWakeRuns())
+	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(coord.idleWakeRuns()) != wakes+1 {
+		t.Fatal("resume did not offer the idle session mail that arrived while paused")
+	}
+
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false); err != nil {
 		t.Fatal(err)
 	}

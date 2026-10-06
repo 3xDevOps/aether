@@ -626,6 +626,10 @@ func (d *acpDriver) activity(entry *supervised, verb, target string) {
 func (d *acpDriver) resumeAfterPause(ctx context.Context, entry *supervised) {
 	if d.session(entry.runID) == nil {
 		d.connect(ctx, entry, false)
+		return
+	}
+	if c := d.s.coordinationSeam(); c != nil && c.enabled {
+		c.svc.WakeIdle(entry.runID)
 	}
 }
 
