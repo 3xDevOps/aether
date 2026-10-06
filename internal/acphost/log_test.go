@@ -45,6 +45,21 @@ func TestLogReadsAndSurvivesRestart(t *testing.T) {
 	_, _ = f.WriteString(`{"seq":8,"kind":"mess`)
 	_ = f.Close()
 
+	ro, err := OpenLogReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ro.Len() != 7 {
+		t.Fatalf("read-only len %d", ro.Len())
+	}
+	if err = ro.Append(&Item{Kind: KindUsage}); err != ErrLogReadOnly {
+		t.Fatalf("read-only append: %v", err)
+	}
+	_ = ro.Close()
+	if !strings.HasSuffix(readFile(t, path), `"kind":"mess`) {
+		t.Fatal("a read-only open cut the torn line")
+	}
+
 	l, err = OpenLog(path)
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +102,15 @@ func TestLogReadsAndSurvivesRestart(t *testing.T) {
 	if _, err := l.ReadAfter(0, 0); err != ErrLogClosed {
 		t.Fatalf("read after delete: %v", err)
 	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestLogRejectsCorruption(t *testing.T) {

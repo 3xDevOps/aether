@@ -17,6 +17,9 @@ import (
 // ErrLogClosed is returned by a Log that was closed or deleted.
 var ErrLogClosed = errors.New("acphost: item log closed")
 
+// ErrLogReadOnly is returned by Append on a log opened with OpenLogReadOnly.
+var ErrLogReadOnly = errors.New("acphost: item log opened read-only")
+
 // Log is a run's append-only JSONL item log. Every Append is one write to
 // the file with no fsync, so a crash can lose the last lines but never
 // leaves a torn line behind after the next open.
@@ -29,6 +32,7 @@ type Log struct {
 	size     int64
 	last     itemHeader
 	openTurn bool
+	readOnly bool
 }
 
 type itemHeader struct {
@@ -56,13 +60,29 @@ func OpenLog(path string) (*Log, error) {
 	return l, nil
 }
 
+// OpenLogReadOnly opens the item log at path for reading while another Log
+// may be appending to it: a final line without its newline is ignored, not
+// cut off.
+func OpenLogReadOnly(path string) (*Log, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("acphost: open item log: %w", err)
+	}
+	l := &Log{path: path, f: f, readOnly: true}
+	if err := l.index(); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
 func (l *Log) index() error {
 	r := bufio.NewReaderSize(l.f, 64<<10)
 	var off int64
 	for {
 		line, err := r.ReadBytes('\n')
 		if errors.Is(err, io.EOF) {
-			if len(line) > 0 {
+			if len(line) > 0 && !l.readOnly {
 				if terr := l.f.Truncate(off); terr != nil {
 					return fmt.Errorf("acphost: cut torn item log line: %w", terr)
 				}
@@ -102,6 +122,9 @@ func (l *Log) Append(it *Item) error {
 	defer l.mu.Unlock()
 	if l.f == nil {
 		return ErrLogClosed
+	}
+	if l.readOnly {
+		return ErrLogReadOnly
 	}
 	it.Seq = l.last.Seq + 1
 	it.Epoch = l.last.Epoch

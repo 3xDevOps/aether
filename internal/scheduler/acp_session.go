@@ -132,11 +132,11 @@ func (s *Scheduler) withItemLog(run domain.RunID, read func(*acphost.Log) error)
 }
 
 func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
-	path := s.cfg.PTY.ItemLogPath(run)
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	log, err := acphost.OpenLogReadOnly(s.cfg.PTY.ItemLogPath(run))
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
-	return acphost.OpenLog(path)
+	return log, err
 }
 
 func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string) error {

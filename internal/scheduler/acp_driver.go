@@ -279,6 +279,8 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	go d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: "enhanced session failed: " + err.Error()})
 }
 
+// notice appends to the item log of a run with no live session. The caller
+// holds the run's op lock, so no session opens the log meanwhile.
 func (d *acpDriver) notice(run domain.RunID, title, description string) {
 	log, err := acphost.OpenLog(d.s.cfg.PTY.ItemLogPath(run))
 	if err != nil {
@@ -314,11 +316,18 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	}
 	_ = r.exec.Detach()
 	cause = adapterError(cause, r.stderr)
+	lock := d.op(entry.runID)
+	lock.Lock()
+	defer lock.Unlock()
 	d.mu.Lock()
-	if d.runs[entry.runID] == r {
+	current := d.runs[entry.runID] == r && !r.stopping
+	if current {
 		r.err = cause
 	}
 	d.mu.Unlock()
+	if !current {
+		return
+	}
 	d.notice(entry.runID, "Enhanced session ended", cause.Error())
 	d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: "enhanced session ended: " + cause.Error()})
 }
