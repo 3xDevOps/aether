@@ -131,12 +131,10 @@ async function machineIdentity() {
   })
 }
 
-/** Walks the wizard from mount past Connect to the Repository step. */
 async function toWorkspaceStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
-/** Walks on to the local clone form by picking the fixture workspace. */
 async function toRepoStep() {
   await toWorkspaceStep()
   fireEvent.click(
@@ -146,7 +144,6 @@ async function toRepoStep() {
   if (local) fireEvent.click(local)
 }
 
-/** Walks on to the Agent step, through a repo link. */
 async function toAgentsStep() {
   await toRepoStep()
   fireEvent.change(await screen.findByLabelText('Repository path'), {
@@ -156,7 +153,6 @@ async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
-/** Walks all the way to the first-run step past the Agent step. */
 async function toFirstRunStep() {
   await toAgentsStep()
   await screen.findByRole('region', { name: 'Agent' })

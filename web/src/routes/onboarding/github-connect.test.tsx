@@ -119,7 +119,6 @@ async function open() {
   act(() => setEnvTerminalSocketReady('main', true))
 }
 
-/** Walks the whole wizard from Connect to the Agent step. */
 async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
   fireEvent.click(

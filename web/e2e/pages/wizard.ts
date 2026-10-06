@@ -30,7 +30,6 @@ class Step {
     return this.section.getByRole('button', { name, exact: true })
   }
 
-  /** Opens a collapsed disclosure of the step, named by its caption. */
   async expand(caption: string): Promise<void> {
     const trigger = this.section.getByRole('button', { name: new RegExp(`^${caption}`) })
     if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click()
@@ -42,7 +41,6 @@ export class ConnectStep extends Step {
     super(page, 'Connect')
   }
 
-  /** Opens the address form, which sits behind a disclosure below the sign-in. */
   byAddress(): Locator {
     return this.section.getByRole('button', { name: /^Link by address/ })
   }
@@ -59,7 +57,6 @@ export class ConnectStep extends Step {
     return this.button('Continue')
   }
 
-  /** The git identity form at the bottom of the step, once the server is linked. */
   get identity(): GitIdentity {
     return new GitIdentity(this.section)
   }
@@ -97,7 +94,6 @@ export class RepositoryStep extends Step {
     return this.section.getByRole('button', { name: `Use ${name}`, exact: true })
   }
 
-  /** Back to the workspace list from a chosen workspace. */
   change(): Locator {
     return this.button('Choose another workspace')
   }
@@ -128,7 +124,6 @@ export class RepositoryStep extends Step {
     return this.button('Continue')
   }
 
-  /** What a member who cannot add a workspace gets instead of the two cards. */
   continueToAgent(): Locator {
     return this.button('Continue to Agent')
   }
@@ -143,17 +138,14 @@ export class AgentStep extends Step {
     super(page, 'Agent')
   }
 
-  /** Opens an agent's setup. `label` is the name the list shows. */
   setUp(label: string): Locator {
     return this.section.getByRole('button', { name: `Set up ${label}`, exact: true })
   }
 
-  /** The list's row for an agent. */
   row(label: string): Locator {
     return this.section.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: label })
   }
 
-  /** A mode card of the Standard and Enhanced comparison. */
   mode(name: 'Standard' | 'Enhanced'): Locator {
     return this.section.getByRole('radio', { name, exact: true })
   }
@@ -162,7 +154,6 @@ export class AgentStep extends Step {
     return this.button(`Install ${label}`)
   }
 
-  /** What step 3 of the setup read back from agent.list. */
   status(label: string): Locator {
     return this.section.getByRole('list', { name: `${label} status` })
   }
@@ -180,7 +171,6 @@ export class AgentStep extends Step {
     return this.section.getByRole('status').filter({ hasText: 'Starting your environment container' })
   }
 
-  /** Opens the Connect GitHub sub-screen from its disclosure. */
   async connectGitHub(): Promise<void> {
     await this.expand('GitHub')
     await this.button('Connect GitHub').click()
@@ -194,7 +184,6 @@ export class AgentStep extends Step {
     return this.button('Skip for now')
   }
 
-  /** The importer, behind the Agent config files disclosure. */
   async configuration(): Promise<ConfigurationImport> {
     await this.expand('Agent config files')
     return new ConfigurationImport(this.page)
@@ -286,7 +275,6 @@ export class FirstRunStep extends Step {
     await this.button('Launch').click()
   }
 
-  /** The way out when no agent is installed: back to the Agent step. */
   setUpAgent(): Locator {
     return this.button('Set up an agent')
   }

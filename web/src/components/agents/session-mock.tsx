@@ -30,7 +30,6 @@ function RequestMock({ request }: { request: SessionRequest }) {
   )
 }
 
-/** Spans only: it sits inside the comparison card's button. */
 export function SessionMock({ items }: { items: SessionItem[] }) {
   const asked = new Set(items.flatMap((item) => (item.request?.status === 'pending' && item.request.tool_call_id ? [item.request.tool_call_id] : [])))
   return (

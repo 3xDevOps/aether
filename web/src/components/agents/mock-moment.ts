@@ -9,8 +9,6 @@ const item = (seq: number, over: Partial<SessionItem>): SessionItem => ({
   ...over,
 })
 
-/** One moment of one run, which both comparison mocks draw: Standard as its
- * terminal shows it, Enhanced as the session view does. */
 export const mockMoment: SessionItem[] = [
   item(1, { kind: 'message', message: { role: 'user', message_id: 'u1', text: 'Fix the flaky login test', complete: true } }),
   item(2, { kind: 'tool_call', tool_call: { id: 't1', title: 'Read auth/login_test.go', tool_kind: 'read', status: 'completed', output: 'Read 84 lines' } }),
