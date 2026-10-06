@@ -158,6 +158,15 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().route.name).toBe('members')
   })
 
+  it('leaves a run that is not in the store on Escape', () => {
+    useStore.setState({ route: { name: 'terminal', params: { runId: 'run_gone' } } })
+    render(<AppShell />)
+    expect(screen.getByRole('heading', { name: 'Run not found' })).toBeDefined()
+
+    press('Escape')
+    expect(useStore.getState().route.name).toBe('board')
+  })
+
   it('lets a pending chord swallow the Escape that cancels it', () => {
     useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
     render(<AppShell />)

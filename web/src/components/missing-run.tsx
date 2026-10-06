@@ -2,6 +2,7 @@ import { ArrowLeft, CircleAlert, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed } from '@/lib/hooks'
+import { useKeybindings } from '@/lib/keybindings'
 import { useStore } from '@/store'
 
 /**
@@ -14,6 +15,7 @@ export function MissingRun() {
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const navigate = useStore((s) => s.navigate)
+  useKeybindings('run', { 'leave-run': () => navigate('board') })
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable)
 
