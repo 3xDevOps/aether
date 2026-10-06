@@ -497,6 +497,19 @@ func TestSwitchRefusals(t *testing.T) {
 	}
 }
 
+func TestServerDefinitionMakesAnAgentUnswitchable(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Harnesses["claude"] = HarnessSpec{TUIArgs: []string{"claude"}, HeadlessArgs: []string{"claude", "-p", "{task}"}}
+	})
+	for name, want := range map[string]bool{"claude": false, "omp": true} {
+		got, err := e.sched.AgentSwitchable(t.Context(), e.member.ID, e.member.ID, name)
+		if err != nil || got != want {
+			t.Fatalf("AgentSwitchable(%s) = %v, %v, want %v", name, got, err, want)
+		}
+	}
+}
+
 func TestSwitchingRunRefusesInput(t *testing.T) {
 	t.Parallel()
 	e := newSwitchEnv(t)

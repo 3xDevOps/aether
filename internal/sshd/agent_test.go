@@ -172,6 +172,23 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 	}
 }
 
+func TestAgentListSwitchableFollowsTheResolvedDefinition(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	s.cfg.Runs = &fakeRuns{unswitchable: map[string]bool{"claude": true}}
+	result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+	if rpcErr != nil {
+		t.Fatalf("agentList: %+v", rpcErr)
+	}
+	switchable := map[string]bool{}
+	for _, a := range result.(protocol.AgentListResult).Agents {
+		switchable[a.Name] = a.Switchable
+	}
+	if switchable["claude"] || !switchable["omp"] || switchable["codex"] {
+		t.Fatalf("switchable = %v, want only omp", switchable)
+	}
+}
+
 func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
 	t.Parallel()
 	s, member := newAgentTestServer(t)

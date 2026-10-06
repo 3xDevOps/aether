@@ -44,6 +44,16 @@ func (s *Scheduler) Switching(run domain.RunID) domain.LaunchMode {
 	return ""
 }
 
+// AgentSwitchable reports whether SwitchMode accepts a run of harnessName
+// launched by member on account.
+func (s *Scheduler) AgentSwitchable(ctx context.Context, member, account domain.MemberID, harnessName string) (bool, error) {
+	profile, _, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return false, err
+	}
+	return profile.Switchable(), nil
+}
+
 // SwitchMode moves a live run's agent between its terminal (tui) and its ACP
 // server (acp) inside the same container, resuming the agent's session.
 // admit calls begin, which claims the run for the switch, under the caller's

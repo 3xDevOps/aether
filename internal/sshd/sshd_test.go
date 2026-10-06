@@ -360,6 +360,7 @@ type fakeRuns struct {
 	// the refusal it reports with the same key.
 	sharedLaunches map[string]scheduler.SharedLaunch
 	sharedRefusals map[string]string
+	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
 }
 
@@ -431,6 +432,12 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	defer f.mu.Unlock()
 	key := fmt.Sprintf("%s:%s:%s", member, account, harness)
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
+}
+
+func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.unswitchable[harness], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {

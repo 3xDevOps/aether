@@ -85,6 +85,11 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err != nil {
 			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", profile.Name, err)
 		}
+		if info.Switchable {
+			if info.Switchable, err = s.cfg.Runs.AgentSwitchable(ctx, member, account, profile.Name); err != nil {
+				return protocol.AgentInfo{}, fmt.Errorf("check agent %q switch: %w", profile.Name, err)
+			}
+		}
 		if account != member {
 			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, profile.Name)
 			if err != nil {
