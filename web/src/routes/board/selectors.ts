@@ -7,7 +7,7 @@ import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
 import { isArchivable, type RunRecord } from '@/store/runs'
-import { listedRuns, runGroups, type RunTree, type RunsInput } from '@/store/selectors'
+import { listedRuns, runGroups, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
 
@@ -21,37 +21,46 @@ export interface BoardData {
   columns: BoardColumn[]
   /** Finished, archived runs in scope - hidden from Finished, shown behind its toggle. */
   archivedCards: BoardCard[]
+  hiddenByMine: boolean
 }
 
 const at = (iso: string) => Date.parse(iso)
 
-export function board(s: RunsInput): BoardData {
-  const groups = runGroups(s)
-  const archivedCards: BoardCard[] = []
+function archivedRows(s: RunsInput): RunRow[] {
+  const rows: RunRow[] = []
   for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    // Defensive: the server already ignores archiving outside a final status.
+    if (s.mineOnly && run.member_id !== s.ctx.viewerID) continue
     if (!run.archived_at || !isArchivable(run.status)) continue
     const shown = presentRun(run, s.ctx)
-    archivedCards.push({
+    rows.push({
       run,
       state: shown.state,
       reason: shown.reason,
       group: groupOf(shown.state),
       waitingSince: run.stateChangedAt,
       owner: s.ctx.members[run.member_id],
-      children: [],
     })
   }
+  return rows
+}
+
+export function board(s: RunsInput): BoardData {
+  const groups = runGroups(s)
   return {
     columns: (Object.keys(groups) as RunGroup[]).map((key) => ({
       key,
       label: groupLabel[key],
       cards: groups[key],
     })),
-    archivedCards: archivedCards.sort(
+    archivedCards: runTrees(archivedRows(s), s.ctx).sort(
       (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),
     ),
+    hiddenByMine:
+      s.mineOnly &&
+      Object.values(s.ctx.runs).some(
+        (run) => (!s.workspace || run.workspace_id === s.workspace) && run.member_id !== s.ctx.viewerID,
+      ),
   }
 }
 
