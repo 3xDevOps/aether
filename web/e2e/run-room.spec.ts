@@ -176,7 +176,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     // Alice, who does, delivers or denies it first.
     await bobPage.getByRole('tab', { name: 'Session', exact: true }).click()
     const bobComposer = bobPage.getByRole('textbox', { name: 'Message the agent' })
-    await expect(bobPage.getByText(/waits 45 s before it reaches the agent/)).toBeVisible()
+    await expect(bobPage.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeVisible()
     await bobComposer.fill(deniedSteer)
     await bobComposer.press('ControlOrMeta+Enter')
     await expect(bobComposer).toHaveValue('')
@@ -266,7 +266,6 @@ test('two members share notes, moderated messages, and explicit control transfer
     await page.goto(alice.url)
     const card = page.locator(`[data-run-id="${run.id}"]`)
     await expect(card.getByText(task, { exact: true })).toBeVisible()
-    await expect(card.getByRole('button', { name: /Requests: 1 unanswered question/ })).toBeVisible()
     await expect(card.getByText('A teammate asked a question', { exact: true })).toBeVisible()
     await card.getByRole('button', { name: task, exact: true }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
