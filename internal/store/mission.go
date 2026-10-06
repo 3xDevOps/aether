@@ -69,6 +69,9 @@ type MissionStore interface {
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
+	SetMissionArchived(context.Context, domain.MissionID, *time.Time) (bool, error)
+	DeleteMission(context.Context, domain.MissionID) error
+	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
 	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)
 	IntegratorReplacementRecorded(context.Context, domain.MissionID, string) (bool, error)
@@ -159,25 +162,29 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
-	integrator_launch_error, integrator_launch_error_at, integrator_run_launched`
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
 	var choices string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
-	var launchErrorAt sql.NullInt64
+	var launchErrorAt, archivedAt sql.NullInt64
 	var mode, phase string
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
-		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
 		at := decodeTime(launchErrorAt.Int64)
 		m.IntegratorLaunchErrorAt = &at
+	}
+	if archivedAt.Valid {
+		at := decodeTime(archivedAt.Int64)
+		m.ArchivedAt = &at
 	}
 	m.Integrator.Mode, m.Phase = domain.LaunchMode(mode), domain.MissionPhase(phase)
 	if runID.Valid {
@@ -258,7 +265,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, runID,

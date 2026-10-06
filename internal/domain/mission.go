@@ -110,6 +110,7 @@ type Mission struct {
 	IdempotencyKey        string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	ArchivedAt            *time.Time
 }
 
 const (

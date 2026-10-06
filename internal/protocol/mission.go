@@ -14,6 +14,9 @@ const (
 	MethodMissionPlanShow       = "mission.plan.show"
 	MethodMissionStart          = "mission.start"
 	MethodMissionCancel         = "mission.cancel"
+	MethodMissionArchive        = "mission.archive"
+	MethodMissionUnarchive      = "mission.unarchive"
+	MethodMissionDelete         = "mission.delete"
 
 	MethodTaskShow             = "task.show"
 	MethodTaskList             = "task.list"
@@ -61,6 +64,7 @@ type Mission struct {
 	IntegratorRunLaunched        bool                     `json:"integrator_run_launched"`
 	CreatedAt                    string                   `json:"created_at"`
 	UpdatedAt                    string                   `json:"updated_at"`
+	ArchivedAt                   *string                  `json:"archived_at,omitempty"`
 }
 
 // MissionQuestion is one clarifying question the integrator asked the
@@ -318,6 +322,16 @@ type MissionCancelResult struct {
 	Mission Mission `json:"mission"`
 }
 
+// MissionIDParams are the params of mission.archive, mission.unarchive and
+// mission.delete.
+type MissionIDParams struct {
+	MissionID string `json:"mission_id"`
+}
+
+type MissionArchiveResult struct {
+	Mission Mission `json:"mission"`
+}
+
 type MissionReplaceIntegratorParams struct {
 	MissionID          string            `json:"mission_id"`
 	ExpectedGeneration uint64            `json:"expected_generation"`
@@ -439,6 +453,7 @@ func MissionFromDomain(m *domain.Mission) Mission {
 	if m.IntegratorLaunchErrorAt != nil {
 		out.IntegratorLaunchErrorAt = rfc3339(*m.IntegratorLaunchErrorAt)
 	}
+	out.ArchivedAt = rfc3339Ptr(m.ArchivedAt)
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
 		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode)}

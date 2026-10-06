@@ -47,7 +47,29 @@ func (p *planGateMissionService) Cancel(_ context.Context, actor domain.MemberID
 	return protocol.MissionCancelResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseCancelled)}}, nil
 }
 
-// TestMissionHumanControlMethods: answer and cancel are Launch-guarded
+func (p *planGateMissionService) Archive(_ context.Context, actor domain.MemberID, params protocol.MissionIDParams) (protocol.MissionArchiveResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.actor = actor
+	at := "2026-10-06T00:00:00Z"
+	return protocol.MissionArchiveResult{Mission: protocol.Mission{ID: params.MissionID, ArchivedAt: &at}}, nil
+}
+
+func (p *planGateMissionService) Unarchive(_ context.Context, actor domain.MemberID, params protocol.MissionIDParams) (protocol.MissionArchiveResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.actor = actor
+	return protocol.MissionArchiveResult{Mission: protocol.Mission{ID: params.MissionID}}, nil
+}
+
+func (p *planGateMissionService) Delete(_ context.Context, actor domain.MemberID, _ protocol.MissionIDParams) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.actor = actor
+	return nil
+}
+
+// TestMissionHumanControlMethods: answer, cancel, archive and delete are Launch-guarded
 // control-channel methods whose handlers are thin - they carry the
 // authenticated member into the service and never take the authorization
 // mutex the service itself holds. mission.plan.decide no longer exists.
@@ -87,6 +109,21 @@ func TestMissionHumanControlMethods(t *testing.T) {
 		t.Fatalf("cancel reached the service as %+v by %q, want cancelled mission-1 by %q", cancelled.Mission, svc.actor, e.member.ID)
 	}
 
+	var archived protocol.MissionArchiveResult
+	if err := adminC.Call(protocol.MethodMissionArchive, protocol.MissionIDParams{MissionID: "mission-1"}, &archived); err != nil {
+		t.Fatalf("mission.archive: %v", err)
+	}
+	if archived.Mission.ArchivedAt == nil || svc.actor != e.member.ID {
+		t.Fatalf("archive reached the service as %+v by %q", archived.Mission, svc.actor)
+	}
+	var restored protocol.MissionArchiveResult
+	if err := adminC.Call(protocol.MethodMissionUnarchive, protocol.MissionIDParams{MissionID: "mission-1"}, &restored); err != nil || restored.Mission.ArchivedAt != nil {
+		t.Fatalf("mission.unarchive = %+v, %v", restored.Mission, err)
+	}
+	if err := adminC.Call(protocol.MethodMissionDelete, protocol.MissionIDParams{MissionID: "mission-1"}, nil); err != nil {
+		t.Fatalf("mission.delete: %v", err)
+	}
+
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
 	viewerC := controlAs(t, e, viewer)
 	wantDenied(t, viewerC.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
@@ -95,4 +132,7 @@ func TestMissionHumanControlMethods(t *testing.T) {
 	wantDenied(t, viewerC.Call(protocol.MethodMissionCancel, protocol.MissionCancelParams{
 		MissionID: "mission-1", IdempotencyKey: "cancel-viewer",
 	}, nil), "viewer mission.cancel")
+	for _, method := range []string{protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionDelete} {
+		wantDenied(t, viewerC.Call(method, protocol.MissionIDParams{MissionID: "mission-1"}, nil), "viewer "+method)
+	}
 }

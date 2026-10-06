@@ -99,6 +99,7 @@ type Config struct {
 	Runs                Launcher
 	Cancel              Canceller
 	Complete            Completer
+	Retire              RunRetirer
 	AuthorizationMu     *sync.Mutex
 	Cost                Budget
 	Evidence            EvidenceReader
@@ -228,6 +229,9 @@ func (s *Service) reconcile(ctx context.Context) error {
 			return err
 		}
 		for _, m := range missions {
+			if sweepErr := s.sweepArchived(ctx, m); sweepErr != nil {
+				slog.Warn("mission: archive sweep", "mission", m.ID, "error", sweepErr)
+			}
 			if missionErr := s.reconcileMission(ctx, m); missionErr != nil {
 				slog.Warn("mission: reconcile mission", "mission", m.ID, "error", missionErr)
 			}

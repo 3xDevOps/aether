@@ -1533,6 +1533,11 @@ CREATE INDEX idx_coord_audit_publications_due
 ALTER TABLE runs ADD COLUMN acp INTEGER NOT NULL DEFAULT 0;
 UPDATE runs SET acp = 1 WHERE mode = 'acp';
 `,
+	// v52: archived_at hides a finished swarm from the default swarm list,
+	// as runs.archived_at does for runs.
+	`
+ALTER TABLE missions ADD COLUMN archived_at INTEGER;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
