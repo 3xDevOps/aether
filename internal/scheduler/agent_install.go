@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -17,11 +18,19 @@ var ErrAgentInstallRunning = errors.New("agent install: another install is runni
 // maxInstallLog is how much of the end of an install's output is kept.
 const maxInstallLog = 8 << 10
 
+// installExecGrace is how long past AgentInstallTimeout the exec may take
+// to answer once the container has killed the installer.
+const installExecGrace = 30 * time.Second
+
 // InstallAgent runs command, an agent's install command, with /bin/sh in
 // the member's environment terminal, starting the terminal when it is not
 // running, and returns the end of its combined output and its exit code.
 // The command installs into the member home, which the terminal mounts,
 // so nothing has to be saved for runs to find it.
+//
+// The terminal lock is not held across the exec, so opening a tab never
+// waits on an installer; a terminal stop or environment reset ends the
+// install with the container.
 func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error) {
 	s.mu.Lock()
 	if s.agentInstalls[member] {
@@ -39,30 +48,41 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 		s.mu.Unlock()
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, protocol.AgentInstallTimeout)
-	defer cancel()
 	if _, err := s.EnsureTerminal(ctx, member); err != nil {
 		return "", 0, err
 	}
-	sup := s.lookupLiveTerminal(member)
-	if sup == nil {
+	s.mu.Lock()
+	sup := s.terminals[member]
+	if sup == nil || sup.cleanupPending {
+		s.mu.Unlock()
 		return "", 0, ErrTerminalNotRunning
 	}
-	// Exec refuses a command whose output passes 1 MiB, and an installer's
-	// progress output can, so only the end of the log comes back.
-	script := fmt.Sprintf("log=$(mktemp) || exit 1\n(\n%s\n) >\"$log\" 2>&1\ncode=$?\ntail -c %d \"$log\"\nrm -f \"$log\"\nexit $code", command, maxInstallLog)
-	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, sup.containerID, []string{"/bin/sh", "-c", script}, sup.home)
+	containerID, home := sup.containerID, sup.home
+	s.mu.Unlock()
+
+	// The install outlives a dropped request, and the container kills it
+	// at AgentInstallTimeout, so the guard above is never released while
+	// an installer still writes into the home. Exec refuses a command
+	// whose output passes 1 MiB, and an installer's progress output can,
+	// so only the end of the log comes back.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), protocol.AgentInstallTimeout+installExecGrace)
+	defer cancel()
+	script := fmt.Sprintf("log=$(mktemp) || exit 1\ntimeout -s KILL %d sh -c \"$1\" >\"$log\" 2>&1\ncode=$?\ntail -c %d \"$log\"\nrm -f \"$log\"\nexit $code",
+		int(protocol.AgentInstallTimeout.Seconds()), maxInstallLog)
+	start := time.Now()
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, containerID, []string{"/bin/sh", "-c", script, "sh", command}, home)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", 0, fmt.Errorf("agent install: did not finish within %s", protocol.AgentInstallTimeout)
-		}
 		return "", 0, fmt.Errorf("agent install: run in the environment terminal: %w", err)
 	}
-	return logTail(joinOutput(stdout, stderr)), code, nil
+	tail := joinOutput(logTail(stdout), stderr)
+	if code != 0 && time.Since(start) >= protocol.AgentInstallTimeout {
+		return "", 0, fmt.Errorf("agent install: did not finish within %s; the end of its output:\n%s", protocol.AgentInstallTimeout, tail)
+	}
+	return tail, code, nil
 }
 
-// logTail drops the partial first line a byte-count tail leaves, and the
-// invalid UTF-8 a cut through a character does.
+// logTail drops the partial first line a byte-count tail of the install log
+// leaves, and the invalid UTF-8 a cut through a character does.
 func logTail(out string) string {
 	if len(out) >= maxInstallLog {
 		if i := strings.IndexByte(out, '\n'); i >= 0 {
