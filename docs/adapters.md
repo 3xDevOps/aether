@@ -25,7 +25,7 @@ one entry to the `profiles` map:
 | `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `InstallPaths` | Home-relative directories the CLI's `~/.local/bin` launcher links into, outside `~/.local/bin` and `~/.local/lib`; `claude` names `.local/share/claude`, where its native installer puts the versions it links to. A recipient's run that borrows the owner's installation mounts each read-only from the owner's home at the same path. Leave empty for an npm install (under `~/.local/lib`) or a single binary in `~/.local/bin`. |
 | `BorrowedState` | A home-relative JSON file and the keys a launch that borrows this login sets in the launcher's copy when they are absent, so the CLI starts signed in with the owner's login instead of running first-time setup against an empty home. `claude` sets `hasCompletedOnboarding: true` in `.claude.json`, because Claude Code's setup wizard shows its sign-in step regardless of an existing login. The file is created with mode 0600 when missing, rewritten in place when it is a JSON object, and left alone otherwise. |
-| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Configuration** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
+| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Agent config files** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
 | `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so the browser excludes them before reads and upload. The server and manual profile path enforce the same names; `*.pem` is always denied. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
@@ -50,11 +50,10 @@ Rules that are easy to get wrong:
   are skipped locally, but scanner findings are a server-side boundary, not a
   promise that all secret content stays local.
 - **Configuration changes the shared member HOME.** The repeatable browser
-  directory picker on **Configuration** and the **Files** editor write the
-  authenticated member's persistent home, visible to that member's active and
-  future runs. Configuration is available from Agents and shared
-  navigation/palette on both gateways when `config.roots` and `config.import`
-  are advertised, without a workspace or onboarding prerequisite. Onboarding
+  directory picker under **Agents > Agent config files** and the **Files**
+  editor write the authenticated member's persistent home, visible to that
+  member's active and future runs. The importer is available on both gateways
+  when `config.roots` and `config.import` are advertised, without a workspace or onboarding prerequisite. Onboarding
   optionally uses the same importer. No daemon watches `LocalRoot` or
   automatically synchronizes configuration.
 - **Directory size does not truncate imports.** The browser previews metadata

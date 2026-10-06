@@ -745,11 +745,11 @@ they launch.
 
 ## Browser configuration and Files
 
-The permanent **Configuration** route provides explicit, repeatable browser
+**Agents > Agent config files** provides explicit, repeatable browser
 directory import on both local and server-hosted dashboards when `config.roots`
-and `config.import` are advertised. The Agents page, onboarding's Agent step
-and the command palette expose it as **Agent config files**; no workspace or
-onboarding progress is required. After a result,
+and `config.import` are advertised. Onboarding's Agent step shows the same
+importer, and the command palette reaches it through **Agents**; no workspace
+or onboarding progress is required. After a result,
 the user can select another directory or choose **Open remote files** to visit
 the existing **Files** editor. The browser waits for `config.roots` and a known
 destination before previewing or reading bytes. A known unique basename selects

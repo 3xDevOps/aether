@@ -1160,7 +1160,7 @@ Inside `aether terminal`, run `opencode auth login` and pick your provider.
 Credentials are written to `~/.local/share/opencode/auth.json` in the member
 home.
 
-**Configuration** import, **Files**, and the manual `aether profile` commands
+**Agent config files** import, **Files**, and the manual `aether profile` commands
 use `~/.config/opencode`, the default native configuration home for the
 [V1](#opencode-v1-inbox-integration) and [V2](#opencode-v2-inbox-integration)
 targets above. OpenCode loads settings and plugins there, not from its login
@@ -1170,7 +1170,7 @@ it does not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR`, or
 verification; V2 `OPENCODE_CONFIG_DIR` relocation remains unverified.
 
 If an earlier import reported `~/.local/share/opencode` as its destination,
-open **Configuration**, select your local `~/.config/opencode` directory
+open **Agents > Agent config files**, select your local `~/.config/opencode` directory
 again, choose `opencode` with destination `~/.config/opencode`, review, and
 import. This writes the corrected destination without moving or deleting old
 files. Do not copy the data directory wholesale or move/delete

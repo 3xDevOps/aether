@@ -676,10 +676,9 @@ They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
 rules as `files.write`, while `config.import` installs an explicitly selected
 directory into that home and may be used repeatedly.
-The permanent **Configuration** route appears in the command palette as
-**Agent config files**, and the same importer sits under that disclosure on
-**Agents** and onboarding's Agent step, whenever `config.roots` and
-`config.import` are advertised. It works through both gateways without a
+The importer sits under the **Agent config files** disclosure on **Agents**
+(the command palette finds it through **Agents**) and on onboarding's Agent
+step, whenever `config.roots` and `config.import` are advertised. It works through both gateways without a
 workspace or onboarding prerequisite. A server-hosted page can read local files
 explicitly selected in the browser directory picker.
 All runs the member launches and the environment terminal mount one shared
