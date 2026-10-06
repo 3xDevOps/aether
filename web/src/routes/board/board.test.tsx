@@ -380,7 +380,7 @@ describe('board', () => {
     render(<Board />)
 
     const card = screen.getByRole('article')
-    const explanation = within(card).getByText(/^No activity for/)
+    const explanation = within(card).getByText('No activity')
     const range = document.createRange()
     range.selectNodeContents(explanation)
     const selection = window.getSelection()

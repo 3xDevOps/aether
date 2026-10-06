@@ -6,6 +6,8 @@ import type { SliceCreator } from '@/store/slice'
 export type RunRecord = Run & {
   reason?: string
   stateChangedAt: string
+  /** The wire has no status-change time, so a snapshot falls back to the run's start. */
+  stateChangedAtEstimated: boolean
   /** Client-side only: what the agent did last, from `run.agent` events. */
   activity?: RunActivity
 }
@@ -18,6 +20,7 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
     stateChangedAt: carry
       ? previous.stateChangedAt
       : (run.finished_at ?? run.started_at ?? run.created_at),
+    stateChangedAtEstimated: carry ? previous.stateChangedAtEstimated : !run.finished_at,
   }
   // No snapshot carries activity, so a re-read must not erase it.
   if (previous?.activity) record.activity = previous.activity
@@ -104,6 +107,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         status: to,
         reason,
         stateChangedAt: time,
+        stateChangedAtEstimated: false,
         outcome_unseen: outcomeUnseen,
       }
       if (to === 'running' && !next.started_at) next.started_at = time

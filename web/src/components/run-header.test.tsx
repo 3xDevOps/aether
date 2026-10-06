@@ -85,7 +85,7 @@ describe('run header', () => {
     seed({ status: 'needs-attention', reason: 'StopFailure: rate limit exceeded' })
     const bar = runHeader('events')
 
-    expect(within(bar).getByText(/^Agent idle for/)).toBeDefined()
+    expect(within(bar).getByText('Agent idle')).toBeDefined()
     expect(within(bar).getByText('StopFailure: rate limit exceeded')).toBeDefined()
   })
 
@@ -123,7 +123,7 @@ describe('run header', () => {
     seed({ status: 'needs-attention', reason })
     const bar = runHeader(name)
 
-    expect(within(bar).getAllByText(/^No activity for/)).toHaveLength(1)
+    expect(within(bar).getAllByText('No activity')).toHaveLength(1)
     expect(within(bar).getByText(`needs-attention - ${reason}`)).toBeDefined()
   })
 

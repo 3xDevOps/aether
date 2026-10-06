@@ -844,6 +844,7 @@ describe('applyEvent', () => {
     expect(record.status).toBe('needs-attention')
     expect(record.reason).toBe('plan review')
     expect(record.stateChangedAt).toBe('2026-08-14T11:00:00Z')
+    expect(record.stateChangedAtEstimated).toBe(false)
     expect(store.getState().lastSeq).toBe(5)
   })
 

@@ -300,10 +300,10 @@ export const needsYouConditions: NeedsYouCondition[] = [
       !run.reason?.startsWith(blockedPrefix) &&
       !run.reason?.startsWith(enhancedPrefix),
     resolvers: (run) => [run.member_id],
-    reason: (run, ctx) =>
-      run.reason?.startsWith(stalledPrefix)
-        ? `No activity for ${waited(run.stateChangedAt, ctx.now)}`
-        : `Agent idle for ${waited(run.stateChangedAt, ctx.now)}`,
+    reason: (run, ctx) => {
+      const label = run.reason?.startsWith(stalledPrefix) ? 'No activity' : 'Agent idle'
+      return run.stateChangedAtEstimated ? label : `${label} for ${waited(run.stateChangedAt, ctx.now)}`
+    },
   }),
   condition({
     id: 'unreviewed-finish',

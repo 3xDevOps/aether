@@ -1044,7 +1044,12 @@ Working run's reason is what its agent is doing ("Reading src/auth.ts", from
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
 message's time, else the state change); Working and Finished sort by latest
 change. Reason lines that name a wait re-read the shared clock, so "for 3
-min" keeps moving.
+min" keeps moving. The run wire carries no status-change time, so the
+dashboard records one from each `run.status` event. A run loaded from a
+snapshot instead takes its finish, start or creation time
+(`stateChangedAtEstimated`): its idle reason drops the duration ("Agent
+idle") until the next status event, and it sorts and shows its change time
+by that estimate.
 
 **Paused** comes from the `paused` field the gateway decorates from the
 scheduler on `run.get` and `run.list`; a paused run still reads `running`.

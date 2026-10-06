@@ -141,7 +141,7 @@ const rows: {
   },
   {
     id: 'stopped',
-    run: { ...record({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' }), stateChangedAt: '2026-08-14T10:08:00Z' },
+    run: { ...record({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' }), stateChangedAt: '2026-08-14T10:08:00Z', stateChangedAtEstimated: false },
     ctx: {},
     reason: 'No activity for 12 min',
   },
@@ -180,10 +180,19 @@ describe('needs you conditions', () => {
   })
 
   it('says the agent idled when the turn ended without a stall', () => {
-    const idle = { ...record({ status: 'needs-attention', reason: 'agent idle' }), stateChangedAt: '2026-08-14T10:17:00Z' }
+    const idle = {
+      ...record({ status: 'needs-attention', reason: 'agent idle' }),
+      stateChangedAt: '2026-08-14T10:17:00Z',
+      stateChangedAtEstimated: false,
+    }
     expect(presentRun(idle, stateContext())).toEqual(
       expect.objectContaining({ state: 'needs-you', reason: 'Agent idle for 3 min' }),
     )
+  })
+
+  it('names no wait for a run parked before the snapshot', () => {
+    const reloaded = record({ status: 'needs-attention', reason: 'agent idle', started_at: '2026-08-14T08:00:00Z' })
+    expect(presentRun(reloaded, stateContext()).reason).toBe('Agent idle')
   })
 })
 
