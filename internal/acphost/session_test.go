@@ -285,17 +285,23 @@ func TestElicitations(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 2)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		_, err := m.request(call.ctx, acp.ClientMethodElicitationCreate, map[string]any{
+			"sessionId": "another", "mode": "form", "message": "Which branch?", "requestedSchema": map[string]any{"type": "object"},
+		})
+		var re *acp.RequestError
+		if !errors.As(err, &re) || re.Code != -32602 {
+			t.Errorf("elicitation for another session: %v", err)
+		}
 		res, _ := m.request(call.ctx, acp.ClientMethodElicitationCreate, map[string]any{
-			"sessionId": "s", "mode": "form", "message": "Which branch?",
+			"sessionId": m.sessionID(), "mode": "form", "message": "Which branch?",
 			"requestedSchema": map[string]any{"type": "object", "properties": map[string]any{"branch": map[string]any{"type": "string"}}},
 		})
 		got <- string(res)
 		res, _ = m.request(call.ctx, acp.ClientMethodElicitationCreate, map[string]any{
-			"sessionId": "s", "mode": "url", "message": "Sign in", "url": "https://example.com/login", "elicitationId": "e1",
+			"requestId": 1, "mode": "url", "message": "Sign in", "url": "https://example.com/login", "elicitationId": "e1",
 		})
 		got <- string(res)
-		_, err := m.request(call.ctx, acp.ClientMethodFsReadTextFile, map[string]any{"sessionId": "s", "path": "/etc/hostname"})
-		var re *acp.RequestError
+		_, err = m.request(call.ctx, acp.ClientMethodFsReadTextFile, map[string]any{"sessionId": "s", "path": "/etc/hostname"})
 		if !errors.As(err, &re) || re.Code != -32601 {
 			t.Errorf("fs/read_text_file: %v", err)
 		}

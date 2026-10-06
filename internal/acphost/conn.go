@@ -469,6 +469,7 @@ var elicitationOptions = []Option{{ID: "accept", Name: "Accept"}, {ID: "decline"
 
 func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *acp.RequestError) {
 	var p struct {
+		SessionID       *string         `json:"sessionId"`
 		Mode            string          `json:"mode"`
 		Message         string          `json:"message"`
 		URL             string          `json:"url"`
@@ -477,6 +478,11 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	// A request-scoped elicitation carries no sessionId; a session-scoped
+	// one must name this connection's session.
+	if p.SessionID != nil && *p.SessionID != c.SessionID() {
+		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unknown session %q", *p.SessionID)})
 	}
 	req := Request{Title: p.Message, ToolCallID: p.ToolCallID, Options: elicitationOptions}
 	switch p.Mode {
