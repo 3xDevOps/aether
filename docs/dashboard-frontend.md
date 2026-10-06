@@ -1356,8 +1356,9 @@ guards its own handler rather than relying on the browser.
 platforms and Ctrl elsewhere, read from `navigator.platform` as tinykeys does,
 and `formatKeys` in `src/lib/keybindings.ts` prints the same side: the palette
 badge reads `⌘K` on macOS and `Ctrl+K` elsewhere. Terminal zoom belongs to
-xterm, not the table, and accepts Ctrl and Meta alike. Terminal copy, paste and find are Ctrl on every
-platform, because that is what xterm binds; see [terminal.md](terminal.md).
+xterm, not the table, and accepts Ctrl and Meta alike. Terminal copy, paste and
+find are Ctrl on every platform, because that is what xterm binds; see
+[terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
 docks (`components/dock.tsx`) carry `role="tablist"`, `aria-selected`, a
