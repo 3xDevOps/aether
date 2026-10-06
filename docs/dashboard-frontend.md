@@ -828,12 +828,16 @@ A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
 3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
    harness name), owner avatar, `+added −deleted` once a `run.diff` snapshot
    is known, the workspace name for a run outside the active one, and the
-   `card:meta` slot (file overlaps, swarm conflicts, swarm role, sync).
+   `card:meta` slot (file overlaps, sync, and on a swarm card the swarm's
+   conflict count).
 
 A click anywhere on the card opens the run. A swarm is one card: the
 objective, a phase word ("Swarm active") and its workers' counts; it opens
-the swarm page. Workers never appear as cards of their own; a swarm whose
-integrator is not listed is rooted at its oldest worker.
+the swarm page and renders `card:meta` for its root run. Workers never
+appear as cards of their own, archived ones included; a swarm whose
+integrator is not listed is rooted at its oldest worker. `useBoard` reuses a
+card's previous object while it is unchanged (`dequal`), so the memoized
+`RunCard` skips it.
 
 A Needs you card shows its primary action on hover, on keyboard focus and
 always on a touch screen (`card-action.tsx`):
@@ -843,13 +847,15 @@ always on a touch screen (`card-action.tsx`):
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
 | Agent idle or stalled | **Reply**: a popover composer on the card; the message goes through `run.inject`, `Mod+Enter` sends |
 | Native permission or question on a Standard run | **Open terminal** |
-| Anything else | **Open**: the run, its Diff for an unreviewed finish, or the swarm page |
+| Anything else | **Open**: where the condition's `target` in `src/lib/needs-you.ts` points - the run (requests, Run Room questions, holds), its Diff for an unreviewed finish, or the swarm page |
 
-With a card focused, `a` approves, `r` replies and `o` opens (the `card` key
-scope). A failed send keeps the draft and shows the server's error.
+While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
+key scope, pushed only then and only for the actions that card offers, so
+the keys stay free elsewhere). Closing the reply composer returns focus to
+the card. A failed send keeps the draft and shows the server's error.
 
-**Finished footer.** **Archived (n)** swaps Finished for archived runs, each
-with `deletesInLabel(deletes_at)`; **Back to Finished** returns. The More menu
+**Finished footer.** **Archived (n)** swaps Finished for archived runs in
+scope (Mine applies), each with `deletesInLabel(deletes_at)`; **Back to Finished** returns. The More menu
 holds **Archive closed runs…** and, for admins, **Free retained
 containers…**. Both open the palette's confirmations
 (`src/components/palette/clear-done-dialog.tsx`) over a plan snapshotted
@@ -865,14 +871,18 @@ a retained container and keeps the run and its history.
 requirement, with one sentence and one button:
 
 1. no workspace: **Add your repository** (onboarding, Workspace step);
-2. `files.tree` on the base branch fails: **Push your base branch**, with the
-   server's error (onboarding, Repository step);
+2. `files.tree` answers `CodeUnavailable` (no repository yet): **Push your
+   base branch**, with the server's error (onboarding, Repository step); any
+   other failure shows as an error instead. The check repeats when the window
+   regains focus;
 3. `agent.list` reports nothing installed: **Set up an agent** (Agents);
-4. otherwise: "A run is one agent working on its own branch in its own
+4. Mine hides every run in scope: **Show everyone's runs**;
+5. otherwise: "A run is one agent working on its own branch in its own
    container." and **New run**, for members who may launch.
 
 Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
-An unreachable server shows its error in place of the columns.
+An unreachable server shows its error in place of the columns. The
+environment terminal dock (`terminal-dock.tsx`) sits under the board.
 
 ### Run state
 
