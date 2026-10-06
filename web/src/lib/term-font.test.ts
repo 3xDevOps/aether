@@ -8,6 +8,17 @@ function stubFonts(fonts: unknown) {
   })
 }
 
+function fontSet(regular: FontFaceLoadStatus, bold: FontFaceLoadStatus, load: (face: string) => Promise<unknown>) {
+  return Object.assign(
+    [
+      { family: 'Inter Variable', status: 'unloaded' },
+      { family: 'JetBrainsMono NFM', status: regular },
+      { family: 'JetBrainsMono NFM', status: bold },
+    ],
+    { load },
+  )
+}
+
 // Async cases use fake timers throughout: advanceTimersByTimeAsync drains the
 // microtask queue between ticks, so promise chains settle deterministically.
 afterEach(() => {
@@ -26,7 +37,7 @@ describe('whenTerminalFontReady', () => {
   })
 
   it('opens synchronously when both faces are already loaded', () => {
-    stubFonts({ check: () => true, load: () => Promise.resolve([]) })
+    stubFonts(fontSet('loaded', 'loaded', () => Promise.resolve([])))
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
@@ -37,13 +48,10 @@ describe('whenTerminalFontReady', () => {
   it('waits when only the regular face is loaded', async () => {
     vi.useFakeTimers()
     const loads: string[] = []
-    stubFonts({
-      check: (face: string) => !face.startsWith('bold'),
-      load: (face: string) => {
-        loads.push(face)
-        return Promise.resolve([])
-      },
-    })
+    stubFonts(fontSet('loaded', 'unloaded', (face: string) => {
+      loads.push(face)
+      return Promise.resolve([])
+    }))
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
@@ -57,7 +65,7 @@ describe('whenTerminalFontReady', () => {
   it('waits for the font load and then opens', async () => {
     vi.useFakeTimers()
     const { promise: loading, resolve } = Promise.withResolvers<void>()
-    stubFonts({ check: () => false, load: () => loading })
+    stubFonts(fontSet('unloaded', 'unloaded', () => loading))
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
@@ -71,7 +79,7 @@ describe('whenTerminalFontReady', () => {
 
   it('opens anyway when the font load rejects', async () => {
     vi.useFakeTimers()
-    stubFonts({ check: () => false, load: () => Promise.reject(new Error('nope')) })
+    stubFonts(fontSet('unloaded', 'unloaded', () => Promise.reject(new Error('nope'))))
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
@@ -82,7 +90,7 @@ describe('whenTerminalFontReady', () => {
 
   it('opens after the timeout when the load hangs', async () => {
     vi.useFakeTimers()
-    stubFonts({ check: () => false, load: () => new Promise(() => {}) })
+    stubFonts(fontSet('unloaded', 'unloaded', () => new Promise(() => {})))
     let opened = false
     whenTerminalFontReady(() => {
       opened = true
@@ -96,7 +104,7 @@ describe('whenTerminalFontReady', () => {
   it('never opens once cancelled', async () => {
     vi.useFakeTimers()
     const { promise: loading, resolve } = Promise.withResolvers<void>()
-    stubFonts({ check: () => false, load: () => loading })
+    stubFonts(fontSet('unloaded', 'unloaded', () => loading))
     let opened = false
     const cancel = whenTerminalFontReady(() => {
       opened = true

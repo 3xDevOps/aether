@@ -106,10 +106,7 @@ function mountWithPendingFonts(ui = <PaneProbe />) {
   const { promise, resolve } = Promise.withResolvers<void>()
   Object.defineProperty(document, 'fonts', {
     configurable: true,
-    value: {
-      check: () => false,
-      load: () => promise,
-    },
+    value: Object.assign([], { load: () => promise }),
   })
   return { resolveFonts: resolve, fontsReady: promise, view: render(ui) }
 }

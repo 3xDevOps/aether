@@ -15,8 +15,8 @@ export const terminalFontFamily = '"JetBrainsMono NFM", monospace'
 
 /**
  * A glyph the shipped font must supply (powerline right arrow).
- * FontFaceSet.load/check sample a plain space by default; probing with a PUA
- * glyph makes the check honest and is what actually starts the load.
+ * FontFaceSet.load samples a plain space by default; probing with a PUA
+ * glyph is what actually starts the load.
  */
 const sampleGlyph = '\ue0b0'
 
@@ -37,7 +37,10 @@ const faces = [`12px "JetBrainsMono NFM"`, `bold 12px "JetBrainsMono NFM"`]
  */
 export function whenTerminalFontReady(open: () => void): () => void {
   const fonts = document.fonts
-  if (!fonts?.load || faces.every((face) => fonts.check(face, sampleGlyph))) {
+  // Not FontFaceSet.check: Chromium answers true for a face that has never
+  // loaded, which opened terminals on fallback metrics.
+  const shipped = fonts ? [...fonts].filter((face) => face.family === 'JetBrainsMono NFM') : []
+  if (!fonts?.load || (shipped.length > 0 && shipped.every((face) => face.status === 'loaded'))) {
     open()
     return () => {}
   }
