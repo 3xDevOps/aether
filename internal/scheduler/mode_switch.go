@@ -205,16 +205,19 @@ func (m modeSwitch) toEnhanced(ctx context.Context) error {
 	return m.s.commitMode(ctx, m.entry, domain.LaunchACP, harness.ReporterFull)
 }
 
+// restoreEnhanced and restoreStandard keep the switch's intent until the
+// swap back is confirmed: a swap that failed may still have happened.
 func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
-	errs := []error{m.recordIntent(nil)}
 	nonce, err := m.writeShell()
 	if err == nil {
 		err = m.s.swapChild(ctx, m.cid, nonce, 0)
 	}
 	if err != nil {
-		errs = append(errs, fmt.Errorf("start the login shell: %w", err))
+		err = fmt.Errorf("start the login shell: %w", err)
+	} else {
+		err = m.recordIntent(nil)
 	}
-	return errors.Join(append(errs, m.reopenEnhanced(ctx))...)
+	return errors.Join(err, m.reopenEnhanced(ctx))
 }
 
 // reopenEnhanced restores the session the adapter had. A restore that fails
@@ -228,15 +231,14 @@ func (m modeSwitch) reopenEnhanced(ctx context.Context) error {
 }
 
 func (m modeSwitch) restoreStandard(ctx context.Context) error {
-	errs := []error{m.recordIntent(nil)}
 	nonce, _, err := m.writeTerminal()
 	if err == nil {
 		err = m.s.swapChild(ctx, m.cid, nonce, tuiSettle)
 	}
 	if err != nil {
-		errs = append(errs, fmt.Errorf("restore the agent's terminal: %w", err))
+		return fmt.Errorf("restore the agent's terminal: %w", err)
 	}
-	return errors.Join(errs...)
+	return m.recordIntent(nil)
 }
 
 // recordIntent persists the child swap about to happen, so a server that

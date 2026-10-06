@@ -346,7 +346,8 @@ child swap on disk before it signals the supervisor. A server that stops
 mid-switch reads `/tmp/aether-supervisor` in the container on restart: if
 the supervisor reached that swap, the run comes back in the new mode,
 otherwise in the previous one. The record stays until the run row holds the
-new mode, so a switch whose row failed to save is finished on restart.
+new mode or a failed switch's swap back is confirmed, so a restart also
+settles a switch whose row failed to save or whose rollback failed.
 
 ## Background runs
 

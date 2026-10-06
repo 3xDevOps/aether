@@ -37,7 +37,10 @@ type fakeSupervisor struct {
 	// as it starts.
 	exitStatus string
 	// hold, when set, keeps the swap exec waiting until it is closed.
-	hold   chan struct{}
+	hold chan struct{}
+	// faults fail the next swap execs in order: "down" before the swap
+	// reaches the supervisor, "lost" after it swapped.
+	faults []string
 	bodies []string
 	// state is what the supervisor's state file holds.
 	state string
@@ -54,9 +57,16 @@ func (f *fakeSupervisor) exec(_ runtime.ID, argv []string) (int, string, error) 
 	}
 	f.mu.Lock()
 	hold := f.hold
+	var fault string
+	if len(f.faults) > 0 {
+		fault, f.faults = f.faults[0], f.faults[1:]
+	}
 	f.mu.Unlock()
 	if hold != nil {
 		<-hold
+	}
+	if fault == "down" {
+		return 0, "", errors.New("docker: connection reset")
 	}
 	raw, err := os.ReadFile(filepath.Join(f.coord.root, string(f.run), coordtransport.NextCommandName))
 	if err != nil {
@@ -70,6 +80,9 @@ func (f *fakeSupervisor) exec(_ runtime.ID, argv []string) (int, string, error) 
 	defer f.mu.Unlock()
 	f.bodies = append(f.bodies, body)
 	f.state = argv[4] + " started\n"
+	if fault == "lost" {
+		return 0, "", errors.New("docker: connection reset")
+	}
 	if body != "" && f.exitStatus != "" {
 		f.state = argv[4] + " exited " + f.exitStatus + "\n"
 		return 3, f.exitStatus + "\n", nil
@@ -353,6 +366,49 @@ func TestSwitchToEnhancedRestoresTheTerminalWhenTheAdapterFails(t *testing.T) {
 	items := waitItems(t, e.sched, run.ID, "the failure notice", noticeTitled("Switch to Enhanced failed"))
 	if !strings.Contains(items[len(items)-1].Notice.Description, "exec: no such file") {
 		t.Fatalf("notice %+v", items[len(items)-1])
+	}
+}
+
+func TestFailedRollbackKeepsTheSwitchForRecovery(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		from, to domain.LaunchMode
+		failure  string
+	}{
+		{domain.LaunchTUI, domain.LaunchACP, "restore the agent's terminal"},
+		{domain.LaunchACP, domain.LaunchTUI, "start the login shell"},
+	} {
+		t.Run(modeName(tc.to), func(t *testing.T) {
+			t.Parallel()
+			e := newSwitchEnv(t)
+			run := e.launch(t, "", tc.from)
+			if tc.from == domain.LaunchTUI {
+				if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "tui-session"}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			}
+			e.sup.faults = []string{"lost", "down"}
+
+			err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, tc.to, admitNow)
+			if err == nil || !strings.Contains(err.Error(), tc.failure) {
+				t.Fatalf("switch error %v", err)
+			}
+			if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.Switch == nil || sc.Switch.Mode != tc.to {
+				t.Fatalf("sidecar %+v (%v), want the switch kept", sc, err)
+			}
+
+			s2 := e.restart(t)
+			if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != tc.to {
+				t.Fatalf("row mode %q, want %q, the mode the container reached", row.Mode, tc.to)
+			}
+			if tc.to == domain.LaunchACP {
+				waitFor(t, "resumed session", func() bool { return s2.acp.session(run.ID) != nil })
+			} else if s2.acp.session(run.ID) != nil {
+				t.Fatal("recovery started an ACP server beside the resumed terminal")
+			}
+		})
 	}
 }
 
