@@ -552,7 +552,8 @@ inspection.
 
 `web/e2e/run-room.spec.ts` sends structured request snapshots through the
 staged reporter in a real container. Both members' browsers must add and
-clear **Needs input** without changing **Working**. The callback payloads
+clear the request; the owner's run reads **Needs you** while it is open
+and the other member's reads **Working**. The callback payloads
 are scripted fixtures, not evidence of a live vendor harness emitting them.
 
 The container user is the test process's own uid:gid unless that is root:

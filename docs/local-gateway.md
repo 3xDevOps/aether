@@ -361,11 +361,11 @@ not task text, and confer no authorization.
 
 `run.get` and `run.list` always include `pending_inputs`, an array of
 `{"id":"request-1","session_id":"session-a","kind":"question"}` objects.
-An empty set is `[]`, never `null`. Execution remains in `status`: `running`
-means Working and `needs-attention` means Idle. A Working run can have pending
-input while another session continues working; an Idle run need not need input.
-The dashboard's separate **Needs input** indicator is not a new execution
-status and does not provide a new answer transport.
+An empty set is `[]`, never `null`. Execution remains in `status`: a
+`running` run can have pending input while another session continues
+working, and a `needs-attention` run need not have any. The dashboard's
+**Needs you** state is derived from both and is not a new execution status
+or answer transport.
 
 Native reporters send `run.report` through their run-scoped coordination
 socket, not the member's gateway control endpoint. The socket supplies the run

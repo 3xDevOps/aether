@@ -144,7 +144,8 @@ printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report cl
 ```
 
 These callbacks invoke wire method `run.report`. They update execution
-(`working` or the legacy `waiting` wire value, displayed as Idle) and/or
+(`working` or the legacy `waiting` wire value, which parks the run at
+`needs-attention`) and/or
 correlated pending input requests. A request-only update leaves execution
 unchanged. They are not an agent outcome, are not an MCP tool, and do not
 create a coordination report or evidence receipt. See

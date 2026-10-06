@@ -1012,15 +1012,15 @@ What a report does depends on the run:
   run once the agent's turn ends: Aether commits the work (`aether:` for
   success, `wip:` for failure), publishes the run branch, and records
   `completed` or `failed`, which moves the run out of **Working**. The turn
-  ends when the agent reports itself **Idle** with no **Needs input**
-  request open; a permission or question prompt is not the end of the turn,
+  ends when the agent reports itself waiting with no input request
+  open; a permission or question prompt is not the end of the turn,
   and the run finishes once it is answered. A report that reaches the server
   after the turn already ended finishes the run at once. A harness without a
   status reporter never says its turn ended, so there the first
   `--poll-interval` check two minutes after the report finishes the run; a
   harness with one is finished by the turn end alone, however long the agent
-  keeps working, unless the run stalled into **Idle** by that check, which
-  then finishes it. A run with a **Needs input** request open is never
+  keeps working, unless the run stalled into `needs-attention` by that check,
+  which then finishes it. A run with an input request open is never
   finished by the check; it waits for the owner's answer. A finish that fails
   is retried by the same check two minutes later. If the agent process exits
   first, the run takes the reported status, whatever its exit code, even when
@@ -1036,9 +1036,9 @@ What a report does depends on the run:
   until its owner opens it (`run.seen`) or a status change such as Close or
   relaunch clears it. A Close or Kill that lands first wins, and Close still
   re-labels a finished run as merged or abandoned. Blocked moves the run to
-  **Idle** with the reason `blocked: <summary>` the next time its turn ends
+  `needs-attention` with the reason `blocked: <summary>` the next time its turn ends
   (or it stalls, on a harness without a status reporter), until the agent
-  resumes; a **Needs input** request does not show it. The newest blocked
+  resumes; an input request does not show it. The newest blocked
   report decides the reason: an older one the server retries delivering after
   it changes nothing.
 - **Mission worker.** Success submits the attempt and the server then pauses

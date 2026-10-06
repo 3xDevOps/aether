@@ -222,7 +222,7 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping, board layout and per-workspace
+collapse state, `activeWorkspace`, the **Mine** toggle, board layout and per-workspace
 map camera, dismissed update versions, terminal zoom) are persisted;
 `persistedUi` in `store/index.ts` is the list that decides. Server data is
 always re-fetched.
@@ -231,8 +231,8 @@ always re-fetched.
 a new array or object on every call re-renders its component on every store
 write, and under React 19 can loop. Lists of IDs go through `useShallow`
 (`useRunIDs(workspace)` in `src/store/hooks.ts`); one entity is read by ID
-(`useRun(id)`); a row asks for a boolean (`selected`, `unseen`) rather than
-the whole `route` or `acked` map. Derived maps live in the reducer that
+(`useRun(id)`); a row asks for a boolean (`selected`) or its own state
+(`useRunPresentation(run)`) rather than the whole `route` or run map. Derived maps live in the reducer that
 changes their inputs: `setInbox` rebuilds `approvalsByRun` (each run's
 pending requests, oldest first), so a row's approval count is one lookup.
 Run rows and board cards are `React.memo` components; reducers replace only
@@ -268,17 +268,15 @@ made while startup is loading takes precedence. A failed preference read shows
 the gateway's original error in a toast without blocking workspace and run
 data: the current valid selection or normal fallback still applies.
 
-Derived data (the sidebar's grouped run list, the attention-ordered run list)
-lives in
-`src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
-memoizing hooks in `src/store/hooks.ts`. Selectors that build new arrays must
-not be passed to `useStore` directly. A view that owns its own derived shape
-keeps it beside the view instead (`src/routes/board/selectors.ts`). Execution
-grouping reads only the run lifecycle. `useRunInput` combines structured native
-requests, pending Aether approvals and unanswered Run Room questions for the
-independent **Needs input** indicator. `usePendingApprovalRuns` derives a stable
-run set for the sidebar's request count; an unchanged inbox refetch does not
-invalidate execution grouping.
+Derived data (the run groups, the flat run list, the Needs you counts) lives
+in `src/store/selectors.ts` as pure functions over a `StateContext`
+(`stateContextOf` in the same file), wrapped by memoizing hooks in
+`src/store/hooks.ts`. Selectors that build new arrays must not be passed to
+`useStore` directly. A view that owns its own derived shape keeps it beside
+the view instead (`src/routes/board/selectors.ts`). `useRunInput` combines
+structured native requests, pending Aether approvals and unanswered Run Room
+questions for the request indicator; the run's state comes from
+[Run state](#run-state).
 
 **Slots** (`src/components/slots.tsx`). Where a route registry is too coarse -
 something belongs *inside* a surface another ticket owns - the surface renders
@@ -303,7 +301,7 @@ The command palette has one independent host in `AppShell`.
 Card slot content may render its own links and buttons; the article's pointer
 handler ignores interactive descendants, so those controls stay interactive.
 Conflict chips and watcher avatars belong in these slots. The shared
-**Needs input** control includes approvals rather than adding a second badge.
+request indicator includes approvals rather than adding a second badge.
 
 ## Sidebar
 
@@ -314,25 +312,25 @@ always reachable. A labeled **More** menu takes overflow according to actual
 available height, not a fixed destination count. Capability gates, accessible
 labels, tooltips and the 2px active indicator remain shared with navigation.
 The adjacent sidebar defaults to 320px and is constrained to 320-520px. Older
-saved widths below the minimum are clamped when rendered. Runs, the attention
-count and Status / Member stay on one row; launch belongs in the titlebar.
+saved widths below the minimum are clamped when rendered. Runs, the Needs you
+count and the **Mine** toggle stay on one row; launch belongs in the titlebar.
 Open **Admin → Members** for account sharing. On a local `aether gui` gateway,
 **Admin → Onboarding** returns to setup; an unlinked gateway opens setup
 automatically.
 
-The sidebar scopes runs to the selected workspace and groups them by state or
-owning member (`groupBy`, persisted). A swarm is a mission whose integrator
-coordinates worker runs, shown as subsessions. Its current integrator carries
-an **Integrator** badge; subsessions sit directly below it with indented tree
-guides, including finished workers. Each row keeps its own state dot, owner
-color, harness, and navigation target.
+The sidebar lists runs in three groups, **Needs you**, **Working** and
+**Finished** (see [Run state](#run-state)). Needs you lists every workspace;
+a row outside the selected workspace leads with that workspace's name.
+Working and Finished list the selected workspace, and only the viewer's own
+runs while **Mine** (`mineOnly`, persisted) is pressed. The switcher names
+each workspace's Needs you count.
 
-Swarm rows stay together in both grouping modes. **Member** uses the
-integrator's owner; **Status** uses the most urgent run in the swarm, so a
-worker needing attention keeps the tree out of the collapsed Done group.
-Trees and their subsessions sort by attention, then most recent change.
-Group counts include subsessions. If an integrator is missing or archived,
-its visible workers remain top-level rows marked **Subsession**.
+A swarm is a mission whose integrator coordinates worker runs. It is one row,
+its current integrator's, carrying an **Integrator** badge and the workers'
+counts ("3 working · 1 needs you · 2 done" on the board card). Only workers
+that need the viewer are listed under it, with indented tree guides; the
+swarm row then sits in Needs you. If an integrator is missing or archived,
+its visible workers remain top-level rows marked **Worker**.
 
 Relationships come from the run snapshot's `mission_id`, `mission_role`, and
 `integrator_run_id`, not task text or the currently opened mission page.
@@ -344,12 +342,9 @@ errors cannot change the fresh snapshot. Replacing an integrator moves its
 workers under the replacement and removes the old run's badge. Older servers
 that omit these fields retain the flat list.
 
-Every rendered group header is a disclosure button with its run count. When
-grouped by **Status**, every status header toggles its own member rows; `Done`
-starts collapsed and every other status group starts expanded. When grouped by
-**Member**, every member header toggles its own rows and every member group
-starts expanded. Disclosure state is local to the current grouping mode, so a
-collapse in Status does not carry into a Member group with the same key.
+Every rendered group header is a disclosure button with its count: runs that
+need the viewer for Needs you, rows for the others. Finished starts collapsed;
+the other two start expanded.
 
 From 641px through 1000px the adjacent workspace/run pane collapses into the
 activity rail, which exposes **Expand sidebar** without changing the stored
@@ -376,19 +371,16 @@ way.
 - **The switcher sits above everything it scopes**, and appears only when there
   is a choice: a single workspace renders as a plain label with its base branch
   under it, because a picker with one option is a control that cannot be used.
-- **The runs come from `sidebarRuns`/`sidebarGroups`** in
-  `src/store/selectors.ts`, filtered to `activeWorkspace`. `sidebarRuns`
-  keeps the flat attention-ordered list for other run surfaces;
-  `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
-  every run until hydration names a workspace.
+- **The runs come from `sidebarGroups`** in `src/store/selectors.ts`;
+  `listedRuns` is the flat list in group order for the other run surfaces.
+  An empty scope shows every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
-- **The attention badge counts runs with unresolved input requests, not idle
-  runs.** Each affected row has a compact request icon and count with its
-  question/permission source in the accessible name and tooltip. The row
-  still opens the terminal, and execution grouping is unchanged.
-- **The header carries grouping, not another launch button.** Grouping is a
-  two-segment control, Status and Member, with `aria-pressed` on the current
-  one, so the pressed segment is the state and the other one is the action.
+- **The header badge counts runs that need the viewer, in every workspace**
+  (`useNeedsYouCount()`). A row with open requests also has a compact request
+  icon and count with its question/permission source in the accessible name
+  and tooltip.
+- **The header carries the Mine toggle, not another launch button.** It is
+  one button with `aria-pressed`.
 - **Board leads the activity rail**, with the active route marked by
   `aria-current`. All runs remains a global route and palette destination,
   not a duplicate rail entry. Scope-wide entries keep their method or
@@ -873,39 +865,33 @@ forever.
 ## Board
 
 `src/routes/board/` is the default center view, reached through the activity
-rail's **Board** home icon. Its header shows the active workspace, run count,
-Mark all seen and a **Cards / Map** segmented layout control. The titlebar
+rail's **Board** home icon. Its header shows the active workspace, run count
+and a **Cards / Map** segmented layout control. The titlebar
 owns the primary New run action.
 
-**Cards** arranges runs in three status buckets. `needs-attention` is Idle:
-the agent's turn ended or a run stalled; the reason strip retains that context.
-`queued`/`provisioning`/`running` is Working; `completed` and final statuses
-are Done. Outstanding requests do not override these buckets: a run can be
-**Working** and **Needs input** at the same time. A run awaiting review
-(below) is also in Idle; it does not raise **Needs input**. Every surface
-that lists runs waiting on a human - Cards, Map, the sidebar's Status
-grouping and sort, the palette - asks `waitsOnHuman(run, state)` in
-`src/lib/status.ts`. Cards sort by last execution state change, newest
-first. The flat bordered
+**Cards** arranges runs in the sidebar's three groups as columns, **Needs
+you**, **Working** and **Finished**, with the same scoping, ordering and
+Mine toggle (`board()` in `src/routes/board/selectors.ts` reads
+`runGroups`). A swarm is one card with its workers' counts; workers never
+appear as cards of their own. Each card shows its state chip and reason line.
+The flat bordered
 columns stack on narrow screens and sit side by side from the `lg`/1024px
 breakpoint, where subgrid keeps their column headers the same height.
 
 Cards uses compact, natural-height rows; Map uses fixed card geometry from
 `map-layout.ts`. Both keep a bounded full-width title preview and the full
 `runLabel` as the navigation button's accessible name. The state badge,
-protection, paused and archival indicators remain, without a redundant state
-dot or New pill. Unseen titles are bold and expose **Unseen** through
-`aria-describedby`. Owner, harness and timestamp stay in the compact preview.
+protection and archival indicators remain, without a redundant state dot or
+New pill. Owner, harness and timestamp stay in the compact preview.
 Counted file-overlap and mission-conflict buttons remain beside the status
 metadata and open diagnostic popovers. **Details** reveals the full task,
 reason, branch/copy control and additional metadata inline in Cards and in a
-dialog in Map, so expansion does not disturb map geometry. Questions remain
-visible as **Needs input**, independently of execution. The run page exposes
+dialog in Map, so expansion does not disturb map geometry. The run page exposes
 the full task and metadata through **Task and details**.
 
 An empty workspace shows one "Ready for a task" panel and a primary New run
 action rather than three repeated empty columns. Loading uses delayed
-skeletons, and hydrated empty buckets say "Nothing here." without confusing
+skeletons, and hydrated empty columns say "Nothing here." without confusing
 an in-flight request with an empty result.
 
 The card's article remains a pointer surface for noninteractive metadata, while
@@ -954,59 +940,22 @@ Switching Cards to Map or back moves matching cards between their measured
 rectangles, including width and height, over 460ms. Reduced-motion preference
 skips this movement.
 
-Three things the buckets do not come from the run status alone:
-
-- **Paused** is a badge, not a bucket. A paused run still reads `running` in
-  the domain enum, so the wire `Run` carries a `paused` field the gateway
-  decorates from the scheduler on `run.get` and `run.list`, never derived
-  from the stored run. The hydration snapshot seeds the board's map from it
-  (`seedPaused`, skipping runs without the field - a legacy gateway), and
-  live `pause`/`resume` entries on the `workspace.timeline` event stream keep
-  it current (`pausedFromTimeline` in `src/store/board.ts`).
-- **Unseen** marks a run whose state changed since someone acknowledged it.
-  An ack records the status *and* the change time, because `stateChangedAt` is
-  recomputed from the run's timestamps on every fetch and can move backwards -
-  a needs-attention run has no `finished_at`, so a re-hydration falls back to
-  `started_at`, and a time-only comparison would mute exactly the card that
-  needed the human. Acks live in the board slice and are app-wide: `navigate()`
-  acknowledges whenever the route it is given carries a `runId`, so every
-  surface that reveals a run mutes its sidebar row and its board card together,
-  and the board header marks everything at once. They last only as long as the
-  tab - nothing is acknowledged when the page loads, so a fresh tab shows what
-  is waiting rather than remembering that yesterday's you looked at it.
-- **Awaiting review** marks a run an agent finished with
-  `aether-internal report --outcome success|failure` (status `completed` or
-  `failed`) that its owner has not opened yet. The server owns the flag
-  (`outcome_unseen`, below); it is shared by every viewer and survives a
-  reload, unlike the tab-local Unseen ack. The card sits in Idle but
-  keeps its Done or Failed dot and chip, and its reason line reads "The agent
-  reported success; open the run to review it." (or failure) in the done or
-  failed tone. `runState` is unchanged, so Archive closed runs, archive
-  eligibility and finished-run checks still treat the run as finished;
-  Archive closed runs only sees it once it has moved to Done.
-  `watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when the
-  owner reveals the run through `navigate()`, or is
-  already on it in a visible tab when the flag arrives. It makes one call per
-  reveal: a refusal shows the server's error and is not retried until the
-  owner opens the run again. The card moves to Done only when the
-  `run.outcome_seen` event or the method result clears the flag; a non-owner
-  opening the run changes nothing.
-
-**Archiving hides a finished run from Done without deleting it.** A run
+**Archiving hides a finished run from Finished without deleting it.** A run
 carries `archived_at`/`deletes_at` once archived. Every hide guard -
-`board()`, `sidebarRuns()`, and the attention count - drops it once its
+`board()`, `runRows()`, and so every group and count - drops it once its
 status is also final (`isArchivable`: `merged`, `abandoned`, `failed`,
 `interrupted`); a route that opens a run by id is untouched, since it reads
-the run map directly. In Cards, the Done `ColumnHeader` grows an "Archived N"
+the run map directly. In Cards, the Finished `ColumnHeader` grows an "Archived N"
 toggle once N is over zero, swapping the column's content to those runs. Map
-keeps the same toggle in its Runs header and replaces Done runs with archived
-runs while leaving active runs visible. Both return to Done when the last
+keeps the same toggle in its Runs header and replaces Finished runs with
+archived runs while leaving active runs visible. Both return to Finished when
+the last
 archived run leaves. Each archived card, and the run header for one, show
 `deletesInLabel(deletes_at)` (`src/lib/format.ts`):
 "deleted today" under 24h (past due included), "deleted in 1 day" under
 48h, then "deleted in N days".
 
-**Archive closed runs... hides every eligible Done card.** The Done
+**Archive closed runs... hides every eligible Finished run.** The Finished
 `ColumnHeader` in Cards and the Runs header in Map offer this action; the
 palette carries the same command whenever the gateway serves `run.archive`.
 All open `ClearDoneConfirm` (`src/routes/board/clear-done-dialog.tsx`) over
@@ -1018,10 +967,10 @@ acts on. Eligible runs are
 says archiving hides runs and schedules their deletion after retention, but
 does not free container memory. It counts completed runs awaiting Close and
 runs this caller cannot act on. `runClearDone()` archives at most six at once,
-newest first, starting another as each settles. A failure does not stop the
-rest. `CodeNotFound` counts as success and removes the vanished run locally.
-The final toast reports the archived and failed counts, with the first real
-error in Done order.
+in Finished order (failures first, then latest change), starting another as
+each settles. A failure does not stop the rest. `CodeNotFound` counts as
+success and removes the vanished run locally. The final toast reports the
+archived and failed counts, with the first real error in that order.
 
 **Release finished resources... frees retained containers without archiving.**
 The same Cards/Map header and the command palette offer workspace-scoped bulk
@@ -1030,7 +979,7 @@ its dialog says "No finished runs hold resources" and which runs release
 acts on when none qualify. Its
 `releaseFinishedPlan()` searches all runs in the active workspace,
 including archived runs behind the toggle and finished runs still awaiting
-review; it does not depend on visible Done cards. It requires `run.release`,
+review; it does not depend on visible Finished cards. It requires `run.release`,
 the Kill permission and a finished status with an existing retained-container
 reason (explicit Close, agent report or mission worker). Active and
 needs-attention runs are excluded. The confirmation says resources are removed,
@@ -1041,9 +990,75 @@ bulk archive, a release refusal is never reclassified as a success; no release
 removes or archives a run in the client. A same-status `run.status` event
 updates its reason so the action disappears once its container is released.
 
+### Run state
+
+A run shows one of five states and one plain-words reason line, derived in
+`src/lib/status.ts` (`presentRun`, `runState`, `stateReason`). The state is
+for the member looking: the same run can need one member and read Working
+for another. The wire status enum is unchanged; the run header's **Task and
+details** shows it as **Lifecycle**.
+
+| State | Wire status | Group |
+| --- | --- | --- |
+| Needs you | any, while a condition below applies to the viewer | Needs you |
+| Working | `queued`, `provisioning`, `running`, `needs-attention` | Working |
+| Paused | a live run paused by a member | Working |
+| Done | `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
+| Failed | `failed`, `interrupted` | Finished, sorted first |
+
+Needs you means the viewer can resolve it. `src/lib/needs-you.ts` holds the
+conditions as one table, checked in order; `needsYou(run, ctx)` returns the
+first that applies:
+
+| Condition | Who it needs | Reason line |
+| --- | --- | --- |
+| Pending permission (approval or native) | owner or terminal controller | Permission: … |
+| Pending native question | owner or terminal controller | Question: answer in the terminal |
+| Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
+| Run Room question to the owner | owner | Bob asked you: … |
+| Open swarm question | accountable human or an admin | The integrator asks: … |
+| Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue |
+| Worker under a control hold | the member holding it | You hold control of worker 3 |
+| Enhanced failure (`enhanced:` reason) | owner | Enhanced unavailable: … |
+| Worker parked `blocked: <summary>` | accountable human | Worker blocked: … |
+| Parked at `needs-attention` | owner | Agent idle for 3 min / No activity for 12 min |
+| Unreviewed finish (`outcome_unseen`) | owner | Finished, review the result |
+
+A condition that applies to someone else leaves the run Working with
+"Waiting for Alice". A worker in a running swarm with a live integrator
+counts only for a control hold or a blocked report: the integrator handles
+its stops and requests. A Background (`headless`) run reaches Needs you only
+through the swarm rows, an Enhanced failure or an unreviewed finish. A
+Working run's reason is what its agent is doing ("Reading src/auth.ts", from
+`run.agent`), else "Queued", "Starting" or "Agent working".
+
+Needs you sorts oldest wait first (`waitingSince`: the approval's or
+message's time, else the state change); Working and Finished sort by latest
+change. Reason lines that name a wait re-read the shared clock, so "for 3
+min" keeps moving.
+
+**Paused** comes from the `paused` field the gateway decorates from the
+scheduler on `run.get` and `run.list`; a paused run still reads `running`.
+The hydration snapshot seeds `pausedRuns` (`seedPaused`, skipping runs
+without the field - a legacy gateway), and live `pause`/`resume` entries on
+the `workspace.timeline` stream keep it current (`pausedFromTimeline` in
+`src/store/board.ts`).
+
+**Unreviewed finish** marks a run an agent finished with
+`aether-internal report --outcome success|failure` (status `completed` or
+`failed`) that its owner has not opened. The server owns the flag
+(`outcome_unseen`, below), so it survives a reload and needs only the owner.
+`watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when the
+owner reveals the run through `navigate()`, or is already on it in a visible
+tab when the flag arrives. It makes one call per reveal: a refusal shows the
+server's error and is not retried until the owner opens the run again. The
+run moves to Finished only when the `run.outcome_seen` event or the method
+result clears the flag. Archive eligibility and finished-run checks read the
+wire status, so they treat the run as finished throughout.
+
 ### Execution, input and paused on the wire
 
-**The Idle reason survives a fetch.** `protocol.Run` carries `reason` -
+**The parked reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
 loaded still says why: `waiting for your input` and its siblings when the
@@ -1054,11 +1069,12 @@ not changed (a legacy gateway); a live `run.status` event still overwrites
 it with the event payload's reason. A pending approval's action or unanswered
 room question remains the card's actionable summary.
 
-**Idle is a display rename, not a new lifecycle.** The persisted/wire status
-remains `needs-attention`. Turn completion, silence, failure, and prose such as
-the legacy `waiting for your input` reason are not evidence of a request.
+**Needs you is a presentation state, not a new lifecycle.** The
+persisted/wire status remains `needs-attention`. Turn completion, silence,
+failure, and prose such as the legacy `waiting for your input` reason are not
+evidence of a request.
 
-**Needs input is independent of execution.** A run snapshot's `pending_inputs`
+**Requests are independent of execution.** A run snapshot's `pending_inputs`
 contains native request identities (`id`, `session_id`, and `kind`: `question`,
 `permission`, `form`, or `extension_ui`), never prompt bodies or answers.
 The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
@@ -1081,7 +1097,7 @@ A terminal run upsert clears native requests instead.
 Mission relationship refreshes replace only relationship fields. Input events
 for unknown runs follow the existing fetch-first and ordered-cursor rules.
 
-**Awaiting review is server state.** `Run.outcome_unseen` on `run.get` and
+**An unreviewed finish is server state.** `Run.outcome_unseen` on `run.get` and
 `run.list` is true while an agent-reported outcome is unopened by the owner;
 absent (an older gateway) means false. Every `run.status` event sets the flag
 to its payload's `outcome_unseen`, the row's flag after that event - a
@@ -1090,8 +1106,8 @@ relaunch clears it. A
 `run.outcome_seen` event, or the Run `run.seen` returns, clears it. `run.seen`
 is gated on `cap.hasMethod('run.seen')`, owner-only, and idempotent.
 
-**The paused badge hydrates from the same snapshot.** With `paused` on the
-wire (above), a reload shows the badge for a run paused earlier, and the
+**Paused hydrates from the same snapshot.** With `paused` on the wire
+(above), a reload shows Paused for a run paused earlier, and the
 palette offers the right one of pause/resume. Against a legacy gateway
 whose runs carry no `paused` field the state stays unknown until a live
 `workspace.timeline` pause or resume arrives, and neither surface offers a
@@ -1113,7 +1129,7 @@ Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
 kill permission and the `run.archive` capability; neither confirms, since
 archiving is reversible. Final runs offer Archive as a primary action;
 archived runs offer Restore. The palette resolves its focused run from the
-run map by `route.params.runId` rather than the attention list, so an
+run map by `route.params.runId` rather than the run list, so an
 archived run's own page still offers Restore.
 
 Release resources requires confirmation, `run.release`, the Kill permission
@@ -1128,7 +1144,7 @@ again if a run changed after the command was displayed.
   independently of the status Slot, directly below the titlebar.
   Navigation comes before run actions, so opening the palette initially
   selects **Open the board**, not a mutation. With an empty query the
-  **Runs** group lists the 50 most urgent runs in attention order; a query
+  **Runs** group lists the first 50 runs in group order, Needs you first; a query
   searches every run. A run matches on the label its row shows (its title,
   or the task's first line), branch, harness, workspace name and run ID,
   never the full task text.
@@ -1551,8 +1567,8 @@ them on desktop. On a phone Room is a full-width modal sheet below the
 titlebar, retaining those contextual facts and containing keyboard focus.
 Escape or the Room shortcut closes it and restores focus without discarding
 the draft. Both surfaces share server state: questions and queued steers
-contribute to the Run Room count; unanswered questions also contribute to
-**Needs input** without changing the execution group or creating another inbox.
+contribute to the Run Room count; an unanswered question to the owner also
+puts the run in the owner's **Needs you** without creating another inbox.
 
 The Terminal tab's single **Evidence** trigger lives in the dock header through
 `Dock.persistentActions`, including when the shell is collapsed or has no
@@ -2272,7 +2288,7 @@ like every other view, and gated on the same method the nav gates them on.
 
 The approval inbox is for agent permission and plan approvals. Run Room
 questions and queued steer requests stay contextual to their run. Unanswered
-questions contribute to **Needs input**; both contribute to the Run Room
+questions to the owner put the run in **Needs you**; both contribute to the Run Room
 count, and neither creates a second action inbox.
 
 - **Events keep them current; a full read only fills gaps.**
@@ -3004,10 +3020,8 @@ about itself and appears wherever the member is an admin.
   persistent status-details surface for live contributors.
 - **Harness and state are separate.** The harness glyph says who is running;
   the state indicator or badge says what state. Board cards use a labeled
-  state badge without a duplicate dot. Presentation states (`working`,
-  `waiting`, `needs-attention`, `failed`, `done`, `idle`) are derived in
-  `src/lib/status.ts`; the domain status enum is untouched. A group header
-  shows the worst state of the runs under it.
+  state badge without a duplicate dot. The five presentation states are
+  described under [Run state](#run-state).
 - **A working run moves where an indicator is used.** `StateIndicator` swaps
   the static dot for three dots bouncing in `--state-working` in run headers
   and run lists. Sidebar rows keep one dot and pulse its opacity; palette rows
@@ -3098,8 +3112,8 @@ Run actions cover the retained-run contract: Close chooses merged or abandoned,
 while Relaunch appears only for eligible retained TUI runs. Release is also
 offered for finished retained mission workers; its confirmation and error path
 do not hide or delete history. Expired or unavailable runs offer no Release.
-Sidebar tests cover Status and Member disclosure independently, with `Done`
-collapsed by default in Status and every Member group expanded.
+Sidebar tests cover group disclosure, with Finished collapsed by default.
+`src/lib/needs-you.test.ts` has one case per Needs you condition.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar splitter
 with keyboard events: arrow navigation, Enter and Space activation, Delete and

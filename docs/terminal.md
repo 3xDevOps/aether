@@ -224,8 +224,8 @@ same message identity, so they do not create a second request.
 
 Questions appear in the Run Room where they apply. **Answer** posts a
 correlated reply. The run snapshot includes its unanswered-question count,
-so **Needs input** appears before anyone opens the room. The request does
-not change the execution group: a working run stays in **Working**. The
+so the run is in the owner's **Needs you** before anyone opens the room.
+The question does not change the run's wire status. The
 card identifies the run owner and links to the Run Room. Questions and queued
 steers do not create a separate action inbox.
 

@@ -628,11 +628,12 @@ for acceptance, acknowledgement, and retries.
 
 ## Status reporting
 
-**Working** and **Idle** describe execution. Idle remains the display label
-for the existing `needs-attention` status and includes settled, failed, and
-stalled execution. **Needs input** is a separate indicator: it requires an
+The reporter sets execution: `running`, or `needs-attention` for settled,
+failed, and stalled execution. An input request is separate: it requires an
 unresolved, correlated question, form, extension dialog, or permission
-request. A run can be Working and need input at the same time. Turn end,
+request, and a `running` run can have one open. The dashboard folds both into
+its run state; see
+[dashboard-frontend.md](dashboard-frontend.md#run-state). Turn end,
 silence, notification text, and a question in the final response do not
 establish a pending request.
 
@@ -689,19 +690,19 @@ tool arguments, transcript, URL, or credential is included in metadata.
 There is no second report transport and no new way to answer prompts;
 use the existing terminal or native approval/question surface.
 
-| Reporter | Execution evidence | Needs input evidence and limits |
+| Reporter | Execution evidence | Input request evidence and limits |
 | --- | --- | --- |
-| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports Idle unless `background_tasks` is nonempty. `StopFailure` reports Idle with a failure reason, not an input request. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
+| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports waiting unless `background_tasks` is nonempty. `StopFailure` reports waiting with a failure reason, not an input request. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
 | OpenCode V1 1.18.32 | Tracks all native busy sessions; one child becoming idle cannot park another active session. | `permission.asked`/`question.asked` preserve `id` and `sessionID`; replies/rejections close the matching `requestID`. Idle reconciles that session's known requests with the released `/permission` and `/question` lists, including interruption cleanup without a reply event. |
 | OpenCode V2 2.0.18 | Tracks `session.execution.started` until succeeded, failed, interrupted, or session deletion. | `permission.asked/replied` and released `form.created/replied/cancelled` preserve request and session IDs. Terminal execution and permission replies reconcile known permissions through `ctx.permission.list`. Session deletion removes only that session's requests. |
-| pi 0.87.1 | Starts report Working; `agent_settled` or confirmed idle after `agent_end` reports Idle. A late finalized message cannot restart settled execution. | Named `ask`/`AskUserQuestion` tools retain `toolCallId` until tool execution ends. The documented `ui_prompt_start/end` pair tracks blocking extension UI with one process/session-scoped ID; Pi emits this pair around the outermost dialog, including dismissal/rejection. Titles and answers are discarded. |
-| OMP 18.3.1 | Uses its public main-session terminal event and `waitForIdle()` so owned background work can drain before Idle; automatic continuation is not settlement. | Named ask tools retain `toolCallId`. `tool_approval_requested/resolved` retain `sessionId` and `toolCallId`, including rejection. The pinned native TUI API has **no generic `ui_prompt_start/end` equivalent**. |
-| Codex legacy notify | `agent-turn-complete` reports Idle only. | No correlated input evidence in this integration. No app-server migration or inference from the final message. |
+| pi 0.87.1 | Starts report Working; `agent_settled` or confirmed idle after `agent_end` reports waiting. A late finalized message cannot restart settled execution. | Named `ask`/`AskUserQuestion` tools retain `toolCallId` until tool execution ends. The documented `ui_prompt_start/end` pair tracks blocking extension UI with one process/session-scoped ID; Pi emits this pair around the outermost dialog, including dismissal/rejection. Titles and answers are discarded. |
+| OMP 18.3.1 | Uses its public main-session terminal event and `waitForIdle()` so owned background work can drain before it reports waiting; automatic continuation is not settlement. | Named ask tools retain `toolCallId`. `tool_approval_requested/resolved` retain `sessionId` and `toolCallId`, including rejection. The pinned native TUI API has **no generic `ui_prompt_start/end` equivalent**. |
+| Codex legacy notify | `agent-turn-complete` reports waiting only. | No correlated input evidence in this integration. No app-server migration or inference from the final message. |
 
 Pi, OMP, and OpenCode forward native Working reports even when the request
 snapshot is unchanged. Pi/OMP tool callbacks, V1 busy status callbacks, and
 V2 concurrent execution starts refresh liveness without inventing input or
-status transitions. Actual settlement still reports Idle; silence without
+status transitions. Actual settlement still reports waiting; silence without
 further activity can still trigger the stall detector.
 
 OpenCode keeps execution and requests independent: a native busy session
@@ -723,7 +724,7 @@ The public CLI surfaces have limits:
 
 - Claude `PermissionRequest` explicitly omits `tool_use_id`, and
   `Notification` permission/elicitation alerts have no correlated
-  resolution identity. Neither creates a durable Needs input indicator.
+  resolution identity. Neither creates a durable input request.
   Elicitations without IDs are likewise unsupported. Claude has no general
   command-hook interrupt/request-list API; an interrupted request whose
   completion hook is absent can remain until session termination. Root

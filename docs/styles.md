@@ -64,15 +64,17 @@ links, nothing else. Inside a selected row, secondary text uses `text-text`.
 A floating surface is `bg-raised`, a 1px seam and `shadow-overlay`
 (`0 8px 24px -12px`, black 18% light, 60% dark).
 
-Run states, used on dots, state lines, callouts and diffs only:
+The five run states (see
+[dashboard-frontend.md](dashboard-frontend.md#run-state)), used on dots,
+state lines, callouts and diffs only:
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
-| Working | `state-working` | `#1b65c2` | `#4a9eff` |
 | Needs you | `state-needs-you` | `#8a5d00` | `#e0a52a` |
-| Failed | `state-failed` | `#c8321f` | `#f05c4a` |
-| Done | `state-done` | `#1a7a36` | `#45c26a` |
+| Working | `state-working` | `#1b65c2` | `#4a9eff` |
 | Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
+| Done | `state-done` | `#1a7a36` | `#45c26a` |
+| Failed | `state-failed` | `#c8321f` | `#f05c4a` |
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark,
 for callouts and request cards; `bg-accent-soft` likewise. Diffs use
@@ -134,8 +136,8 @@ Use compact workbench geometry rather than landing-page ornament:
   Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
 - Board Cards use compact, natural-height rows with a full-width title, state
-  badge and brief owner/harness/time metadata. Unseen titles stay bold with an
-  accessible **Unseen** description, not a second dot or a **New** pill.
+  badge, a reason line and brief owner/harness/time metadata. A Needs you
+  reason reads in the text colour, never with a second dot or a **New** pill.
   **Details** reveals the branch and copy control along with the full details;
   protection, questions, conflicts and archival state remain visible when relevant.
   Desktop column headers share a subgrid row so card lists start together.

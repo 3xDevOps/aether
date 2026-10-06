@@ -620,16 +620,19 @@ commit captured at launch.
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
 
-The dashboard distinguishes execution from requests: **Idle** means the run
-is not currently working, not that someone must answer. **Needs input** marks
-correlated native questions, permission requests, forms or extension dialogs,
-pending Aether approvals, and unanswered Run Room questions. It can appear on
-a **Working** run. Its count falls as each request closes and disappears after
-the last one. Respond in the existing Terminal, Approvals, or Run Room surface
-named by its tooltip. Turn completion, output silence, and generic errors do
-not create input requests. Native coverage depends on the harness reporter;
-see [harnesses.md](harnesses.md). Desktop **Run idle** notifications and
-`aether runs --attention` still describe execution, not this input indicator.
+The dashboard shows each run in one of five states: **Needs you**,
+**Working**, **Paused**, **Done** or **Failed**, with a reason line. **Needs
+you** means something blocks the run that you can resolve: a permission or
+question on your run or the run whose terminal you control, a parked or
+stalled run of yours, your unreviewed finish, a teammate's queued message, a
+Run Room question to you, or a swarm question, a stopped integrator or a
+blocked worker in a swarm you are accountable for. The full list is in
+[dashboard-frontend.md](dashboard-frontend.md#run-state). The same run reads
+**Working** with "Waiting for Alice" for everyone else. Needs you lists every
+workspace; Working and Finished list the selected one. Native question
+coverage depends on the harness reporter; see [harnesses.md](harnesses.md).
+`aether runs --attention` lists the `needs-attention` wire status, not Needs
+you.
 
 ### Handoff and finishing runs
 
@@ -673,9 +676,8 @@ silently. A handoff itself is not rolled back solely because its evidence
 packet could not be captured. Unresolved facts remain inspectable in the Run
 Room's evidence drawer. Use a fact's **Answer** action to open the composer
 with that fact prefilled, then edit and send a normal room comment. Evidence
-facts do not create **Needs input**; unanswered Run Room questions do, without
-changing Working/Idle or a finished run's lifecycle group. This is not a
-separate action inbox, blocker, or task model.
+facts do not put a run in **Needs you**; an unanswered Run Room question to
+the owner does. This is not a separate action inbox, blocker, or task model.
 
 ### Task templates and schedules
 

@@ -31,8 +31,8 @@ The threshold is the **hang detector**, and the fallback for harnesses that
 cannot report their own state.
 
 Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
-[harnesses.md](harnesses.md)), a turn that ends can mark execution **Idle**
-immediately. This does not mean the agent needs an answer: **Needs input**
+[harnesses.md](harnesses.md)), a turn that ends can park the run at `needs-attention`
+immediately. This does not mean the agent needs an answer: an open request
 is a separate indication of an unresolved structured request. The threshold
 still catches a harness that hangs mid-turn with a `stalled:` reason. Where
 the agent does not report, silence is all the server has, and the threshold
@@ -653,14 +653,14 @@ for schedule administration.
 
 ### Agent stall or crash
 
-`needs-attention` - **Idle** on the board - describes execution, not a request
-for human action. It means one of two things, and the reason on the run says
+`needs-attention` - **Needs you** for the run's owner on the board - describes
+execution, not a request from the agent. It means one of two things, and the reason on the run says
 which.
 
 **The harness reported idle or turn completion.** A harness that reports
 its own state parks the run when it has no active work. The `waiting` wire
 state means idle; generic turn completion, interruption, silence, and prose
-do not create **Needs input**. An agent that ran
+do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
 turn parks at its end with `blocked: <summary>` instead of `agent idle`,
 until it resumes. The execution report is recovered through a server
@@ -712,7 +712,7 @@ work is committed as `wip:`.
 
 ### Pending structured input
 
-**Needs input** is independent of **Working** and **Idle**. A run may keep
+An open request is independent of the wire status. A run may keep
 working in one session while another has an unanswered question, permission
 request, form, or extension dialog. Closing a request does not claim execution
 resumed; only a positive execution signal does that. Codex's legacy notify
