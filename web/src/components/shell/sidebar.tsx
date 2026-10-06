@@ -41,7 +41,6 @@ import { useStore } from '@/store'
 import { pendingApprovals } from '@/store/approvals'
 import {
   useCapability,
-  useNeedsYouByWorkspace,
   useNeedsYouCount,
   useRun,
   useRunInput,
@@ -306,7 +305,6 @@ function WorkspaceSwitcher({
   const current = workspaces[active]
   const navigate = useStore((s) => s.navigate)
   const caps = useCapability()
-  const needsYou = useNeedsYouByWorkspace()
 
   return (
     <div className="flex h-[var(--title-bar-height)] shrink-0 items-center gap-1 border-b border-border px-2">
@@ -320,7 +318,6 @@ function WorkspaceSwitcher({
             {list.map((workspace) => (
               <SelectItem key={workspace.id} value={workspace.id}>
                 {workspace.name}
-                {needsYou[workspace.id] ? ` · ${needsYou[workspace.id]} ${needsYou[workspace.id] === 1 ? 'needs' : 'need'} you` : ''}
               </SelectItem>
             ))}
           </SelectContent>
