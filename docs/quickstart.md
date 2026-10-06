@@ -865,7 +865,7 @@ retention expires, reopen the same run with **Reopen run** in its **More**
 menu, or:
 
 ```sh
-aether relaunch <run-id>
+aether reopen <run-id>
 ```
 
 Reopening does not create a new run or container, and expired or unavailable

@@ -8,15 +8,15 @@ import (
 
 func init() {
 	register(command{
-		name:  "relaunch",
+		name:  "reopen",
 		short: "reopen a finished run that still keeps its container",
-		run:   runRelaunch,
+		run:   runReopen,
 	})
 }
 
-func runRelaunch(args []string) error {
+func runReopen(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether relaunch <run-id>")
+		return fmt.Errorf("usage: aether reopen <run-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.RunResult

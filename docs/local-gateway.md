@@ -481,12 +481,12 @@ it on a run whose flag is already clear returns the run and publishes
 nothing. Every `run.status` payload carries `outcome_unseen` as the run's
 flag after that event, including a same-status re-label such as retention
 expiry: `true` from the finish a report causes until the owner opens the run,
-`false` after a later status change such as a close or relaunch.
+`false` after a later status change such as a close or reopen.
 
 `run.relaunch` is another proxied control-channel method:
 
 ```sh
-aether relaunch <run-id>
+aether reopen <run-id>
 ```
 
 The equivalent gateway call is `POST /api/v1/run.relaunch` with
@@ -502,8 +502,8 @@ or container and does not perform a new launch or disk-floor admission.
 Retention expiry is swept within at most one minute and reconciled on server
 boot. Once expiry destroys the retained container, the call returns `-32002`
 (invalid state, retained container unavailable), and the run cannot be
-relaunched. An expired or otherwise unavailable retained run cannot be
-relaunched; a row removed by `run.delete` instead returns not found. The
+reopened. An expired or otherwise unavailable retained run cannot be
+reopened; a row removed by `run.delete` instead returns not found. The
 default `--run-container-ttl` is `168h` (7 days); negative values disable
 retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 

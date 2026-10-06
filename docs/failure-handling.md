@@ -479,7 +479,7 @@ timer; it does not release container memory.
 its agent's report - whose retention deadline has not passed. From the CLI:
 
 ```sh
-aether relaunch <run>
+aether reopen <run>
 ```
 
 It resumes the same run row, container, checkout, member account, and

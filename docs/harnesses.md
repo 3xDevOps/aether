@@ -231,12 +231,12 @@ default is `168h` (7 days); `0` uses that default. A negative value
 disables retention and cleans up immediately. Kill and Delete remain immediate
 cleanup operations.
 
-Reopen (`aether relaunch`) is available only for a retained Standard or
+Reopen (`aether reopen`) is available only for a retained Standard or
 Enhanced run - closed, or finished by its agent's report - while its
 retention deadline has not passed:
 
 ```sh
-aether relaunch <run>
+aether reopen <run>
 ```
 
 It resumes the same row, container, checkout, member account, and coordination

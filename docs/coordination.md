@@ -1088,7 +1088,7 @@ evidence leaves the task in **Review**.
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
 report. Reopening the run (**Reopen run** under the run's **More** menu,
-or `aether relaunch <run>`) supersedes the terminal report, including one
+or `aether reopen <run>`) supersedes the terminal report, including one
 whose evidence capture failed and was never accepted, so the reopened agent
 can report again under a new idempotency key; the superseded report's key
 then fails with `CodeConflict`, as does a report whose evidence capture was

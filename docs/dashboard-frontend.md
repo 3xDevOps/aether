@@ -1041,7 +1041,7 @@ protect and free do not overwrite the server's events with an RPC response.
   (`isRetainedRun`). A freed or expired run no longer offers it, and the
   server checks the lifecycle again if the run changed after the menu opened.
 - **Reopen run** restarts a Standard run whose container was retained after
-  a close or an agent-reported finish (`aether relaunch` on the command line).
+  a close or an agent-reported finish (`aether reopen` on the command line).
 - **Hand off** and **Protect** need the run's owner or an admin. Before
   hydration the caller's own record has not arrived, and the mirror answers
   yes rather than making the shell's buttons appear a beat late. **Pull

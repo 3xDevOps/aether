@@ -103,7 +103,7 @@ and timeline attribution. The server-hosted dashboard also exposes the shared
 member-home **Files** editor through the same authenticated RPCs.
 A live TUI run closed as merged or abandoned keeps its exact run row, container
 and checkout for `--run-container-ttl` (default `7 days`); **Reopen** (`aether
-relaunch`) resumes that retained run before expiry rather than creating a new
+reopen`) resumes that retained run before expiry rather than creating a new
 run or container. Expired or unavailable runs cannot be reopened.
 Launch freshness is server-owned: before a run row exists, the server captures
 the workspace base. A configured mirror refreshes that base; a local-only
