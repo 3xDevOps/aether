@@ -11,10 +11,9 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// execAttachment adapts a hijacked Docker exec connection to Attachment.
-// With a TTY, stdout carries the merged raw stream and stderr is empty;
-// without one, Docker multiplexes both and they are demuxed here, and
-// stdout is lossless because it carries the command's protocol stream.
+// execAttachment: with a TTY, stdout carries the merged raw stream and
+// stderr is empty; without one, Docker multiplexes both and they are
+// demuxed here. stdout is lossless because it carries a protocol stream.
 type execAttachment struct {
 	cli  *client.Client
 	id   string

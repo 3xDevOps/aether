@@ -29,17 +29,14 @@ type PTYAttacher interface {
 	Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error)
 }
 
-// PTYHistoryReader is the read-only transcript extension implemented by the
-// production PTY host. Inputs are validated and normalized before dispatch;
-// implementations return at most limit lines in chronological order. It stays
-// separate so attach-only adapters remain small.
+// PTYHistoryReader is separate from PTYAttacher so attach-only adapters stay
+// small. Implementations return at most limit lines, oldest first.
 type PTYHistoryReader interface {
 	History(ctx context.Context, run domain.RunID, before, query string, limit int) (ptyhost.HistoryPage, error)
 }
 
-// RunLauncherWithOptions is the optional extension implemented by schedulers
-// that can pin a launch to a caller-supplied base observation. Keeping it
-// separate preserves the strict Launch seam for older adapters and tests.
+// RunLauncherWithOptions is implemented by schedulers that can pin a launch to
+// a caller-supplied base observation.
 type RunLauncherWithOptions interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
 }
@@ -63,11 +60,7 @@ type RunController interface {
 	// account would be refused over the harness or the account owner's
 	// login, and why, resolving it as Launch does.
 	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error)
-	// ContainerAddr resolves the network address of a supervised run
-	// container.
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
-	// TerminalContainerAddr resolves the network address of a member's
-	// supervised environment terminal container.
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Release(ctx context.Context, run domain.RunID, actor domain.MemberID) error
@@ -81,8 +74,6 @@ type RunController interface {
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
-	// ACPSubscribe opens an enhanced run's session item stream after
-	// afterSeq.
 	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
 	// first answer wins.
@@ -95,9 +86,6 @@ type RunController interface {
 	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
-	// SetArchived hides a Final run from the board (archived true) or
-	// restores it (false); see the scheduler implementation's doc comment
-	// for the exact refusal and idempotency rules.
 	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)
 	// Seen clears the run's outcome_unseen flag for its owner; anyone
 	// else is denied. Clearing a clear flag returns the run unchanged.
@@ -117,9 +105,8 @@ type RunController interface {
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error
-	// InstallAgent runs an agent's install command in the member's
-	// environment terminal and returns the end of its output and its exit
-	// code.
+	// InstallAgent returns the end of the install command's output and its
+	// exit code.
 	InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error)
 	// SaveTerminalImage writes validated image bytes to the target account's
 	// persistent home and returns its absolute container-visible path.

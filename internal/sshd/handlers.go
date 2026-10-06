@@ -118,9 +118,8 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if !mode.Valid() {
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
-	// A taskless launch drops the member into the agent's interactive TUI with
-	// no seeded prompt. Headless has no interactive surface, so it still needs
-	// a task to have anything to do.
+	// A taskless launch opens the agent's TUI with no prompt; headless has no
+	// interactive surface, so it still needs a task.
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
@@ -234,9 +233,8 @@ func (s *Server) runDelete(ctx context.Context, member domain.MemberID, params j
 	return s.runAct(ctx, member, params, s.cfg.Runs.DeleteRun)
 }
 
-// runArchive hides a finished run from the board, or restores it. The
-// guard above has already checked Kill against the run, matching
-// run.delete's gate.
+// runArchive hides a finished run from the board, or restores it. The guard
+// checked Kill, matching run.delete's gate.
 func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunArchiveParams](params)
 	if perr != nil {
@@ -410,10 +408,8 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	// A run must land on someone who can act on it. Handing one to a
-	// viewer (or a member awaiting approval) orphans it: nobody but an
-	// admin could then steer or kill it. Launch is the capability that
-	// separates the roles that may own a run from the ones that may not.
+	// Handing a run to a member without Launch (a viewer or one awaiting
+	// approval) orphans it: only an admin could then steer or kill it.
 	to := domain.MemberID(p.ToMemberID)
 	recipient, err := s.cfg.Store.GetMember(ctx, to)
 	if err != nil {

@@ -1,13 +1,6 @@
-// Package sshd is the embedded SSH server: the single transport every
-// client rides. It authenticates members - by Tailscale WhoIs identity
-// when a resolver is configured, falling back to public key against the
-// store, or, on a connection an edge relays, by the edge's grant and the
-// device key it names - and multiplexes git transport (exec), the JSON-RPC
-// control channel, the event stream, and PTY attach (subsystems) over one
-// port.
-// It owns no run lifecycle, git, or PTY logic - everything mutating
-// state is delegated through the consumer-side seam interfaces or the
-// store.
+// Package sshd is the embedded SSH server every client rides: it authenticates
+// members and multiplexes git, JSON-RPC control, events and PTY attach over one
+// port, delegating every state change to the seam interfaces or the store.
 package sshd
 
 import (
@@ -63,8 +56,6 @@ const (
 	authTimeout = 10 * time.Second
 )
 
-// Config wires the server to its collaborators. All collaborators are
-// required.
 type Config struct {
 	Addr            string // default ":2222"
 	HostKeyPath     string // <data>/ssh/host_ed25519_key; generated on first start if absent
@@ -142,7 +133,6 @@ type Config struct {
 	revalidateInterval time.Duration
 }
 
-// Server is the embedded SSH server.
 type Server struct {
 	cfg     Config
 	sshCfg  *ssh.ServerConfig
@@ -327,8 +317,7 @@ func (s *Server) storeIsFresh(ctx context.Context) (bool, error) {
 }
 
 // bootstrapKeyMember registers the first key to contact a fresh server as
-// the admin member (zero-setup bootstrap; wave 1 contract §9.5). Called
-// only after the SSH handshake has verified the key's signature.
+// the admin member, only after the SSH handshake verified its signature.
 // Freshness is re-checked under registerMu: if another identity won the
 // race the connection is rejected, exactly as an unknown key would be.
 func (s *Server) bootstrapKeyMember(ctx context.Context, user, keyLine string) (*domain.Member, error) {

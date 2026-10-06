@@ -217,8 +217,6 @@ func (p *projector) chunk(kind Kind, role, id string, block acp.ContentBlock) {
 	}
 }
 
-// flushText writes the buffered text of the open message as one or more
-// segments.
 func (p *projector) flushText() {
 	t := p.text
 	if t == nil {
@@ -238,7 +236,6 @@ func (p *projector) flushText() {
 	}
 }
 
-// closeText writes the open message's last segment, marked complete.
 func (p *projector) closeText() {
 	t := p.text
 	if t == nil {

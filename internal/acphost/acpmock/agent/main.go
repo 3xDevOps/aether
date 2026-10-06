@@ -1,6 +1,5 @@
-// Command agent is the acpmock agent on stdio, for integration tests that
-// run it inside a container in place of a real ACP adapter. Its one
-// argument names the fixture: claude (the default) or codex.
+// Command agent serves the acpmock agent on stdio in place of a real ACP
+// adapter. Its one argument names the fixture: claude (the default) or codex.
 package main
 
 import (

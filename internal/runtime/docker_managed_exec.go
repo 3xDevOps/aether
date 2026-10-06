@@ -20,9 +20,8 @@ import (
 
 var _ ManagedExecRuntime = (*Docker)(nil)
 
-// StartExecTTY runs the staged helper as the container's configured user,
-// environment and working directory. The helper waits for a claim before
-// launching the command: losing/cancelling ExecAttach cannot orphan a command.
+// StartExecTTY runs the staged helper, which waits for a claim before
+// launching the command, so losing ExecAttach cannot orphan the command.
 func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (ManagedExec, error) {
 	if spec.Cols == 0 || spec.Rows == 0 || spec.Cols > 65535 || spec.Rows > 65535 {
 		return nil, errors.New("runtime: execution terminal dimensions must be between 1 and 65535")
@@ -109,9 +108,9 @@ func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty
 	return execution, nil
 }
 
-// RecoverExec proves both Docker's immutable execution/container association
-// and the helper's claim identity. It cannot restore an exec's stdio: consumers
-// must expose the unavailable terminal, not launch a replacement implicitly.
+// RecoverExec proves the exec's container association and the helper's
+// claim identity. It cannot restore stdio: callers must surface the terminal
+// as unavailable, not launch a replacement.
 func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (ManagedExec, error) {
 	if identity.ContainerID == "" || identity.ExecID == "" || identity.CreationKey == "" || identity.ClaimToken == "" {
 		return nil, fmt.Errorf("%w: incomplete identity", ErrExecUnavailable)
@@ -139,8 +138,7 @@ func (e *dockerManagedExec) Identity() ExecIdentity { return e.identity }
 func (e *dockerManagedExec) Attachment() Attachment {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	// EOF still leaves buffered output for the initial consumer to drain.
-	// Transport availability is reported separately by Status.
+	// An attachment at EOF may still hold buffered output to drain.
 	if e.attachment == nil {
 		return nil
 	}

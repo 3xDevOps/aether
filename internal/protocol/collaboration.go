@@ -44,9 +44,8 @@ type RoomMessageFailure struct {
 	Retryable bool   `json:"retryable,omitempty"`
 }
 
-// RoomMessage is the wire representation of one run-room message. Attachments
-// are opaque container-visible references; host paths and secrets are not
-// represented by this type.
+// RoomMessage is one run-room message on the wire. Attachments are opaque
+// container-visible references; it carries no host paths or secrets.
 type RoomMessage struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -71,7 +70,6 @@ type RoomMessage struct {
 	UpdatedAt        string              `json:"updated_at"`
 }
 
-// EvidenceTrigger mirrors the durable evidence packet trigger vocabulary.
 type EvidenceTrigger string
 
 const (
@@ -142,8 +140,7 @@ type EvidencePacket struct {
 	UpdatedAt             string                     `json:"updated_at"`
 }
 
-// RoomMessageListResult and EvidencePacketListResult carry bounded pages.
-// NextBefore is an opaque cursor returned by the store.
+// NextBefore is an opaque store cursor.
 type RoomMessageListResult struct {
 	Messages   []RoomMessage `json:"messages"`
 	NextBefore string        `json:"next_before,omitempty"`
@@ -154,7 +151,6 @@ type EvidencePacketListResult struct {
 	NextBefore string           `json:"next_before,omitempty"`
 }
 
-// Human-facing collaboration methods on the control channel.
 const (
 	MethodRunRoomList           = "run.room.list"
 	MethodRunRoomStatus         = "run.room.status"
@@ -166,7 +162,6 @@ const (
 	MethodRunEvidenceTranscript = "run.evidence.transcript"
 )
 
-// Collaboration list and payload bounds are shared by room and evidence handlers.
 const (
 	CollaborationDefaultPageSize        = 50
 	CollaborationMaxPageSize            = 100

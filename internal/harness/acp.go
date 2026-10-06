@@ -26,11 +26,9 @@ const (
 // ~/.local, pinned to the version recorded in acpregistry.json, the
 // vendored snapshot of the ACP registry.
 type ACPInstall struct {
-	// RegistryID is the adapter's id in the ACP registry.
 	RegistryID string
-	// Package and Version are the npm package and the pinned version.
-	Package string
-	Version string
+	Package    string
+	Version    string
 	// Binary is the executable the package links into ~/.local/bin.
 	Binary string
 }
@@ -43,8 +41,6 @@ var (
 	piACP     = &ACPInstall{RegistryID: "pi-acp", Package: "pi-acp", Version: "0.0.34", Binary: "pi-acp"}
 )
 
-// EnhancedSupport reports how the profile serves ACP: through an adapter
-// package, through its own CLI, or not at all.
 func (p Profile) EnhancedSupport() Enhanced {
 	switch {
 	case p.ACPInstall != nil:
@@ -55,10 +51,7 @@ func (p Profile) EnhancedSupport() Enhanced {
 	return EnhancedNone
 }
 
-// InstallCommand is the shell command that installs the agent into the
-// member home: InstallScript, followed by the pinned adapter's install when
-// enhanced is set and the agent serves ACP through one. Empty for an agent
-// with no install script.
+// InstallCommand is the shell command that installs the agent into the member home.
 func (p Profile) InstallCommand(enhanced bool) string {
 	if p.InstallScript == "" || !enhanced || p.ACPInstall == nil {
 		return p.InstallScript

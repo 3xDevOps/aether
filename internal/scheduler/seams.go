@@ -11,9 +11,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// EvidenceService is the scheduler's narrow view of durable evidence
-// capture. The concrete evidence service also exposes list/read operations
-// to transports, but lifecycle code only needs these two run-scoped methods.
 type EvidenceService interface {
 	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
 	CaptureBeforeCleanup(context.Context, evidence.Request, func(context.Context) error) (protocol.EvidencePacket, error)
@@ -26,7 +23,6 @@ type EvidencePurger interface {
 	PurgeRun(context.Context, domain.WorkspaceID, domain.RunID, func(context.Context) error) error
 }
 
-// GitEngine is the scheduler's view of the git engine (*gitengine.Engine).
 type GitEngine interface {
 	CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (checkoutPath, branch string, err error)
 	WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error)
@@ -39,7 +35,6 @@ type GitEngine interface {
 	LastFileChange(run domain.RunID) (time.Time, bool)
 }
 
-// PTYHost is the scheduler's view of the PTY host (*ptyhost.Host).
 type PTYHost interface {
 	StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error
 	SessionGeneration(key ptyhost.SessionKey) uint64

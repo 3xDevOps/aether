@@ -49,8 +49,6 @@ func runSwarm(args []string) error {
 	return fmt.Errorf("unknown swarm command %q\n%s", args[0], swarmUsage)
 }
 
-// swarmSpec is a validated create request before the account and workspace
-// are resolved over the control channel.
 type swarmSpec struct {
 	objective string
 	agent     string
@@ -109,7 +107,6 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	return spec, nil
 }
 
-// stdinText returns value, or standard input when value is "-".
 func stdinText(value, what string, stdin io.Reader) (string, error) {
 	if value != "-" {
 		return value, nil
@@ -125,8 +122,7 @@ func stdinText(value, what string, stdin io.Reader) (string, error) {
 	return text, nil
 }
 
-// parseWorker reads one --worker value, harness[:mode]. The account is the
-// integrator's and is filled in by missionCreateParams.
+// The account is the integrator's, filled in by missionCreateParams.
 func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	harness, name, ok := strings.Cut(spec, ":")
 	if !ok {
@@ -139,9 +135,8 @@ func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
 	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
 }
 
-// missionCreateParams builds the request the server accepts: the integrator
-// tuple is always the first execution choice, and a --worker that repeats it
-// or another worker is sent once, because the store refuses duplicates.
+// A --worker that repeats the integrator or another worker is sent once,
+// because the store refuses duplicates.
 func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key string) protocol.MissionCreateParams {
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: "tui"}
 	choices := []protocol.MissionExecutionChoice{integrator}
@@ -200,8 +195,6 @@ func swarmList(args []string) error {
 	})
 }
 
-// listSwarms follows the list cursor until the server has no older page, so
-// a workspace with more missions than one page holds is listed whole.
 func listSwarms(c *protocol.Client, wsID string) ([]protocol.Mission, error) {
 	var out []protocol.Mission
 	cursor := ""
@@ -218,8 +211,7 @@ func listSwarms(c *protocol.Client, wsID string) ([]protocol.Mission, error) {
 	}
 }
 
-// objectiveColumnWidth keeps the list readable in a terminal; the full
-// objective is on aether swarm show.
+// The full objective is on aether swarm show.
 const objectiveColumnWidth = 60
 
 func renderSwarms(w io.Writer, missions []protocol.Mission) error {
@@ -240,8 +232,8 @@ func renderSwarms(w io.Writer, missions []protocol.Mission) error {
 	return tw.Flush()
 }
 
-// cell renders free text as one table cell: its first line, with tabs
-// turned into spaces so the value cannot shift the columns.
+// cell keeps free text to its first line, tabs as spaces, so it cannot
+// shift the columns.
 func cell(s string) string {
 	return strings.ReplaceAll(firstLine(s), "\t", " ")
 }

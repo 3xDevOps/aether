@@ -15,22 +15,15 @@ import (
 // runs: two npm installs into one ~/.local race each other.
 var ErrAgentInstallRunning = errors.New("agent install: another install is running in this environment; wait for it to finish")
 
-// maxInstallLog is how much of the end of an install's output is kept.
 const maxInstallLog = 8 << 10
 
 // installExecGrace is how long past AgentInstallTimeout the exec may take
 // to answer once the container has killed the installer.
 const installExecGrace = 30 * time.Second
 
-// InstallAgent runs command, an agent's install command, with /bin/sh in
-// the member's environment terminal, starting the terminal when it is not
-// running, and returns the end of its combined output and its exit code.
-// The command installs into the member home, which the terminal mounts,
-// so nothing has to be saved for runs to find it.
-//
-// The terminal lock is not held across the exec, so opening a tab never
-// waits on an installer; a terminal stop or environment reset ends the
-// install with the container.
+// InstallAgent runs an agent's install command in the member's environment
+// terminal, starting it if needed. The terminal lock is not held across the
+// exec, so opening a tab never waits on an installer.
 func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error) {
 	homePath, err := s.cfg.Homes.Path(member)
 	if err != nil {
@@ -57,11 +50,9 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 	containerID, home := sup.containerID, sup.home
 	s.mu.Unlock()
 
-	// The install outlives a dropped request, and the container kills it
-	// at AgentInstallTimeout, so the guard above is never released while
-	// an installer still writes into the home. Exec refuses a command
-	// whose output passes 1 MiB, and an installer's progress output can,
-	// so only the end of the log comes back.
+	// The container kills the install at AgentInstallTimeout, so the guard is
+	// never released while an installer still writes into the home. Exec
+	// refuses output past 1 MiB, so only the log's tail comes back.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), protocol.AgentInstallTimeout+installExecGrace)
 	defer cancel()
 	script := fmt.Sprintf("log=$(mktemp) || exit 1\ntimeout -s KILL %d sh -c \"$1\" >\"$log\" 2>&1\ncode=$?\ntail -c %d \"$log\"\nrm -f \"$log\"\nexit $code",

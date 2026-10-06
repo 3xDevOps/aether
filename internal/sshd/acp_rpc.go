@@ -130,7 +130,6 @@ func (s *Server) runACPItem(ctx context.Context, _ domain.MemberID, raw json.Raw
 	return protocol.RunACPItemResult{Item: b}, nil
 }
 
-// acpRun resolves an enhanced run.
 func (s *Server) acpRun(ctx context.Context, id string) (domain.RunID, *protocol.Error) {
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(id))
 	if err != nil {

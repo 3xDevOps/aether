@@ -17,19 +17,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// sessionStream is one SSH session channel's stdio as a byte stream.
-// Close ends the channel without tearing down the parent connection.
-//
-// x/crypto's Session.Wait cannot report a subsystem's exit status:
-// RequestSubsystem never marks the session started, so Wait fails with
-// "ssh: session not started" no matter what the server sent. The stream
-// therefore talks to the raw channel and collects the exit-status
-// request itself.
+// sessionStream uses the raw channel because x/crypto's Session.Wait fails
+// with "ssh: session not started" after RequestSubsystem, so it cannot
+// report a subsystem's exit status.
 type sessionStream struct {
 	io.Reader
 	stdin io.WriteCloser
-	// ch is the raw session channel, kept for outbound window-change
-	// requests; nil in tests that fake the stream.
+	// nil in tests that fake the stream.
 	ch       ssh.Channel
 	closeCh  func() error
 	wait     func() error
@@ -70,7 +64,6 @@ type channelStdin struct{ ch ssh.Channel }
 func (w channelStdin) Write(p []byte) (int, error) { return w.ch.Write(p) }
 func (w channelStdin) Close() error                { return w.ch.CloseWrite() }
 
-// ptyGeometry is the terminal size requested for a subsystem channel.
 type ptyGeometry struct{ cols, rows uint }
 
 func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, error) {
@@ -103,14 +96,10 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 	}, nil
 }
 
-// RemoteExitError is a subsystem channel ending with a nonzero exit
-// status; see protocol.RemoteExitError.
 type RemoteExitError = protocol.RemoteExitError
 
-// awaitRequests consumes session requests until the channel closes. Exit
-// status 0, or a close without any status, is a clean end; a nonzero
-// status carries the remote failure. Requests with no server-side response
-// are acknowledged negatively so an accidental request cannot block closure.
+// awaitRequests treats a close without any exit status as clean. Requests
+// are acknowledged negatively so an accidental one cannot block closure.
 func awaitRequests(reqs <-chan *ssh.Request) error {
 	var res error
 	for req := range reqs {
@@ -147,8 +136,6 @@ func requestPTY(ch ssh.Channel, cols, rows uint) error {
 	return err
 }
 
-// Terminal is an interactive remote terminal: a byte stream whose window
-// can be resized while it is open.
 type Terminal interface {
 	io.ReadWriteCloser
 	Resize(cols, rows uint) error
@@ -162,7 +149,6 @@ type TerminalStream struct {
 
 var _ Terminal = (*TerminalStream)(nil)
 
-// Resize adjusts the remote PTY to cols by rows.
 func (t *TerminalStream) Resize(cols, rows uint) error {
 	payload := ssh.Marshal(struct {
 		Cols, Rows, WidthPx, HeightPx uint32
@@ -173,7 +159,6 @@ func (t *TerminalStream) Resize(cols, rows uint) error {
 	return nil
 }
 
-// Control opens the JSON-RPC control channel.
 func (c *Conn) Control() (*protocol.Client, error) {
 	stream, err := c.openSubsystem(protocol.SubsystemControl, nil)
 	if err != nil {
@@ -194,9 +179,8 @@ func NewControlSessionID() string {
 	return hex.EncodeToString(raw[:])
 }
 
-// AttachStream opens the attach subsystem for req and returns the
-// resizable terminal stream alongside the server's ack. A refused ack is
-// returned with the error so callers can forward its code.
+// AttachStream returns a refused ack with the error so callers can forward
+// its code.
 func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protocol.AttachResponse, error) {
 	var ack protocol.AttachResponse
 	out, err := c.openStream(protocol.SubsystemAttach, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "attach", &ack)
@@ -225,9 +209,8 @@ func (c *Conn) ACPStream(req protocol.ACPStreamRequest) (io.ReadWriteCloser, pro
 	return out, ack, nil
 }
 
-// TerminalStream opens the member's persistent terminal subsystem and
-// returns its acknowledged PTY stream. The requested geometry is sent as an
-// SSH pty-req before the JSON header, matching AttachStream.
+// TerminalStream sends the geometry as an SSH pty-req before the JSON
+// header, matching AttachStream.
 func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, protocol.TerminalResponse, error) {
 	var ack protocol.TerminalResponse
 	out, err := c.openStream(protocol.SubsystemTerminal, &ptyGeometry{cols: req.Cols, rows: req.Rows}, req, "terminal", &ack)
@@ -241,8 +224,6 @@ func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, pr
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
 
-// Attach opens the attach subsystem for runID with the given geometry and
-// returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
 	stream, _, err := c.AttachStream(protocol.AttachRequest{
 		RunID: runID, Cols: cols, Rows: rows, ControlSessionID: NewControlSessionID(),
@@ -253,9 +234,8 @@ func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error)
 	return stream, nil
 }
 
-// Sync opens the sync subsystem for runID and returns the raw mutagen
-// endpoint stream after a successful ack. force overrides the server's
-// mid-write refusal for runs that are currently running.
+// Sync returns the raw mutagen endpoint stream. force overrides the
+// server's mid-write refusal for running runs.
 func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 	var ack protocol.SyncResponse
 	out, err := c.openStream(protocol.SubsystemSync, nil, protocol.SyncRequest{RunID: runID, Force: force}, "sync", &ack)
@@ -269,9 +249,8 @@ func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 	return out, nil
 }
 
-// EventsStream opens the events subsystem with the given subscription and
-// returns the raw NDJSON event stream after a successful ack. A refused
-// subscription comes back as *protocol.Error with the server's code.
+// EventsStream returns a refused subscription as *protocol.Error with the
+// server's code.
 func (c *Conn) EventsStream(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
 	var ack protocol.SubscribeResponse
 	out, err := c.openStream(protocol.SubsystemEvents, nil, req, "subscribe", &ack)
@@ -285,8 +264,6 @@ func (c *Conn) EventsStream(req protocol.SubscribeRequest) (io.ReadWriteCloser, 
 	return out, nil
 }
 
-// Events opens the events subsystem with the given subscription and
-// returns the raw NDJSON event stream after a successful ack.
 func (c *Conn) Events(req protocol.SubscribeRequest) (io.ReadWriteCloser, error) {
 	out, err := c.EventsStream(req)
 	var perr *protocol.Error
@@ -317,9 +294,8 @@ func readAck(stream *sessionStream, v any) (*bufferedStream, error) {
 	return &bufferedStream{r: br, sessionStream: stream}, nil
 }
 
-// openStream opens a subsystem, writes its one-line JSON header, and reads
-// the ack line into ack; the returned stream carries any bytes past the
-// ack. Refusal is the caller's to detect: the ack is decoded either way.
+// openStream decodes the ack whether or not it is a refusal; detecting
+// refusal is the caller's job.
 func (c *Conn) openStream(name string, pty *ptyGeometry, header any, what string, ack any) (*bufferedStream, error) {
 	stream, err := c.openSubsystem(name, pty)
 	if err != nil {

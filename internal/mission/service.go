@@ -24,9 +24,8 @@ type Launcher interface {
 	LaunchMission(context.Context, MissionLaunchRequest) (*domain.Run, error)
 }
 
-// launchValidator is the optional seam that refuses, before anything is
-// persisted, an integrator the scheduler has no command for: a harness whose
-// definition the account no longer has, or one without an interactive command.
+// launchValidator refuses, before anything is persisted, an integrator the
+// scheduler has no interactive command for.
 type launchValidator interface {
 	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode) error
 }
@@ -109,9 +108,7 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
-	// Integration resolves the underlying candidate engine lazily. Mission
-	// policy owns the adapter while the engine remains the implementation.
-	Integration func() (sshd.IntegrationService, error)
+	Integration         func() (sshd.IntegrationService, error)
 }
 type Service struct {
 	cfg             Config
@@ -710,9 +707,9 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 	})
 }
 
-// Create persists the bounded human authorization and launches its
-// integrator through the reserved-run scheduler seam. The actor is always the
-// authenticated member; request fields cannot impersonate a different owner.
+// Create persists the human authorization and launches its integrator. The
+// actor is always the authenticated member; request fields cannot impersonate
+// another owner.
 func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.MissionCreateParams) (protocol.MissionCreateResult, error) {
 	if p.WorkspaceID == "" || strings.TrimSpace(p.Objective) == "" || p.IdempotencyKey == "" {
 		return protocol.MissionCreateResult{}, errors.New("workspace_id, objective, and idempotency_key are required")
@@ -808,10 +805,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 }
 
-// integratorLaunchFailure records why m's current integrator did not launch
-// and says what happens next. Reconciliation relaunches only a reserved run
-// with no row; a row the scheduler wrote before provisioning failed stays
-// failed.
+// integratorLaunchFailure records why m's integrator did not launch.
+// Reconciliation relaunches only a reserved run with no row; a row written
+// before provisioning failed stays failed.
 func (s *Service) integratorLaunchFailure(ctx context.Context, m *domain.Mission, err error) error {
 	_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
 	if recordErr := s.recordIntegratorLaunch(ctx, m, err.Error(), getErr == nil); recordErr != nil {
@@ -908,8 +904,6 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }
 
-// validateIntegratorLaunch resolves the integrator's command for its run
-// owner on the account the launch runs under, when the launcher can.
 func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account domain.MemberID, choice domain.MissionIntegrator) error {
 	v, ok := s.cfg.Runs.(launchValidator)
 	if !ok {

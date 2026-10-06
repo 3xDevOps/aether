@@ -17,18 +17,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// imageUserResolver is the optional runtime capability used to learn the
-// user an image is configured to run as (*runtime.Docker implements it).
-// Runtimes without it run images as their default user (root).
+// imageUserResolver is implemented by *runtime.Docker. Runtimes without it
+// run images as their default user (root).
 type imageUserResolver interface {
 	ImageUser(ctx context.Context, ref string) (string, error)
 }
 
-// resolveContainerUser resolves the single numeric uid:gid a container
-// and host-side ownership pass share: the profile override wins, an empty
-// image user means root, a numeric image user is accepted, and a named
-// image user without a profile mapping fails provisioning. Root resolves
-// to "" (the image default) so Spec.User is only set when it matters.
+// resolveContainerUser resolves root to "" (the image default) so
+// Spec.User is only set when it matters.
 func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, profile harness.Profile) (string, error) {
 	var imageUser string
 	if r, ok := s.cfg.Runtime.(imageUserResolver); ok {
@@ -48,11 +44,10 @@ func (s *Scheduler) resolveContainerUser(ctx context.Context, image string, prof
 	return user, nil
 }
 
-// reserveCredentialUser atomically reserves the non-root uid:gid for a
-// container that mounts home, and login's login paths when login is set. A
-// conflicting live reservation (see blocks) refuses it, so no ownership pass
-// can take a home or a shared login from a live container of its owner, or
-// flip a login between two recipients.
+// reserveCredentialUser atomically reserves the uid:gid for a container that
+// mounts home and login's login paths. A conflicting live reservation refuses
+// it, so no ownership pass can take a home or shared login from a live
+// container or flip a login between two recipients.
 func (s *Scheduler) reserveCredentialUser(home, login domain.MemberID, user string, sharedHome bool, owner string, run *supervised) (*credentialUserReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,10 +76,9 @@ func (s *Scheduler) reserveCredentialUser(home, login domain.MemberID, user stri
 	return reservation, nil
 }
 
-// syncRunUserReservationsLocked folds recovered runs and live environment
-// terminals into the common registry. Stale reservations are discarded after
-// their container leaves the live registry, except for an explicitly pending
-// terminal reservation between reservation and registration.
+// syncRunUserReservationsLocked folds recovered runs and live terminals into
+// the registry. Stale reservations are dropped once their container leaves
+// it, except a terminal reservation pending registration.
 func (s *Scheduler) syncRunUserReservationsLocked() {
 	if s.credentialUsers == nil {
 		s.credentialUsers = make(map[*credentialUserReservation]struct{})
@@ -130,9 +124,7 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 	}
 }
 
-// reservationConflictLocked refuses a container that mounts home, and
-// login's login paths when login is set, as user when a live reservation
-// blocks it (see blocks). The caller must hold s.mu and have synced the
+// reservationConflictLocked: the caller must hold s.mu and have synced the
 // reservations.
 func (s *Scheduler) reservationConflictLocked(home, login domain.MemberID, user, owner string) error {
 	for other := range s.credentialUsers {
@@ -186,12 +178,9 @@ func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bo
 // in-flight run; failProvisioning turns it into abandoned ("killed").
 var errKillRequested = errors.New("scheduler: kill requested during provisioning")
 
-// checkFreeSpace applies the free-space floor (§ failure table, "Disk
-// pressure"). It runs before the run row exists so a refusal leaves
-// nothing behind, and it reads the filesystem holding the state directory,
-// which is the same one the checkouts, transcripts and event log are on.
-// A filesystem that cannot be read is not treated as full: the floor
-// exists to stop a disk from filling, not to stop the server.
+// checkFreeSpace runs before the run row exists so a refusal leaves nothing
+// behind. An unreadable filesystem is not treated as full: the floor exists
+// to stop a disk filling, not to stop the server.
 func (s *Scheduler) checkFreeSpace() error {
 	if s.cfg.MinFreeBytes < 0 {
 		return nil
@@ -210,17 +199,14 @@ func (s *Scheduler) checkFreeSpace() error {
 		ErrDiskFull, free, s.cfg.MinFreeBytes)
 }
 
-// Launch creates a new run using a strict base capture. Strict mode refreshes
-// a configured mirror and reads the local base directly for local-only
-// workspaces; callers that explicitly accept a displayed cached base use
-// LaunchWithOptions.
+// Launch uses a strict base capture; callers that accept a displayed cached
+// base use LaunchWithOptions.
 func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	return s.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
 }
 
-// LaunchWithOptions creates a new run and provisions it synchronously. The
-// base is captured after launch inputs are validated and before the run row is
-// created, so a failed capture leaves no durable or in-memory run state.
+// LaunchWithOptions captures the base before the run row is created, so a
+// failed capture leaves no durable or in-memory run state.
 func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	lock := s.workspaceLock(workspace)
 	lock.RLock()
@@ -246,9 +232,8 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
-	// A reserved identity that already has a run is a replay, not a fresh
-	// launch. Its immutable base was captured on the original handoff; a new
-	// fetch could fail (or observe a different base) without changing that run.
+	// A reserved identity that already has a run is a replay: its base was
+	// captured on the original handoff, and a new fetch could fail or differ.
 	if opts.AssignedRunID != "" {
 		existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
 		if getErr == nil {
@@ -327,12 +312,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	return s.freshen(ctx, run), nil
 }
 
-// provision drives queued -> provisioning -> running. The run is
-// registered in s.runs before any provisioning I/O so a concurrent Kill
-// takes the supervised path (killRequested flag) instead of transitioning
-// the row underneath the in-flight launch. Any error after the row exists
-// marks the run failed ("provisioning: <err>"), or abandoned ("killed")
-// when a kill was accepted meanwhile.
+// provision registers the run in s.runs before any provisioning I/O so a
+// concurrent Kill takes the supervised path instead of transitioning the row
+// underneath the in-flight launch.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	entry := &supervised{
 		runID:           run.ID,
@@ -411,9 +393,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Lock()
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	s.mu.Unlock()
-	// Coordination assets are Aether-owned container surfaces and are appended
-	// after the environment plan's validated workspace mounts. Staging errors
-	// are provisioning errors: never create a container that lacks the CLI.
+	// Staging errors fail provisioning: never create a container that lacks the CLI.
 	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
 	if coordErr != nil {
 		return coordErr
@@ -430,9 +410,8 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	}
 	argv = append(argv, coordArgs...)
 	argv = native.Command(argv)
-	// Last, so the server's value wins over the workspace's for the same
-	// reason Profile.Env's does: what the server needs the container to
-	// have is not a preference.
+	// Last, so the server's value wins over the workspace's: what the server
+	// needs the container to have is not a preference.
 	maps.Copy(plan.Env, coordEnv)
 	maps.Copy(plan.Env, native.Env)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
@@ -499,10 +478,8 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	return nil
 }
 
-// failProvisioning records the terminal state after a provisioning error -
-// abandoned ("killed") when a kill was accepted during provisioning,
-// failed ("provisioning: <err>") otherwise - on a fresh context so a
-// cancelled launch still lands in a consistent state.
+// failProvisioning uses a fresh context so a cancelled launch still lands in
+// a consistent state.
 func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cause error) {
 	slog.Error("scheduler: provisioning failed", "run", run.ID, "error", cause)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -8,8 +8,7 @@ import (
 )
 
 // ApproveNow releases a queued steer request for immediate delivery. The
-// approver is recorded in decision metadata, while injection remains
-// attributed to the request author's member identity.
+// injection stays attributed to the request author, not the approver.
 func (s *Service) ApproveNow(ctx context.Context, id string, by domain.MemberID, session string, generation uint64) (Result, error) {
 	msg, run, err := s.messageActorRun(ctx, id, by)
 	if err != nil {

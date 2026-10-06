@@ -63,8 +63,6 @@ func TestLoginPathIsDir(t *testing.T) {
 	}
 }
 
-// A symlink anywhere on the path makes it unshareable, whether it points
-// inside the home, at another member's home, or at the host.
 func TestLoginPathIsDirRefusesSymlinks(t *testing.T) {
 	cases := map[string]func(t *testing.T, owner, other string){
 		"final component to another home": func(t *testing.T, owner, other string) {
@@ -109,7 +107,6 @@ func TestPrepareLoginMountpoint(t *testing.T) {
 		t.Fatalf("directory mountpoint = %v, %v; want a directory", info, err)
 	}
 
-	// The launcher's own login is kept, never truncated or replaced.
 	if err := os.WriteFile(filepath.Join(launcher, ".claude", ".credentials.json"), []byte("mine"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +124,6 @@ func TestPrepareLoginMountpoint(t *testing.T) {
 		t.Fatal("a file was accepted as a directory mountpoint")
 	}
 
-	// A symlink planted in the launcher's home cannot lead preparation out.
 	replaceWithSymlink(t, filepath.Join(launcher, ".claude"), "../other/.codex")
 	if err := manager.PrepareLoginMountpoint("launcher", ".claude/.credentials.json", false); err == nil {
 		t.Fatal("preparation followed a symlinked parent")

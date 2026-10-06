@@ -8,9 +8,8 @@ const (
 	MethodConfigImport = "config.import"
 )
 
-// ConfigRoot identifies one harness profile directory in the authenticated
-// member's persistent home. Path is a display/container path such as
-// ~/.claude; requests use paths relative to that root.
+// ConfigRoot is one harness profile directory in the member's persistent
+// home; request paths are relative to it.
 type ConfigRoot struct {
 	Harness         string   `json:"harness"`
 	DisplayName     string   `json:"display_name"`
@@ -43,8 +42,8 @@ type ConfigReadParams struct {
 	Path    string `json:"path"`
 }
 
-// ConfigFileReadResult follows files.read's complete-content metadata and
-// adds a revision token and writable indicator for optimistic editor saves.
+// ConfigFileReadResult is files.read's result plus a revision token and
+// writable flag for optimistic editor saves.
 type ConfigFileReadResult struct {
 	Content   string `json:"content"`
 	Truncated bool   `json:"truncated"`

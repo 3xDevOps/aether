@@ -178,10 +178,8 @@ func (c *Conn) closed() bool {
 // Close closes the agent's stdin; adapters exit on EOF.
 func (c *Conn) Close() error { return c.w.Close() }
 
-// SessionID is the agent session this connection drives.
 func (c *Conn) SessionID() string { return c.sessionID.Load().(string) }
 
-// Info is what the agent advertised in initialize.
 func (c *Conn) Info() AgentInfo { return c.info }
 
 func call[T any](c *Conn, ctx context.Context, method string, params any) (T, error) {

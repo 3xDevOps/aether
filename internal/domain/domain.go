@@ -1,9 +1,5 @@
-// Package domain defines the three core Aether objects - Workspace, Run,
-// Member - and their shared enums. This is the type contract the SQLite
-// store, the event bus, and the runtime all build against; they add no
-// fields of their own.
-//
-// IDs are opaque strings; the store assigns them at creation time.
+// Package domain defines the core Aether objects - Workspace, Run, Member -
+// and their shared enums. IDs are opaque strings the store assigns.
 package domain
 
 import (
@@ -15,28 +11,22 @@ import (
 )
 
 type (
-	// WorkspaceID identifies a Workspace.
 	WorkspaceID string
-	// RunID identifies a Run.
-	RunID string
-	// MemberID identifies a Member.
-	MemberID string
+	RunID       string
+	MemberID    string
 )
 
-// SetupPolicy controls the script run before a command starts in the
-// workspace environment.
+// SetupPolicy is the script run before a command starts in the workspace
+// environment.
 type SetupPolicy struct {
 	Script string `json:"script,omitempty"`
 }
 
-// WorkspaceEnvironment carries workspace variables and its pre-launch setup
-// policy.
 type WorkspaceEnvironment struct {
 	Variables   map[string]string `json:"variables,omitempty"`
 	SetupPolicy SetupPolicy       `json:"setup_policy,omitempty"`
 }
 
-// Valid reports whether all environment variable names are valid.
 func (e WorkspaceEnvironment) Valid() bool {
 	for name := range e.Variables {
 		if name == "" || strings.ContainsAny(name, "=\x00") {
@@ -52,22 +42,18 @@ type WorkspaceSelector struct {
 	Name string
 }
 
-// Valid reports whether exactly one selector form is present.
 func (s WorkspaceSelector) Valid() bool {
 	return (s.ID != "") != (strings.TrimSpace(s.Name) != "")
 }
 
-// RunStatus is the lifecycle state of a Run.
-//
-// The lifecycle is:
+// RunStatus is the lifecycle state of a Run:
 //
 //	queued -> provisioning -> running <-> needs-attention -> completed -> (merged | abandoned)
 //
 // A run can also become failed or interrupted before it completes. Completed
 // is excluded from active-run operations but remains closable until a final
-// disposition is chosen. A TUI run finished by its agent's terminal report
-// is completed or failed while it still holds its paused container for
-// relaunch, like a merged or abandoned TUI run a human closed.
+// disposition is chosen. A terminal TUI run may still hold a paused container
+// for relaunch.
 type RunStatus string
 
 const (
@@ -82,16 +68,13 @@ const (
 	RunInterrupted    RunStatus = "interrupted"
 )
 
-// AllRunStatuses lists every defined run status in lifecycle order. It is
-// the single source of truth consumers derive status sets from (e.g. the
-// store's non-terminal query); extend it when adding a status.
+// AllRunStatuses lists every run status in lifecycle order; consumers such as
+// the store's non-terminal query derive their status sets from it.
 var AllRunStatuses = []RunStatus{
 	RunQueued, RunProvisioning, RunRunning, RunNeedsAttention, RunCompleted,
 	RunMerged, RunAbandoned, RunFailed, RunInterrupted,
 }
 
-// Terminal reports whether the run has finished execution. A terminal TUI
-// run may still hold a paused, retained container for relaunch.
 func (s RunStatus) Terminal() bool {
 	switch s {
 	case RunCompleted, RunMerged, RunAbandoned, RunFailed, RunInterrupted:
@@ -109,7 +92,6 @@ func (s RunStatus) Final() bool {
 	return false
 }
 
-// Valid reports whether s is one of the defined run statuses.
 func (s RunStatus) Valid() bool {
 	return slices.Contains(AllRunStatuses, s)
 }
@@ -123,8 +105,7 @@ const ArchiveRetention = 14 * 24 * time.Hour
 type LaunchMode string
 
 const (
-	// LaunchTUI runs the agent's native interactive TUI in a persistent
-	// server-side PTY. This is the default.
+	// LaunchTUI runs the agent's native TUI in a persistent server-side PTY.
 	LaunchTUI LaunchMode = "tui"
 	// LaunchHeadless runs the agent in its structured output mode.
 	LaunchHeadless LaunchMode = "headless"
@@ -132,7 +113,6 @@ const (
 	LaunchACP LaunchMode = "acp"
 )
 
-// Valid reports whether m is a defined launch mode.
 func (m LaunchMode) Valid() bool {
 	return m == LaunchTUI || m == LaunchHeadless || m == LaunchACP
 }
@@ -162,7 +142,6 @@ const (
 	RoleAdmin        Role = "admin"
 )
 
-// Valid reports whether r is a defined role.
 func (r Role) Valid() bool {
 	return r == RoleViewer || r == RoleCollaborator || r == RoleAdmin
 }
@@ -174,12 +153,9 @@ type Workspace struct {
 	ID          WorkspaceID
 	Name        string
 	Environment WorkspaceEnvironment
-	// BaseBranch is the branch new run worktrees are created from.
-	BaseBranch string
-	// SteerOthers is the workspace's steering policy for runs owned by
-	// someone else: "" (default) lets any collaborator steer or kill any
-	// run; SteerOthersAdminsOnly restricts steering and killing another
-	// member's run to its owner and admins.
+	BaseBranch  string
+	// SteerOthers "" lets any collaborator steer or kill any run;
+	// SteerOthersAdminsOnly restricts that to the run's owner and admins.
 	SteerOthers string
 	// Origin is the upstream git URL run checkouts push to; "" when the
 	// workspace has none, in which case a checkout keeps the origin its
@@ -188,7 +164,6 @@ type Workspace struct {
 	CreatedAt time.Time
 }
 
-// MirrorAuth identifies how an upstream workspace mirror authenticates.
 type MirrorAuth string
 
 const (
@@ -198,12 +173,10 @@ const (
 	MirrorAuthDeployKey MirrorAuth = "deploy-key"
 )
 
-// Valid reports whether a is a defined mirror authentication mode.
 func (a MirrorAuth) Valid() bool {
 	return a == MirrorAuthPublic || a == MirrorAuthDeployKey
 }
 
-// MirrorStatus is the persisted lifecycle state of a workspace mirror.
 type MirrorStatus string
 
 const (
@@ -219,7 +192,6 @@ const (
 	MirrorStatusError         MirrorStatus = "error"
 )
 
-// AllMirrorStatuses lists every defined mirror status.
 var AllMirrorStatuses = []MirrorStatus{
 	MirrorStatusPending,
 	MirrorStatusRefreshing,
@@ -233,7 +205,6 @@ var AllMirrorStatuses = []MirrorStatus{
 	MirrorStatusError,
 }
 
-// Valid reports whether s is a defined mirror status.
 func (s MirrorStatus) Valid() bool {
 	return slices.Contains(AllMirrorStatuses, s)
 }
@@ -261,9 +232,8 @@ type WorkspaceMirror struct {
 	LastSuccessAt  time.Time
 }
 
-// Valid reports whether the mirror contains values with safe, storage-level
-// shapes. Git-specific object and ref semantics are intentionally kept here
-// rather than importing the git engine package.
+// Valid checks storage-level shapes only. Git object and ref rules are
+// duplicated here rather than importing the git engine package.
 func (m WorkspaceMirror) Valid() bool {
 	return m.WorkspaceID != "" &&
 		ValidMirrorSourceURL(m.SourceURL) &&
@@ -277,9 +247,8 @@ func (m WorkspaceMirror) Valid() bool {
 		ValidMirrorFingerprint(m.KeyFingerprint)
 }
 
-// ValidMirrorSourceURL reports whether url is a non-empty, one-line source
-// URL suitable for a mirror fetch. Mirrors support HTTPS and SSH remotes,
-// including Git's scp-like form.
+// ValidMirrorSourceURL accepts HTTPS and SSH remotes, including Git's
+// scp-like form.
 func ValidMirrorSourceURL(url string) bool {
 	if url == "" || strings.TrimSpace(url) != url || strings.ContainsAny(url, "\x00\r\n\t ") || strings.HasPrefix(url, "-") {
 		return false
@@ -289,8 +258,6 @@ func ValidMirrorSourceURL(url string) bool {
 		scpLikeOrigin.MatchString(url)
 }
 
-// ValidMirrorSourceIdentity reports whether identity is a non-empty,
-// one-line source identity.
 func ValidMirrorSourceIdentity(identity string) bool {
 	return identity != "" && strings.TrimSpace(identity) == identity &&
 		!strings.ContainsAny(identity, "\x00\r\n\t ")
@@ -309,8 +276,7 @@ func ValidMirrorBranch(branch string) bool {
 	return true
 }
 
-// ValidMirrorSHA reports whether sha is empty or a complete hexadecimal
-// object ID. Both SHA-1 and SHA-256 repository object formats are accepted.
+// ValidMirrorSHA accepts empty or a full SHA-1 or SHA-256 object ID.
 func ValidMirrorSHA(sha string) bool {
 	if sha == "" {
 		return true
@@ -345,15 +311,12 @@ func ValidMirrorFingerprint(fingerprint string) bool {
 	return true
 }
 
-// DefaultBaseBranch is the branch a workspace falls back to when none was
-// given at creation.
 const DefaultBaseBranch = "main"
 
 // SteerOthersAdminsOnly is the restrictive Workspace.SteerOthers value.
 // The empty string is the permissive default.
 const SteerOthersAdminsOnly = "admins_only"
 
-// ValidSteerOthers reports whether v is a defined SteerOthers value.
 func ValidSteerOthers(v string) bool {
 	return v == "" || v == SteerOthersAdminsOnly
 }
@@ -365,11 +328,9 @@ var originPrefixes = []string{"https://", "http://", "ssh://", "git://", "/"}
 // scpLikeOrigin matches git's scp-like remote form (user@host:path).
 var scpLikeOrigin = regexp.MustCompile(`^[A-Za-z0-9._-]+@[^:/\s]+:`)
 
-// ValidOrigin reports whether url is usable as a workspace origin. The
-// empty string is valid and clears the origin. Otherwise the value is
-// handed to git as a remote URL inside a run container, so it must be one
-// line with no whitespace, and must not start with "-", which git would
-// read as an option rather than a URL.
+// ValidOrigin accepts "" (clears the origin). Otherwise the value reaches git
+// as a remote URL, so it must be one line and must not start with "-", which
+// git would read as an option.
 func ValidOrigin(url string) bool {
 	if url == "" {
 		return true
@@ -390,14 +351,9 @@ func ValidOrigin(url string) bool {
 	return scpLikeOrigin.MatchString(url)
 }
 
-// NormalizeOrigin rewrites a github.com origin written in either of git's
-// SSH forms - git@github.com:acme/app.git and
-// ssh://[git@]github.com[:22]/acme/app.git - to
-// https://github.com/acme/app.git. A run authenticates to github.com over
-// https only, so an SSH origin recorded as typed could never be pushed to
-// from a container. Every other origin, an SSH URL on another host
-// included, is returned unchanged: only github.com's https form is known
-// to address the same repository.
+// NormalizeOrigin rewrites a github.com SSH origin to its https form, since a
+// run authenticates to github.com over https only. Other hosts are left
+// unchanged: only github.com's https form is known to be the same repository.
 func NormalizeOrigin(origin string) string {
 	var authority, path string
 	if rest, ok := strings.CutPrefix(origin, "ssh://"); ok {
@@ -428,8 +384,7 @@ type Member struct {
 	// PublicKey is the member's SSH public key in authorized_keys format;
 	// empty for tailnet-only members.
 	PublicKey string
-	// TailnetLogin is the member's Tailscale login name (e.g.
-	// "alice@example.com") as reported by tailscaled's WhoIs; empty for
+	// TailnetLogin is the login tailscaled's WhoIs reports; empty for
 	// key-only members.
 	TailnetLogin string
 	// Pending marks a tailnet-auto-registered member awaiting admin
@@ -448,8 +403,6 @@ type Member struct {
 	CreatedAt time.Time
 }
 
-// GitIdentity is a git author or co-author: the name and address a commit
-// is attributed to.
 type GitIdentity struct {
 	Name  string
 	Email string
@@ -460,16 +413,10 @@ type GitIdentity struct {
 // commit crediting no upstream account.
 const fallbackGitEmailDomain = "@aether.local"
 
-// GitIdentity returns what commits for this member are authored as: the
-// git name and email they set, falling back to the display name and the
-// member's aether.local address.
-//
-// Every half is validated here rather than trusted from the row. A display
-// name is member-supplied and never checked - it comes out of the SSH
-// username an invite is redeemed with - and one holding angle brackets
-// would put a second address inside the "Name <email>" form, which git and
-// GitHub both resolve to the first one they see. A member id credits
-// nobody, which is the honest answer; crediting the wrong account is not.
+// GitIdentity validates every half rather than trusting the row: a display
+// name comes unchecked from the SSH username, and angle brackets in it would
+// put a second address inside "Name <email>", which git and GitHub resolve to
+// the first one they see. Crediting nobody beats crediting the wrong account.
 func (m *Member) GitIdentity() GitIdentity {
 	id := GitIdentity{Name: string(m.ID), Email: string(m.ID) + fallbackGitEmailDomain}
 	switch {
@@ -484,10 +431,8 @@ func (m *Member) GitIdentity() GitIdentity {
 	return id
 }
 
-// String renders the identity in git's "Name <email>" form.
 func (g GitIdentity) String() string { return g.Name + " <" + g.Email + ">" }
 
-// Trailer renders the identity as a Co-authored-by commit trailer.
 func (g GitIdentity) Trailer() string { return "Co-authored-by: " + g.String() }
 
 // ValidGitName reports whether name is usable as a git author name: no
@@ -557,10 +502,8 @@ type GitHubCLI struct {
 	Minimum string
 	// Detail is what gh, or the container that could not run it, printed.
 	Detail string
-	// Image is the image the terminal container is running and SavedImage
-	// the member's own saved one. They differ while a container outlives
-	// the image it should be on, which is the whole reason a member has to
-	// reopen the terminal after either one moves.
+	// Image is what the terminal container runs and SavedImage the member's
+	// saved one; they differ while a container outlives its intended image.
 	Image      string
 	SavedImage string
 	// Path is where gh resolved, filled only when that is a file inside the
@@ -582,7 +525,6 @@ type Terminal struct {
 	StartedAt   time.Time
 }
 
-// TerminalStatus describes the running state and live tabs of a member terminal.
 type TerminalStatus struct {
 	Running    bool
 	Image      string
@@ -599,37 +541,29 @@ type Run struct {
 	WorkspaceID WorkspaceID
 	// MemberID is the owning member (transferable via handoff).
 	MemberID MemberID
-	// AccountMemberID owns the vendor login and quota used by this run. It
-	// normally equals MemberID; a different value records an explicit
-	// account-share launch, which mounts only the harness's login paths from
-	// this member's home into the launcher's environment, without changing
-	// run ownership or actor attribution. Empty rows from older schemas fall
-	// back to MemberID.
+	// AccountMemberID owns the vendor login and quota used by this run. A
+	// value other than MemberID is an account-share launch, which mounts only
+	// the harness's login paths from this member's home and changes neither
+	// ownership nor attribution.
 	AccountMemberID MemberID
-	// HomeMemberID is whose persistent home the run's container mounts. It
-	// is set to the launcher when the run is created; a handoff changes
-	// MemberID, never this. It is empty on rows created before account
-	// shares were narrowed, whose containers mounted the account's whole
-	// home.
+	// HomeMemberID is whose home the container mounts: the launcher. A
+	// handoff changes MemberID, never this. Empty on rows created before
+	// account shares were narrowed.
 	HomeMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
 	// Title is the latest terminal title reported by the agent.
-	Title string
-	// Harness is the agent harness name, e.g. "claude", "codex".
+	Title   string
 	Harness string
 	Mode    LaunchMode
 	Status  RunStatus
 	// Reason is the last run.status reason, sanitized like the event
 	// payload; empty when the last transition carried no reason.
 	Reason string
-	// Branch is the run's git branch, aether/run-<slug>-<id>: the task
-	// leads so the branch reads as what it is, the run ID trails as the
-	// disambiguator.
+	// Branch is aether/run-<slug>-<id>.
 	Branch string
 	// LastCommit is the most recently published commit on the run branch.
-	LastCommit string
-	// LastCommitAt is when LastCommit was published.
+	LastCommit   string
 	LastCommitAt time.Time
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
@@ -660,8 +594,8 @@ type Run struct {
 	MissionID       MissionID
 	MissionRole     string
 	IntegratorRunID RunID
-	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
-	// provisioning. Zero (empty) means unpinned / no snapshot.
+	// ProfileSnapshotID is the agent-profile snapshot pinned at provisioning;
+	// empty means unpinned.
 	ProfileSnapshotID ProfileSnapshotID
 	// HarnessSessionID is the agent's own session id, which a driver records
 	// so a reopened run can resume the same conversation. Empty until a
@@ -670,7 +604,6 @@ type Run struct {
 	// BaseCommit is the commit SHA recorded for the workspace base at the
 	// last base check. Empty means no base commit has been observed.
 	BaseCommit string
-	// BaseBranch is the workspace branch used as the base for this run.
 	BaseBranch string
 	// BaseSource is the source identity used to obtain BaseCommit.
 	BaseSource string
@@ -705,31 +638,20 @@ type AccountShare struct {
 	CreatedAt time.Time
 }
 
-// ServerBusy reports what is keeping a server from being idle, which is
-// what a scheduled self-update waits for. It is the run engine's answer,
-// consumed by the update service, so it lives here rather than in either.
-//
-// Paused runs are counted separately because they do not hold anything
-// back: a frozen container survives a restart exactly like a live one, and
-// nothing is working inside it. They are still reported so an admin
-// looking at a pending update is not left wondering why a run that
-// `aether runs` calls running is being ignored.
+// ServerBusy is what a scheduled self-update waits for. Paused runs do not
+// hold an update back - a frozen container survives a restart - but are still
+// reported so an admin sees why a "running" run is ignored.
 type ServerBusy struct {
 	// Unknown reports that the server could not tell what it was doing -
 	// a failed store read. It is never idle: an unknown answer must not be
 	// the one that decides to restart.
 	Unknown bool
-	// Runs is how many runs are still working, which holds an update back.
-	Runs int
-	// Paused is how many runs are paused. They do not hold an update back.
-	Paused int
-	// Shells is how many interactive terminal attaches are live. A restart
-	// would drop each stream under the person typing into it, so each one
-	// holds an update back.
+	Runs    int
+	Paused  int
+	// Shells is live interactive terminal attaches; a restart would drop each.
 	Shells int
 }
 
-// Idle reports that nothing is holding a server update back.
 func (b ServerBusy) Idle() bool {
 	return !b.Unknown && b.Runs == 0 && b.Shells == 0
 }

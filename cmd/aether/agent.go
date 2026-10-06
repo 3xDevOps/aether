@@ -48,8 +48,6 @@ func agentList(args []string) error {
 	})
 }
 
-// printAgents emits one "agent <name> <source>" line per agent so members can
-// tell shipped profiles from their own registered definitions.
 func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 	if len(agents) == 0 {
 		_, err := fmt.Fprintln(w, "no agents")
@@ -211,8 +209,6 @@ func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
 	return describeTerminalEnd(copyRaw(stream, 0))
 }
 
-// agentInstallScript is the command that installs agent, followed by its
-// enhanced-mode adapter's install when enhanced is set and it has one.
 func agentInstallScript(agent protocol.AgentInfo, enhanced bool) string {
 	switch {
 	case enhanced && agent.EnhancedInstallScript != "":

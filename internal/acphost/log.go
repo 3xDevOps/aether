@@ -14,10 +14,8 @@ import (
 	"time"
 )
 
-// ErrLogClosed is returned by a Log that was closed or deleted.
 var ErrLogClosed = errors.New("acphost: item log closed")
 
-// ErrLogReadOnly is returned by Append on a log opened with OpenLogReadOnly.
 var ErrLogReadOnly = errors.New("acphost: item log opened read-only")
 
 // Log is a run's append-only JSONL item log. Every Append is one write to
@@ -222,7 +220,6 @@ func readItems(f *os.File, from, to int64) ([]Item, error) {
 	return items, nil
 }
 
-// Len returns the number of items in the log.
 func (l *Log) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -257,7 +254,6 @@ func (l *Log) Close() error {
 	return nil
 }
 
-// Delete closes the log and removes its file.
 func (l *Log) Delete() error {
 	if err := l.Close(); err != nil {
 		return err

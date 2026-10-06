@@ -17,9 +17,8 @@ var errNoItemLog = errors.New("scheduler: the run has no session item log")
 
 type ACPStream struct {
 	Replay []acphost.Item
-	// Reset means the cursor was past the log's end, so the log was
-	// replaced: Replay starts from the first item and the viewer drops what
-	// it held.
+	// Reset means the log was replaced past the cursor: Replay starts from
+	// the first item and the viewer drops what it held.
 	Reset bool
 	Epoch int64
 	Seq   int64
@@ -131,7 +130,6 @@ func (s *Scheduler) withItemLog(run domain.RunID, read func(*acphost.Log) error)
 	return read(log)
 }
 
-// recordedMode is the last mode run's item log recorded, or "".
 func (s *Scheduler) recordedMode(run domain.RunID) string {
 	log, err := s.openItemLog(run)
 	if err != nil || log == nil {

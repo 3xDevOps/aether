@@ -17,14 +17,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 )
 
-// TestACPAdapterInstall installs each pinned adapter the way InstallCommand
-// does, into a member home mounted at /home/aether in the standard image
-// and as a non-root run user, then starts it and completes the ACP
-// initialize handshake over stdio. The cold start it logs is the first start
-// after install, which is what a member's first enhanced run pays.
-//
-// AETHER_ACP_IMAGE names the standard image (docs/testing.md). Unset, or
-// without access to the npm registry, the test skips.
+// The logged cold start is the first start after install, which is what a
+// member's first enhanced run pays. Needs AETHER_ACP_IMAGE (docs/testing.md)
+// and npm registry access; skips otherwise.
 func TestACPAdapterInstall(t *testing.T) {
 	image := os.Getenv("AETHER_ACP_IMAGE")
 	if image == "" {
@@ -131,9 +126,7 @@ func testAdapterInstall(t *testing.T, image string, p Profile) {
 	t.Fatalf("%s exited without answering initialize: %v\nstderr: %s", install.Binary, lines.Err(), stderr.String())
 }
 
-// testLiveSession opens a session the way an enhanced run does: the session
-// host over the adapter's stdio in the standard image, initialize then
-// session/new. No prompt is sent, so no login is needed.
+// No prompt is sent, so no login is needed.
 func testLiveSession(ctx context.Context, t *testing.T, container, adapter string, p Profile) {
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"exec", "-i",
 		"--env", "CLAUDE_CONFIG_DIR=/home/aether/.claude", "--env", "NO_BROWSER=1",

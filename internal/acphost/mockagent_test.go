@@ -65,7 +65,6 @@ func newMockAgent(t *testing.T, fix fixture) *mockAgent {
 	return &mockAgent{t: t, fix: fix, cancelled: make(chan struct{}, 8)}
 }
 
-// pipes connects the mock and returns the host's ends.
 func (m *mockAgent) pipes() (io.Reader, io.WriteCloser) {
 	hostIn, agentOut := io.Pipe()
 	agentIn, hostOut := io.Pipe()
@@ -169,7 +168,6 @@ func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMe
 	return nil, acp.NewMethodNotFound(method)
 }
 
-// recorder captures the scheduler callbacks.
 type recorder struct {
 	mu       sync.Mutex
 	states   []string
@@ -269,7 +267,6 @@ func startMock(t *testing.T, m *mockAgent, cfg Config) (*Session, *recorder) {
 
 func textPrompt(s string) []acp.ContentBlock { return []acp.ContentBlock{acp.TextBlock(s)} }
 
-// items reads the whole log of a live session.
 func items(t *testing.T, s *Session) []Item {
 	t.Helper()
 	its, err := s.Log().ReadAfter(0, 0)

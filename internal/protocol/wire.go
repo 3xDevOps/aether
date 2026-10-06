@@ -9,17 +9,14 @@ import (
 )
 
 // Run is the wire form of a run. Times are RFC3339; server-side host paths
-// never appear on the wire. Reason is the last run.status reason,
-// sanitized server-side. Paused reports a frozen container; it is
-// decorated by handlers from the scheduler, never derived from the
+// never appear on the wire. Paused comes from the scheduler, never from the
 // stored run.
 type Run struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	MemberID    string `json:"member_id"`
-	// AccountMemberID identifies the member whose vendor login backs the
-	// run. MemberID remains the run owner and actor; the run's environment
-	// is its launcher's.
+	// AccountMemberID's vendor login backs the run; MemberID remains the
+	// owner and actor.
 	AccountMemberID string `json:"account_member_id"`
 	Task            string `json:"task"`
 	Title           string `json:"title,omitempty"`
@@ -30,42 +27,35 @@ type Run struct {
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
-	// PendingInputs is the scheduler's correlated native input snapshot, separate
-	// from execution status. Modern gateways always send a list, including [].
+	// Always a list, including [].
 	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
 	Branch        string                   `json:"branch"`
 	LastCommit    string                   `json:"last_commit,omitempty"`
 	LastCommitAt  *string                  `json:"last_commit_at,omitempty"`
 	Protected     bool                     `json:"protected,omitempty"`
-	// ArchivedAt is when the run was hidden from the board; absent means
-	// it is not archived. DeletesAt is ArchivedAt + domain.ArchiveRetention,
-	// computed here so no client hardcodes the retention window.
+	// DeletesAt is computed here so no client hardcodes the retention window.
 	ArchivedAt *string `json:"archived_at,omitempty"`
 	DeletesAt  *string `json:"deletes_at,omitempty"`
-	// OutcomeUnseen is true while a run an agent's report finished has not
-	// been opened by its owner; run.seen clears it.
+	// run.seen clears OutcomeUnseen.
 	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
-	// UnansweredQuestions is server-computed in run snapshots. It is always
-	// present on modern gateways, including zero; web clients keep the field
-	// optional so snapshots from older gateways remain valid.
+	// Always present, including zero; web clients keep it optional for older
+	// gateways.
 	UnansweredQuestions int    `json:"unanswered_questions"`
 	MissionID           string `json:"mission_id,omitempty"`
 	MissionRole         string `json:"mission_role,omitempty"`
 	IntegratorRunID     string `json:"integrator_run_id,omitempty"`
-	// BaseCommit, BaseBranch, BaseSource, and BaseCheckedAt are the
-	// immutable base provenance captured for this run.
+	// Immutable base provenance captured at launch.
 	BaseCommit    string  `json:"base_commit,omitempty"`
 	BaseBranch    string  `json:"base_branch,omitempty"`
 	BaseSource    string  `json:"base_source,omitempty"`
 	BaseCheckedAt *string `json:"base_checked_at,omitempty"`
 }
 
-// MirrorFailure is the sanitized provenance available when a base capture
-// cannot complete. It lets a caller decide whether to retry with the exact
+// MirrorFailure lets a caller retry a failed base capture with the exact
 // accepted commit returned by the mirror.
 type MirrorFailure struct {
 	Kind           string `json:"kind"`
@@ -83,8 +73,7 @@ type Workspace struct {
 	Name        string `json:"name"`
 	BaseBranch  string `json:"base_branch"`
 	SteerOthers string `json:"steer_others,omitempty"`
-	// Origin is the upstream git URL run checkouts push to; absent when
-	// the workspace has none.
+	// Origin is the upstream git URL run checkouts push to.
 	Origin    string `json:"origin,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
@@ -96,9 +85,7 @@ type Member struct {
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
 	Role        string `json:"role"`
-	// GitName and GitEmail are what commits made for this member are
-	// authored as; empty means the member has set neither and the
-	// fallback applies.
+	// Empty means the fallback identity applies.
 	GitName  string `json:"git_name,omitempty"`
 	GitEmail string `json:"git_email,omitempty"`
 	Pending  bool   `json:"pending,omitempty"`
@@ -134,8 +121,6 @@ func rfc3339ValuePtr(t time.Time) *string {
 	return &s
 }
 
-// runDeletesAt computes the wire deletes_at from a run's ArchivedAt: the
-// date the deletion sweep will remove it. nil (not archived) stays nil.
 func runDeletesAt(archivedAt *time.Time) *string {
 	if archivedAt == nil {
 		return nil
@@ -144,7 +129,6 @@ func runDeletesAt(archivedAt *time.Time) *string {
 	return rfc3339Ptr(&deletesAt)
 }
 
-// RunFromDomain converts a domain run to its wire form.
 func RunFromDomain(r *domain.Run) Run {
 	return Run{
 		ID:                  string(r.ID),
@@ -180,7 +164,6 @@ func RunFromDomain(r *domain.Run) Run {
 	}
 }
 
-// WorkspaceFromDomain converts a domain workspace to its wire form.
 func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 	return Workspace{
 		ID:          string(w.ID),
@@ -192,7 +175,6 @@ func WorkspaceFromDomain(w *domain.Workspace) Workspace {
 	}
 }
 
-// MemberFromDomain converts a domain member to its wire form.
 func MemberFromDomain(m *domain.Member) Member {
 	return Member{
 		ID:          string(m.ID),
@@ -211,47 +193,39 @@ type ServerInfoResult struct {
 	ProtocolVersion string `json:"protocol_version"`
 	Time            string `json:"time"`
 	Member          Member `json:"member"`
-	// TailnetHostname is the server's MagicDNS name, discovered once at
-	// startup; empty when the server is not on a tailnet.
+	// MagicDNS name discovered once at startup; empty off a tailnet.
 	TailnetHostname string `json:"tailnet_hostname,omitempty"`
-	// TailnetIdentityAuth reports whether the server resolves tailnet
-	// identities (WhoIs) for keyless auth.
+	// Whether the server resolves tailnet identities (WhoIs) for keyless auth.
 	TailnetIdentityAuth bool `json:"tailnet_identity_auth,omitempty"`
 }
 
-// WorkspaceListResult is the result of workspace.list.
 type WorkspaceListResult struct {
 	Workspaces []Workspace `json:"workspaces"`
 }
 
-// WorkspaceGetParams are the params of workspace.get.
 type WorkspaceGetParams struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-// WorkspaceGetResult is the result of workspace.get.
 type WorkspaceGetResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 
-// MemberListResult is the result of member.list.
 type MemberListResult struct {
 	Members []Member `json:"members"`
 }
 
-// MemberApproveParams are the params of member.approve (admin only):
-// clears the target member's pending flag.
+// MemberApproveParams: member.approve is admin only.
 type MemberApproveParams struct {
 	MemberID string `json:"member_id"`
 }
 
-// MemberApproveResult is the result of member.approve.
 type MemberApproveResult struct {
 	Member Member `json:"member"`
 }
 
-// AccountListResult reports the accounts the caller may launch with and the
-// members currently allowed to launch with the caller's account.
+// AccountListResult: Accounts are those the caller may launch with;
+// SharedWith are members allowed to launch with the caller's account.
 type AccountListResult struct {
 	Accounts   []Member `json:"accounts"`
 	SharedWith []Member `json:"shared_with"`
@@ -263,92 +237,75 @@ type AccountMemberParams struct {
 	MemberID string `json:"member_id"`
 }
 
-// MemberColorParams are the params of member.color: set a member's
-// attribution color. MemberID empty means the caller; setting anyone
-// else's color requires the admin role.
+// MemberColorParams: empty MemberID means the caller; anyone else requires
+// the admin role.
 type MemberColorParams struct {
 	MemberID string `json:"member_id,omitempty"`
 	Color    string `json:"color"`
 }
 
-// MemberColorResult is the result of member.color.
 type MemberColorResult struct {
 	Member Member `json:"member"`
 }
 
-// MemberGitParams sets a member's git identity - the name and address
-// commits made for them are authored as. An empty field clears that half
-// back to its fallback. MemberID defaults to the caller.
+// MemberGitParams: an empty field clears that half back to its fallback.
+// MemberID defaults to the caller.
 type MemberGitParams struct {
 	MemberID string `json:"member_id,omitempty"`
 	Name     string `json:"name"`
 	Email    string `json:"email"`
 }
 
-// MemberGitResult echoes the member after the change.
 type MemberGitResult struct {
 	Member Member `json:"member"`
 }
 
-// GitHubConnectResult is the result of github.connect: the account the
-// environment terminal is logged in to, and the commit signing key now
-// registered on it.
 type GitHubConnectResult struct {
 	Login       string `json:"login"`
 	SigningKey  string `json:"signing_key"`
 	Fingerprint string `json:"fingerprint"`
 }
 
-// GitHubProbeResult is the result of github.probe: the gh the caller's
-// environment terminal has, and what has to happen when it cannot do the
-// login. Status is "ok", "missing" (nothing named gh on PATH), "broken"
-// (gh is there but would not run) or "outdated".
+// GitHubProbeResult.Status is "ok", "missing" (no gh on PATH), "broken" (gh
+// would not run) or "outdated".
 type GitHubProbeResult struct {
 	Status string `json:"status"`
-	// Version is empty unless gh ran and printed a version line this could
-	// read; Minimum is the oldest gh the login check can read.
+	// Minimum is the oldest gh the login check can read.
 	Version string `json:"version,omitempty"`
 	Minimum string `json:"minimum"`
 	// Detail is what gh, or the container that could not run it, printed.
 	Detail string `json:"detail,omitempty"`
-	// Image is the image the terminal container is running; SavedImage is
-	// the caller's own saved one, omitted when they have none.
+	// SavedImage is the caller's own saved image, if any.
 	Image      string `json:"image"`
 	SavedImage string `json:"saved_image,omitempty"`
-	// Path is where gh resolved, present only when that is a file inside
-	// the caller's own environment home and therefore outlives every image.
+	// Path is set only when gh resolves inside the caller's environment
+	// home, so it outlives every image.
 	Path string `json:"path,omitempty"`
-	// Remedy is the command the caller runs and AdminRemedy what a server
-	// admin has to run first; both are omitted while gh is fine.
+	// AdminRemedy must run before Remedy; both are omitted while gh is fine.
 	Remedy      string `json:"remedy,omitempty"`
 	AdminRemedy string `json:"admin_remedy,omitempty"`
 }
 
-// RunLaunchParams are the params of run.launch. Task is optional in the
-// default tui mode - an empty task drops the member into the agent's
-// interactive TUI with no seeded prompt - but required in headless mode,
-// which has no interactive surface.
+// RunLaunchParams.Task is optional in tui mode and required in headless
+// mode.
 type RunLaunchParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Task        string `json:"task,omitempty"`
 	Harness     string `json:"harness"`
 	Mode        string `json:"mode,omitempty"`
-	// AccountMemberID selects an account explicitly shared with the caller.
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
-	// CachedBase is the exact accepted mirror commit to retry after a
-	// transient base-capture failure. It is consumed by one launch only.
+	// CachedBase retries a transient base-capture failure with the accepted
+	// mirror commit; one launch consumes it.
 	CachedBase string `json:"cached_base,omitempty"`
 }
 
-// RunListParams are the params of run.list.
 type RunListParams struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	MemberID    string `json:"member_id,omitempty"`
 	ActiveOnly  bool   `json:"active_only,omitempty"`
 }
 
-// RunListResult is the result of run.list.
 type RunListResult struct {
 	Runs []Run `json:"runs"`
 }
@@ -365,89 +322,78 @@ type RunResult struct {
 	Run Run `json:"run"`
 }
 
-// RunInjectParams are the params of run.inject. IdempotencyKey is supplied
-// by the caller and makes a retry return the original room mutation.
+// RunInjectParams.IdempotencyKey makes a retry return the original room
+// mutation.
 type RunInjectParams struct {
 	RunID          string `json:"run_id"`
 	Message        string `json:"message"`
 	IdempotencyKey string `json:"idempotency_key"`
-	// Steer asks an enhanced run's agent to add the message to its running
-	// turn instead of queueing it for the next one.
+	// Steer adds the message to an enhanced run's running turn instead of
+	// queueing it.
 	Steer bool `json:"steer,omitempty"`
-	// The control lease, when the caller holds it, delivers the message at
-	// once instead of after the moderation delay.
+	// Holding the control lease skips the moderation delay.
 	ControlSessionID  string `json:"control_session_id,omitempty"`
 	ControlGeneration uint64 `json:"control_generation,omitempty"`
 }
 
-// RunCloseParams are the params of run.close; Outcome is "merged" or
-// "abandoned".
+// RunCloseParams.Outcome is "merged" or "abandoned".
 type RunCloseParams struct {
 	RunID   string `json:"run_id"`
 	Outcome string `json:"outcome"`
 }
 
-// RunHandoffParams are the params of run.handoff.
 type RunHandoffParams struct {
 	RunID      string `json:"run_id"`
 	ToMemberID string `json:"to_member_id"`
 }
 
-// RunProtectParams are the params of run.protect (owner or admin):
-// toggles the run's protected flag.
+// RunProtectParams: run.protect is owner or admin only.
 type RunProtectParams struct {
 	RunID     string `json:"run_id"`
 	Protected bool   `json:"protected"`
 }
 
-// RunArchiveParams are the params of run.archive: hides a finished run
-// from the board (Archived true) or restores it (false).
 type RunArchiveParams struct {
 	RunID    string `json:"run_id"`
 	Archived bool   `json:"archived"`
 }
 
-// RunSeenParams are the params of run.seen (owner only): the owner has
-// opened a run an agent's report finished.
+// RunSeenParams: run.seen is owner only.
 type RunSeenParams struct {
 	RunID string `json:"run_id"`
 }
 
-// WorkspaceSettingsParams are the params of workspace.settings (admin
-// only). SteerOthers is "" (permissive default) or "admins_only".
+// WorkspaceSettingsParams: admin only. SteerOthers is "" (permissive) or
+// "admins_only".
 type WorkspaceSettingsParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	SteerOthers string `json:"steer_others"`
 }
 
-// WorkspaceSettingsResult is the result of workspace.settings.
 type WorkspaceSettingsResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 
-// WorkspaceOriginParams are the params of workspace.origin. Origin is the
-// upstream git URL run checkouts push to; "" clears it.
+// WorkspaceOriginParams: an empty Origin clears it.
 type WorkspaceOriginParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Origin      string `json:"origin"`
 }
 
-// WorkspaceOriginResult is the result of workspace.origin.
 type WorkspaceOriginResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 
-// RunPullResult is the result of run.pull: fetch coordinates for the run's
-// branch; the transfer itself is a normal git fetch over the exec git
-// transport.
+// RunPullResult holds fetch coordinates; the transfer is a normal git fetch
+// over the exec git transport.
 type RunPullResult struct {
 	WorkspaceID string `json:"workspace_id"`
 	RepoPath    string `json:"repo_path"`
 	Branch      string `json:"branch"`
 }
 
-// SubscribeRequest is the single negotiation line a client sends after
-// opening the events subsystem.
+// SubscribeRequest is the single line a client sends after opening the
+// events subsystem.
 type SubscribeRequest struct {
 	WorkspaceID string   `json:"workspace_id,omitempty"`
 	RunID       string   `json:"run_id,omitempty"`
@@ -456,8 +402,7 @@ type SubscribeRequest struct {
 	AfterSeq    uint64   `json:"after_seq,omitempty"`
 }
 
-// SubscribeResponse acknowledges a SubscribeRequest; on failure the server
-// sends OK false with a code and closes the channel.
+// On failure the server sends OK false with a code and closes the channel.
 type SubscribeResponse struct {
 	OK    bool   `json:"ok"`
 	Code  int    `json:"code,omitempty"`
@@ -471,15 +416,14 @@ type TerminalEpoch string
 // TerminalSequence counts client-visible terminal bytes in publication order.
 type TerminalSequence uint64
 
-// TerminalPosition is the atomic high-water mark for terminal output. Epoch
-// and Sequence must always be copied and compared together.
+// TerminalPosition's Epoch and Sequence must always be copied and compared
+// together.
 type TerminalPosition struct {
 	Epoch    TerminalEpoch    `json:"resume_id,omitempty"`
 	Sequence TerminalSequence `json:"cursor,omitempty"`
 }
 
-// Valid reports whether the position carries the incarnation fence required
-// for a safe delta resume. Sequence zero is a valid position.
+// Valid: sequence zero is a valid position; an empty epoch is not.
 func (p TerminalPosition) Valid() bool { return p.Epoch != "" }
 
 func terminalPosition(position TerminalPosition, resumeID string, cursor uint64) TerminalPosition {
@@ -494,56 +438,42 @@ func legacyTerminalPosition(position TerminalPosition, resumeID string, cursor u
 	return string(position.Epoch), uint64(position.Sequence)
 }
 
-// AttachRequest is the single header line a client sends after opening the
-// attach subsystem. Geometry precedence is pty-req > header > 80x24, and a
-// Follow client's geometry is not part of the session's at all.
+// AttachRequest geometry precedence is pty-req > header > 80x24; a Follow
+// client's geometry is ignored.
 type AttachRequest struct {
 	RunID    string `json:"run_id"`
 	ReadOnly bool   `json:"read_only,omitempty"`
-	// Screen asks for a compact current terminal state on a fresh or fallback
-	// run attach. False retains the complete recorded history.
+	// Screen asks for compact current state instead of full history.
 	Screen bool `json:"screen,omitempty"`
-	// Interactive enables NDJSON input/control frames on a framed dashboard
-	// attach. Raw CLI and shell attachments continue to send PTY bytes.
+	// Interactive enables NDJSON input/control frames on a framed attach.
 	Interactive bool `json:"interactive,omitempty"`
 	Cols        uint `json:"cols,omitempty"`
 	Rows        uint `json:"rows,omitempty"`
-	// Framed carries output and geometry in one ordered terminal record stream.
-	Framed bool `json:"framed,omitempty"`
-	// Shell names a shell tab inside the run container; write is required.
+	Framed      bool `json:"framed,omitempty"`
+	// Shell requires write.
 	Shell       string `json:"shell,omitempty"`
 	Incarnation string `json:"incarnation,omitempty"`
-	// Follow renders the session at the size it already is and imposes
-	// none of its own: the PTY is the minimum over the clients that do
-	// impose one, and a follower is left out of it whether or not it can
-	// write. The ack reports the initial size; framed output reports later
-	// changes before bytes drawn at that size.
+	// Follow imposes no size: the PTY is the minimum over non-followers.
+	// Framed output reports size changes before bytes drawn at that size.
 	Follow bool `json:"follow,omitempty"`
-	// Resume asks for the attach without its scrollback replay: the
-	// client already holds this session's screen and is reattaching only
-	// to change what it may do. The ack reports a replay of zero and the
-	// client keeps what it has, which is what makes taking control a
-	// change of state rather than a redraw.
+	// Resume skips scrollback replay so taking control is a state change,
+	// not a redraw.
 	Resume bool `json:"resume,omitempty"`
-	// Cursor and ResumeID preserve source compatibility for callers awaiting
-	// the position integration pass. New code uses Position so the epoch and
-	// sequence cannot come from different observations.
+	// Legacy; new code uses Position so epoch and sequence come from one
+	// observation.
 	Cursor   uint64 `json:"cursor,omitempty"`
 	ResumeID string `json:"resume_id,omitempty"`
 	// Position is encoded with the legacy flat resume_id and cursor keys.
 	Position TerminalPosition `json:"-"`
-	// ControlSessionID identifies one logical client tab across reconnects.
+	// One logical client tab, stable across reconnects.
 	ControlSessionID string `json:"control_session_id,omitempty"`
 	// ControlGeneration is the fenced generation the client expects.
 	ControlGeneration uint64 `json:"control_generation,omitempty"`
 	// Takeover explicitly displaces another controller.
-	Takeover bool `json:"takeover,omitempty"`
-	// ReleaseControl releases this session's controller lease.
+	Takeover       bool `json:"takeover,omitempty"`
 	ReleaseControl bool `json:"release_control,omitempty"`
 }
 
-// ResumePosition returns the atomic position, adapting legacy callers that
-// still populate ResumeID and Cursor separately.
 func (r AttachRequest) ResumePosition() TerminalPosition {
 	return terminalPosition(r.Position, r.ResumeID, r.Cursor)
 }
@@ -574,9 +504,8 @@ func (r *AttachRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// AttachResponse acknowledges an AttachRequest with the session's live
-// geometry, or with the requested one when no session exists yet to have
-// its own; on failure the server sends OK false with a code and closes.
+// AttachResponse carries the session's live geometry, or the requested one
+// when no session exists yet. On failure OK is false and the server closes.
 type AttachResponse struct {
 	OK                   bool   `json:"ok"`
 	Cols                 uint   `json:"cols,omitempty"`
@@ -585,32 +514,25 @@ type AttachResponse struct {
 	TerminalID           string `json:"terminal_id,omitempty"`
 	Incarnation          string `json:"incarnation,omitempty"`
 	ServerOwnedResponder bool   `json:"server_owned_responder,omitempty"`
-	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
+	// Bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
-	// Cursor and ResumeID preserve source compatibility for legacy producers
-	// and consumers. Position is the authoritative atomic high-water value.
+	// Legacy; Position is authoritative.
 	Cursor   uint64 `json:"cursor,omitempty"`
 	ResumeID string `json:"resume_id,omitempty"`
 	// Position is encoded with the legacy flat resume_id and cursor keys.
 	Position TerminalPosition `json:"-"`
-	// Resumed answers a request to resume: true when the replay is only
-	// what this client missed, false when the session could not serve
-	// from its position and the replay is the whole scrollback instead.
+	// Resumed false means the replay is the whole scrollback, not a delta.
 	Resumed bool `json:"resumed,omitempty"`
 	// ControllerID is the member currently holding writable control.
-	ControllerID string `json:"controller_id,omitempty"`
-	// ControlGeneration is the fenced lease generation.
+	ControllerID      string `json:"controller_id,omitempty"`
 	ControlGeneration uint64 `json:"control_generation,omitempty"`
-	// ControlExpiresAt is the RFC3339 expiry of the active controller lease.
+	// RFC3339.
 	ControlExpiresAt string `json:"control_expires_at,omitempty"`
-	// HasControl reports whether this attachment owns the active lease.
-	HasControl bool   `json:"has_control,omitempty"`
-	Code       int    `json:"code,omitempty"`
-	Error      string `json:"error,omitempty"`
+	HasControl       bool   `json:"has_control,omitempty"`
+	Code             int    `json:"code,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
-// HighWater returns the atomic terminal position, adapting legacy producers
-// that still populate ResumeID and Cursor separately.
 func (r AttachResponse) HighWater() TerminalPosition {
 	return terminalPosition(r.Position, r.ResumeID, r.Cursor)
 }
@@ -621,8 +543,7 @@ func (r *AttachResponse) SetHighWater(position TerminalPosition) {
 	r.ResumeID, r.Cursor = legacyTerminalPosition(position, "", 0)
 }
 
-// MarshalJSON preserves numeric cursors for legacy peers while quoting values
-// above JavaScript's exact integer range.
+// MarshalJSON quotes cursors above JavaScript's exact integer range.
 func (r AttachResponse) MarshalJSON() ([]byte, error) {
 	type wire AttachResponse
 	out := wire(r)
@@ -633,8 +554,6 @@ func (r AttachResponse) MarshalJSON() ([]byte, error) {
 	}{wire: out, Cursor: marshalTerminalCursor(out.Cursor)})
 }
 
-// UnmarshalJSON accepts numeric and lossless decimal-string cursors and
-// materializes one atomic high-water position.
 func (r *AttachResponse) UnmarshalJSON(data []byte) error {
 	type wire AttachResponse
 	var decoded struct {
@@ -654,29 +573,20 @@ func (r *AttachResponse) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Exit statuses of the attach subsystem. 0 is the run's terminal session
-// ending and 1 an attach that failed after its ack; these statuses name the
-// server dropping a live attach because its authorization re-check failed,
-// so a client can say why it was detached instead of only that it was.
+// Attach exit statuses for a live attach dropped by a failed authorization
+// re-check. 0 and 1 are a normal end and a post-ack failure.
 const (
-	// AttachExitSteerRevoked: a write attach lost the steer capability
-	// (role change, handoff, run protection, or the workspace's steering
-	// policy). A read-only attach of the same run is still allowed.
+	// A read-only attach of the same run is still allowed.
 	AttachExitSteerRevoked = 3
-	// AttachExitMembershipRevoked: the member was removed or set back to
-	// pending. Every attach of theirs ends, read-only ones included.
+	// Every attach of the member ends, read-only ones included.
 	AttachExitMembershipRevoked = 4
-	// AttachExitControlRevoked: another browser tab explicitly took over
-	// writable control, or the current control lease was released or expired.
-	// The displaced client may reconnect as a read-only mirror and ask for
-	// control again; this is not a permission withdrawal.
+	// Another tab took control or the lease lapsed; not a permission
+	// withdrawal, so the client may reconnect read-only.
 	AttachExitControlRevoked = 5
 )
 
-// RemoteExitError is a subsystem stream ending with a nonzero exit status:
-// the SSH channel's exit-status request, or the in-process transport's
-// equivalent. The attach subsystem uses the AttachExit* statuses to say
-// why the server dropped a live attach.
+// RemoteExitError is a nonzero subsystem exit status, from SSH or the
+// in-process transport.
 type RemoteExitError struct{ Status int }
 
 func (e *RemoteExitError) Error() string {
@@ -689,37 +599,30 @@ type WorkspaceSelector struct {
 	Name string `json:"name,omitempty"`
 }
 
-// SyncRequest is the single header line a client sends after opening the
-// sync subsystem. Force overrides the mid-write refusal: without it the
-// server rejects the bridge while the run is `running`.
+// SyncRequest.Force overrides the refusal while the run is `running`.
 type SyncRequest struct {
 	RunID string `json:"run_id"`
 	Force bool   `json:"force,omitempty"`
 }
 
-// SyncResponse acknowledges a SyncRequest; after an OK the raw remaining
-// stream is a mutagen remote endpoint protocol session rooted at the
-// run's worktree. On failure the server sends OK false with a code and
-// closes.
+// After an OK SyncResponse the stream is a mutagen remote endpoint session
+// rooted at the run's worktree.
 type SyncResponse struct {
 	OK    bool   `json:"ok"`
 	Code  int    `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
-// SyncConflictParams are the params of sync.conflict: a paused live
-// overlay reporting its conflicted paths so the server can notify both
-// affected members. The target resolver reads run_id, so the Steer gate
-// applies to the same run the overlay was opened against.
+// SyncConflictParams: the target resolver reads run_id, so the Steer gate
+// applies to the run the overlay was opened against.
 type SyncConflictParams struct {
 	RunID         string   `json:"run_id"`
 	SyncSessionID string   `json:"sync_session_id,omitempty"`
 	Files         []string `json:"files"`
 }
 
-// AgentDefinition is the wire form of a member-supplied custom harness
-// launch definition. Paths are absolute container paths; validation lives
-// in internal/harness.Definition.Validate.
+// AgentDefinition paths are absolute container paths; validation lives in
+// internal/harness.Definition.Validate.
 type AgentDefinition struct {
 	Name            string   `json:"name"`
 	Executable      string   `json:"executable"`
@@ -731,80 +634,57 @@ type AgentDefinition struct {
 	DenyNames       []string `json:"deny_names,omitempty"`
 }
 
-// AgentRegisterParams are the params of agent.register.
 type AgentRegisterParams struct {
 	Definition AgentDefinition `json:"definition"`
 }
 
-// AgentRegisterResult is the result of agent.register: the stored
-// definition echoed back.
 type AgentRegisterResult struct {
 	Definition AgentDefinition `json:"definition"`
 }
 
-// AgentListResult is the result of agent.list.
 type AgentListResult struct {
 	Agents []AgentInfo `json:"agents"`
 }
 
-// AgentListParams selects the shared account whose member-defined harnesses
-// should be listed. Empty means the caller's own account.
+// AgentListParams: empty means the caller's own account.
 type AgentListParams struct {
 	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
-// AgentInfo is one entry of agent.list; Source is "shipped" or "member".
+// AgentInfo.Source is "shipped" or "member".
 type AgentInfo struct {
-	Name string `json:"name"`
-	// DisplayName is the vendor's product name for a shipped agent, the
-	// registered name otherwise.
+	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
 	// Glyph is the shipped agent's name, or "custom" for a member's own.
 	Glyph     string `json:"glyph"`
 	Source    string `json:"source"`
 	Installed bool   `json:"installed"`
-	// Enhanced is how the agent serves the Agent Client Protocol: "native",
-	// "adapter" or "none". EnhancedInstalled reports that the program
-	// serving it resolves for this launch: the adapter, or the agent's own
-	// CLI for a native agent.
+	// Enhanced is "native", "adapter" or "none".
 	Enhanced          string `json:"enhanced"`
 	EnhancedInstalled bool   `json:"enhanced_installed"`
-	// LoginFound reports that one of the agent's login paths exists, non-empty,
-	// in the home the launch uses: the account owner's on a shared account.
-	// It checks for paths, not for a working session.
+	// LoginFound checks the launch home for login paths, not for a working
+	// session.
 	LoginFound bool `json:"login_found"`
-	// DefaultMode is the launch mode the agent starts in unless asked
-	// otherwise: "acp" for an agent whose enhanced mode is installed and
-	// preferred, "tui" for every other.
+	// "acp" when enhanced mode is installed and preferred, else "tui".
 	DefaultMode string `json:"default_mode"`
-	// InstallScript is the shipped harness's vendor install command. It is
-	// empty for member-owned custom agents.
+	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
-	// EnhancedInstallScript is InstallScript followed by the pinned
-	// adapter's install, for an agent that serves ACP through one.
+	// InstallScript followed by the pinned adapter's install.
 	EnhancedInstallScript string `json:"enhanced_install_script,omitempty"`
-	// LoginMissing is true when a launch of this agent on the listed shared
-	// account would be refused because the account owner has no login for
-	// it. OwnAccountOnly is true when it would be refused because the agent
-	// resolves to the caller's own definition, which runs only on their own
-	// account. Unavailable is the launch's refusal when the owner's login
-	// exists but cannot be shared. At most one is set, and none for the
-	// caller's own account.
+	// Why a launch on a shared account would be refused; at most one is set,
+	// and none for the caller's own account.
 	LoginMissing   bool   `json:"login_missing,omitempty"`
 	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
 	Unavailable    string `json:"unavailable,omitempty"`
 }
 
-// AgentInstallParams are the params of agent.install: the shipped agent to
-// install, and whether to install its enhanced-mode adapter as well.
 type AgentInstallParams struct {
 	Name     string `json:"name"`
 	Enhanced bool   `json:"enhanced,omitempty"`
 }
 
-// AgentInstallResult is the result of agent.install. LogTail is the end of
-// the command's combined output. Error is set when the command failed; the
-// install flags are read from the home after it ends either way.
+// AgentInstallResult's install flags are read from the home even when Error
+// is set.
 type AgentInstallResult struct {
 	LogTail           string `json:"log_tail"`
 	Installed         bool   `json:"installed"`

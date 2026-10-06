@@ -62,13 +62,11 @@ type RunACPHistoryResult struct {
 	Frames []ACPFrame `json:"frames"`
 }
 
-// RunACPItemParams names one logged item.
 type RunACPItemParams struct {
 	RunID string `json:"run_id"`
 	Seq   int64  `json:"seq"`
 }
 
-// RunACPItemResult is one item in full.
 type RunACPItemResult struct {
 	Item json.RawMessage `json:"item"`
 }

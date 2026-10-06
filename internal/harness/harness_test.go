@@ -75,11 +75,6 @@ func TestCustomProfileIsEmpty(t *testing.T) {
 	}
 }
 
-// TestSetupHarnesses pins the environment-setup subset: exactly claude,
-// codex, pi, in that order. Later tasks and the dashboard treat this
-// list as the authority on which harnesses may drive environment setup;
-// opencode, custom, and fake stay launchable for runs but are never offered
-// here.
 func TestSetupHarnesses(t *testing.T) {
 	want := []string{"claude", "codex", "pi"}
 	var got []string
@@ -94,7 +89,6 @@ func TestSetupHarnesses(t *testing.T) {
 			t.Errorf("SetupHarnesses() must not offer %q", excluded)
 		}
 	}
-	// Each entry is the full registry profile, not a name-only stub.
 	for _, p := range SetupHarnesses() {
 		registered, ok := Lookup(p.Name)
 		if !ok {
@@ -182,8 +176,6 @@ func TestStatusReporters(t *testing.T) {
 		if p.Reporter != reporter {
 			t.Errorf("%s reporter = %s, want %s", name, p.Reporter, reporter)
 		}
-		// Whatever the CLI's own mechanism is, this is everything the
-		// launch says about the reporter.
 		pointers := p.StatusLaunchArgs("/run/aether")
 		pointers = append(pointers, slices.Collect(maps.Values(p.StatusLaunchEnv("/run/aether")))...)
 		if reporter == ReporterNone {
@@ -488,14 +480,8 @@ func TestUpdateScripts(t *testing.T) {
 	}
 }
 
-// The dashboard cannot import this registry, so it repeats the shipped
-// names in two places: the picker a template's harness is chosen from, and
-// the glyph map that decides what a run card shows. A name missing from
-// either is a harness members cannot schedule, or one that renders as an
-// anonymous bot - and nothing else catches it, because both lists are valid
-// TypeScript whatever they hold. The name has to be a quoted string or an
-// object key, so a harness that is only mentioned in a comment or a class
-// name still counts as missing.
+// The dashboard cannot import this registry, so it repeats the shipped names
+// in the template picker and the glyph map; nothing else catches a missing one.
 func TestDashboardListsEveryShippedHarness(t *testing.T) {
 	for _, file := range []string{
 		"../../web/src/routes/templates/index.tsx",

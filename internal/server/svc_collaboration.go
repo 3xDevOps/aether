@@ -46,9 +46,9 @@ func init() {
 	})
 }
 
-// terminalImageReferenceValidator keeps image attachment references on the
-// scheduler's strict, server-generated path contract. The room service does
-// not interpret the reference as a host path.
+// terminalImageReferenceValidator holds attachment references to the
+// scheduler's server-generated path contract; the room never reads one as
+// a host path.
 func terminalImageReferenceValidator(r interface {
 	ValidateTerminalImage(context.Context, domain.RunID, string) error
 }) collab.AttachmentValidator {

@@ -1,7 +1,5 @@
-// Package acpmock is a scripted Agent Client Protocol agent for tests. It
-// replays conversations recorded from the real adapters (fixtures/) and
-// answers prompts by their text, so a test can drive a permission request
-// or a turn that runs until it is cancelled without a real agent or login.
+// Package acpmock is a scripted ACP agent for tests that replays conversations
+// recorded from the real adapters (fixtures/) and answers prompts by their text.
 package acpmock
 
 import (

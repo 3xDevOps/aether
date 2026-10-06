@@ -1,7 +1,5 @@
 // Package collab owns the durable run-room service. Room messages are stored
-// before any attempt to reach a live PTY; comments, replies, questions, and
-// system messages are room-only, while steer requests may be delivered to a
-// run's controller or released after the overlap grace period.
+// before any attempt to reach a live PTY.
 package collab
 
 import (
@@ -47,8 +45,7 @@ var (
 	// ErrUnauthorizedDecision means the caller did not present the current
 	// connected controller's member, session, and generation together.
 	ErrUnauthorizedDecision = errors.New("collab: moderation requires the current controller lease")
-	// ErrClosed is returned after the service has been shut down.
-	ErrClosed = errors.New("collab: service closed")
+	ErrClosed               = errors.New("collab: service closed")
 )
 
 // Receipt is the durable result of an attempted steer delivery.
@@ -75,7 +72,6 @@ type AttachmentValidator func(context.Context, domain.WorkspaceID, domain.RunID,
 // anchor. The service still applies cheap shape and host-path checks first.
 type AnchorValidator func(context.Context, domain.WorkspaceID, domain.RunID, *store.RoomAnchor) error
 
-// Runs is the lookup half of the existing store API.
 type Runs interface {
 	GetRun(context.Context, domain.RunID) (*domain.Run, error)
 	GetMember(context.Context, domain.MemberID) (*domain.Member, error)
@@ -106,10 +102,8 @@ func ClassifyReceipt(err error) Receipt {
 	return ReceiptUncertain
 }
 
-// Config wires one room service. Store and Runs are required; Bus, Control,
-// Inject, and validators are optional only for the corresponding degraded
-// paths. Production delivery uses Inject, which is the scheduler's actor-aware
-// canonical seam.
+// Config wires one room service. Store and Runs are required; the rest are
+// optional only for the corresponding degraded paths.
 type Config struct {
 	Store          store.CollaborationStore
 	Runs           Runs
@@ -132,7 +126,6 @@ type Config struct {
 	AnchorBytes      int
 }
 
-// MessageInput is the transport-neutral shape of one room mutation.
 type MessageInput struct {
 	WorkspaceID    domain.WorkspaceID
 	RunID          domain.RunID
@@ -159,7 +152,6 @@ type Result struct {
 	Outcome string
 }
 
-// Status is a bounded room snapshot suitable for transport responses.
 type Status struct {
 	WorkspaceID   domain.WorkspaceID
 	RunID         domain.RunID
@@ -182,9 +174,8 @@ type Service struct {
 	overdueErr error
 }
 
-// OverdueDeliveryError reports the latest failure observed by the overdue
-// worker. The value remains available after the worker retries, so callers
-// can observe an asynchronous delivery failure without relying on logs.
+// OverdueDeliveryError reports the latest overdue worker failure, kept after
+// the worker retries.
 func (s *Service) OverdueDeliveryError() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -315,7 +306,6 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// Post persists a room message and delivers steering when it is eligible.
 func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	if err := s.validateInput(ctx, &in); err != nil {
 		return Result{}, err

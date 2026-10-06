@@ -347,7 +347,6 @@ func TestRestore(t *testing.T) {
 		if !m.called(acp.AgentMethodSessionResume) || m.called(acp.AgentMethodSessionLoad) || m.called(acp.AgentMethodSessionNew) {
 			t.Fatalf("methods %v", m.methods)
 		}
-		// The restored session reports that it holds no turn and no request.
 		if inputs := <-rec.inputsCh; len(inputs) != 0 {
 			t.Fatalf("restored inputs %+v", inputs)
 		}
@@ -371,7 +370,6 @@ func TestRestore(t *testing.T) {
 		if len(ofKind(its, KindMessage)) != 0 || len(ofKind(its, KindCommands)) != 1 || len(ofKind(its, KindReset)) != 0 {
 			t.Fatalf("load items %+v", its)
 		}
-		// Updates after the load are live again.
 		if _, err := s.Prompt(context.Background(), textPrompt("again"), false); err != nil {
 			t.Fatal(err)
 		}

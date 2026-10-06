@@ -69,10 +69,8 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 	return protocol.AgentRegisterResult(p), nil
 }
 
-// agentList describes what a launch by member on the requested account would
-// run: member's own definitions, since a run uses its launcher's environment,
-// the executables installed for it, and on another member's account whether
-// that account has the login the launch needs.
+// agentList lists member's own definitions, not the account owner's, since a
+// run uses its launcher's environment.
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.AgentListParams](raw)
 	if perr != nil {
@@ -134,10 +132,8 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	return protocol.AgentListResult{Agents: agents}, nil
 }
 
-// describeAgent reports, for a launch by member on account, what profile
-// installs, whether its CLI and its ACP server resolve, and whether a login
-// file is there. A member's own definition runs only on their own account,
-// so there is no installation to borrow for it and no install command.
+// describeAgent describes a launch by member on account. A member's own
+// definition runs only on their own account, so it has no install command.
 func (s *Server) describeAgent(member, account domain.MemberID, profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
 	info := protocol.AgentInfo{
 		Name:        profile.Name,
@@ -178,12 +174,9 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	return info, nil
 }
 
-// agentInstalled reports whether a launch by member on account finds
-// executable: in member's home, or on another member's account in that
-// owner's home, whose installation the launch then borrows (see
-// memberhome.Manager.Installation for which links InstallPaths let
-// resolve). The ACP server counts only in the home the CLI comes from,
-// since that is the one ~/.local the launch sees.
+// agentInstalled looks in member's home, or on another member's account in
+// the owner's home whose installation the launch borrows. The ACP server
+// counts only in the home the CLI comes from: that is the ~/.local the launch sees.
 func (s *Server) agentInstalled(member, account domain.MemberID, executable string, profile harness.Profile) (installed, acp bool, err error) {
 	if s.cfg.Homes == nil {
 		return true, len(profile.ACPArgs) > 0, nil

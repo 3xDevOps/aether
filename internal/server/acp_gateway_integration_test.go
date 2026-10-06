@@ -28,11 +28,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// TestIntegrationEnhancedRunGateway launches an enhanced run through the
-// dashboard gateway against real Docker, with the acpmock agent as its ACP
-// server, and drives it the way the session view does: /ws/acp with the
-// control lease, a prompt through run.inject, a permission answered with
-// run.input.answer, and the stream closing 1012 when the run is closed.
+// TestIntegrationEnhancedRunGateway drives an enhanced run through the
+// dashboard gateway on real Docker, with the acpmock agent as its ACP server,
+// the way the session view does.
 func TestIntegrationEnhancedRunGateway(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)

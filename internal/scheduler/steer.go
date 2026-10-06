@@ -109,9 +109,8 @@ func (s *Scheduler) reconcileActiveDestroyPending(ctx context.Context, id domain
 	s.recoverDestroyMetadata(ctx, runtime.ID(sc.ContainerID), &sc)
 	owner, admitted := s.admitDestroyPendingOwner(ctx, r, sc, runtime.ID(sc.ContainerID))
 	if admitted {
-		// Kill reacquires the exact owner's lifecycle lock and performs the
-		// physical cleanup. Releasing here keeps this helper non-blocking
-		// with respect to the caller's ordinary steering path.
+		// Kill reacquires the owner's lifecycle lock for the physical
+		// cleanup; releasing here keeps this helper non-blocking.
 		owner.lifecycleMu.Unlock()
 		return true, nil
 	}
@@ -137,9 +136,8 @@ func (s *Scheduler) reconcileActiveDestroyPending(ctx context.Context, id domain
 	return true, nil
 }
 
-// under s.mu: every scheduler status write holds the lock, so the locked
-// read is authoritative and a concurrent terminal transition cannot be
-// overwritten.
+// killUnsupervised writes status under s.mu: every scheduler status write
+// holds the lock, so a concurrent terminal transition cannot be overwritten.
 func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor domain.MemberID) error {
 	r, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
@@ -167,10 +165,9 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 				return resolveErr
 			}
 		}
-		// startup, before recoverRuns has had a chance to adopt its sidecar.
-		// Reuse DeleteRun's reconciliation so Kill has the same durable
-		// ownership and retry behavior instead of treating that row as
-		// a no-op and leaking its container.
+		// A terminal row can still own a retained container right after
+		// startup, before recoverRuns adopts its sidecar. Reuse DeleteRun's
+		// reconciliation so Kill does not treat it as a no-op and leak it.
 		retainedEntry, retry, reconcileErr := s.reconcileRetainedSidecarForDelete(ctx, id)
 		if reconcileErr != nil {
 			return reconcileErr
@@ -543,8 +540,6 @@ func (s *Scheduler) setPaused(entry *supervised, paused bool) {
 	}
 }
 
-// Paused reports whether a supervised run's container is currently
-// frozen. Unknown or finished runs report false.
 func (s *Scheduler) Paused(run domain.RunID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -813,11 +808,9 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 	return s.closeLiveLocked(ctx, entry, status, workspace, cid, mode, alreadyPaused, assigned, spec)
 }
 
-// closeLiveLocked ends a live run's lifecycle with spec. A TUI or mission
-// run is detached, paused, committed, published, and retained in its exact
-// container; a headless run or a TUI pause failure takes the immediate
-// stop-and-destroy path. The caller holds entry.lifecycleMu and passes the
-// status, container, pause state and mission assignment it read under s.mu.
+// closeLiveLocked: a TUI pause failure takes the headless stop-and-destroy
+// path. The caller holds entry.lifecycleMu and passes the status, container,
+// pause state and mission assignment it read under s.mu.
 func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, status domain.RunStatus, workspace domain.WorkspaceID, cid runtime.ID, mode domain.LaunchMode, alreadyPaused, assigned bool, spec closeSpec) error {
 	run, outcome, actor, mission := entry.runID, spec.outcome, spec.actor, spec.mission
 	closeReason := spec.retained

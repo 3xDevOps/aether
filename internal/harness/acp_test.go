@@ -13,9 +13,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 )
 
-// acpregistry.json is the vendored ACP registry entries Aether installs.
-// A pin bumped in one place and not the other would install a version the
-// snapshot does not describe.
+// A pin bumped in acpregistry.json and not in the snapshot would install a
+// version the snapshot does not describe.
 func TestACPRegistryPins(t *testing.T) {
 	raw, err := os.ReadFile("acpregistry.json")
 	if err != nil {

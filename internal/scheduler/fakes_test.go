@@ -54,8 +54,7 @@ type fakeRuntime struct {
 	execStderr   string
 	execRunCalls []fakeExecCall
 	attaches     int
-	// images is the fake daemon's local image registry.
-	images map[string]string
+	images       map[string]string
 }
 
 type fakeCommitCall struct {
@@ -99,7 +98,6 @@ type fakeContainer struct {
 	done  chan struct{}
 }
 
-// output emits agent PTY bytes to every open attachment.
 func (c *fakeContainer) output(s string) {
 	c.mu.Lock()
 	atts := slices.Clone(c.atts)
@@ -109,12 +107,9 @@ func (c *fakeContainer) output(s string) {
 	}
 }
 
-// exitNow is the test-facing exit: it ends the main process with the
-// given code. It rejects state "created", the one state Docker can never
-// report as exited, because a container has no process before Start. A
-// forged exit there leaves Attach refusing the container as not running,
-// so a test that beats the code under test to Start reads that refusal
-// instead of the exit code it set.
+// exitNow rejects state "created": Docker never reports a container exited
+// before Start, and a forged exit there would make Attach refuse it as not
+// running instead of reporting the exit code the test set.
 func (c *fakeContainer) exitNow(code int) {
 	c.mu.Lock()
 	created := c.state == "created"
@@ -409,7 +404,6 @@ func (r *fakeRuntime) FindByCreationKey(_ context.Context, key string) (runtime.
 	return "", fmt.Errorf("fake runtime: creation key %q: %w", key, runtime.ErrNotFound)
 }
 
-// Commit records a saved image and registers its tag in the fake daemon.
 func (r *fakeRuntime) Commit(_ context.Context, id runtime.ID, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -430,8 +424,6 @@ func (r *fakeRuntime) commitCalls() []fakeCommitCall {
 	return slices.Clone(r.commits)
 }
 
-// ImageExists mirrors the Docker capability probe the scheduler uses for
-// saved member environment images.
 func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -439,8 +431,6 @@ func (r *fakeRuntime) ImageExists(_ context.Context, tag string) (bool, error) {
 	return ok, nil
 }
 
-// ListImageTags returns the registered tags under repo, like Docker's
-// reference filter.
 func (r *fakeRuntime) ListImageTags(_ context.Context, repo string) ([]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -460,8 +450,7 @@ func (r *fakeRuntime) hasImage(tag string) bool {
 	return ok
 }
 
-// RemoveImage forgets a saved member environment tag; a missing tag is not
-// an error, matching the Docker implementation.
+// RemoveImage treats a missing tag as success, matching Docker.
 func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -670,8 +659,6 @@ func (g *fakeGit) CommitAll(_ context.Context, run domain.RunID, message string,
 	return fmt.Sprintf("commit-%d", len(g.commits[run])), nil
 }
 
-// commitSignings reports, per CommitAll call for the run, whether a
-// signing key was passed.
 func (g *fakeGit) commitSignings(run domain.RunID) []bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -724,8 +711,6 @@ func (g *fakeGit) LastFileChange(run domain.RunID) (time.Time, bool) {
 	return t, ok
 }
 
-// watchingFor reports the workspace scope StartDiffWatch was called with,
-// and whether a watch is currently active for the run.
 func (g *fakeGit) watchingFor(run domain.RunID) (domain.WorkspaceID, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -904,10 +889,8 @@ func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, a
 	if !ok {
 		return errFakeNoSession
 	}
-	// The banner never advances the session's last-output clock; only what
-	// arrives on the attachment does. This fake has no terminal, so it
-	// models none of ptyhost.Host's echo handling - that lives in the
-	// ptyhost tests.
+	// The banner never advances the last-output clock. Echo handling is not
+	// modeled here; it is covered by the ptyhost tests.
 	_, err := sess.att.Stdin().Write([]byte(message + submit))
 	return err
 }

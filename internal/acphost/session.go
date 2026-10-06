@@ -1,18 +1,5 @@
 // Package acphost hosts one Agent Client Protocol (ACP) session per run. The
-// server is the agent process's only ACP client: it owns the process's stdin
-// and stdout, projects everything the agent sends into a per-run item log,
-// and fans that log out to any number of viewers.
-//
-// Invariants:
-//   - One client per agent process. Viewers never speak ACP; they read items
-//     and act through the Session.
-//   - Prompts are serialized. A second session/prompt is never sent while one
-//     is in flight: mid-turn input is steered where the agent supports it and
-//     queued until the turn ends otherwise. A steer asks for idleBehavior
-//     promptRequired, so the agent never starts a turn the host did not
-//     open; one that does anyway has that turn cancelled.
-//   - Answers are forwarded verbatim. A permission answer is the option id the
-//     agent offered; the first answer to a request wins.
+// server is the agent process's only ACP client; viewers read its item log.
 package acphost
 
 import (
@@ -39,7 +26,6 @@ const subscriberBuffer = 1024
 
 // Config describes the session to host.
 type Config struct {
-	// LogPath is the run's item log file.
 	LogPath string
 	// Cwd is the agent's working directory inside its container.
 	Cwd string
@@ -208,10 +194,8 @@ func (s *Session) open(ctx context.Context) error {
 // SessionID is the agent session id to store for a later restore.
 func (s *Session) SessionID() string { return s.conn.SessionID() }
 
-// Info is what the agent advertised in initialize.
 func (s *Session) Info() AgentInfo { return s.conn.Info() }
 
-// Log is the run's item log, for history reads.
 func (s *Session) Log() *Log { return s.log }
 
 // Done is closed once the agent connection ended, everything the agent sent
@@ -393,12 +377,10 @@ func (s *Session) SetMode(ctx context.Context, modeID string) error {
 	return nil
 }
 
-// ListSessions returns one page of the agent's sessions.
 func (s *Session) ListSessions(ctx context.Context, cwd, cursor string) ([]SessionSummary, string, error) {
 	return s.conn.listSessions(ctx, cwd, cursor)
 }
 
-// State returns a snapshot of the session.
 func (s *Session) State() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -449,7 +431,6 @@ func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error)
 	return replay, ch, cancel, nil
 }
 
-// emitLocked appends an item to the log and hands it to subscribers.
 func (s *Session) emitLocked(it Item) {
 	if s.closed {
 		return

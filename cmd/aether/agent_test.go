@@ -9,8 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// The list output must distinguish shipped profiles from member-registered
-// definitions so members can tell what agent add actually stored.
 func TestPrintAgents(t *testing.T) {
 	var b strings.Builder
 	err := printAgents(&b, []protocol.AgentInfo{

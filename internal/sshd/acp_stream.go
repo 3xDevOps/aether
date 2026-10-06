@@ -16,7 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
-// maxACPViewers caps the live session streams of one run.
 const maxACPViewers = 32
 
 var errACPViewerLimit = errors.New("sshd: too many viewers on this enhanced run")

@@ -43,10 +43,8 @@ func TestKill(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
-	// Kill publishes its timeline event on one goroutine and the abandoned
-	// transition on the finalize goroutine, in either order. The wait
-	// helpers discard what they do not match, so each wait reads its own
-	// stream rather than racing to swallow the other's event.
+	// Kill publishes the timeline event and the abandoned transition on
+	// different goroutines in either order, so each wait reads its own stream.
 	status := e.subscribe(t)
 	ctx := t.Context()
 
@@ -76,11 +74,8 @@ func TestKill(t *testing.T) {
 
 func TestPauseResumeAndStallExemption(t *testing.T) {
 	t.Parallel()
-	// A tight threshold left no room for the Pause call sequence itself:
-	// under heavy scheduling contention it can outrun 60ms before Pause
-	// ever takes effect, stalling the run before there is anything to be
-	// exempt from. 500ms/20ms keeps PollInterval well under StallThreshold
-	// while giving the setup steps a realistic margin.
+	// 500ms/20ms: a tighter threshold can elapse under contention before
+	// Pause takes effect.
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 500 * time.Millisecond
 		cfg.PollInterval = 20 * time.Millisecond
@@ -120,8 +115,6 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 		t.Fatal("double pause accepted")
 	}
 
-	// Paused runs are exempt from stall detection: well past the stall
-	// threshold the run must still be running.
 	time.Sleep(700 * time.Millisecond)
 	r, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
@@ -146,7 +139,6 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 		t.Fatal("Paused(run) = true after Resume")
 	}
 
-	// Unpaused and idle: now the stall fires.
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
 	if p := ev.Payload.(events.RunStatusPayload); !strings.HasPrefix(p.Reason, "stalled: no output or file changes for ") {
 		t.Fatalf("stall reason = %q", p.Reason)
@@ -179,7 +171,6 @@ func TestStallAndActivityResume(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	// PTY output refreshes activity on the stalled-but-alive run.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
@@ -201,12 +192,8 @@ func TestStallAndActivityResume(t *testing.T) {
 
 func TestFileChangeCountsAsActivity(t *testing.T) {
 	t.Parallel()
-	// 80ms/10ms left too little slack between poll ticks: with ~200
-	// parallel tests sharing one P, a delayed tick can outrun the
-	// threshold even though the run is genuinely active, parking it as
-	// stalled. 500ms/20ms keeps the same shape - PollInterval well under
-	// StallThreshold, and the touch loop well past it - with a margin
-	// scheduling jitter cannot close.
+	// 500ms/20ms: with ~200 parallel tests on one P, a delayed tick can
+	// outrun a tighter threshold and park an active run.
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 500 * time.Millisecond
 		cfg.PollInterval = 20 * time.Millisecond
@@ -223,7 +210,6 @@ func TestFileChangeCountsAsActivity(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-startDone })
 
 	run, _ := e.launchFake(t, "task")
-	// Keep touching files (no PTY output): the run must stay running.
 	deadline := time.Now().Add(700 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		e.git.touch(run.ID)
@@ -995,7 +981,6 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	// The agent answering is what returns it to running.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {

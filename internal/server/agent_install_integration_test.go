@@ -14,12 +14,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// TestIntegrationAgentInstall drives agent.install over the control channel
-// against real Docker: the install command runs in the member's environment
-// terminal, which the call starts, and a command that fails comes back as a
-// result carrying its exit code and the end of its output, with the install
-// flags read from the home. busybox has no bash or curl, so the shipped
-// Claude Code installer fails the way it would on an image without them.
+// busybox has no bash or curl, so the shipped Claude Code installer fails the
+// way it would on an image without them.
 func TestIntegrationAgentInstall(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

@@ -31,13 +31,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// waitTimeout bounds every wait in this package's tests. CI runs them with
-// the race detector and in parallel on a shared runner, where a login shell
-// or a destroy sweep can take well over ten seconds to settle.
+// waitTimeout is generous because CI runs these with the race detector, in
+// parallel on a shared runner, where a destroy sweep can take over ten seconds.
 const waitTimeout = 30 * time.Second
 
-// testEnv wires a scheduler to the real store, real event bus, fake git/pty,
-// and an in-memory immutable base-capture seam.
 type testEnv struct {
 	t      *testing.T
 	db     *store.DB
@@ -78,9 +75,8 @@ type scriptedWaitOutcome struct {
 	useUnderlying bool
 }
 
-// scriptedWaitRuntime controls each Wait call independently. It lets
-// supervision tests model a daemon transport failure followed by the real
-// container exit without mutating shared fake-runtime state concurrently.
+// scriptedWaitRuntime controls each Wait call independently, without
+// mutating shared fake-runtime state concurrently.
 type scriptedWaitRuntime struct {
 	*fakeRuntime
 	calls    chan runtime.ID
@@ -181,17 +177,11 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		StateDir:      filepath.Join(dir, "scheduler"),
 		Homes:         homes,
 		StandardImage: "busybox:1.36",
-		// The default two-second window exists for a daemon that really
-		// takes that long to answer; the fake runtime never does, so tests
-		// use a probe short enough that a reboot scenario is not the
-		// slowest thing in the package.
+		// The fake runtime never needs the default two-second window, and a short
+		// probe keeps reboot scenarios from being the slowest tests.
 		ExitProbeTimeout: 20 * time.Millisecond,
-		// Gives launchFake (and any other test that just needs a running
-		// fake agent) a real argv without AETHER_FAKE_AGENT: t.Setenv
-		// forbids t.Parallel, and most callers do not care what the
-		// deterministic agent's own argv is. Tests pinning the env
-		// fallback itself still set AETHER_FAKE_AGENT explicitly and stay
-		// serial.
+		// A real argv without AETHER_FAKE_AGENT, because t.Setenv forbids
+		// t.Parallel.
 		Harnesses: map[string]HarnessSpec{
 			"fake": {TUIArgs: []string{"fake-agent", "{task}"}, HeadlessArgs: []string{"fake-agent", "{task}"}},
 		},
@@ -208,9 +198,8 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	return e
 }
 
-// newScheduler builds a second scheduler over the same store, state dir,
-// and bus - a "rebooted server" - with fresh PTY state and the given
-// runtime.
+// newScheduler builds a "rebooted server" over the same store, state dir
+// and bus, with fresh PTY state.
 func (e *testEnv) newScheduler(t *testing.T, rt *fakeRuntime, pty *fakePTY) *Scheduler {
 	t.Helper()
 	cfg := e.cfg
@@ -236,8 +225,6 @@ func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 	return sub
 }
 
-// launchFake launches a run on the deterministic fake harness and returns
-// it together with its fake container.
 func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeContainer) {
 	t.Helper()
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "fake", domain.LaunchTUI)
@@ -268,8 +255,6 @@ func readSavedTerminalImage(t *testing.T, e *testEnv, member domain.MemberID, re
 	return data
 }
 
-// A run's terminal images land in the home its container mounts, which for
-// a shared-account launch is the launcher's, never the account owner's.
 func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -313,8 +298,6 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	}
 }
 
-// waitStatusEvent reads sub until a run.status event with the wanted To
-// status arrives and returns it.
 func waitStatusEvent(t *testing.T, sub events.Subscription, run domain.RunID, to domain.RunStatus) events.Event {
 	t.Helper()
 	deadline := time.After(waitTimeout)
@@ -353,7 +336,6 @@ func waitTimelineEvent(t *testing.T, sub events.Subscription, run domain.RunID, 
 	}
 }
 
-// waitStoreStatus polls the store until the run reaches status.
 func (e *testEnv) waitStoreStatus(t *testing.T, run domain.RunID, status domain.RunStatus) *domain.Run {
 	t.Helper()
 	deadline := time.Now().Add(waitTimeout)
@@ -725,11 +707,8 @@ func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 	case <-time.After(waitTimeout):
 		t.Fatal("supervisor did not exit after TERM reached harness")
 	}
-	// The trap is installed before the harness prints "harness-ready", so
-	// its own process already has it by the time that line was observed
-	// above; what a busy host can still delay is this test's reader
-	// goroutine draining the PTY, so wait for the marker instead of a
-	// fixed sleep.
+	// A busy host can delay this test's PTY reader, not the trap, so wait for
+	// the marker instead of a fixed sleep.
 	p.waitForOutput(t, "harness-term")
 	if got := strings.Count(p.output.String(), "harness-term"); got != 1 {
 		t.Fatalf("harness TERM observations = %d, output = %q", got, p.output.String())
@@ -1054,9 +1033,6 @@ func TestCommandTemplates(t *testing.T) {
 	}
 }
 
-// TestLaunchSpecIdentityAndCreationKey pins the Wave 2 spec construction:
-// the agent's git identity env comes from the owning member and the run
-// ID rides as the creation key for crash recovery.
 func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1130,8 +1106,6 @@ func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) 
 	}
 }
 
-// TestLaunchMountsPersistentHome pins that every launch for one member uses
-// the same writable server-owned home at the container's HOME.
 func TestLaunchMountsPersistentHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
@@ -1165,9 +1139,8 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	}
 }
 
-// TestContainerSpecNonRootHome pins that a non-root run user gets
-// HOME=/home/aether in the container env (Docker leaves HOME wrong for
-// numeric users, and the credential mounts land under that home).
+// Docker leaves HOME wrong for numeric users, and the credential mounts
+// land under that home.
 func TestContainerSpecNonRootHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1182,12 +1155,8 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 	}
 }
 
-// TestReserveRunUserConflict pins the credential-home ownership guard:
-// a run whose resolved uid:gid differs from a live run of the same member
-// fails provisioning loudly (the ownership pass would otherwise flip the
-// shared home's ownership back and forth), while same mapping, different
-// member, and root runs all pass. The guard is cross-platform; only the
-// chown itself is linux-only.
+// Without the guard the ownership pass would flip the shared home's
+// ownership back and forth. Only the chown itself is linux-only.
 func TestReserveRunUserConflict(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1423,8 +1392,6 @@ func TestRetentionTTLDefaults(t *testing.T) {
 	}
 }
 
-// TestLaunchPinsProfileWithoutMount pins the snapshot for run provenance,
-// while the member home remains the only environment mount.
 func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
@@ -1509,9 +1476,6 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	}
 }
 
-// TestValidateMissionLaunchResolvesTheHarnessForTheAccount: validation is the
-// launch's own command resolution, so a harness the account has no definition
-// for fails before a mission records it, and a shipped one passes.
 func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

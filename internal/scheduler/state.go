@@ -18,11 +18,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// legalTransition encodes the pinned lifecycle table (Wave 1 contract
-// §6.6). The close disposition comes first: any state that holds a record
-// may be resolved as merged or abandoned on a human's say-so - live runs
-// are stopped first, finished ones re-labeled. Everything else: final
-// dispositions never transition.
+// legalTransition encodes the run lifecycle table. Any state that holds a
+// record may be closed as merged or abandoned on a human's say-so - live runs
+// are stopped first, finished ones re-labeled. Final dispositions never
+// transition.
 func legalTransition(from, to domain.RunStatus) bool {
 	if !to.Valid() {
 		return false
@@ -179,10 +178,8 @@ func (s *Scheduler) publishTimeline(ctx context.Context, workspace domain.Worksp
 }
 
 // sidecar is the durable per-run supervision state at
-// <StateDir>/<run-id>.json (Wave 1 contract §6.6). A file written by an
-// older build still carries a session_id key; encoding/json ignores
-// unknown fields, so it decodes here unchanged, and the run's workspace
-// is read off the run row (entryFromSidecar) rather than this file.
+// <StateDir>/<run-id>.json. An older file's session_id key is ignored on
+// decode; the run's workspace is read off the run row (entryFromSidecar).
 type sidecar struct {
 	RunID string `json:"run_id"`
 	// TerminalMember identifies a member-terminal reference kept outside the

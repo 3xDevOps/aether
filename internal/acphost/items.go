@@ -78,8 +78,7 @@ type Item struct {
 	Raw           json.RawMessage `json:"raw,omitempty"`
 }
 
-// Message is one segment of a user message, an assistant message, or a
-// thought.
+// Message is one segment of a user message, assistant message, or thought.
 type Message struct {
 	Role        string    `json:"role"`
 	MessageID   string    `json:"message_id"`
@@ -98,7 +97,6 @@ type Content struct {
 	TerminalID string `json:"terminal_id,omitempty"`
 }
 
-// ToolCall is the merged state of one tool call.
 type ToolCall struct {
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
@@ -114,7 +112,6 @@ type ToolCall struct {
 	ExitCode    *int            `json:"exit_code,omitempty"`
 }
 
-// Location is a file a tool call touches.
 type Location struct {
 	Path string `json:"path"`
 	Line *int   `json:"line,omitempty"`
@@ -134,7 +131,6 @@ type PlanEntry struct {
 	Status   string `json:"status,omitempty"`
 }
 
-// Request kinds and statuses.
 const (
 	RequestPermission = "permission"
 	RequestQuestion   = "question"
@@ -195,8 +191,6 @@ func (it *Item) essential() bool {
 	return false
 }
 
-// encode returns the item as one JSON line without the newline, shrinking it
-// below MaxItemBytes when needed.
 func (it *Item) encode() ([]byte, error) {
 	b, err := json.Marshal(it)
 	if err != nil || len(b) <= MaxItemBytes {

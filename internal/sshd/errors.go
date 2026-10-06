@@ -14,9 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// The sibling packages' exported sentinels, matched via errors.Is when
-// mapping seam errors to wire codes. Wave 1's local copies were
-// reconciled with the real values at integration.
 var (
 	errInvalidTransition = scheduler.ErrInvalidTransition
 	errDiskFull          = scheduler.ErrDiskFull
@@ -25,12 +22,9 @@ var (
 	errWriteDenied       = ptyhost.ErrWriteDenied
 )
 
-// errMemberRemoved is returned when the authenticated member has been
-// deleted from the store since the handshake; it maps to CodeDenied.
+// errMemberRemoved means the member was deleted since the handshake.
 var errMemberRemoved = errors.New("sshd: member no longer exists")
 
-// errMemberPending is returned when the authenticated member is still
-// awaiting admin approval; it maps to CodeDenied.
 var errMemberPending = errors.New("sshd: membership pending admin approval")
 
 // memberFor re-fetches the authenticated member, mapping a deleted row to
@@ -46,11 +40,9 @@ func (s *Server) memberFor(ctx context.Context, member domain.MemberID) (*domain
 	return m, nil
 }
 
-// checkMember re-validates that the authenticated member still exists and
-// is approved, so deleting a member revokes access for established
-// connections too - not only for future handshakes - and a pending member
-// can do nothing until approved (the control channel gates per method
-// instead, so server.info stays reachable).
+// checkMember re-validates the member on every call so deleting a member
+// revokes established connections too. The control channel gates pending
+// members per method instead, so server.info stays reachable.
 func (s *Server) checkMember(ctx context.Context, member domain.MemberID) error {
 	m, err := s.memberFor(ctx, member)
 	if err != nil {
@@ -62,10 +54,8 @@ func (s *Server) checkMember(ctx context.Context, member domain.MemberID) error 
 	return nil
 }
 
-// rpcError maps an error from the store or a seam call to the wire error
-// object per the contract's error-mapping table. Mirror failures retain only
-// the safe, actionable base metadata; git's raw transport output never
-// crosses this boundary.
+// rpcError maps a store or seam error to its wire error. git's raw transport
+// output never crosses this boundary.
 func rpcError(err error) *protocol.Error {
 	var typed *protocol.Error
 	if errors.As(err, &typed) && typed != nil {
@@ -95,9 +85,7 @@ func rpcError(err error) *protocol.Error {
 			errors.Is(err, store.ErrMissionIdempotencyConflict),
 			errors.Is(err, scheduler.ErrRunShellTabLimit), errors.Is(err, scheduler.ErrAgentInstallRunning),
 			errors.Is(err, ptyhost.ErrSessionReplaced):
-			// The agent socket already answers CodeConflict for a reused
-			// mission idempotency key (coord.missionRPCError); the control
-			// channel must not report the same caller mistake as internal.
+			// Matches coord.missionRPCError for a reused mission idempotency key.
 			code = protocol.CodeConflict
 		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
 			code = protocol.CodeInvalidParams
@@ -111,9 +99,7 @@ func rpcError(err error) *protocol.Error {
 			errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):
 			code = protocol.CodeDenied
 		case errors.Is(err, errNoSession), errors.Is(err, errSessionEnded), errors.Is(err, errDiskFull):
-			// The free-space floor is a "not right now", not a bad request:
-			// the call is well-formed and becomes possible again once the
-			// disk does.
+			// The free-space floor is a "not right now", not a bad request.
 			code = protocol.CodeUnavailable
 		}
 	}

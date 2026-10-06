@@ -55,14 +55,12 @@ func waitForExit(ctx context.Context, wait func(context.Context) (runtime.ExitSt
 	}
 }
 
-// finalizeTimeout bounds the post-exit work (commit, publish, destroy),
-// which runs on a fresh context so shutdown cannot orphan half-finalized
-// runs.
+// finalizeTimeout bounds post-exit work, which runs on a fresh context so
+// shutdown cannot orphan half-finalized runs.
 const finalizeTimeout = time.Minute
 
-// superviseWait blocks on the container's main process and finalizes the
-// run when it exits. Supervision-context cancellation (Close / server
-// shutdown) ends supervision without touching the container or the run.
+// superviseWait finalizes the run when its container exits. Cancelling the
+// supervision context ends supervision without touching the container or run.
 func (s *Scheduler) superviseWait(entry *supervised) {
 	defer s.wg.Done()
 	st, err := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
@@ -78,9 +76,7 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 			slog.Warn("scheduler: container disappeared while waiting", "run", entry.runID, "error", err)
 			st = runtime.ExitStatus{Code: -1}
 		} else {
-			// waitForExit only returns another error when its context was
-			// cancelled; keep this guard so a future implementation cannot
-			// turn a transport error into a bogus exit.
+			// Guards against a transport error ever becoming a bogus exit.
 			slog.Warn("scheduler: container wait inconclusive; retaining supervision", "run", entry.runID, "error", err)
 			return
 		}
@@ -156,13 +152,9 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 	}
 }
 
-// finalize implements the pinned exit handling (§6.6): stop the watches,
-// commit results ("aether:" on clean exit or a reported success, "wip:"
-// otherwise), publish the run branch, and record the outcome. Mission
-// containers are retained unless killed; ordinary exits follow the
-// immediate destruction path.
-// The caller has already released entry.lifecycleMu; the finalizing flag
-// keeps other destructive lifecycle operations from racing this work.
+// finalize commits "aether:" on a clean exit or reported success and "wip:"
+// otherwise. The caller has already released entry.lifecycleMu; the
+// finalizing flag keeps other destructive operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
 	defer cancel()
@@ -336,9 +328,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.mu.Unlock()
 }
 
-// sweepRetained is the single bounded expiry sweep for retained run
-// containers and active destroy-pending recovery owners. It deliberately
-// performs no per-run goroutine scheduling.
+// sweepRetained deliberately starts no per-run goroutines.
 func (s *Scheduler) sweepRetained(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0)
@@ -442,8 +432,7 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 }
 
 // expireRetained serializes expiry against every other operation on a
-// retained run. Evidence capture is performed by expireRetainedLocked before
-// the runtime is released.
+// retained run.
 func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error {
 	if entry == nil {
 		return nil
@@ -530,25 +519,12 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	return transitionErr
 }
 
-// checkStalls implements §6.7: a running, non-paused run with no PTY
-// output and no file changes past StallThreshold parks at needs-attention;
-// a stalled-but-alive run whose activity refreshes returns to running.
-// PTY output is what the agent wrote: a steer's banner, and the terminal's
-// echo of anything written to the agent's input, are the server's, so only
-// the agent's own answer clears a stall.
-//
-// Silence is now the hang detector and the fallback for harnesses that
-// cannot report (internal/agentstatus): an agent that says it is waiting
-// parks its own run, with a reason that says what for, the moment it stops.
-// Two rules follow. Where the harness reports both ends of a turn, activity
-// must not un-park it: a TUI that repaints while the member types is
-// producing output, not work, and only the agent's own "working" means the
-// turn resumed - which is activity in its own right, because a hook writes
-// nothing to the terminal and touches no files. And un-parking takes
-// activity that was actually observed, not a run that merely started
-// recently - after a restart nothing has been observed yet, and every run
-// parked for its member would otherwise be declared working again on the
-// first poll.
+// checkStalls counts only the agent's own PTY output as activity: a steer's
+// banner and the echo of its input are the server's. Where the harness
+// reports both ends of a turn, terminal activity never un-parks a run - a TUI
+// repainting while the member types is not work. Un-parking needs observed
+// activity, or after a restart every parked run would resume on the first
+// poll.
 func (s *Scheduler) checkStalls(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0, len(s.runs))
@@ -576,9 +552,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 
 		s.mu.Lock()
 		if s.runs[e.runID] == e && !e.paused {
-			// An agent that says it is working leaves no other trace, so
-			// the report is read here, under the lock, and counts as the
-			// activity it is - including one that lands mid-poll.
+			// A working report leaves no other trace, so it counts as activity.
 			if e.lastWorking.After(activity) {
 				activity, observed = e.lastWorking, true
 			}
@@ -634,26 +608,14 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	}
 }
 
-// defaultTurnTail is how long after a waiting report the terminal is still taken
-// to be painting the turn that ended: the answer it wrote, the prompt
-// being restored, a spinner winding down. It is a bound on a TUI's own
-// trailing frames, not a measured vendor number, so it is generous.
+// defaultTurnTail bounds a TUI's trailing frames after a waiting report. It is
+// not a measured vendor number, so it is generous.
 const defaultTurnTail = 3 * time.Second
 
-// unparks reports whether terminal activity on a run the agent parked
-// itself is the next turn rather than the tail of the one that ended.
-//
-// A harness that reports only the end of a turn (harness.ReporterTurnEnd)
-// never says the next one started, so activity is the only thing that can
-// release its run - but the report fires while the finished turn is still
-// being drawn. Counting those frames would hand the run straight back to
-// an agent that is waiting, which is the failure this whole mechanism
-// exists to fix. So the frames are measured against the clock rather than
-// against polls: a poll landing inside the trailing burst would otherwise
-// see it advance twice and release the run, whatever --poll-interval is
-// set to. Past the tail, activity still has to move on a later poll, so a
-// single late frame is not a turn either.
-//
+// unparks reports whether terminal activity on a self-parked run is the next
+// turn rather than the tail of the one that ended. A turn-end-only reporter
+// fires while its turn is still being drawn, so the tail is measured against
+// the clock, not polls, and past it activity must still move on a later poll.
 // Caller must hold s.mu.
 func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 	if !activity.After(e.parkedAt.Add(tail)) {
@@ -666,9 +628,7 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 	return activity.After(e.postParkActivity)
 }
 
-// sweepCheckouts applies the checkout TTL (§6.8): terminal runs whose
-// checkout outlived CheckoutTTL lose the checkout directory - the branch
-// and transcript are the artifacts and are never GC'd.
+// sweepCheckouts never removes the branch or transcript.
 func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
@@ -803,10 +763,8 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 	}
 }
 
-// sweepArchived deletes archived runs whose fixed retention period
-// (domain.ArchiveRetention) has elapsed. It keeps no state between ticks:
-// every candidate is re-validated fresh, so a restore or a publish
-// failure only ever costs a retry on the next tick.
+// sweepArchived keeps no state between ticks: every candidate is re-validated,
+// so a restore or publish failure only costs a retry.
 func (s *Scheduler) sweepArchived(ctx context.Context) {
 	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
 	candidates, err := s.cfg.Store.ListRunsArchivedBefore(ctx, cutoff)
