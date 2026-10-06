@@ -6,9 +6,13 @@ import { useStore } from '@/store'
 const darkQuery = '(prefers-color-scheme: dark)'
 
 
-/** Keeps the document's dark class in sync with the theme preference. */
 export function ThemeEffect() {
   const theme = useStore((s) => s.theme)
+  const textSize = useStore((s) => s.textSize)
+
+  useEffect(() => {
+    document.documentElement.dataset.textSize = textSize
+  }, [textSize])
 
   useEffect(() => {
     const apply = () => {

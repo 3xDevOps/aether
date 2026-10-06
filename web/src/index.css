@@ -391,9 +391,35 @@
 /* Saira at 600 for pane, dialog, step and empty-state headings only. */
 @utility text-title {
   font-family: var(--font-title);
-  font-size: 16px;
+  font-size: var(--title-size);
   line-height: 24px;
   font-weight: 600;
+}
+
+:root {
+  --title-size: 16px;
+}
+
+:root[data-text-size='large'] {
+  --text-ui-xs: 12px;
+  --text-ui-sm: 13px;
+  --text-ui-sm--line-height: 18px;
+  --text-ui: 14px;
+  --text-prose: 15px;
+  --text-prose--line-height: 24px;
+  --title-size: 17px;
+}
+
+:root[data-text-size='larger'] {
+  --text-ui-xs: 13px;
+  --text-ui-xs--line-height: 18px;
+  --text-ui-sm: 14px;
+  --text-ui-sm--line-height: 20px;
+  --text-ui: 15px;
+  --text-ui--line-height: 22px;
+  --text-prose: 16px;
+  --text-prose--line-height: 26px;
+  --title-size: 18px;
 }
 
 @utility no-highlight {
@@ -412,7 +438,7 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
     font-feature-settings: normal;
-    font-size: 13px;
+    font-size: var(--text-ui);
     line-height: 1.4;
   }
 }

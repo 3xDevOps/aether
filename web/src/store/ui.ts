@@ -13,6 +13,7 @@ import type {
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
+export type TextSize = 'default' | 'large' | 'larger'
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
 export interface Route {
@@ -87,6 +88,7 @@ export interface ConfigImportStatus {
 
 export interface UiSlice {
   theme: Theme
+  textSize: TextSize
   sidebarWidth: number
   sidebarCollapsed: boolean
   sidebarDrawerOpen: boolean
@@ -125,6 +127,7 @@ export interface UiSlice {
   updatesOpen: boolean
   shortcutsOpen: boolean
   setTheme: (theme: Theme) => void
+  setTextSize: (size: TextSize) => void
   setSidebarWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
   setTerminalDockHeight: (height: number) => void
@@ -152,6 +155,7 @@ export interface UiSlice {
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   theme: 'system',
+  textSize: 'default',
   sidebarWidth: defaultSidebarWidth,
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
@@ -178,6 +182,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   updatesOpen: false,
   shortcutsOpen: false,
   setTheme: (theme) => set({ theme }),
+  setTextSize: (textSize) => set({ textSize }),
   setSidebarWidth: (width) =>
     set({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),

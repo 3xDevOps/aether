@@ -70,6 +70,7 @@ export type RootState = ServerSlice &
 /** Only view preferences survive a reload; server data is re-hydrated. */
 const persistedUi = (s: RootState) => ({
   theme: s.theme,
+  textSize: s.textSize,
   sidebarWidth: s.sidebarWidth,
   sidebarCollapsed: s.sidebarCollapsed,
   terminalDockHeight: s.terminalDockHeight,
