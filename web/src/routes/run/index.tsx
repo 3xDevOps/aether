@@ -116,6 +116,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
     'run-view-previous': () => step(-1),
     'run-details': (event) => {
       event.preventDefault()
+      returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setDetails(!detailsOpen)
     },
     'focus-composer': nav.focusComposer,
