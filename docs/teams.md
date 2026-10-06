@@ -458,14 +458,14 @@ the source mirror and use **Verify** or **Refresh**; from the CLI:
   --workspace myproject --generation <n> --yes`). **Disable** requires
   confirmation and returns the workspace to local-only; remove any GitHub
   deploy key separately because disabling cannot revoke it remotely.
-- **The steer policy** decides whether collaborators may message, control
-  and kill each other's runs. It is permissive by default; an admin restricts it to
-  owners and admins:
+- **The message-others policy** decides whether collaborators may
+  message, control and kill each other's runs. It is permissive by default;
+  an admin restricts it to owners and admins:
 
   ```sh
   aether workspace settings                              # show
-  aether workspace settings --steer-others admins-only
-  aether workspace settings --steer-others everyone      # back to the default
+  aether workspace settings --message-others admins-only
+  aether workspace settings --message-others everyone    # back to the default
   ```
 
   The repository page's **Messages to others' runs** row has the same
