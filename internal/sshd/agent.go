@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -17,6 +18,7 @@ import (
 func init() {
 	registerMethod(protocol.MethodAgentRegister, (*Server).agentRegister)
 	registerMethod(protocol.MethodAgentList, (*Server).agentList)
+	registerGuarded(protocol.MethodAgentInstall, permissions.Launch, nil, (*Server).agentInstall)
 }
 
 // reservedAgentNames are names a member can never register: "custom" is the
@@ -187,4 +189,35 @@ func (s *Server) agentInstalled(member, account domain.MemberID, executable stri
 	}
 	installation, err := s.cfg.Homes.Installation(member, account, executable, installPaths)
 	return installation != "", err
+}
+
+// agentInstall runs a shipped agent's install command in the caller's own
+// environment terminal. A failed command is a result, not an error: the
+// member needs its output to act on it.
+func (s *Server) agentInstall(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.AgentInstallParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	profile, ok := harness.Lookup(p.Name)
+	if !ok || profile.InstallScript == "" {
+		return nil, invalidParams(fmt.Sprintf("agent %q has no install command; install it in the environment terminal", p.Name))
+	}
+	if p.Enhanced && profile.EnhancedSupport() == harness.EnhancedNone {
+		return nil, invalidParams(fmt.Sprintf("agent %q has no enhanced mode", p.Name))
+	}
+	tail, code, err := s.cfg.Runs.InstallAgent(ctx, member, profile.InstallCommand(p.Enhanced))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	result := protocol.AgentInstallResult{LogTail: tail}
+	if code != 0 {
+		result.Error = fmt.Sprintf("the install command exited %d", code)
+	}
+	info, err := s.describeAgent(member, member, profile, "shipped", profile.TUIArgs[0])
+	if err != nil {
+		return nil, rpcError(fmt.Errorf("check agent %q: %w", p.Name, err))
+	}
+	result.Installed, result.EnhancedInstalled = info.Installed, info.EnhancedInstalled
+	return result, nil
 }

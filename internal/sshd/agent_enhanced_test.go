@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -107,4 +108,46 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		// owner's, who has none.
 		"codex": {true, false, "acp"},
 	})
+}
+
+func TestAgentInstall(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	runs := &fakeRuns{}
+	s.cfg.Runs = runs
+	installInHome(t, homes, member.ID, ".local/bin/claude")
+	install := func(params protocol.AgentInstallParams) (protocol.AgentInstallResult, *protocol.Error) {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, perr := s.agentInstall(context.Background(), member.ID, raw)
+		if perr != nil {
+			return protocol.AgentInstallResult{}, perr
+		}
+		return result.(protocol.AgentInstallResult), nil
+	}
+	got, perr := install(protocol.AgentInstallParams{Name: "claude", Enhanced: true})
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	want := protocol.AgentInstallResult{LogTail: "installed", Installed: true}
+	if got != want {
+		t.Fatalf("agent.install = %+v, want %+v", got, want)
+	}
+	claude, _ := harness.Lookup("claude")
+	if calls := runs.Calls(); !slices.Equal(calls, []string{"agent-install:" + string(member.ID) + ":" + claude.InstallCommand(true)}) {
+		t.Fatalf("RunController calls = %v", calls)
+	}
+	for _, refused := range []protocol.AgentInstallParams{{Name: "custom"}, {Name: "mybot"}, {Name: ""}} {
+		if _, perr := install(refused); perr == nil || perr.Code != protocol.CodeInvalidParams {
+			t.Errorf("agent.install %+v = %v, want invalid params", refused, perr)
+		}
+	}
 }

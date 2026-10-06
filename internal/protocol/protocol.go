@@ -9,6 +9,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const (
@@ -98,7 +99,15 @@ const MethodTerminalHistory = "terminal.history"
 const (
 	MethodAgentRegister = "agent.register"
 	MethodAgentList     = "agent.list"
+	// MethodAgentInstall runs a shipped agent's install command, and its
+	// enhanced-mode adapter's on request, in the caller's environment
+	// terminal. It answers when the command ends or AgentInstallTimeout
+	// passes, whichever is first.
+	MethodAgentInstall = "agent.install"
 )
+
+// AgentInstallTimeout bounds one agent.install.
+const AgentInstallTimeout = 10 * time.Minute
 
 // Wave 3 permission-model methods.
 const (

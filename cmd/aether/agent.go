@@ -67,6 +67,8 @@ type agentAddOptions struct {
 	name     string
 	tui      string
 	headless string
+	acp      string
+	enhanced bool
 }
 
 func parseAgentAdd(args []string) (agentAddOptions, error) {
@@ -74,11 +76,13 @@ func parseAgentAdd(args []string) (agentAddOptions, error) {
 	fs.SetOutput(io.Discard)
 	tui := fs.String("tui", "", "interactive command template")
 	headless := fs.String("headless", "", "headless command template")
+	acp := fs.String("acp", "", "Agent Client Protocol server command")
+	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--tui <argv>] [--headless <argv>]")
+		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--enhanced] [--tui <argv>] [--headless <argv>] [--acp <argv>]")
 	}
-	return agentAddOptions{name: name, tui: *tui, headless: *headless}, nil
+	return agentAddOptions{name: name, tui: *tui, headless: *headless, acp: *acp, enhanced: *enhanced}, nil
 }
 
 // resolveAgentArgs turns flag values into argv templates. Shipped names send
@@ -141,7 +145,13 @@ func agentAdd(args []string) error {
 		return listErr
 	}
 	if found && selected.Source == "shipped" {
-		return runShippedAgentInstall(selected)
+		if opts.enhanced && selected.Enhanced == "none" {
+			return fmt.Errorf("agent %s has no enhanced mode", opts.name)
+		}
+		return runShippedAgentInstall(selected, opts.enhanced)
+	}
+	if opts.enhanced {
+		return fmt.Errorf("--enhanced installs a shipped agent's adapter; name your agent's ACP server command with --acp")
 	}
 	var promptInput io.Reader
 	if term.IsTerminal(int(os.Stdin.Fd())) {
@@ -159,6 +169,7 @@ func agentAdd(args []string) error {
 				Executable:   opts.name,
 				TUIArgs:      tuiArgs,
 				HeadlessArgs: headlessArgs,
+				ACPArgs:      strings.Fields(opts.acp),
 			},
 		}, &result); err != nil {
 			return err
@@ -167,14 +178,15 @@ func agentAdd(args []string) error {
 	})
 }
 
-func runShippedAgentInstall(agent protocol.AgentInfo) error {
+func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
+	script := agentInstallScript(agent, enhanced)
 	cfg, err := cli.Load()
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	conn, err := cli.Dial(cfg)
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -184,14 +196,10 @@ func runShippedAgentInstall(agent protocol.AgentInfo) error {
 		Rows: rows,
 	})
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	defer func() { _ = stream.Close() }()
 
-	script := agent.InstallScript
-	if script == "" {
-		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
-	}
 	if _, err := io.WriteString(stream, script+"\n"); err != nil {
 		return err
 	}
@@ -200,11 +208,19 @@ func runShippedAgentInstall(agent protocol.AgentInfo) error {
 	return describeTerminalEnd(copyRaw(stream, 0))
 }
 
-func printAgentInstallGuidance(w io.Writer, agent protocol.AgentInfo) error {
-	script := agent.InstallScript
-	if script == "" {
-		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+// agentInstallScript is the command that installs agent, followed by its
+// enhanced-mode adapter's install when enhanced is set and it has one.
+func agentInstallScript(agent protocol.AgentInfo, enhanced bool) string {
+	switch {
+	case enhanced && agent.EnhancedInstallScript != "":
+		return agent.EnhancedInstallScript
+	case agent.InstallScript != "":
+		return agent.InstallScript
 	}
+	return fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+}
+
+func printAgentInstallGuidance(w io.Writer, script string) error {
 	_, err := fmt.Fprintf(w, "Run `aether terminal`, then paste:\n%s\n", script)
 	return err
 }

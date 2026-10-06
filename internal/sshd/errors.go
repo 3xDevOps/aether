@@ -93,7 +93,7 @@ func rpcError(err error) *protocol.Error {
 			code = protocol.CodeNotFound
 		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
 			errors.Is(err, store.ErrMissionIdempotencyConflict),
-			errors.Is(err, scheduler.ErrRunShellTabLimit),
+			errors.Is(err, scheduler.ErrRunShellTabLimit), errors.Is(err, scheduler.ErrAgentInstallRunning),
 			errors.Is(err, ptyhost.ErrSessionReplaced):
 			// The agent socket already answers CodeConflict for a reused
 			// mission idempotency key (coord.missionRPCError); the control

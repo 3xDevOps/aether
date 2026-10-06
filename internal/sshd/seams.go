@@ -104,6 +104,10 @@ type RunController interface {
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error
+	// InstallAgent runs an agent's install command in the member's
+	// environment terminal and returns the end of its output and its exit
+	// code.
+	InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error)
 	// SaveTerminalImage writes validated image bytes to the target account's
 	// persistent home and returns its absolute container-visible path.
 	SaveTerminalImage(ctx context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error)

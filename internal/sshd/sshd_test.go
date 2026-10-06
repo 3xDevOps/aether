@@ -737,6 +737,13 @@ func (f *fakeRuns) SaveEnvironment(_ context.Context, member domain.MemberID) (s
 func (f *fakeRuns) ResetEnvironment(_ context.Context, member domain.MemberID) error {
 	return f.record(fmt.Sprintf("env-reset:%s", member))
 }
+
+func (f *fakeRuns) InstallAgent(_ context.Context, member domain.MemberID, command string) (string, int, error) {
+	if err := f.record(fmt.Sprintf("agent-install:%s:%s", member, command)); err != nil {
+		return "", 0, err
+	}
+	return "installed", 0, nil
+}
 func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error) {
 	if err := f.record(fmt.Sprintf("terminal-image:%s:%s:%s:%d", actor, run, extension, len(data))); err != nil {
 		return "", err

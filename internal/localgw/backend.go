@@ -114,6 +114,16 @@ func unreachableError(err error) *protocol.Error {
 // CodeUnavailable instead of pinning the caller until kernel TCP timeout.
 const callTimeout = 60 * time.Second
 
+// callBound is how long method may take: agent.install runs an installer
+// for up to protocol.AgentInstallTimeout, and anything else gets
+// callTimeout.
+func callBound(method string) time.Duration {
+	if method == protocol.MethodAgentInstall {
+		return protocol.AgentInstallTimeout + callTimeout
+	}
+	return callTimeout
+}
+
 // errWedged reports a control call that outlived the watchdog; the
 // connection it ran on is presumed dead.
 var errWedged = errors.New("control call timed out")
@@ -137,7 +147,7 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 		err := client.Call(method, callParams, &result)
 		done <- outcome{result: result, err: err}
 	}()
-	watchdog := time.NewTimer(callTimeout)
+	watchdog := time.NewTimer(callBound(method))
 	defer watchdog.Stop()
 	select {
 	case out := <-done:
@@ -188,8 +198,8 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 // Call performs one control call on its own channel. A server-reported
 // failure comes back as that *protocol.Error; a transport failure
 // triggers one redial and one retry before surfacing as CodeUnavailable,
-// except for imports and development/repository operations, which may have
-// already committed a mutation before the response was lost.
+// except for imports, agent installs and development/repository operations,
+// which may have already committed a mutation before the response was lost.
 func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	result, err := b.callOnce(ctx, method, params)
 	if err == nil {
@@ -199,7 +209,7 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if errors.As(err, &perr) {
 		return nil, perr
 	}
-	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport ||
+	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
 		strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
 		// The response may have been lost after committing a mutation. Preserve
 		// that uncertainty; reconnect only on the next explicit request.

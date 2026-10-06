@@ -38,16 +38,20 @@ func TestPrintAgentsEmpty(t *testing.T) {
 
 func TestPrintAgentInstallGuidance(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		script string
-		want   string
+		name     string
+		script   string
+		enhanced string
+		want     string
 	}{
 		{name: "claude", script: "curl https://example.test/install | sh", want: "curl https://example.test/install | sh"},
+		{name: "codex", script: "npm install codex", enhanced: "npm install codex && npm install codex-acp", want: "npm install codex && npm install codex-acp"},
+		{name: "omp", script: "curl https://example.test/omp | sh", want: "curl https://example.test/omp | sh"},
 		{name: "myagent", want: "install myagent into ~/.local/bin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
-			if err := printAgentInstallGuidance(&out, protocol.AgentInfo{Name: tc.name, InstallScript: tc.script}); err != nil {
+			agent := protocol.AgentInfo{Name: tc.name, InstallScript: tc.script, EnhancedInstallScript: tc.enhanced}
+			if err := printAgentInstallGuidance(&out, agentInstallScript(agent, true)); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "aether terminal") || !strings.Contains(out.String(), tc.want) {

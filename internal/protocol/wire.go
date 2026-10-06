@@ -787,3 +787,20 @@ type AgentInfo struct {
 	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
 	Unavailable    string `json:"unavailable,omitempty"`
 }
+
+// AgentInstallParams are the params of agent.install: the shipped agent to
+// install, and whether to install its enhanced-mode adapter as well.
+type AgentInstallParams struct {
+	Name     string `json:"name"`
+	Enhanced bool   `json:"enhanced,omitempty"`
+}
+
+// AgentInstallResult is the result of agent.install. LogTail is the end of
+// the command's combined output. Error is set when the command failed; the
+// install flags are read from the home after it ends either way.
+type AgentInstallResult struct {
+	LogTail           string `json:"log_tail"`
+	Installed         bool   `json:"installed"`
+	EnhancedInstalled bool   `json:"enhanced_installed"`
+	Error             string `json:"error,omitempty"`
+}
