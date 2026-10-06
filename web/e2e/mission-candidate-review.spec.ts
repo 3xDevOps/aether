@@ -3,38 +3,12 @@
 // explicitly not a vendor-harness or credentialed-agent demonstration.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import path from 'node:path'
 import { expect, test } from './fixtures'
+import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { runContainer } from './harness/docker'
 import { memberID, seedWorkspace } from './harness/setup'
 
 const terminalTimeout = 3 * 60 * 1000
-
-// The coordination CLI is mounted in every real run container. Keeping this
-// helper narrow makes the fixture exercise the same socket and admission path
-// as an installed integrator/worker skill, without pretending to be one.
-function runCoordCLI<T>(runID: string, args: string[], input?: string): T {
-  const output = execFileSync(
-    'docker',
-    ['exec', '-i', runContainer(runID), 'aether-internal', ...args],
-    { input, encoding: 'utf8', timeout: 60_000 },
-  )
-  const envelope = JSON.parse(output) as { ok?: boolean; result?: T; error?: { message?: string } }
-  if (!envelope.ok || envelope.result === undefined) {
-    throw new Error(envelope.error?.message || `aether-internal ${args.join(' ')} failed`)
-  }
-  return envelope.result
-}
-
-async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
-  await expect
-    .poll(() => existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock')), {
-      timeout: 30_000,
-      intervals: [100, 250, 500],
-    })
-    .toBeTruthy()
-}
 
 test('launches a mission, controls a worker, and shows its candidate without a human gate', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
@@ -77,11 +51,13 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   const answerBox = page.getByLabel('Answer question 1', { exact: true })
   await expect(answerBox).toBeVisible({ timeout: terminalTimeout })
   await answerBox.fill('the guest checkout flow')
-  await page.getByRole('button', { name: 'Answer', exact: true }).click()
-  // The stored answer renders under an attribution line once the refetch
-  // lands; the member's display name is whatever the fixture registered.
-  await expect(page.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('the guest checkout flow', { exact: true })).toBeVisible()
+  await page.getByRole('region', { name: 'Questions for you' }).getByRole('button', { name: 'Answer', exact: true }).click()
+  // The answered question folds to one line once the refetch lands; the
+  // member's display name is whatever the fixture registered.
+  const questions = page.getByRole('region', { name: 'Questions for you' })
+  await expect(questions.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
+  await questions.getByRole('button', { name: /which checkout flow\?/ }).click()
+  await expect(questions.getByText('the guest checkout flow', { exact: true })).toBeVisible()
 
   type TaskMutation = { task: { id: string; current_revision: number } }
   const proposed = runCoordCLI<TaskMutation>(
@@ -103,7 +79,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
     '--idempotency-key', 'mission-candidate-start',
   ])
   expect(startedMission.plan.phase).toBe('active')
-  await expect(page.getByRole('region', { name: 'Mission tasks' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('region', { name: 'Tasks' })).toContainText('scripted worker candidate', { timeout: 30_000 })
   for (const name of ['Approve', 'Request changes', 'Reject']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
   }
@@ -147,7 +123,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await page.goto(alice.url)
   await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
-  const missionView = page.getByRole('region', { name: 'Mission tasks' })
+  const missionView = page.getByRole('region', { name: 'Tasks' })
   await expect(missionView).toBeVisible()
   await expect(missionView).toContainText('Working')
   await page.getByRole('button', { name: 'Release control', exact: true }).click()
@@ -156,6 +132,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   expect(released.takeover_active ?? false).toBe(false)
   // The mission page stays open from here on: candidate progress must follow
   // the integrator without a reload.
+  await page.getByRole('button', { name: 'Integration', exact: true }).click()
   const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
   await expect(candidateReview).toContainText('No candidate has been prepared yet.', { timeout: terminalTimeout })
 
@@ -171,6 +148,8 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   runCoordCLI<{ report_id: string }>(started.attempt.run_id, [
     'report', '--outcome', 'success', '--summary', 'scripted fixture completed', '--idempotency-key', 'mission-candidate-report',
   ])
+  // The report is also mail to the integrator; the swarm page lists it live.
+  await expect(page.getByRole('region', { name: 'Agent messages' })).toContainText('scripted fixture completed', { timeout: 30_000 })
   type Submission = { id: string; state: string; ref: { evidence_ref: string; retained_revision: string; run_id: string } }
   let submission: Submission | undefined
   await expect
