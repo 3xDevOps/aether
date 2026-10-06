@@ -314,9 +314,10 @@ restart delays them rather than losing them, and neither carries the body:
 | `coord.message.acked` | recipient | `message_id`, `to_run_id`, `acked_at` |
 
 The dashboard's Activity feed shows `coord.message` as an **Agent message**
-row such as `Planner → Backend · question`; `aether timeline` prints it as
-`<from-run> -> <to-run> · question`. The CLI has no command for bodies, so
-read them in the dashboard or through `coord.messages.list`.
+row with the sender, recipient and kind, such as `Planner → Backend ·
+question`; `aether timeline` prints it as `<from-run> -> <to-run> ·
+question`. Neither shows the body. Bodies come only from
+`coord.messages.list`; the dashboard has no view of them yet.
 
 `workspace.timeline` accepts `mission_id`, which matches events of every run
 that has served the swarm, and its `run_id` filter also matches mail
