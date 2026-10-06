@@ -1,9 +1,7 @@
-import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
-import type { Run, RunPRFeedbackResult } from '@/lib/types'
+import type { RunPRFeedbackResult } from '@/lib/types'
 import { Actual, Attest, Diagnostics, InlineError } from '@/routes/diff/publish-parts'
+import type { Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
 
 interface FeedbackEntry {
@@ -27,35 +25,14 @@ function entriesOf(feedback: RunPRFeedbackResult): FeedbackEntry[] {
   ]
 }
 
-export function PRFeedback({ run, feedback, client }: { run: Run; feedback: RunPRFeedbackResult; client: Api }) {
-  const [selected, setSelected] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [receipt, setReceipt] = useState<string | null>(null)
-  const pending = useRef<{ body: string; key: string } | null>(null)
+export function PRFeedback({ p, feedback }: { p: Publish; feedback: RunPRFeedbackResult }) {
   const entries = entriesOf(feedback)
-  const chosen = entries.filter((entry) => selected.includes(entry.key))
+  const chosen = entries.filter((entry) => p.feedbackSelected.includes(entry.key))
 
-  async function send() {
-    if (busy || !chosen.length) return
+  function send() {
     const pr = feedback.pull_request
     const body = `Selected GitHub feedback${pr ? ` for ${pr.repository}#${pr.number} (${pr.url}), ${pr.head_repository}:${pr.head_branch} → ${pr.base_branch}, head ${pr.head_oid}` : ''}:\n\n${chosen.map((entry) => `${entry.heading}\n${entry.body}${entry.url ? `\n${entry.url}` : ''}`).join('\n\n')}`
-    // The same selection resends under the same key, so a lost response cannot post twice.
-    const action = pending.current && pending.current.body === body ? pending.current : { body, key: crypto.randomUUID() }
-    pending.current = action
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await client.runRoomPost({ workspace_id: run.workspace_id, run_id: run.id, kind: 'steer_request', body, idempotency_key: action.key })
-      useStore.getState().upsertRoomMessage(result.message)
-      setReceipt(result.receipt ?? result.message.state)
-      setSelected([])
-      pending.current = null
-    } catch (cause) {
-      setError(message(cause))
-    } finally {
-      setBusy(false)
-    }
+    void p.perform('send', () => p.sendFeedback(body))
   }
 
   return (
@@ -76,9 +53,9 @@ export function PRFeedback({ run, feedback, client }: { run: Run; feedback: RunP
             <li key={entry.key}>
               <article className="grid min-w-0 gap-1 p-2">
                 <Attest
-                  checked={selected.includes(entry.key)}
-                  disabled={busy}
-                  onChange={() => setSelected((current) => current.includes(entry.key) ? current.filter((key) => key !== entry.key) : [...current, entry.key])}
+                  checked={p.feedbackSelected.includes(entry.key)}
+                  disabled={p.busy}
+                  onChange={() => p.toggleFeedback(entry.key)}
                 >
                   <span className="font-medium break-words">{entry.heading}</span>
                 </Attest>
@@ -98,15 +75,15 @@ export function PRFeedback({ run, feedback, client }: { run: Run; feedback: RunP
         the Session composer; this does not type directly into the agent.
       </p>
       <div className="grid justify-items-start gap-1">
-        <Button disabled={busy || !chosen.length} onClick={() => void send()}>
+        <Button disabled={p.busy || !chosen.length} onClick={send}>
           Send selected feedback to the agent
         </Button>
-        <InlineError>{error ?? undefined}</InlineError>
+        <InlineError>{p.errors.send}</InlineError>
       </div>
-      {receipt && (
+      {p.feedbackReceipt && (
         <p role="status">
-          Delivery: {receipt}.{' '}
-          <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('run', { runId: run.id, view: 'session' })}>
+          Delivery: {p.feedbackReceipt}.{' '}
+          <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('run', { runId: p.run.id, view: 'session' })}>
             Open the session
           </Button>
         </p>

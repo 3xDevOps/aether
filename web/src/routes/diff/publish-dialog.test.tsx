@@ -204,3 +204,41 @@ it('sends only checked PR feedback to the agent', async () => {
   expect(body).toContain('please add a test')
   expect(body).not.toContain('nit: rename')
 })
+
+it('keeps PR feedback and its idempotency key across switching steps and closing the dialog', async () => {
+  const client = fakeApi({
+    runGitStatus: vi.fn(async () => status),
+    runPRFeedback: vi.fn(async () => ({
+      identity: status.identity, account_member_id: status.account_member_id, output, truncated: false,
+      pull_request: null, checks: [], reviews: [], review_comments: [],
+      comments: [{ id: 'c1', author: 'reviewer', body: 'please add a test', created_at: '2026-10-01', url: 'https://github.com/upstream/project/pull/7#c1' }],
+    })),
+  })
+  vi.mocked(client.runRoomPost).mockRejectedValueOnce(new Error('connection lost after request'))
+  renderOpen(client)
+  await screen.findByRole('checkbox', { name: 'Select selected.txt' })
+  step('2 · Push and pull request')
+  const pr = within(screen.getByRole('region', { name: 'GitHub pull request' }))
+  for (const [label, value] of [['PR repository (owner/name)', 'upstream/project'], ['PR base branch', 'main'], ['PR head repository (owner/name)', 'fork/project'], ['PR head branch', 'reviewed']]) {
+    fireEvent.change(pr.getByLabelText(label), { target: { value } })
+  }
+  fireEvent.click(pr.getByRole('button', { name: 'Refresh PR feedback' }))
+  const feedback = within(await screen.findByRole('region', { name: 'PR feedback' }))
+  fireEvent.click(feedback.getByRole('checkbox'))
+  fireEvent.click(feedback.getByRole('button', { name: 'Send selected feedback to the agent' }))
+  await feedback.findByText('connection lost after request')
+
+  step('1 · Commit')
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  fireEvent.click(screen.getByRole('button', { name: 'Publish…' }))
+  step('2 · Push and pull request')
+
+  const again = within(await screen.findByRole('region', { name: 'PR feedback' }))
+  expect(again.getByRole('checkbox').getAttribute('aria-checked')).toBe('true')
+  expect(again.getByText('connection lost after request')).toBeTruthy()
+  fireEvent.click(again.getByRole('button', { name: 'Send selected feedback to the agent' }))
+  expect(await again.findByRole('status')).toHaveProperty('textContent', expect.stringContaining('Delivery'))
+  const [first, second] = vi.mocked(client.runRoomPost).mock.calls.map(([request]) => request.idempotency_key)
+  expect(second).toBe(first)
+})

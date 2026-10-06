@@ -9,7 +9,7 @@ import type {
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
-export type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create' | 'feedback'
+export type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create' | 'feedback' | 'send'
 
 export interface UntrackedPreview {
   path: string
@@ -48,6 +48,9 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const [body, setBody] = useState('')
   const [draft, setDraft] = useState(false)
   const [feedback, setFeedback] = useState<RunPRFeedbackResult | null>(null)
+  const [feedbackSelected, setFeedbackSelected] = useState<string[]>([])
+  const [feedbackReceipt, setFeedbackReceipt] = useState<string | null>(null)
+  const pendingSend = useRef<{ body: string; key: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<PublishAction, string>>>({})
   const mounted = useRef(true)
@@ -191,7 +194,25 @@ export function usePublish(run: Run, client: Api, open: boolean) {
 
   async function refreshFeedback() {
     setFeedback(null)
+    setFeedbackSelected([])
+    setFeedbackReceipt(null)
     if (expected) setFeedback(await client.runPRFeedback({ run_id: run.id, expected, target, limit: 100 }))
+  }
+
+  function toggleFeedback(key: string) {
+    setFeedbackSelected((current) => current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key])
+  }
+
+  async function sendFeedback(body: string) {
+    // The same message resends under the same key, so a lost response cannot post it twice.
+    const action = pendingSend.current?.body === body ? pendingSend.current : { body, key: crypto.randomUUID() }
+    pendingSend.current = action
+    const result = await client.runRoomPost({ workspace_id: run.workspace_id, run_id: run.id, kind: 'steer_request', body, idempotency_key: action.key })
+    pendingSend.current = null
+    useStore.getState().upsertRoomMessage(result.message)
+    if (!mounted.current) return
+    setFeedbackReceipt(result.receipt ?? result.message.state)
+    setFeedbackSelected([])
   }
 
   function changeTarget(key: keyof RunPRTarget, value: string) {
@@ -199,6 +220,8 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     setPRReview(null)
     setPRReviewed(false)
     setFeedback(null)
+    setFeedbackSelected([])
+    setFeedbackReceipt(null)
     setCreation(null)
   }
 
@@ -208,14 +231,14 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   }
 
   return {
-    run, client, caps, canWrite, busy, errors, perform,
+    run, caps, canWrite, busy, errors, perform,
     status, statusReady, expected, refreshStatus,
     paths, selectPath, patches, untracked, reviewed, reviewPaths,
     commitMessage, setCommitMessage, commit, commitPaths,
     pushTarget, changePushTarget, pushReviewed, setPushReviewed, push, pushBranch,
     target, targetComplete, changeTarget, currentPRReview, discoverPR, uncertain,
     title, setTitle, body, setBody, draft, setDraft, prReviewed, setPRReviewed, creation, createPR,
-    feedback, refreshFeedback,
+    feedback, refreshFeedback, feedbackSelected, toggleFeedback, feedbackReceipt, sendFeedback,
   }
 }
 

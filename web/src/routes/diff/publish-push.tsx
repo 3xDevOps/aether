@@ -203,7 +203,7 @@ export function PushStep({ p }: { p: Publish }) {
           </Button>
           <InlineError>{p.errors.feedback}</InlineError>
         </div>
-        {p.feedback && <PRFeedback key={JSON.stringify(p.target)} run={p.run} feedback={p.feedback} client={p.client} />}
+        {p.feedback && <PRFeedback p={p} feedback={p.feedback} />}
       </section>
     </div>
   )
