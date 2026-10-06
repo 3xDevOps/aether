@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { dequal } from 'dequal'
+import { useMemo, useRef } from 'react'
 import type { RunActionCandidate } from '@/lib/commands'
 import type { StateContext } from '@/lib/needs-you'
 import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
@@ -54,11 +55,30 @@ export function board(s: RunsInput): BoardData {
   }
 }
 
+// Unchanged cards keep their previous object so the memoized RunCard skips them.
+function reuseCards(data: BoardData, previous: Map<string, BoardCard>): Map<string, BoardCard> {
+  const next = new Map<string, BoardCard>()
+  const keep = (card: BoardCard) => {
+    const old = previous.get(card.run.id)
+    const kept = old && dequal(old, card) ? old : card
+    next.set(card.run.id, kept)
+    return kept
+  }
+  for (const column of data.columns) column.cards = column.cards.map(keep)
+  data.archivedCards = data.archivedCards.map(keep)
+  return next
+}
+
 export function useBoard(): BoardData {
   const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
   const mineOnly = useStore((s) => s.mineOnly)
-  return useMemo(() => board({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
+  const cards = useRef(new Map<string, BoardCard>())
+  return useMemo(() => {
+    const data = board({ workspace, mineOnly, ctx })
+    cards.current = reuseCards(data, cards.current)
+    return data
+  }, [workspace, mineOnly, ctx])
 }
 
 function candidates(runs: RunRecord[], workspaces: Record<string, Workspace>): RunActionCandidate[] {

@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react'
+import { memo, useMemo, useRef, useState } from 'react'
 import { Slot } from '@/components/slots'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -26,8 +26,8 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
   const navigate = useStore((s) => s.navigate)
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
-  const additions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'additions'))
-  const deletions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'deletions'))
+  const files = useStore((s) => s.diffs[run.id]?.snapshots.at(-1)?.files)
+  const totals = useMemo(() => diffTotals(files), [files])
   const [replying, setReplying] = useState(false)
   const cardRef = useRef<HTMLElement>(null)
   const action = cardAction(card, approval)
@@ -55,9 +55,10 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
               </>
             )}
             <Avatar name={owner} color={card.owner?.color} />
-            {additions !== undefined && deletions !== undefined && (
+            {totals && (
               <span className="shrink-0 tabular-nums">
-                <span className="text-diff-add">+{additions}</span> <span className="text-diff-del">−{deletions}</span>
+                <span className="text-diff-add">+{totals.additions}</span>{' '}
+                <span className="text-diff-del">−{totals.deletions}</span>
               </span>
             )}
             {card.workspaceName && <span className="min-w-0 truncate">{card.workspaceName}</span>}
@@ -96,8 +97,15 @@ function archivedReason(card: BoardCard): string {
   return `${card.reason}, ${deletesInLabel(run.deletes_at)}`
 }
 
-function diffTotal(files: { additions: number; deletions: number }[] | undefined, key: 'additions' | 'deletions') {
-  return files?.reduce((sum, file) => sum + file[key], 0)
+function diffTotals(files: { additions: number; deletions: number }[] | undefined) {
+  if (!files) return undefined
+  let additions = 0
+  let deletions = 0
+  for (const file of files) {
+    additions += file.additions
+    deletions += file.deletions
+  }
+  return { additions, deletions }
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {
