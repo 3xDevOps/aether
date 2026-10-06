@@ -106,25 +106,44 @@ describe('session rows', () => {
 })
 
 describe('session log', () => {
-  it('reads the run history to the head and keeps live events that arrive after', async () => {
+  const span = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({ ...event('run.agent', { kind: 'tool_call', tool: 'Read' }, '2026-08-14T10:03:00Z'), seq: from + i }))
+
+  it('opens on the newest history, stops at what it keeps, then follows live events', async () => {
     const store = createRootStore()
-    const first = event('run.agent', { kind: 'tool_call', tool: 'Read' }, '2026-08-14T10:03:00Z')
-    const second = event('workspace.timeline', { kind: 'pause' }, '2026-08-14T10:04:00Z')
     const workspaceTimeline = vi.fn()
-      .mockResolvedValueOnce({ events: [first], next_seq: first.seq, more: true })
-      .mockResolvedValueOnce({ events: [second], next_seq: second.seq, more: false })
+      .mockResolvedValueOnce({ events: span(2001, 3000), next_seq: 3000, more: true, older_seq: 2001 })
+      .mockResolvedValueOnce({ events: span(1001, 2000), next_seq: 3000, more: true, older_seq: 1001 })
     await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
 
-    expect(workspaceTimeline).toHaveBeenNthCalledWith(2, expect.objectContaining({ run_id: 'run_1', after_seq: first.seq }))
-    expect(workspaceTimeline.mock.calls[0]![0].types).toEqual(['run.agent', 'workspace.timeline', 'run.status'])
-    const live = event('run.status', { to: 'completed' }, '2026-08-14T10:05:00Z')
+    expect(workspaceTimeline).toHaveBeenCalledTimes(2)
+    expect(workspaceTimeline.mock.calls[0]![0]).toMatchObject({ run_id: 'run_1', newest: true, before_seq: undefined, types: ['run.agent', 'workspace.timeline', 'run.status'] })
+    expect(workspaceTimeline.mock.calls[1]![0]).toMatchObject({ newest: true, before_seq: 2001 })
+    const log = store.getState().sessionLogs.run_1!
+    expect([log.events.length, log.events[0]!.seq, log.cursor]).toEqual([2000, 1001, 3000])
+
+    const live = { ...event('run.status', { to: 'completed' }, '2026-08-14T10:05:00Z'), seq: 3001 }
     store.getState().appendSessionEvent(live)
-    store.getState().appendSessionEvent({ ...live, run_id: 'run_other', seq: live.seq + 1 })
-    expect(store.getState().sessionLogs.run_1!.events.map((e) => e.seq)).toEqual([first.seq, second.seq, live.seq])
+    store.getState().appendSessionEvent({ ...live, run_id: 'run_other', seq: 3002 })
+    expect(store.getState().sessionLogs.run_1!.events.at(-1)!.seq).toBe(3001)
     expect(store.getState().sessionLogs.run_other).toBeUndefined()
   })
 
-  it('reads from the start again after the server event log restarts', async () => {
+  it('catches up forward from its cursor on a later read', async () => {
+    const store = createRootStore()
+    const workspaceTimeline = vi.fn()
+      .mockResolvedValueOnce({ events: span(1, 2), next_seq: 10, more: false })
+      .mockResolvedValueOnce({ events: span(11, 11), next_seq: 11, more: true })
+      .mockResolvedValueOnce({ events: span(12, 12), next_seq: 12, more: false })
+    await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
+    await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
+
+    expect(workspaceTimeline).toHaveBeenNthCalledWith(2, expect.objectContaining({ after_seq: 10 }))
+    expect(workspaceTimeline).toHaveBeenNthCalledWith(3, expect.objectContaining({ after_seq: 11 }))
+    expect(store.getState().sessionLogs.run_1!.events.map((e) => e.seq)).toEqual([1, 2, 11, 12])
+  })
+
+  it('reads from the head again after the server event log restarts', async () => {
     const store = createRootStore()
     const old = event('run.agent', { kind: 'tool_call', tool: 'Read' }, '2026-08-14T10:03:00Z')
     const workspaceTimeline = vi.fn().mockResolvedValue({ events: [old], next_seq: 500, more: false })
@@ -135,7 +154,8 @@ describe('session log', () => {
     workspaceTimeline.mockResolvedValue({ events: [restored], next_seq: 3, more: false })
     await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
 
-    expect(workspaceTimeline).toHaveBeenLastCalledWith(expect.objectContaining({ after_seq: 0 }))
+    expect(workspaceTimeline.mock.lastCall![0]).toMatchObject({ newest: true })
+    expect(workspaceTimeline.mock.lastCall![0]).not.toHaveProperty('after_seq')
     expect(store.getState().sessionLogs.run_1!.events.map((e) => e.id)).toEqual(['ev_restored'])
   })
 })

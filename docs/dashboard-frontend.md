@@ -1507,7 +1507,11 @@ plain message), `event` and `finished`. Request titles and that copy live in
 `lib/run-requests.ts`, shared with Details. A timeline steer that matches a
 room message is shown once. **Show older messages** at the top pages room
 history back 100 messages at a time, and a failed history read shows the
-server's error with **Retry**. The log keeps the last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
+server's error with **Retry**. The log keeps the last 2,000 events: the
+first read pages backward from the log head (`workspace.timeline` with
+`newest: true`, then `before_seq` set to the previous page's `older_seq`)
+and stops there, and a later read resumes forward from `next_seq`, which a
+backward page sets to the head. The list is `role="log"` with `aria-live="off"`, and each
 row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 `steer_request` with the lease the tab holds; its rules are in
 [Run control](terminal.md#run-control). A refused send or image upload shows
@@ -2344,8 +2348,8 @@ questions and queued messages stay contextual to their run, in its Details
   rendered as the server's answer, never predicted by the form. A request the
   user has just decided stays on screen reporting its outcome, laid over the
   fetched queue, because the next fetch no longer returns it.
-- **The feed opens at the end of the log.** `workspace.timeline` pages forward
-  from a cursor only, so the view first asks for a page past the end - that
+- **The feed opens at the end of the log.** The feed reads `workspace.timeline`
+  forward from a cursor, so the view first asks for a page past the end - that
   answer carries the log head - and opens a window back from it. After that
   the feed is live without reading: while a feed view is mounted
   (`useLiveFeed`), `applyEvent` appends each event the filters select by the

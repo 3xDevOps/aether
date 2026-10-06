@@ -2,9 +2,12 @@ package timeline
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -82,6 +85,52 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	matcher := events.Filter{Runs: []domain.RunID{"run-integrator"}}
 	if !matcher.Matches(events.Event{RunID: "run-worker", Payload: events.CoordMessagePayload{ToRunID: "run-integrator"}}) {
 		t.Error("a live subscription filtered by run must see mail addressed to it")
+	}
+}
+
+func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
+	ctx := context.Background()
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatalf("event log: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	const ws domain.WorkspaceID = "ws-1"
+	for seq := uint64(1); seq <= 7; seq++ {
+		run := domain.RunID("run-1")
+		if seq%2 == 0 {
+			run = "run-other"
+		}
+		e := events.Event{ID: fmt.Sprintf("ev-%d", seq), Seq: seq, Time: time.Unix(int64(seq), 0).UTC(), WorkspaceID: ws, RunID: run, Payload: events.RunStatusPayload{To: domain.RunRunning}}
+		e.Type = e.Payload.EventType()
+		if aerr := log.Append(ctx, e); aerr != nil {
+			t.Fatalf("append %d: %v", seq, aerr)
+		}
+	}
+	reader := NewReader(log, fixedMission{})
+	f := Filter{Workspace: ws, Run: "run-1"}
+	var pages [][]uint64
+	before := uint64(0)
+	for {
+		page, perr := reader.Before(ctx, f, before, 2)
+		if perr != nil {
+			t.Fatalf("Before(%d): %v", before, perr)
+		}
+		if page.NextSeq != 7 {
+			t.Fatalf("NextSeq = %d, want the head 7", page.NextSeq)
+		}
+		var seqs []uint64
+		for _, e := range page.Events {
+			seqs = append(seqs, e.Seq)
+		}
+		pages = append(pages, seqs)
+		if !page.More {
+			break
+		}
+		before = page.OlderSeq
+	}
+	if want := [][]uint64{{5, 7}, {1, 3}}; !reflect.DeepEqual(pages, want) {
+		t.Fatalf("pages = %v, want %v", pages, want)
 	}
 }
 

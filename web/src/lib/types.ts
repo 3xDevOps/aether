@@ -744,6 +744,7 @@ export interface TimelinePage {
   events: Event[]
   next_seq: number
   more: boolean
+  older_seq?: number
 }
 
 export interface TimelineQuery {
@@ -753,6 +754,8 @@ export interface TimelineQuery {
   member_id?: string
   types?: string[]
   after_seq?: number
+  newest?: boolean
+  before_seq?: number
   limit?: number
 }
 

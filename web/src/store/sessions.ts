@@ -261,20 +261,27 @@ export async function readSessionLog(store: RootStore, client: Api, run: { id: s
   if (state.sessionLogs[run.id]?.loading) return
   state.beginSessionLog(run.id)
   const epoch = state.terminalCacheEpoch
+  const query = { workspace_id: run.workspace_id, run_id: run.id, types: sessionEventTypes, limit: pageSize }
   let cursor = state.sessionLogs[run.id]?.cursor ?? 0
   try {
-    for (;;) {
-      const page = await client.workspaceTimeline({
-        workspace_id: run.workspace_id,
-        run_id: run.id,
-        types: sessionEventTypes,
-        after_seq: cursor,
-        limit: pageSize,
-      })
-      if (store.getState().terminalCacheEpoch !== epoch) return
-      store.getState().addSessionEvents(run.id, page.events, page.next_seq)
-      cursor = page.next_seq
-      if (!page.more) break
+    if (cursor === 0) {
+      let before: number | undefined
+      for (let read = 0; read < residentEvents;) {
+        const page = await client.workspaceTimeline({ ...query, newest: true, before_seq: before })
+        if (store.getState().terminalCacheEpoch !== epoch) return
+        store.getState().addSessionEvents(run.id, page.events, page.next_seq)
+        read += page.events.length
+        before = page.older_seq
+        if (!page.more) break
+      }
+    } else {
+      for (;;) {
+        const page = await client.workspaceTimeline({ ...query, after_seq: cursor })
+        if (store.getState().terminalCacheEpoch !== epoch) return
+        store.getState().addSessionEvents(run.id, page.events, page.next_seq)
+        cursor = page.next_seq
+        if (!page.more) break
+      }
     }
     store.getState().setSessionLogError(run.id, null)
   } catch (err) {

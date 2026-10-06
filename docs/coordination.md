@@ -338,7 +338,10 @@ An integrator that leaves mail unacknowledged for over two minutes reads
 `3 agent messages unread for 12 min` on the swarm page, its board card and
 its sidebar row.
 
-`workspace.timeline` accepts `mission_id`, which matches events of every run
+`workspace.timeline` pages forward from `after_seq`, or with `newest: true`
+backward from `before_seq` (zero: the log head; pass the previous page's
+`older_seq`), always returning events oldest first. It accepts
+`mission_id`, which matches events of every run
 that has served the swarm, and its `run_id` filter also matches mail
 addressed to the run. The two mission filters differ: the timeline also
 shows mail a swarm run received from a run outside the swarm, which

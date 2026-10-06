@@ -35,20 +35,34 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	for _, t := range p.Types {
 		types = append(types, events.Type(t))
 	}
-	page, err := reader.Page(ctx, timeline.Filter{
+	if p.Newest && p.AfterSeq > 0 {
+		return nil, invalidParams("after_seq and newest cannot be combined")
+	}
+	if !p.Newest && p.BeforeSeq > 0 {
+		return nil, invalidParams("before_seq needs newest")
+	}
+	filter := timeline.Filter{
 		Workspace: domain.WorkspaceID(p.WorkspaceID),
 		Run:       domain.RunID(p.RunID),
 		MissionID: domain.MissionID(p.MissionID),
 		Member:    domain.MemberID(p.MemberID),
 		Types:     types,
-	}, p.AfterSeq, p.Limit)
+	}
+	var page timeline.Page
+	var err error
+	if p.Newest {
+		page, err = reader.Before(ctx, filter, p.BeforeSeq, p.Limit)
+	} else {
+		page, err = reader.Page(ctx, filter, p.AfterSeq, p.Limit)
+	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := protocol.WorkspaceTimelineResult{
-		Events:  make([]protocol.Event, 0, len(page.Events)),
-		NextSeq: page.NextSeq,
-		More:    page.More,
+		Events:   make([]protocol.Event, 0, len(page.Events)),
+		NextSeq:  page.NextSeq,
+		More:     page.More,
+		OlderSeq: page.OlderSeq,
 	}
 	for _, ev := range page.Events {
 		payload, merr := json.Marshal(ev.Payload)

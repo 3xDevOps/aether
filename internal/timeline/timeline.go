@@ -54,12 +54,15 @@ type MissionRuns interface {
 	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 }
 
-// Page is one slice of history. NextSeq is the cursor to pass as the next
-// call's afterSeq; More reports that history remains past it.
+// Page is one slice of history, oldest first. NextSeq is the cursor to
+// pass as the next call's afterSeq; More reports that history remains past
+// it. A page read backward by Before sets NextSeq to the log head, More to
+// older history remaining, and OlderSeq to the next call's beforeSeq.
 type Page struct {
-	Events  []events.Event
-	NextSeq uint64
-	More    bool
+	Events   []events.Event
+	NextSeq  uint64
+	More     bool
+	OlderSeq uint64
 }
 
 // Reader pages a workspace's history out of the event log.
@@ -78,38 +81,16 @@ func NewReader(log events.EventLog, missions MissionRuns) *Reader {
 // first. Reads are bounded by the log head sampled at entry, so paging
 // stays stable while new events arrive.
 func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int) (Page, error) {
-	switch {
-	case limit <= 0:
-		limit = DefaultLimit
-	case limit > MaxLimit:
-		limit = MaxLimit
-	}
-	head, err := r.log.LastSeq(ctx)
+	limit = clampLimit(limit)
+	head, logFilter, ok, err := r.prepare(ctx, f)
 	if err != nil {
-		return Page{}, fmt.Errorf("timeline: read log head: %w", err)
+		return Page{}, err
 	}
 	cursor := afterSeq
-	if cursor >= head {
+	if !ok || cursor >= head {
 		return Page{NextSeq: head}, nil
 	}
 	batch := max(limit, minBatch)
-	logFilter := events.Filter{Workspace: f.Workspace, Types: f.Types}
-	if f.Run != "" {
-		logFilter.Runs = []domain.RunID{f.Run}
-	}
-	if f.MissionID != "" {
-		runs, merr := r.missions.ListMissionRunIDs(ctx, f.MissionID)
-		if merr != nil {
-			return Page{}, fmt.Errorf("timeline: resolve mission %s: %w", f.MissionID, merr)
-		}
-		if f.Run != "" {
-			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
-		}
-		if len(runs) == 0 {
-			return Page{NextSeq: head}, nil
-		}
-		logFilter.Runs = runs
-	}
 	out := make([]events.Event, 0, limit)
 	scanned := 0
 	for len(out) < limit && cursor < head && scanned < limit*scanBudget {
@@ -122,10 +103,7 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 			consumed++
 			cursor = e.Seq
 			scanned++
-			if f.Member != "" && e.ActorID != f.Member {
-				continue
-			}
-			if len(f.Types) == 0 && detailTypes[e.Type] {
+			if !f.keeps(e) {
 				continue
 			}
 			out = append(out, e)
@@ -141,4 +119,96 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 		}
 	}
 	return Page{Events: out, NextSeq: cursor, More: cursor < head}, nil
+}
+
+// Before returns the newest limit events matching f with Seq < beforeSeq,
+// oldest first; beforeSeq zero reads back from the log head.
+func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit int) (Page, error) {
+	limit = clampLimit(limit)
+	head, logFilter, ok, err := r.prepare(ctx, f)
+	if err != nil {
+		return Page{}, err
+	}
+	cursor := beforeSeq
+	if cursor == 0 || cursor > head {
+		cursor = head + 1
+	}
+	if !ok {
+		return Page{NextSeq: head}, nil
+	}
+	batch := max(limit, minBatch)
+	out := make([]events.Event, 0, limit)
+	scanned := 0
+	for len(out) < limit && cursor > 1 && scanned < limit*scanBudget {
+		got, rerr := r.log.ReadBefore(ctx, logFilter, cursor, batch)
+		if rerr != nil {
+			return Page{}, fmt.Errorf("timeline: read workspace %s history: %w", f.Workspace, rerr)
+		}
+		consumed := 0
+		for _, e := range got {
+			consumed++
+			cursor = e.Seq
+			scanned++
+			if !f.keeps(e) {
+				continue
+			}
+			out = append(out, e)
+			if len(out) == limit {
+				break
+			}
+		}
+		if consumed == len(got) && len(got) < batch {
+			cursor = 0
+		}
+	}
+	slices.Reverse(out)
+	page := Page{Events: out, NextSeq: head, More: cursor > 1}
+	if page.More {
+		page.OlderSeq = cursor
+	}
+	return page, nil
+}
+
+func clampLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return DefaultLimit
+	case limit > MaxLimit:
+		return MaxLimit
+	}
+	return limit
+}
+
+// prepare samples the log head and turns f into a log filter; ok is false
+// when f can match nothing.
+func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, bool, error) {
+	head, err := r.log.LastSeq(ctx)
+	if err != nil {
+		return 0, events.Filter{}, false, fmt.Errorf("timeline: read log head: %w", err)
+	}
+	logFilter := events.Filter{Workspace: f.Workspace, Types: f.Types}
+	if f.Run != "" {
+		logFilter.Runs = []domain.RunID{f.Run}
+	}
+	if f.MissionID != "" {
+		runs, merr := r.missions.ListMissionRunIDs(ctx, f.MissionID)
+		if merr != nil {
+			return 0, events.Filter{}, false, fmt.Errorf("timeline: resolve mission %s: %w", f.MissionID, merr)
+		}
+		if f.Run != "" {
+			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
+		}
+		if len(runs) == 0 {
+			return head, logFilter, false, nil
+		}
+		logFilter.Runs = runs
+	}
+	return head, logFilter, true, nil
+}
+
+func (f Filter) keeps(e events.Event) bool {
+	if f.Member != "" && e.ActorID != f.Member {
+		return false
+	}
+	return len(f.Types) > 0 || !detailTypes[e.Type]
 }
