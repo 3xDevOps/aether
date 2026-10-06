@@ -6,6 +6,7 @@ import { PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { needsYouConditions, type NeedsYouTarget } from '@/lib/needs-you'
 import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -24,15 +25,21 @@ function answersInTerminal(card: BoardCard): boolean {
   return (card.needsYou === 'permission' || card.needsYou === 'question') && card.run.mode !== 'acp'
 }
 
+// The Run Room lives in the run view, so a notes target opens the run.
+const routeOf: Record<NeedsYouTarget, 'terminal' | 'diff' | 'missions'> = {
+  request: 'terminal',
+  run: 'terminal',
+  notes: 'terminal',
+  changes: 'diff',
+  swarm: 'missions',
+}
+
 export function openCard(card: BoardCard, navigate: (name: string, params?: Record<string, string>) => void) {
   const { run } = card
-  if ((card.swarm || card.needsYou === 'swarm-question' || card.needsYou === 'integrator-down') && run.mission_id) {
-    navigate('missions', { missionId: run.mission_id })
-  } else if (card.needsYou === 'unreviewed-finish') {
-    navigate('diff', { runId: run.id })
-  } else {
-    navigate('terminal', { runId: run.id })
-  }
+  const target = card.swarm ? 'swarm' : needsYouConditions.find((c) => c.id === card.needsYou)?.target ?? 'run'
+  const route = routeOf[target]
+  if (route === 'missions' && run.mission_id) navigate('missions', { missionId: run.mission_id })
+  else navigate(route === 'diff' ? 'diff' : 'terminal', { runId: run.id })
 }
 
 export function CardActionButton({
