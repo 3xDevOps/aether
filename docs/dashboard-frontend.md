@@ -3284,7 +3284,10 @@ The body is one column, in this order:
    "The integrator reported success. Leftover workers were stopped.",
    cancelled "The swarm was cancelled. Its workers and integrator run are
    stopped." A stopped or missing integrator adds a callout with
-   **Replace integrator…** (see below).
+   **Replace integrator…** (see below). An integrator that needs you for its
+   own reason, such as `Enhanced unavailable: <error>`, adds a callout `The
+   integrator needs you` with that reason, and the reason leads the state
+   line ahead of any `N questions for you`.
 2. **Questions for you**, only when the integrator asked any. An open
    question is a Needs you callout with an `Answer question <n>` field and
    **Answer**, which sends `mission.question.answer` with the key

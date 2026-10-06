@@ -11,6 +11,7 @@ import { ApiError, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
+import { needsYouConditions, type NeedsYouID } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import { presentRun } from '@/lib/status'
 import type { AgentInfo, Mission } from '@/lib/types'
@@ -64,23 +65,29 @@ function useIntegratorLine(runID: string | undefined) {
   const key = useStore((s) => {
     const run = runID ? s.runs[runID] : undefined
     if (!run) return ''
-    const shown = presentRun(run, stateContextOf(s, now))
-    return JSON.stringify([shown.reason, shown.state === 'needs-you', shown.unread ?? 0, isTerminal(run.status)])
+    const ctx = stateContextOf(s, now)
+    const shown = presentRun(run, ctx)
+    const problem = isTerminal(run.status) ? undefined : needsYouConditions.find((c) => !swarmConditions.has(c.id) && c.applies(run, ctx))
+    return JSON.stringify([shown.reason, shown.state === 'needs-you', shown.unread ?? 0, isTerminal(run.status), problem?.reason(run, ctx) ?? ''])
   })
   return useMemo(() => {
     if (!key) return undefined
-    const [reason, needsYou, unread, stopped] = JSON.parse(key) as [string, boolean, number, boolean]
-    return { reason, needsYou, unread, stopped }
+    const [reason, needsYou, unread, stopped, problem] = JSON.parse(key) as [string, boolean, number, boolean, string]
+    return { reason, needsYou, unread, stopped, problem }
   }, [key])
 }
+
+const swarmConditions = new Set<NeedsYouID>(['swarm-question', 'integrator-down'])
 
 function stateLineOf(mission: Mission, line: ReturnType<typeof useIntegratorLine>, missing: boolean): { tone: Tone; text: string } {
   const final = missionFinal(mission)
   if (!final && mission.integrator_launch_error) return { tone: 'needs-you', text: 'Integrator failed to launch' }
   if (!final && (missing || line?.stopped)) return { tone: 'needs-you', text: 'Integrator stopped' }
-  if (!final && mission.open_questions > 0) {
-    return { tone: 'needs-you', text: `${phaseWord[mission.phase]} · ${mission.open_questions} question${mission.open_questions === 1 ? '' : 's'} for you` }
+  const questions = `${mission.open_questions} question${mission.open_questions === 1 ? '' : 's'} for you`
+  if (!final && line?.problem) {
+    return { tone: 'needs-you', text: mission.open_questions > 0 ? `${line.problem} · ${questions}` : line.problem }
   }
+  if (!final && mission.open_questions > 0) return { tone: 'needs-you', text: `${phaseWord[mission.phase]} · ${questions}` }
   if (!final && line?.needsYou) return { tone: 'needs-you', text: line.reason }
   if (!final && line?.unread) return { tone: phaseTone[mission.phase], text: line.reason }
   return { tone: phaseTone[mission.phase], text: phaseWord[mission.phase] }
@@ -230,6 +237,15 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
               canReplace={canReplace}
               onReplace={() => setDialog('replace')}
             />
+            {!final && line?.problem && integratorRunID && !mission.integrator_launch_error && (
+              <Callout
+                tone="needs-you"
+                title="The integrator needs you"
+                actions={openQuestion && <Button size="sm" variant="secondary" onClick={() => navigate('run', { runId: integratorRunID })}>Open integrator</Button>}
+              >
+                <p className="break-words">{line.problem}</p>
+              </Callout>
+            )}
           </section>
           <SwarmQuestions
             questions={detail.questions}

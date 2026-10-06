@@ -189,6 +189,17 @@ describe('swarm detail', () => {
     })
   })
 
+  it('keeps a broken integrator in view while a question is open', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator({ status: 'needs-attention', reason: 'enhanced session failed: start claude-agent-acp: not found' })) } })
+    await mount(showing({ phase: 'planning', open_questions: 1 }, { questions: [missionQuestion()] }))
+    const problem = 'Enhanced unavailable: start claude-agent-acp: not found'
+    expect(screen.getAllByText(`${problem} · 1 question for you · Claude Code · Standard · created`, { exact: false }).length).toBeGreaterThan(0)
+    const callout = screen.getByText('The integrator needs you').parentElement!
+    expect(callout.textContent).toContain(problem)
+    await userEvent.click(within(callout).getByRole('button', { name: 'Open integrator' }))
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_integrator' } })
+  })
+
   it('keeps an unsent draft when the answer arrives from elsewhere', async () => {
     seed()
     await mount(showing({ phase: 'planning', open_questions: 1 }, { questions: [missionQuestion()] }))
