@@ -770,8 +770,8 @@ is not an internal candidate proposal.
    says sent. **Open the session** shows the durable message and its delivery
    state.
 
-Native status is read when this view opens and after explicit actions; GitHub
-discovery and feedback refresh are explicit. No background PR watcher, automatic
+Native status is read when the Publish dialog first opens and after explicit
+actions; GitHub discovery and feedback refresh are explicit. No background PR watcher, automatic
 merge, force push, branch switch or automatic mutation retry is performed.
 GitHub discovery, creation and feedback need a working native `gh`, network
 access, and the run's GitHub login's permissions on the explicit upstream/fork:

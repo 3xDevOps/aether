@@ -569,8 +569,8 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   rather than the app setting.
 
 A layout that only changes size belongs in CSS. Layouts that mount different
-elements for a finger than for a mouse, such as the activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
-constants there include `coarsePointer`, Tailwind's `belowSm` breakpoint and
+elements for a finger than for a mouse, such as the activity filter bar, ask
+`useMediaQuery` in `src/lib/hooks.ts`. Named constants there include `coarsePointer`, Tailwind's `belowSm` breakpoint and
 `phoneScreen`; the `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. Terminal utility controls respond to their
 pane's container width rather than the window width. The shell has one
@@ -2119,7 +2119,7 @@ both what it renders and the overlap set the conflict chips read.
   right **Wrap lines**, **Refresh**, **More** (**Expand all files**,
   **Collapse all files**, **Review locally…**) and **Publish…**. Below it a
   file list (`file-list.tsx`: status letter, name, folder, `+a −d`) sits
-  beside the patch once the view itself is 1000px wide - a container query,
+  beside the patch once the view itself is 780px wide - a container query,
   so opening Details narrows it too; narrower, the count in the strip is a
   menu of the same files. Picking a file opens it and scrolls to it. With
   nothing changed the view is the "No changes yet." empty state. `Land`
@@ -2185,8 +2185,9 @@ both what it renders and the overlap set the conflict chips read.
   its attestation checkbox; a refresh clears them. Each RPC's error shows
   under the button that sent it. The dialog's state lives in
   `publish-state.ts` and stays mounted while the Changes view is open, so a
-  typed message, or a PR creation whose outcome is uncertain, survives
-  closing the dialog.
+  typed message, a PR creation whose outcome is uncertain, and checked PR
+  feedback with its pending send survive switching steps and closing the
+  dialog. A resend after a lost response reuses the same idempotency key.
 - **Conflict chips write their list out for a finger.** The overlapping file
   names live in the chip's tooltip, which a touch screen cannot open, so on a
   coarse pointer the same list is rendered as visible text beside the chip.

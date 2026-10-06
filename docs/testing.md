@@ -119,8 +119,9 @@ Layers, per the design spec's testing strategy:
   viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
   protocol replies, control, geometry and process lifetime), and
   `web/e2e/remote-development-git/` (remote import, native selected-path commit
-  and push through the Changes view's Publish dialog, plus opt-in actual GitHub PR publication). These use deterministic
-  harness fixtures, not authenticated vendor-agent loops.
+  and push through the Changes view's Publish dialog, plus opt-in actual
+  GitHub PR publication). These use deterministic harness fixtures, not
+  authenticated vendor-agent loops.
 
 CI's native `windows` job builds, vets, and tests the full Windows client
 package closure (`./cmd/aether` and its repository dependencies). It owns
