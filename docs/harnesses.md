@@ -144,9 +144,10 @@ owner's installation borrows the owner's adapter with it, read-only.
 
 `agent.list` reports, per agent, `enhanced` (`native`, `adapter`, or `none`),
 `enhanced_installed` (the adapter, or the native CLI, resolves for that
-launch), `login_found` (a **Login state** file exists in the home the launch
-signs in with: the owner's on a shared account; it checks for the file, not
-for a working session), and `default_mode`: `acp` for `codex`, `omp`, and
+launch from the same `~/.local` as the CLI), `login_found` (a **Login state**
+file exists in the home the launch signs in with: the owner's on a shared
+account; it checks for the file, not for a working session), and
+`default_mode`: `acp` for `codex`, `omp`, and
 `opencode` once their ACP server is installed, `tui` for everything else.
 Claude Code stays on its terminal by default because its adapter runs on the
 Claude Agent SDK, whose terms favour API keys.

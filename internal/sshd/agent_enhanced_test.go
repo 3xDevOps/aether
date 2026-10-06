@@ -33,7 +33,7 @@ func installInHome(t *testing.T, homes *memberhome.Manager, member domain.Member
 
 // agent.list reports enhanced mode from the adapter or native CLI a launch
 // would run and the login from the home it signs in with: the owner's on a
-// shared account, whose adapter it borrows like the CLI.
+// shared account. The adapter counts only in the home the CLI comes from.
 func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	t.Parallel()
 	s, owner := newAgentTestServer(t)
@@ -50,7 +50,8 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	s.cfg.Runs = &fakeRuns{}
 	installInHome(t, homes, grantee.ID, ".local/bin/codex", ".local/bin/codex-acp", ".codex/auth.json",
 		".local/bin/omp", ".local/bin/claude")
-	installInHome(t, homes, owner.ID, ".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json")
+	installInHome(t, homes, owner.ID, ".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json",
+		".local/bin/pi", ".local/bin/pi-acp")
 
 	list := func(account domain.MemberID) map[string]protocol.AgentInfo {
 		t.Helper()
@@ -103,7 +104,12 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(list(owner.ID), map[string]state{
-		"claude": {true, true, "tui"},
+		// The grantee's own claude runs, so the owner's adapter is not
+		// on the launch's PATH.
+		"claude": {false, true, "tui"},
+		// The grantee has no pi, so the launch borrows the owner's pi and
+		// its adapter together.
+		"pi": {true, false, "tui"},
 		// The grantee's own codex and adapter run, but the login is the
 		// owner's, who has none.
 		"codex": {true, false, "acp"},

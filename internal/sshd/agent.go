@@ -155,13 +155,8 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		}
 	}
 	var err error
-	if info.Installed, err = s.agentInstalled(member, account, executable, profile.InstallPaths); err != nil {
+	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {
 		return protocol.AgentInfo{}, err
-	}
-	if len(profile.ACPArgs) > 0 {
-		if info.EnhancedInstalled, err = s.agentInstalled(member, account, profile.ACPArgs[0], profile.InstallPaths); err != nil {
-			return protocol.AgentInfo{}, err
-		}
 	}
 	if profile.ACPDefault && info.EnhancedInstalled {
 		// The wire name of the enhanced launch mode.
@@ -182,13 +177,19 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 // agentInstalled reports whether a launch by member on account finds
 // executable: in member's home, or on another member's account in that
 // owner's home, whose installation the launch then borrows (see
-// memberhome.Manager.Installation for which links installPaths let resolve).
-func (s *Server) agentInstalled(member, account domain.MemberID, executable string, installPaths []string) (bool, error) {
+// memberhome.Manager.Installation for which links InstallPaths let
+// resolve). The ACP server counts only in the home the CLI comes from,
+// since that is the one ~/.local the launch sees.
+func (s *Server) agentInstalled(member, account domain.MemberID, executable string, profile harness.Profile) (installed, acp bool, err error) {
 	if s.cfg.Homes == nil {
-		return true, nil
+		return true, len(profile.ACPArgs) > 0, nil
 	}
-	installation, err := s.cfg.Homes.Installation(member, account, executable, installPaths)
-	return installation != "", err
+	owner, err := s.cfg.Homes.Installation(member, account, executable, profile.InstallPaths)
+	if err != nil || owner == "" || len(profile.ACPArgs) == 0 {
+		return owner != "", false, err
+	}
+	acpOwner, err := s.cfg.Homes.Installation(member, account, profile.ACPArgs[0], profile.InstallPaths)
+	return true, acpOwner == owner, err
 }
 
 // agentInstall runs a shipped agent's install command in the caller's own
