@@ -134,7 +134,11 @@ terminal (or prints it when no terminal opens). The dashboard calls
 runs the same command in the member's environment terminal, starting it if
 needed, waits up to 10 minutes, and answers with the last 8 KiB of output,
 the exit status, and whether the agent and its adapter now resolve. One
-install runs per member at a time.
+install runs per member at a time. It first waits for a pre-launch update
+writing into the same home, and a launch skips that update while an install
+runs. The server wraps the command in `mktemp` and `timeout`, so the
+environment image must provide both (coreutils or busybox); without them the
+install fails with `timeout: not found` and exit status 127.
 
 The pre-launch update brings an installed adapter to its pinned version after
 the agent's own update, through the same staged exchange as `codex`. It never

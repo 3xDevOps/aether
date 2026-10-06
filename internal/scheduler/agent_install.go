@@ -32,16 +32,13 @@ const installExecGrace = 30 * time.Second
 // waits on an installer; a terminal stop or environment reset ends the
 // install with the container.
 func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error) {
-	s.mu.Lock()
-	if s.agentInstalls[member] {
-		s.mu.Unlock()
-		return "", 0, ErrAgentInstallRunning
+	homePath, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return "", 0, fmt.Errorf("agent install: resolve the member home: %w", err)
 	}
-	if s.agentInstalls == nil {
-		s.agentInstalls = make(map[domain.MemberID]bool)
+	if err = s.holdHomeForInstall(ctx, member, homePath); err != nil {
+		return "", 0, err
 	}
-	s.agentInstalls[member] = true
-	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		delete(s.agentInstalls, member)
@@ -79,6 +76,38 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 		return "", 0, fmt.Errorf("agent install: did not finish within %s; the end of its output:\n%s", protocol.AgentInstallTimeout, tail)
 	}
 	return tail, code, nil
+}
+
+// updateHarness starts no update into a home agentInstalls holds.
+func (s *Scheduler) holdHomeForInstall(ctx context.Context, member domain.MemberID, homePath string) error {
+	for {
+		s.mu.Lock()
+		if _, running := s.agentInstalls[member]; running {
+			s.mu.Unlock()
+			return ErrAgentInstallRunning
+		}
+		var update *harnessUpdateRun
+		for key, state := range s.harnessUpdates {
+			if key.home == homePath && state.running != nil {
+				update = state.running
+				break
+			}
+		}
+		if update == nil {
+			if s.agentInstalls == nil {
+				s.agentInstalls = make(map[domain.MemberID]string)
+			}
+			s.agentInstalls[member] = homePath
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Unlock()
+		select {
+		case <-update.done:
+		case <-ctx.Done():
+			return fmt.Errorf("agent install: wait for the harness update in this environment: %w", ctx.Err())
+		}
+	}
 }
 
 // logTail drops the partial first line a byte-count tail of the install log

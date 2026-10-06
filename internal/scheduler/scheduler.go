@@ -239,9 +239,9 @@ type Scheduler struct {
 	// harnessUpdates is the pre-launch harness update state per member home
 	// and harness (harness_update.go).
 	harnessUpdates map[harnessUpdateKey]*harnessUpdateState
-	// agentInstalls holds the members with an agent.install in flight
-	// (agent_install.go).
-	agentInstalls map[domain.MemberID]bool
+	// agentInstalls maps a member with an agent.install in flight to its
+	// home's host path (agent_install.go).
+	agentInstalls map[domain.MemberID]string
 }
 
 // credentialUserReservation protects the writable member home a container

@@ -78,7 +78,8 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 		s.harnessUpdates[key] = state
 	}
 	update := state.running
-	if update == nil && !s.cfg.Now().Before(state.next) {
+	installing := slices.Contains(slices.Collect(maps.Values(s.agentInstalls)), home.HostPath)
+	if update == nil && !installing && !s.cfg.Now().Before(state.next) {
 		update = &harnessUpdateRun{done: make(chan struct{})}
 		state.running = update
 		// One name per home and harness: only one update per key runs at a
