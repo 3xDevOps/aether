@@ -74,6 +74,20 @@ describe('shell landmarks', () => {
 })
 
 describe('run rows', () => {
+  it('shows five Needs you rows, then the rest behind Show all', () => {
+    const waiting = Array.from({ length: 7 }, (_, i) =>
+      run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention' }))
+    useStore.setState({ runs: Object.fromEntries(waiting.map((r) => [r.id, toRecord(r)])) })
+    render(<AppShell />)
+    const needsYou = () => runList().getAllByRole('button', { name: /^Needs you · question/ })
+    expect(needsYou()).toHaveLength(5)
+
+    fireEvent.click(runList().getByRole('button', { name: 'Show all 7' }))
+
+    expect(needsYou()).toHaveLength(7)
+    expect(runList().queryByRole('button', { name: /^Show all/ })).toBeNull()
+  })
+
   it('names the state first, marks the open run, and opens its terminal', () => {
     render(<AppShell />)
 

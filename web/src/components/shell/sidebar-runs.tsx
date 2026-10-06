@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight } from '@/components/icons'
@@ -17,6 +17,8 @@ import { stateContextOf, type RunTree, type SidebarGroup, type SwarmSummary } fr
 import type { Route } from '@/store/ui'
 
 export const runRowSelector = '#sidebar-runs [data-run-row]'
+
+const needsYouShown = 5
 
 export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
   return targetRoute(run, needsYou(run, ctx)?.target)
@@ -75,43 +77,65 @@ export function SidebarRuns() {
   const loading = useDelayed(!hydrated && error === null && groups.length === 0)
   const region = useRef<HTMLElement>(null)
   const roving = useRovingRows(region)
+  const [moreBelow, setMoreBelow] = useState(false)
+  const measure = useCallback(() => {
+    const el = region.current
+    if (el) setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 1)
+  }, [])
+  useEffect(() => {
+    const el = region.current
+    if (!el) return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    return () => observer.disconnect()
+  }, [measure])
 
   return (
     <section
       ref={region}
       id="sidebar-runs"
       aria-label="Runs"
-      className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+      className={cn(
+        'min-h-0 flex-1 overflow-y-auto px-2 pb-2',
+        moreBelow && '[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]',
+      )}
+      onScroll={measure}
       onFocus={roving.onFocus}
       onKeyDown={roving.onKeyDown}
     >
-      {groups.length === 0 ? (
-        error !== null ? (
-          <p className="px-2 py-1 text-ui-sm text-muted">{dead ? error : 'Cannot reach the server. Retrying.'}</p>
-        ) : loading ? (
-          <p className="px-2 py-1 text-ui-sm text-muted">Loading runs</p>
-        ) : hydrated && (
-          <p className="px-2 py-1 text-ui-sm text-muted">No runs yet.</p>
-        )
-      ) : (
-        groups.map((group) => {
-          const open = expanded[group.key] ?? group.key !== 'finished'
-          return (
-            <Group
-              key={group.key}
-              group={group}
-              expanded={open}
-              onToggle={() => setExpanded((current) => ({ ...current, [group.key]: !open }))}
-            />
+      <div>
+        {groups.length === 0 ? (
+          error !== null ? (
+            <p className="px-2 py-1 text-ui-sm text-muted">{dead ? error : 'Cannot reach the server. Retrying.'}</p>
+          ) : loading ? (
+            <p className="px-2 py-1 text-ui-sm text-muted">Loading runs</p>
+          ) : hydrated && (
+            <p className="px-2 py-1 text-ui-sm text-muted">No runs yet.</p>
           )
-        })
-      )}
+        ) : (
+          groups.map((group) => {
+            const open = expanded[group.key] ?? group.key !== 'finished'
+            return (
+              <Group
+                key={group.key}
+                group={group}
+                expanded={open}
+                onToggle={() => setExpanded((current) => ({ ...current, [group.key]: !open }))}
+              />
+            )
+          })
+        )}
+      </div>
     </section>
   )
 }
 
 function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
+  const [showAll, setShowAll] = useState(false)
+  const capped = group.key === 'needs-you' && !showAll && group.runs.length > needsYouShown
+  const runs = capped ? group.runs.slice(0, needsYouShown) : group.runs
   return (
     <div className="pt-2">
       <div className="flex items-center gap-1">
@@ -132,7 +156,7 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         {group.key === 'working' && <MineToggle />}
       </div>
       <ul id={listID} hidden={!expanded}>
-        {expanded && group.runs.map((tree) => (
+        {expanded && runs.map((tree) => (
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
@@ -147,6 +171,11 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
           </li>
         ))}
       </ul>
+      {expanded && capped && (
+        <Button variant="ghost" size="sm" className="w-full justify-start text-muted" onClick={() => setShowAll(true)}>
+          Show all {group.count}
+        </Button>
+      )}
     </div>
   )
 }

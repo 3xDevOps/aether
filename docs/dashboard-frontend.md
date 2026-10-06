@@ -331,7 +331,11 @@ top to bottom:
    collapsed. Needs you lists every workspace; a row outside the selected
    workspace leads with that workspace's name. Working and Finished list the
    selected workspace, and only the viewer's own runs while **Mine**
-   (`mineOnly`, persisted) in the Working header is pressed.
+   (`mineOnly`, persisted) in the Working header is pressed. Needs you shows
+   its first five rows, then **Show all n**. The region scrolls on its own,
+   and while more rows sit below the fold its bottom edge fades out. The
+   sidebar never collapses on its own at narrow widths; the splitter and
+   `⌘B` stay the reader's call.
 4. **Navigation**: Board, Swarms, Activity, Files, Environment, Agents and
    Templates, then under a hairline Members (admins only) and Settings. The
    current one carries `aria-current="page"`. Gates come from
