@@ -163,17 +163,38 @@ export function FileEditor({
                 const tabDraft = drafts[tabKey]
                 const name = tab.path.split('/').at(-1) ?? tab.path
                 return (
-                  <span key={tabKey} className="flex h-full shrink-0 items-center">
-                    <TabsTrigger value={tabKey} title={`${tab.path} · ${sourceLabel(tab)}`}>
-                      {name}
-                      {tabDraft && (tabDraft.content !== tabDraft.baseContent || tabDraft.saving) && (
-                        <span role="img" aria-label="Unsaved changes" className="size-1.5 rounded-full bg-text" />
-                      )}
-                    </TabsTrigger>
-                    <Button variant="ghost" size="icon-sm" label={`Close ${tab.path}`} onClick={() => onClose(tab)}>
+                  <TabsTrigger
+                    key={tabKey}
+                    value={tabKey}
+                    title={`${tab.path} · ${sourceLabel(tab)}`}
+                    aria-keyshortcuts="Delete"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Delete') onClose(tab)
+                    }}
+                    onAuxClick={(event) => {
+                      if (event.button === 1) onClose(tab)
+                    }}
+                  >
+                    {name}
+                    {tabDraft && (tabDraft.content !== tabDraft.baseContent || tabDraft.saving) && (
+                      <span role="img" aria-label="Unsaved changes" className="size-1.5 rounded-full bg-text" />
+                    )}
+                    <span
+                      aria-hidden
+                      title={`Close ${tab.path}`}
+                      className="-mr-1 grid size-6 place-items-center rounded-control text-muted hover:bg-hover hover:text-text coarse:size-11"
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onClose(tab)
+                      }}
+                    >
                       <X />
-                    </Button>
-                  </span>
+                    </span>
+                  </TabsTrigger>
                 )
               })}
             </TabsList>

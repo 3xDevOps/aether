@@ -477,7 +477,8 @@ existing file.
 
 Saves are explicit (**Save**, **Commit to <branch>…**, or Ctrl/Cmd-S, which
 opens the same commit dialog for a base file); there is
-no autosave or force-save. Open tabs and dirty drafts live in memory and survive
+no autosave or force-save. A tab closes from its ×, a middle click, or Delete
+while it has focus. Open tabs and dirty drafts live in memory and survive
 route changes and reconnects to the same identity. A different authenticated
 member or server clears them. The browser warns before unloading dirty buffers.
 The revision is the SHA-256 of the complete bytes read. A failed or stale save

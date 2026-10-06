@@ -144,6 +144,17 @@ describe('Files editor', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
+  it('closes an open file from its tab with Delete, and the tab list holds only tabs', async () => {
+    const client = readmeApi()
+    render(<FilesRoute params={{}} client={client} />)
+    fireEvent.click(await tree().findByRole('button', { name: 'README.md' }))
+    const tabs = await screen.findByRole('tablist', { name: 'Open files' })
+    expect(within(tabs).queryAllByRole('button')).toHaveLength(0)
+
+    fireEvent.keyDown(within(tabs).getByRole('tab', { name: /README\.md/ }), { key: 'Delete' })
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).toBeNull())
+  })
+
   it('saves a run checkout file directly', async () => {
     const client = readmeApi()
     await openAndEdit(client, 'run_1')
