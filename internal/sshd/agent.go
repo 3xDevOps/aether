@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -167,8 +168,11 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	if logins, pathErr := profile.LoginPaths(); s.cfg.Homes != nil && pathErr == nil {
 		// A launch on another member's account signs in with the owner's
 		// login, so that is the home to look in.
-		if info.LoginFound, err = s.cfg.Homes.LoginFound(account, logins); err != nil {
-			return protocol.AgentInfo{}, err
+		found, loginErr := s.cfg.Homes.LoginFound(account, logins)
+		if loginErr != nil {
+			slog.Warn("sshd: agent.list cannot check the login", "agent", profile.Name, "account", account, "error", loginErr)
+		} else {
+			info.LoginFound = found
 		}
 	}
 	return info, nil

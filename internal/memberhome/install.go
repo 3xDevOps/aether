@@ -76,7 +76,10 @@ type hop struct {
 // met on the way, an empty but non-nil list for a plain file, or nil when
 // there is no such installation.
 func (m *Manager) executableInstalled(member domain.MemberID, executable string) ([]hop, error) {
-	root, err := m.openHome(member)
+	root, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

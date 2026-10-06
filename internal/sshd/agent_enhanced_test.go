@@ -116,6 +116,70 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	})
 }
 
+func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
+	t.Parallel()
+	s, owner := newAgentTestServer(t)
+	ctx := context.Background()
+	grantee := &domain.Member{DisplayName: "grantee", TailnetLogin: "grantee@example.com", Role: domain.RoleCollaborator}
+	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
+		t.Fatal(err)
+	}
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	s.cfg.Runs = &fakeRuns{}
+	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
+		t.Fatal(err)
+	}
+	list := func(account domain.MemberID) map[string]protocol.AgentInfo {
+		t.Helper()
+		raw, err := json.Marshal(protocol.AgentListParams{AccountMemberID: string(account)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, perr := s.agentList(ctx, grantee.ID, raw)
+		if perr != nil {
+			t.Fatalf("agent.list on %s: %v", account, perr)
+		}
+		agents := map[string]protocol.AgentInfo{}
+		for _, agent := range result.(protocol.AgentListResult).Agents {
+			agents[agent.Name] = agent
+		}
+		return agents
+	}
+
+	list(owner.ID)
+	for _, member := range []domain.MemberID{owner.ID, grantee.ID} {
+		// homes.Path would create the home it names.
+		if _, err := os.Lstat(filepath.Join(homes.Root(), string(member))); !os.IsNotExist(err) {
+			t.Errorf("agent.list created %s's home: %v", member, err)
+		}
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 directory")
+	}
+	installInHome(t, homes, grantee.ID, ".local/bin/codex", ".codex/auth.json", ".local/bin/claude", ".claude/.credentials.json")
+	home, err := homes.Path(grantee.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(home, ".codex")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	agents := list(grantee.ID)
+	if agents["codex"].LoginFound || !agents["codex"].Installed {
+		t.Errorf("codex with an unreadable login = %+v, want installed with no login found", agents["codex"])
+	}
+	if !agents["claude"].LoginFound {
+		t.Errorf("claude = %+v, want its readable login found", agents["claude"])
+	}
+}
+
 func TestAgentInstall(t *testing.T) {
 	t.Parallel()
 	s, member := newAgentTestServer(t)

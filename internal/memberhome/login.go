@@ -212,7 +212,10 @@ func writeInPlace(root *os.Root, name string, data []byte) error {
 // a mountpoint Aether created, not a login. Only presence is checked: a
 // path that is there may still hold an expired login.
 func (m *Manager) LoginFound(member domain.MemberID, rels []string) (bool, error) {
-	home, err := m.openHome(member)
+	home, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

@@ -289,6 +289,18 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 		_ = roots.Close()
 		return nil, fmt.Errorf("memberhome: stat home for %q: %w", member, err)
 	}
+	_ = roots.Close()
+	return m.openExistingHome(member)
+}
+
+func (m *Manager) openExistingHome(member domain.MemberID) (*os.Root, error) {
+	if err := validateMemberID(string(member)); err != nil {
+		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
+	}
+	roots, err := os.OpenRoot(m.root)
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: open root: %w", err)
+	}
 	home, err := rootfs.OpenRoot(roots, string(member))
 	_ = roots.Close()
 	if err != nil {
