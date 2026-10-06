@@ -256,12 +256,13 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           />
           <SwarmTasks detail={detail} agents={agents} canRelease={canRelease} client={client} onChanged={onChanged} />
           <AgentMessages detail={detail} client={client} />
-          <SwarmIntegration detail={detail} client={client} />
+          <SwarmIntegration detail={detail} agents={agents} client={client} />
         </div>
       </div>
       {dialog === 'replace' && (
         <ReplaceIntegrator
           mission={mission}
+          agents={agents}
           client={client}
           onClose={closeDialog}
           onReplaced={() => {

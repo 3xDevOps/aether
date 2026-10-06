@@ -17,7 +17,8 @@ import { FormField } from '@/components/ui/form-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { Mission } from '@/lib/types'
+import { agentLabel } from '@/components/launch/modes'
+import type { AgentInfo, Mission } from '@/lib/types'
 import { useStore } from '@/store'
 
 function newKey(): string {
@@ -27,8 +28,9 @@ function newKey(): string {
 }
 
 /** mission.replace-integrator takes any execution choice's account and agent and runs it Standard. */
-export function ReplaceIntegrator({ mission, client, onClose, onReplaced }: {
+export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced }: {
   mission: Mission
+  agents: AgentInfo[] | null
   client: Api
   onClose: () => void
   onReplaced: () => void
@@ -102,7 +104,7 @@ export function ReplaceIntegrator({ mission, client, onClose, onReplaced }: {
               <SelectValue placeholder="Choose an agent" />
             </SelectTrigger>
             <SelectContent>
-              {harnesses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              {harnesses.map((name) => <SelectItem key={name} value={name}>{agentLabel(agents?.find((agent) => agent.name === name), name)}</SelectItem>)}
             </SelectContent>
           </Select>
         </FormField>

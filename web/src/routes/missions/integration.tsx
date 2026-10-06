@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { agentLabel, modeLabel } from '@/components/launch/modes'
 import type { Api } from '@/lib/api'
+import type { AgentInfo } from '@/lib/types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
+import { useStore } from '@/store'
 import type { MissionDetail } from '@/store/missions'
 
 function Fact({ term, children }: { term: string; children: ReactNode }) {
@@ -13,8 +16,10 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
   )
 }
 
-function TechnicalDetails({ detail }: { detail: MissionDetail }) {
+function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: AgentInfo[] | null }) {
   const { mission, tasks, attempts, submissions } = detail
+  const members = useStore((s) => s.members)
+  const taskTitle = (taskID: string) => tasks.find((task) => task.id === taskID)?.revision?.title || taskID
   const accepted = submissions.filter((item) => item.state === 'accepted')
   return (
     <Collapsible>
@@ -26,7 +31,9 @@ function TechnicalDetails({ detail }: { detail: MissionDetail }) {
           <Fact term="Integrator generation">{mission.integrator_generation}</Fact>
           <Fact term="Accepted set">{mission.accepted_set_version}</Fact>
           <Fact term="Execution choices">
-            {mission.execution_choices.map((c) => `${c.harness} · ${c.mode} · ${c.account_member_id}`).join('\n')}
+            {mission.execution_choices
+              .map((c) => `${agentLabel(agents?.find((agent) => agent.name === c.harness), c.harness)} · ${modeLabel(c.mode)} · ${members[c.account_member_id]?.display_name ?? c.account_member_id}`)
+              .join('\n')}
           </Fact>
           {tasks.map((task) => (
             <Fact key={task.id} term={task.revision?.title || task.id}>
@@ -35,7 +42,7 @@ function TechnicalDetails({ detail }: { detail: MissionDetail }) {
             </Fact>
           ))}
           {attempts.map((attempt) => (
-            <Fact key={attempt.id} term={`Attempt ${attempt.number}`}>
+            <Fact key={attempt.id} term={`${taskTitle(attempt.task_id)} · attempt ${attempt.number}`}>
               {attempt.run_id} · {attempt.state} · rev {attempt.task_revision}
               {attempt.takeover_generation != null ? ` · takeover ${attempt.takeover_generation}` : ''}
             </Fact>
@@ -58,7 +65,7 @@ function TechnicalDetails({ detail }: { detail: MissionDetail }) {
   )
 }
 
-export function SwarmIntegration({ detail, client }: { detail: MissionDetail; client: Api }) {
+export function SwarmIntegration({ detail, agents, client }: { detail: MissionDetail; agents: AgentInfo[] | null; client: Api }) {
   const { mission } = detail
   return (
     <section aria-label="Integration" className="flex flex-col gap-1">
@@ -77,7 +84,7 @@ export function SwarmIntegration({ detail, client }: { detail: MissionDetail; cl
                 client={client}
               />
             )}
-            <TechnicalDetails detail={detail} />
+            <TechnicalDetails detail={detail} agents={agents} />
           </div>
         </CollapsibleContent>
       </Collapsible>
