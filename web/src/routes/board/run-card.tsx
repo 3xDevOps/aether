@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { Slot } from '@/components/slots'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -29,6 +29,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
   const additions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'additions'))
   const deletions = useStore((s) => diffTotal(s.diffs[run.id]?.snapshots.at(-1)?.files, 'deletions'))
   const [replying, setReplying] = useState(false)
+  const cardRef = useRef<HTMLElement>(null)
   const action = cardAction(card, approval)
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
@@ -39,7 +40,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
   return (
     <Popover open={replying} onOpenChange={setReplying}>
       <PopoverAnchor asChild>
-        <Card data-run-id={run.id} selected={replying}>
+        <Card ref={cardRef} data-run-id={run.id} selected={replying}>
           <StateLine tone={tone} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
             {reason}
           </StateLine>
@@ -71,7 +72,14 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
           </div>
         </Card>
       </PopoverAnchor>
-      {replying && <ReplyComposer card={card} title={title} onDone={() => setReplying(false)} />}
+      {replying && (
+        <ReplyComposer
+          card={card}
+          title={title}
+          onDone={() => setReplying(false)}
+          returnFocus={() => cardRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()}
+        />
+      )}
     </Popover>
   )
 })

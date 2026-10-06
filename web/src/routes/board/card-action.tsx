@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
 import { Button } from '@/components/ui/button'
@@ -82,11 +82,22 @@ export function CardActionButton({
   )
 }
 
-export function ReplyComposer({ card, title, onDone }: { card: BoardCard; title: string; onDone: () => void }) {
+export function ReplyComposer({
+  card,
+  title,
+  onDone,
+  returnFocus,
+}: {
+  card: BoardCard
+  title: string
+  onDone: () => void
+  returnFocus: () => void
+}) {
   const [text, setText] = useState('')
   const [request, setRequest] = useState<{ payload: string; key: string } | null>(null)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const leftOutside = useRef(false)
 
   const send = async () => {
     const payload = text.trim()
@@ -109,7 +120,17 @@ export function ReplyComposer({ card, title, onDone }: { card: BoardCard; title:
   }
 
   return (
-    <PopoverContent aria-label={`Reply to ${title}`} className="w-[min(360px,calc(100vw-16px))]">
+    <PopoverContent
+      aria-label={`Reply to ${title}`}
+      className="w-[min(360px,calc(100vw-16px))]"
+      onInteractOutside={() => {
+        leftOutside.current = true
+      }}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault()
+        if (!leftOutside.current) returnFocus()
+      }}
+    >
       <form
         className="flex flex-col gap-2"
         onSubmit={(event) => {
