@@ -20,11 +20,9 @@ test('the first run completes', async ({ page, aether }) => {
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  // The git identity is optional and this scenario is not about it.
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   // Every run forks from the workspace's base branch, so the push is what
   // makes a first run possible at all.
@@ -35,10 +33,12 @@ test('the first run completes', async ({ page, aether }) => {
   // directory: the member's environment home, which agent.list reads and
   // the run container mounts.
   aether.installAgent(await memberID(alice), 'claude', agentShim)
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
 
   await wizard.expectStep('First run')
-  await wizard.firstRun.launch('claude', 'write the result file')
+  // The launch dialog's own form, with the same mode rules.
+  await expect(wizard.firstRun.section.getByRole('radiogroup', { name: 'Mode' })).toBeVisible()
+  await wizard.firstRun.launch('Claude Code', 'write the result file')
 
   // Launching leaves the wizard for the run's terminal, which is where the
   // agent is; the run's own state arrives over the event stream from there.
@@ -80,7 +80,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(header).toContainText('closed; retained container')
 })
 
-test('with no agent installed the first run sends you back to Agents', async ({
+test('with no agent installed the first run sends you back to Agent', async ({
   page,
   aether,
 }) => {
@@ -88,24 +88,23 @@ test('with no agent installed the first run sends you back to Agents', async ({
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   // Skipping the setup is exactly how a member arrives here with nothing
   // installed, which used to offer `claude` and fail after the launch.
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
 
   await wizard.expectStep('First run')
-  await expect(wizard.firstRun.section).toContainText('no agent is installed')
+  await expect(wizard.firstRun.section).toContainText('No agent is installed yet')
   await expect(
-    wizard.firstRun.section.getByRole('combobox', { name: 'Agent' }),
+    wizard.firstRun.section.getByRole('radiogroup', { name: 'Agent' }),
   ).toHaveCount(0)
   await expect(wizard.firstRun.button('Launch')).toHaveCount(0)
 
   await wizard.firstRun.setUpAgent().click()
-  await wizard.expectStep('Agents')
-  await expect(wizard.agents.setUp('Claude Code')).toBeVisible()
+  await wizard.expectStep('Agent')
+  await expect(wizard.agent.setUp('Claude Code')).toBeVisible()
 })

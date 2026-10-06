@@ -190,17 +190,16 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText('Pushed main to aether')
   await wizard.repository.continue().click()
   // The picker offers only the agents this account has installed.
   aether.installAgent(await memberID(alice), 'claude', agentShim)
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', 'write the result file')
 

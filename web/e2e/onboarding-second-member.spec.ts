@@ -22,17 +22,16 @@ test('a collaborator seeds an empty local-only workspace without mirror manageme
   const commit = (await exec('git', ['-C', clone, 'rev-parse', 'HEAD'])).stdout.trim()
   const wizard = await OnboardingWizard.open(page, bob.url)
 
-  await wizard.link.link(aether.server.addr, { invite: code, name: 'Bob' })
-  await expect(wizard.link.section).toContainText('(collaborator)')
-  await wizard.link.continue().click()
-  // The git identity is optional and this scenario is not about it.
-  await wizard.gitIdentity.skip().click()
+  await wizard.connect.link(aether.server.addr, { invite: code, name: 'Bob' })
+  await expect(wizard.connect.section).toContainText('(collaborator)')
+  await wizard.connect.continue().click()
 
-  // The workspace is already there, so this step picks rather than creates.
-  await wizard.expectStep('Workspace')
-  await wizard.workspace.use('project').click()
-
+  // The workspace is already there, so this step picks rather than creates,
+  // and a collaborator is offered no way to add one.
   await wizard.expectStep('Repository')
+  await expect(wizard.repository.button('Create from local clone')).toHaveCount(0)
+  await wizard.repository.use('project').click()
+  await wizard.repository.expand('Advanced')
   await expect(wizard.repository.section.getByRole('status', { name: 'Source mirror status' })).toContainText('Local-only workspace.')
   await expect(wizard.repository.section.getByRole('button', { name: /source mirror/ })).toHaveCount(0)
   await wizard.repository.localClone().click()
@@ -60,7 +59,7 @@ test('a collaborator seeds an empty local-only workspace without mirror manageme
   await expect(wizard.repository.section.getByRole('button', { name: /source mirror/ })).toHaveCount(0)
   await page.screenshot({ path: test.info().outputPath('collaborator-local-only-pushed.png'), fullPage: true })
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
 })
 
 test('a collaborator links a mirrored workspace without pushing or managing its source', async ({ page, aether }) => {
@@ -84,14 +83,15 @@ test('a collaborator links a mirrored workspace without pushing or managing its 
   })
   const wizard = await OnboardingWizard.open(page, bob.url)
 
-  await wizard.link.link(aether.server.addr, { invite: code, name: 'Bob' })
-  await expect(wizard.link.section).toContainText('(collaborator)')
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.expectStep('Workspace')
-  await wizard.workspace.use('project').click()
-
+  await wizard.connect.link(aether.server.addr, { invite: code, name: 'Bob' })
+  await expect(wizard.connect.section).toContainText('(collaborator)')
+  await wizard.connect.continue().click()
   await wizard.expectStep('Repository')
+  await wizard.repository.use('project').click()
+
+  // A source the server has not verified yet says so outside Advanced.
+  await expect(wizard.repository.section).toContainText("The server's copy is pending")
+  await wizard.repository.expand('Advanced')
   const status = wizard.repository.section.getByRole('status', { name: 'Source mirror status' })
   await expect(status).toContainText('Source mirror configured.')
   await expect(status).toContainText(sourceURL)
@@ -104,7 +104,7 @@ test('a collaborator links a mirrored workspace without pushing or managing its 
   await expect(wizard.repository.section.getByLabel('Push command', { exact: true })).toHaveCount(0)
   await page.screenshot({ path: test.info().outputPath('collaborator-mirrored-link-only.png'), fullPage: true })
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
   expect(pushes).toEqual([])
   const current = await bob.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: workspaceID })
   expect(current.enabled).toBe(true)

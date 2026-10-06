@@ -4,11 +4,12 @@ import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
 import type { ConfigImportResult, ConfigRoot, GatewayCapabilities } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
-import { AgentsStep } from '@/routes/onboarding/agents-step'
-import { FirstRunStep } from '@/routes/onboarding/steps'
+import { AgentStep } from '@/routes/onboarding/agent-step'
+import { FirstRunStep } from '@/routes/onboarding/first-run-step'
 import { useStore } from '@/store'
 import { capability } from '@/store/hooks'
 import {
+  agentInfo,
   alice,
   bob,
   fakeApi,
@@ -42,8 +43,8 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    onboardingStep: 'Link',
-    onboardingFurthest: 'Link',
+    onboardingStep: 'Connect',
+    onboardingFurthest: 'Connect',
     onboardingWorkspace: '',
     onboardingRepo: null,
     onboardingFirstRun: { harness: '', task: '' },
@@ -53,23 +54,28 @@ function seed(caps: GatewayCapabilities = localCaps) {
 function renderStep(client: Api, caps: GatewayCapabilities = localCaps) {
   seed(caps)
   const onNext = vi.fn()
-  const onReady = vi.fn()
   function Host() {
     const [setup, onSetup] = useState('')
     return (
-      <AgentsStep
+      <AgentStep
         client={client}
         caps={capability(caps)}
-        workspace={workspace}
         setup={setup}
         onSetup={onSetup}
         onNext={onNext}
-        onReady={onReady}
+        back={setup ? <button type="button" onClick={() => onSetup('')}>Back</button> : null}
       />
     )
   }
   const view = render(<Host />)
-  return { onNext, onReady, view }
+  expandConfiguration()
+  return { onNext, view }
+}
+
+/** The importer sits behind the step's Agent config files disclosure. */
+function expandConfiguration() {
+  const trigger = screen.queryByRole('button', { name: /^Agent config files/ })
+  if (trigger && trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
 }
 
 function directoryFile(
@@ -141,7 +147,7 @@ beforeEach(() => {
 describe('agents step', () => {
   it('keeps setup and import independent of local gateway capabilities', async () => {
     const client = fakeApi({
-      envHarnesses: vi.fn(async () => { throw new Error('env.harnesses is unavailable on this gateway') }),
+      agentList: vi.fn(async () => [agentInfo({ display_name: 'Claude Code', installed: false })]),
     })
     renderStep(client, {
       gateway: 'remote',
@@ -154,9 +160,8 @@ describe('agents step', () => {
     expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Choose directory' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code' }))
-    expect(await screen.findByText(/claude.ai\/install.sh/)).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Install Claude Code' })).toBeDefined()
   })
-
 
   it('previews metadata without reading bytes and uploads only the latest selection', async () => {
     const client = fakeApi()
@@ -976,52 +981,80 @@ describe('directory import bounds', () => {
   })
 })
 
-describe('the harness the step set up', () => {
-  it('marks the harness ready after terminal setup is confirmed', async () => {
-    const client = fakeApi()
-    const { onReady } = renderStep(client)
+describe('the agent the step set up', () => {
+  it('opens the setup for one agent and comes back to the list when it is done', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ display_name: 'Claude Code', installed: false, enhanced: 'adapter' })]),
+    })
+    renderStep(client)
     fireEvent.click(await screen.findByRole('button', { name: 'Set up Claude Code' }))
-    await screen.findByText(/claude.ai\/install.sh/)
-    fireEvent.click(screen.getByRole('button', { name: "I've installed and logged in" }))
-    expect(await screen.findByText('Agent installed')).toBeDefined()
-    expect(onReady).toHaveBeenCalledWith('claude')
+    expect(await screen.findByRole('radiogroup', { name: 'How runs show Claude Code' })).toBeDefined()
+
+    vi.mocked(client.agentList).mockResolvedValue([agentInfo({ display_name: 'Claude Code', login_found: true, enhanced: 'adapter' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Install Claude Code' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Done' }))
+
+    expect(await screen.findByText('Installed · Login found')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Run Claude Code' })).toBeDefined()
+    expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
   })
 
-  it('still exposes static terminal instructions when the terminal socket is absent', async () => {
+  it('remembers Run as the agent the first run starts on and moves on', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ display_name: 'Claude Code', login_found: true })]),
+    })
+    const { onNext } = renderStep(client)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Claude Code' }))
+    expect(onNext).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().launchDefaults.claude).toBeDefined()
+  })
+
+  it('adds a custom agent and opens its setup', async () => {
     const client = fakeApi()
-    renderStep(client, { ...localCaps, ws: ['events', 'attach'] })
-    fireEvent.click(await screen.findByRole('button', { name: 'Set up Claude Code' }))
-    await screen.findByText('aether terminal')
-    expect(screen.getByText(/claude.ai\/install.sh/)).toBeDefined()
+    renderStep(client)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add agent…' }))
+    vi.mocked(client.agentList).mockResolvedValue([
+      agentInfo({ name: 'mycli', display_name: 'mycli', source: 'member', glyph: 'custom', installed: false, install_script: undefined, enhanced: 'native' }),
+    ])
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mycli' } })
+    fireEvent.change(screen.getByLabelText('Enhanced command'), { target: { value: 'mycli acp' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+
+    expect(await screen.findByRole('heading', { name: 'Set up mycli' })).toBeDefined()
+    expect(client.agentRegister).toHaveBeenCalledWith({
+      name: 'mycli',
+      executable: 'mycli',
+      tui_args: ['mycli', '{task}'],
+      headless_args: ['mycli', '-p', '{task}'],
+      acp_args: ['mycli', 'acp'],
+    })
   })
 })
 
 describe('first run', () => {
-  it('can return to the agents step without an installed agent', async () => {
+  it('points back to the Agent step when no agent is installed', async () => {
     seed()
-    const onBackToAgents = vi.fn()
+    const onBackToAgent = vi.fn()
     render(
       <FirstRunStep
         client={fakeApi({ agentList: vi.fn(async () => []) })}
         workspace={workspace}
-        back={null}
-        defaultHarness=""
-        onBackToWorkspace={vi.fn()}
-        onBackToAgents={onBackToAgents}
+        onBackToRepository={vi.fn()}
+        onBackToAgent={onBackToAgent}
       />,
     )
-    fireEvent.click(await screen.findByRole('button', { name: 'Set up an agent' }))
-    expect(onBackToAgents).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('No agent is installed yet')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))
+    expect(onBackToAgent).toHaveBeenCalledTimes(1)
   })
 })
 
-
 describe('onboarding route', () => {
-  it('reaches the agents step while keeping import optional', async () => {
+  it('reaches the Agent step with the extras collapsed', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
     fireEvent.click(await screen.findByRole('button', { name: `Use ${workspace.name}` }))
     fireEvent.click(await screen.findByRole('button', { name: 'Link local repository' }))
     fireEvent.change(await screen.findByLabelText('Repository path'), {
@@ -1029,7 +1062,10 @@ describe('onboarding route', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add remote' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    expect(await screen.findByRole('region', { name: 'Bring your configuration' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Skip for now' })).toBeDefined()
+
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
+    expect(screen.queryByRole('region', { name: 'Bring your configuration' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
+    expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
   })
 })

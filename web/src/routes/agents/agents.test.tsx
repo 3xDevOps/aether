@@ -1,18 +1,15 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { vi } from 'vitest'
+import { splitArgv } from '@/components/agents/add-agent'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
-import { AgentWizard, splitArgv } from '@/routes/agents/wizard'
 import { ConfigurationRoute } from '@/routes/configuration'
 import { useStore } from '@/store'
-import {
-  initialEnvTerminal,
-  registerEnvTerminalSocket,
-} from '@/store/env-terminal'
-import { StubSocket } from '@/test/stub-socket'
-import { agentInfo, fakeApi } from '@/test/fixtures'
+import { agentInfo } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
+
 // vi.mock factories are hoisted above static imports, so the fixture module
 // must be loaded inside the factory (same as terminal.test.tsx).
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -20,7 +17,6 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const { fakeApi } = await import('@/test/fixtures')
   return { ...actual, api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
-
 
 function mount() {
   const View = lookupRoute('agents')
@@ -33,19 +29,15 @@ async function flush() {
 }
 
 beforeEach(() => {
+  useStore.setState(useStore.getInitialState(), true)
   vi.mocked(api.agentList).mockResolvedValue([
-    agentInfo(), agentInfo({ name: 'myagent', source: 'member', installed: false }),
+    agentInfo({ display_name: 'Claude Code', glyph: 'claude', login_found: true, enhanced: 'adapter' }),
+    agentInfo({ name: 'myagent', display_name: 'myagent', glyph: 'custom', source: 'member', installed: false, install_script: undefined, enhanced: 'none' }),
   ])
-  StubSocket.install()
   useStore.setState({
-    capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach', 'terminal'] },
+    capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach'] },
   })
 })
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
 
 describe('splitArgv', () => {
   it('splits on spaces and drops empty words', () => {
@@ -54,299 +46,95 @@ describe('splitArgv', () => {
   })
 })
 
-describe('agents view', () => {
-  it('lists agents with shipped and member badges', async () => {
-    const view = mount()
+describe('agents page', () => {
+  it('lists each agent with its install and login state, its modes and one action', async () => {
+    mount()
     await flush()
 
-    expect(screen.getByText('claude')).toBeDefined()
-    expect(screen.getByText('shipped')).toBeDefined()
-    expect(screen.getByText('myagent')).toBeDefined()
-    expect(screen.getByText('member')).toBeDefined()
-    expect(screen.getByText('Installed')).toBeDefined()
-    expect(screen.getByText('Not installed')).toBeDefined()
-    view.unmount()
+    const rows = within(screen.getByRole('list', { name: 'Agents' })).getAllByRole('listitem')
+    expect(rows[0].textContent).toContain('Claude Code')
+    expect(rows[0].textContent).toContain('Installed · Login found')
+    expect(rows[0].textContent).toContain('Standard · Enhanced')
+    expect(within(rows[0]).getByRole('button', { name: 'Run Claude Code' })).toBeDefined()
+    expect(rows[1].textContent).toContain('Not installed')
+    expect(within(rows[1]).getByLabelText('Supports Standard only')).toBeDefined()
+    expect(within(rows[1]).getByRole('button', { name: 'Set up myagent' })).toBeDefined()
+    expect(within(rows[1]).queryByRole('button', { name: 'Run myagent' })).toBeNull()
   })
 
-  it('shows the add button with regular gateway capabilities', async () => {
-    const view = mount()
+  it('keeps a default mode per agent without making it the most recent launch', async () => {
+    useStore.setState({ launchDefaults: { claude: { mode: 'tui', at: 42 } } })
+    mount()
     await flush()
 
-    expect(screen.getByText('Add agent')).toBeDefined()
-    view.unmount()
+    await pickOption(screen.getByRole('combobox', { name: 'Default mode for Claude Code' }), 'Enhanced')
+    expect(useStore.getState().launchDefaults.claude).toEqual({ mode: 'acp', at: 42 })
   })
 
-  it.each(['local', 'remote'] as const)(
-    'opens configuration after onboarding without a workspace on a %s gateway',
-    async (gateway) => {
-      useStore.setState({
-        capabilities: {
-          gateway,
-          methods: ['agent.list', 'config.roots', 'config.import', 'config.tree'],
-          ws: [],
-        },
-        onboarded: true,
-        workspaces: {},
-        activeWorkspace: '',
-        route: { name: 'agents', params: {} },
-      })
-      const view = mount()
-      await flush()
+  it('opens the launch dialog on the agent Run names', async () => {
+    mount()
+    await flush()
 
-      fireEvent.click(screen.getByRole('button', { name: 'Configuration' }))
-      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
-      view.unmount()
+    fireEvent.click(screen.getByRole('button', { name: 'Run Claude Code' }))
+    expect(useStore.getState().paletteDialog).toBe('launch')
+    expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
+  })
 
-      const configuration = render(<ConfigurationRoute params={{}} client={api} />)
-      await flush()
-      expect(
-        (screen.getByRole('button', { name: 'Choose directory' }) as HTMLButtonElement).disabled,
-      ).toBe(false)
-      fireEvent.click(screen.getByRole('button', { name: 'Open remote files' }))
-      expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
-      configuration.unmount()
-    },
-  )
+  it('opens the setup with the comparison, and comes back from it', async () => {
+    mount()
+    await flush()
 
-  it.each(['config.roots', 'config.import'])(
-    'does not offer configuration when %s is unavailable',
-    async (missing) => {
-      useStore.setState({
-        capabilities: {
-          gateway: 'remote',
-          methods: ['agent.list', 'config.roots', 'config.import'].filter(
-            (method) => method !== missing,
-          ),
-          ws: [],
-        },
-      })
-      const view = mount()
-      await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code again' }))
+    expect(screen.getByRole('radiogroup', { name: 'How runs show Claude Code' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'All agents' }))
+    expect(screen.getByRole('list', { name: 'Agents' })).toBeDefined()
+  })
 
-      expect(screen.queryByRole('button', { name: 'Configuration' })).toBeNull()
-      view.unmount()
-    },
-  )
+  it('adds a custom agent from the header', async () => {
+    mount()
+    await flush()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Add agent…' }))
+    expect(screen.getByRole('form', { name: 'Add agent' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('list', { name: 'Agents' })).toBeDefined()
+  })
 
-  it('sends the wizard install line once across instructions remounts', async () => {
-    useStore.getState().resetEnvTerminal()
+  it('keeps git identity, GitHub and agent config files collapsed', async () => {
+    mount()
+    await flush()
+
+    expect(screen.queryByRole('form', { name: 'Git identity' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Git identity/ }))
+    expect(screen.getByRole('form', { name: 'Git identity' })).toBeDefined()
+    expect(screen.getByRole('button', { name: /^GitHub/ })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
+    expect(screen.getByRole('region', { name: 'Bring your configuration' })).toBeDefined()
+  })
+
+  it.each(['config.roots', 'config.import'])('offers no agent config files when %s is unavailable', async (missing) => {
     useStore.setState({
-      envTerminal: {
-        ...initialEnvTerminal,
-        tabs: ['main', 't2'],
-        activeTab: 't2',
+      capabilities: {
+        gateway: 'remote',
+        methods: ['agent.list', 'config.roots', 'config.import'].filter((method) => method !== missing),
+        ws: [],
       },
     })
-    const connection = {
-      send: vi.fn(),
-      resize: vi.fn(),
-      reopen: vi.fn(),
-      rebind: vi.fn(),
-      suspend: vi.fn(),
-      resume: vi.fn(),
-      resetWriteDenial: vi.fn(),
-      setControl: vi.fn(),
-      requestTakeover: vi.fn(() => false),
-      isEnded: vi.fn(() => false),
-      close: vi.fn(),
-    }
-    registerEnvTerminalSocket('main', connection)
-
-    const props = {
-      agents: [{ name: 'claude', source: 'shipped' as const, install_script: 'install claude' }],
-      harness: 'claude',
-      onRegistered: vi.fn(),
-      onCancel: vi.fn(),
-      client: api,
-    }
-    const first = render(<AgentWizard {...props} />)
-    await flush()
-    first.unmount()
-
-    const second = render(<AgentWizard {...props} />)
+    mount()
     await flush()
 
-    expect(useStore.getState().envTerminal.activeTab).toBe('main')
-    expect(connection.send).toHaveBeenCalledWith('install claude\n')
-    expect(connection.send).toHaveBeenCalledTimes(1)
-    second.unmount()
-    useStore.getState().resetEnvTerminal()
+    expect(screen.queryByRole('button', { name: /^Agent config files/ })).toBeNull()
   })
 
-  it('keeps static terminal instructions on an older gateway', async () => {
+  it('still opens the configuration route without a workspace', async () => {
     useStore.setState({
-      capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach'] },
+      capabilities: { gateway: 'remote', methods: ['agent.list', 'config.roots', 'config.import', 'config.tree'], ws: [] },
+      onboarded: true,
+      workspaces: {},
+      activeWorkspace: '',
     })
-    const view = mount()
+    render(<ConfigurationRoute params={{}} client={api} />)
     await flush()
-
-    fireEvent.click(screen.getByText('Add agent'))
-    await flush()
-    fireEvent.change(screen.getByPlaceholderText('claude'), {
-      target: { value: 'mycli' },
-    })
-    fireEvent.click(screen.getByText('Continue'))
-    await flush()
-
-    expect(screen.getByText(/Open your environment terminal/)).toBeDefined()
-    expect(screen.getByText('aether terminal')).toBeDefined()
-    view.unmount()
-  })
-
-  it('shows the shipped harness install script', async () => {
-    const view = mount()
-    await flush()
-
-    fireEvent.click(screen.getByText('Add agent'))
-    await flush()
-    fireEvent.change(screen.getByPlaceholderText('claude'), {
-      target: { value: 'claude' },
-    })
-    fireEvent.click(screen.getByText('Continue'))
-    await flush()
-
-    expect(screen.getByText('curl -fsSL https://claude.ai/install.sh | bash')).toBeDefined()
-    view.unmount()
-  })
-
-  it('registers a custom agent after the member finishes setup', async () => {
-    const view = mount()
-    await flush()
-
-    fireEvent.click(screen.getByText('Add agent'))
-    await flush()
-    fireEvent.change(screen.getByPlaceholderText('claude'), {
-      target: { value: 'mycli' },
-    })
-    fireEvent.click(screen.getByText('Continue'))
-    await flush()
-
-    vi.mocked(api.agentList).mockResolvedValue([
-      agentInfo({ name: 'mycli', source: 'member' }),
-    ])
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-
-    expect(vi.mocked(api.agentRegister)).toHaveBeenCalledWith({
-      name: 'mycli',
-      executable: 'mycli',
-      tui_args: ['mycli', '{task}'],
-      headless_args: ['mycli', '-p', '{task}'],
-    })
-    expect(screen.getByText('Agent registered')).toBeDefined()
-    view.unmount()
-  })
-
-  it('preserves an existing member definition through failed setup and retry', async () => {
-    const custom = agentInfo({ name: 'custom', source: 'member', installed: false, install_script: undefined })
-    const client = fakeApi({
-      agentList: vi.fn(async () => [custom]),
-      agentRegister: vi.fn(async () => { throw new Error('existing definition was replaced') }),
-    })
-    const onRegistered = vi.fn()
-    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
-    const view = render(<AgentWizard agents={[custom]} harness="custom" onRegistered={onRegistered} onCancel={vi.fn()} client={client} />)
-    fireEvent.click(screen.getByRole('button', { name: "I've installed and logged in" }))
-    await flush()
-    expect(screen.getByText(/custom is not detected as installed/)).toBeDefined()
-    expect(client.envSave).not.toHaveBeenCalled()
-    expect(client.agentRegister).not.toHaveBeenCalled()
-    vi.mocked(client.agentList).mockResolvedValue([{ ...custom, installed: true }])
-    fireEvent.click(screen.getByRole('button', { name: "I've installed and logged in" }))
-    await flush()
-    expect(onRegistered).toHaveBeenCalledOnce()
-    expect(client.agentRegister).not.toHaveBeenCalled()
-    expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
-    view.unmount()
-  })
-
-  it('saves the environment after the install check and names the image', async () => {
-    // An executable that lives only in the running container is not in the
-    // image runs start from, so confirming setup has to save it.
-    const onRegistered = vi.fn()
-    useStore.getState().resetEnvTerminal()
-    vi.mocked(api.envSave).mockClear()
-    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
-      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
-    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-
-    expect(vi.mocked(api.envSave)).toHaveBeenCalledOnce()
-    expect(screen.getByText('Agent installed')).toBeDefined()
-    expect(screen.getByText('aether/member-1:123')).toBeDefined()
-    expect(useStore.getState().envTerminal.status?.saved_image).toBe(
-      'aether/member-1:123',
-    )
-    expect(onRegistered).toHaveBeenCalledOnce()
-    view.unmount()
-  })
-
-  it('shows the real save failure and keeps the confirm button for a retry', async () => {
-    const onRegistered = vi.fn()
-    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
-      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
-    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
-    vi.mocked(api.envSave).mockRejectedValueOnce(
-      new Error('env.save: no space left on device'),
-    )
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-
-    expect(screen.getByText('env.save: no space left on device')).toBeDefined()
-    expect(screen.queryByText('Agent installed')).toBeNull()
-    expect(onRegistered).not.toHaveBeenCalled()
-
-    vi.mocked(api.envSave).mockResolvedValueOnce({ image: 'aether/member-1:124' })
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-    expect(screen.getByText('Agent installed')).toBeDefined()
-    view.unmount()
-  })
-
-  it('verifies shipped installation before reporting success and allows retry', async () => {
-    const onRegistered = vi.fn()
-    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
-      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
-    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-    expect(screen.getByText(/claude is not detected as installed/)).toBeDefined()
-    expect(onRegistered).not.toHaveBeenCalled()
-    expect(screen.queryByText('Agent installed')).toBeNull()
-
-    vi.mocked(api.agentList).mockResolvedValue([agentInfo()])
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-    expect(screen.getByText('Agent installed')).toBeDefined()
-    expect(onRegistered).toHaveBeenCalledOnce()
-    view.unmount()
-  })
-
-  it('shows discovery errors instead of declaring the shipped agent ready', async () => {
-    const onRegistered = vi.fn()
-    const view = render(<AgentWizard agents={[agentInfo()]} harness="claude"
-      onRegistered={onRegistered} onCancel={vi.fn()} client={api} />)
-    vi.mocked(api.agentList).mockRejectedValue(new Error('agent.list: connection closed'))
-    fireEvent.click(screen.getByText("I've installed and logged in"))
-    await flush()
-    expect(screen.getByText('agent.list: connection closed')).toBeDefined()
-    expect(onRegistered).not.toHaveBeenCalled()
-    view.unmount()
-  })
-
-  it('omits argv inputs for a shipped name', async () => {
-    const view = mount()
-    await flush()
-
-    fireEvent.click(screen.getByText('Add agent'))
-    await flush()
-    fireEvent.change(screen.getByPlaceholderText('claude'), {
-      target: { value: 'claude' },
-    })
-
-    expect(screen.queryByText('TUI command')).toBeNull()
-    view.unmount()
+    expect((screen.getByRole('button', { name: 'Choose directory' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-// The Agents step's Connect GitHub screen. The login itself is a device
+// The Agent step's Connect GitHub screen. The login itself is a device
 // flow only a person can finish, so a stub `gh` in the member's environment
 // home stands in for it; everything the server does around that stub - the
 // signing key, the git identity written next to gh's own credential block,
@@ -24,15 +24,15 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
   // The identity is what the connect writes into the home's .gitconfig, so
-  // this scenario sets one rather than skipping the step.
-  await wizard.gitIdentity.save('Ada Lovelace', 'ada@example.invalid')
-  await wizard.workspace.createFromClone('project')
+  // this scenario sets one rather than leaving it to the server's fallback.
+  await wizard.connect.identity.save('Ada Lovelace', 'ada@example.invalid')
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
 
   const id = await memberID(alice)
   const home = aether.server.memberHome(id)
@@ -43,8 +43,8 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   // showing a login that container cannot run. Opening the dock starts a
   // real container, so the first answer is what to wait on: the button is
   // clickable long before the container exists.
-  const github = wizard.agents.github
-  await wizard.agents.connectGitHub().click()
+  const github = wizard.agent.github
+  await wizard.agent.connectGitHub()
   await expect(github.section).toContainText(
     'There is no gh in your environment terminal',
     { timeout: 3 * 60 * 1000 },
@@ -56,13 +56,13 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   ])
   await expect(github.section).not.toContainText(githubLoginCommand)
   await wizard.back().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
 
   // The container is the same one; the stub reaches it through the bind
   // mounted home, so reopening the screen is enough to probe again. The
   // server bounds the probe at twenty seconds, well inside this.
   aether.installStubGh(id)
-  await wizard.agents.connectGitHub().click()
+  await wizard.agent.connectGitHub()
   // The state, not the command block: a probe that threw would put the
   // same block back, so only this sentence proves the check passed.
   await expect(github.section).toContainText(
@@ -104,7 +104,7 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   // Back closes the sub-screen without leaving the step, and the step now
   // says who it connected as.
   await wizard.back().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
   await expect(github.section).toContainText('Connected in this session as octocat')
-  await expect(wizard.agents.connectGitHub()).toBeVisible()
+  await expect(github.section.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
 })

@@ -9,15 +9,15 @@
 import { expect, shrinkToKeyboardHeight, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'
 
-test('the Link step stays usable at the height a keyboard leaves', async ({
+test('the Connect step stays usable at the height a keyboard leaves', async ({
   page,
   aether,
 }) => {
   const alice = await aether.member('alice')
   const wizard = await OnboardingWizard.open(page, alice.url)
 
-  await wizard.link.byAddress().tap()
-  const address = wizard.link.section.getByLabel('Server address')
+  await wizard.connect.byAddress().tap()
+  const address = wizard.connect.section.getByLabel('Server address')
   await address.tap()
   const restoreViewport = await shrinkToKeyboardHeight(page)
 
@@ -38,15 +38,17 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
   // The submit is the other half. The wizard's header and step list fill a
   // phone screen on their own, so it starts below the fold: what the short
   // viewport may not do is keep it from being scrolled into reach.
-  const link = wizard.link.button('Link')
+  const link = wizard.connect.button('Link')
   await link.scrollIntoViewIfNeeded()
   await expect(link).toBeInViewport({ ratio: 1 })
   await link.tap()
-  await expect(wizard.link.section).toContainText('(admin)')
+  await expect(wizard.connect.section).toContainText('(admin)')
 
   await restoreViewport()
-  await wizard.link.continue().tap()
-  await wizard.expectStep('Git identity')
+  const next = wizard.connect.continue()
+  await next.scrollIntoViewIfNeeded()
+  await next.tap()
+  await wizard.expectStep('Repository')
 })
 
 test('repository settings keep their content inside the phone after a Git push', async ({

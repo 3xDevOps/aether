@@ -66,8 +66,8 @@ function seed() {
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
     onboarded: false,
-    onboardingStep: 'Link',
-    onboardingFurthest: 'Link',
+    onboardingStep: 'Connect',
+    onboardingFurthest: 'Connect',
     onboardingWorkspace: '',
   })
 }
@@ -78,25 +78,19 @@ afterEach(() => {
 })
 
 describe('onboarding link through an edge', () => {
-  it('offers sign-in first and swaps it for the address form on request', async () => {
+  it('offers sign-in first and keeps the address form behind a disclosure', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi({ localLinkStatus: vi.fn(async () => unlinked) })} />)
 
     const signIn = await screen.findByRole('button', { name: 'Sign in' })
-    const byAddress = screen.getByRole('button', { name: 'Link by address' })
-    expect(screen.getByText('Tailscale or a direct address')).toBeDefined()
-    // Sign-in comes first in reading order.
+    const byAddress = screen.getByRole('button', { name: /^Link by address/ })
     expect(signIn.compareDocumentPosition(byAddress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('form', { name: 'Link server' })).toBeNull()
 
     fireEvent.click(byAddress)
     const form = screen.getByRole('form', { name: 'Link server' })
     expect(within(form).getByLabelText('Server address')).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
-
-    fireEvent.click(within(form).getByRole('button', { name: 'Sign in instead' }))
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
-    expect(screen.queryByRole('form', { name: 'Link server' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined()
   })
 
   it('shows the code, opens the browser, and waits for the gateway to report the sign-in', async () => {
@@ -226,11 +220,11 @@ describe('onboarding link through an edge', () => {
 
     const servers = within(await screen.findByRole('list', { name: 'Your servers' }))
     const oldBox = servers.getByText('old-box').closest('li')!
-    expect(oldBox.textContent).toContain('offline')
-    expect(oldBox.textContent).toContain('Account access: signing in is enough')
+    expect(oldBox.textContent).toContain('Offline · viewer · signing in is enough')
     const box = servers.getByText('build-box').closest('li')!
-    expect(box.textContent).toContain('self-hosted')
-    expect(box.textContent).toContain('Approved devices: a new device waits for approval')
+    expect(box.textContent).toContain('Online · admin · a new device waits for approval')
+    // The id and claim forms wait behind a disclosure while servers are listed.
+    expect(screen.queryByLabelText('Server id from your admin')).toBeNull()
     fireEvent.click(servers.getByRole('button', { name: 'Link build-box' }))
 
     const confirm = within(await screen.findByRole('region', { name: 'Confirm server' }))
@@ -246,7 +240,7 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeLink).toHaveBeenCalledWith(serverID, edge)
     expect(useStore.getState().connectionEpoch).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain('Git identity')
+    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain('Repository')
   })
 
   it('offers no link when the host key cannot be read, and cancels', async () => {
@@ -279,7 +273,8 @@ describe('onboarding link through an edge', () => {
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
-    fireEvent.change(await screen.findByLabelText('Server id from your admin'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
+    fireEvent.change(screen.getByLabelText('Server id from your admin'), {
       target: { value: ` ${serverID} ` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Link by id' }))
@@ -302,13 +297,11 @@ describe('onboarding link through an edge', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     expect(await screen.findByText(/Your account reaches no servers yet/)).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a server' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Other ways to link' }))
     // The claim is made for the account the edge reported at sign-in, shown
     // before the code is sent.
     const form = screen.getByRole('form', { name: 'Add a server' })
-    expect(form.textContent).toContain(
-      'Claiming makes octocat (GitHub), the account the edge reported when you signed in',
-    )
+    expect(form.textContent).toContain("Claiming makes octocat (GitHub) the server's admin.")
     fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: ' abcdefgh-example ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
@@ -347,7 +340,7 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeServers).toHaveBeenCalledWith(other)
     expect(client.localEdgeServers).not.toHaveBeenCalledWith(edge)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add a server' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
     expect(await screen.findByText('claim code is wrong')).toBeDefined()
@@ -370,7 +363,7 @@ describe('onboarding link through an edge', () => {
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a server' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 

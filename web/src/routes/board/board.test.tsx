@@ -442,7 +442,7 @@ describe('empty board', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add your repository' }))
     expect(useStore.getState().route.name).toBe('onboarding')
-    expect(useStore.getState().onboardingStep).toBe('Workspace')
+    expect(useStore.getState().onboardingStep).toBe('Repository')
   })
 
   it('asks for the base branch when the server cannot read it, with its error', async () => {

@@ -15,7 +15,7 @@ describe('terminal zoom', () => {
   })
 
   /** Rehydrates a fresh store from a payload this build's own version wrote. */
-  function rehydrate(state: Record<string, unknown>, version = 7) {
+  function rehydrate(state: Record<string, unknown>, version = 8) {
     window.localStorage.setItem('aether.ui', JSON.stringify({ state, version }))
     const hydrated = createRootStore().getState()
     window.localStorage.removeItem('aether.ui')
@@ -114,7 +114,7 @@ describe('workspace scope and route stay in sync', () => {
     useStore.setState({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 'Agents',
+      onboardingStep: 'Agent',
       onboardingWorkspace: 'wsp_1',
       onboardingRepo: {
         link: 'lnk_1',
@@ -131,7 +131,7 @@ describe('workspace scope and route stay in sync', () => {
     expect(useStore.getState()).toMatchObject({
       route: { name: 'board', params: {} },
       onboarded: true,
-      onboardingStep: 'Link',
+      onboardingStep: 'Connect',
       onboardingWorkspace: '',
       onboardingRepo: null,
     })
@@ -294,7 +294,7 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingRepo).toBeNull()
     window.localStorage.removeItem('aether.ui')
   })
@@ -317,26 +317,36 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingRepo).toEqual(repo)
     window.localStorage.removeItem('aether.ui')
   })
 
-  it('maps every old index to the step it named', () => {
+  it('maps every old index to the step that absorbed the one it named', () => {
     for (const version of [0, 1, 2]) {
-      expect(resumeFrom(version, 0)).toBe('Link')
-      expect(resumeFrom(version, 1)).toBe('Workspace')
+      expect(resumeFrom(version, 0)).toBe('Connect')
+      expect(resumeFrom(version, 1)).toBe('Repository')
       expect(resumeFrom(version, 2)).toBe('Repository')
-      expect(resumeFrom(version, 3)).toBe('Agents')
+      expect(resumeFrom(version, 3)).toBe('Agent')
       expect(resumeFrom(version, 4)).toBe('First run')
     }
   })
 
   it('starts over on a value the wizard cannot place', () => {
-    expect(resumeFrom(0, 9)).toBe('Link')
-    expect(resumeFrom(0, -1)).toBe('Link')
-    expect(resumeFrom(0, 'Repository')).toBe('Link')
-    expect(resumeFrom(0, undefined)).toBe('Link')
+    expect(resumeFrom(0, 9)).toBe('Connect')
+    expect(resumeFrom(0, -1)).toBe('Connect')
+    expect(resumeFrom(0, 'Repository')).toBe('Connect')
+    expect(resumeFrom(0, undefined)).toBe('Connect')
+    expect(resumeFrom(7, 'Somewhere')).toBe('Connect')
+  })
+
+  it('maps each of the six old step names to the step that absorbed it', () => {
+    expect(resumeFrom(7, 'Link')).toBe('Connect')
+    expect(resumeFrom(7, 'Git identity')).toBe('Connect')
+    expect(resumeFrom(7, 'Workspace')).toBe('Repository')
+    expect(resumeFrom(7, 'Repository')).toBe('Repository')
+    expect(resumeFrom(7, 'Agents')).toBe('Agent')
+    expect(resumeFrom(7, 'First run')).toBe('First run')
   })
 
   it('runs the migrate on every version behind this one', () => {
@@ -344,9 +354,9 @@ describe('a persisted store from an older release', () => {
     // configured one, so a payload seeded at the current version proves
     // nothing about it. All three older versions stored an index, and each
     // has to come back as the step it named.
-    expect(resumeFrom(0, 3)).toBe('Agents')
-    expect(resumeFrom(1, 3)).toBe('Agents')
-    expect(resumeFrom(2, 3)).toBe('Agents')
+    expect(resumeFrom(0, 3)).toBe('Agent')
+    expect(resumeFrom(1, 3)).toBe('Agent')
+    expect(resumeFrom(2, 3)).toBe('Agent')
     window.localStorage.removeItem('aether.ui')
   })
 
@@ -360,8 +370,8 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
-    expect(migrated.onboardingFurthest).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
+    expect(migrated.onboardingFurthest).toBe('Agent')
     window.localStorage.removeItem('aether.ui')
   })
 
@@ -369,14 +379,14 @@ describe('a persisted store from an older release', () => {
     window.localStorage.setItem(
       'aether.ui',
       JSON.stringify({
-        state: { onboardingStep: 'Agents', onboardingFurthest: 'First run' },
-        version: 7,
+        state: { onboardingStep: 'Agent', onboardingFurthest: 'First run' },
+        version: 8,
       }),
     )
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingFurthest).toBe('First run')
     window.localStorage.removeItem('aether.ui')
   })

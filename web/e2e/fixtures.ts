@@ -57,6 +57,15 @@ export interface Aether {
    * under test here; what the connect path does around it is.
    */
   installStubGh: (memberID: string) => void
+  /**
+   * Puts a stub `npm` in a member's environment home, so `agent.install`
+   * runs the real install command for codex and its adapter without a
+   * registry. It records each call and writes the executable the package
+   * would link.
+   */
+  installStubNpm: (memberID: string) => void
+  /** Writes the file agent.list reads as a member's codex login. */
+  giveCodexLogin: (memberID: string) => void
 }
 
 /**
@@ -100,6 +109,25 @@ case "$1 $2" in
 	exit 1
 	;;
 esac
+`
+
+/** busybox `sh`; fails loudly on a package it does not know. */
+const stubNpm = `#!/bin/sh
+echo "$*" >> "$HOME/npm-calls.log"
+for a; do
+	case "$a" in
+	@openai/codex) bin=codex ;;
+	@agentclientprotocol/codex-acp@*) bin=codex-acp ;;
+	esac
+done
+if [ -z "$bin" ]; then
+	echo "npm: unsupported install: $*" >&2
+	exit 1
+fi
+mkdir -p "$HOME/.local/bin"
+printf '#!/bin/sh\\n' > "$HOME/.local/bin/$bin"
+chmod +x "$HOME/.local/bin/$bin"
+echo "added 1 package ($bin)"
 `
 
 /**
@@ -172,6 +200,16 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
         const bin = path.join(server.memberHome(memberID), '.local', 'bin')
         mkdirSync(bin, { recursive: true })
         writeFileSync(path.join(bin, 'gh'), stubGh, { mode: 0o755 })
+      },
+      installStubNpm: (memberID) => {
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        writeFileSync(path.join(bin, 'npm'), stubNpm, { mode: 0o755 })
+      },
+      giveCodexLogin: (memberID) => {
+        const dir = path.join(server.memberHome(memberID), '.codex')
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(path.join(dir, 'auth.json'), '{}\n')
       },
     })
 

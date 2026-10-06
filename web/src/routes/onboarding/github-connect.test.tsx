@@ -5,7 +5,7 @@ import type { Api } from '@/lib/api'
 import { githubLoginCommand } from '@/lib/github'
 import type { GatewayCapabilities, GitHubProbeResult } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
-import { AgentsStep } from '@/routes/onboarding/agents-step'
+import { AgentStep } from '@/routes/onboarding/agent-step'
 import { useStore } from '@/store'
 import {
   registerEnvTerminalSocket,
@@ -35,7 +35,7 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    onboardingStep: 'Link',
+    onboardingStep: 'Connect',
     onboardingWorkspace: '',
     onboardingRepo: null,
   })
@@ -60,14 +60,13 @@ function renderStep(client: Api, caps: GatewayCapabilities = localCaps) {
   function Host() {
     const [setup, onSetup] = useState('')
     return (
-      <AgentsStep
+      <AgentStep
         client={client}
         caps={capability(caps)}
-        workspace={workspace}
         setup={setup}
         onSetup={onSetup}
         onNext={onNext}
-        onReady={vi.fn()}
+        back={setup ? <button type="button" onClick={() => onSetup('')}>Back</button> : null}
       />
     )
   }
@@ -102,10 +101,16 @@ function attachMainTab(): EnvTerminalSocket {
   return socket
 }
 
+function expandGitHub() {
+  const trigger = screen.getByRole('button', { name: /^GitHub/ })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+}
+
 /** Opens the Connect GitHub sub-screen from the step's own screen, once the
  * harness list the step loads on mount has settled. */
 async function open() {
   await screen.findByText('Claude Code')
+  expandGitHub()
   fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
   await act(async () => {})
   // Mounting the dock marks its connection unattached until the server
@@ -114,10 +119,9 @@ async function open() {
   act(() => setEnvTerminalSocketReady('main', true))
 }
 
-/** Walks the whole wizard from Link to the Agents step. */
+/** Walks the whole wizard from Connect to the Agent step. */
 async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
@@ -146,9 +150,9 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi())
 
     // The closed section is part of the step, not a screen of its own.
-    expect(
-      await screen.findByRole('region', { name: 'Connect GitHub' }),
-    ).toBeDefined()
+    await screen.findByText('Claude Code')
+    expandGitHub()
+    expect(screen.getByRole('region', { name: 'Connect GitHub' })).toBeDefined()
     await open()
 
     expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
@@ -209,7 +213,8 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
         'github.connect: not logged in to github.com in the environment terminal; run gh auth login there first',
       ),
     ).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     expect(onNext).toHaveBeenCalled()
   })
 
@@ -488,13 +493,11 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Connect GitHub' }),
-      ).toBeDefined()
+      expect(screen.getByRole('button', { name: /^GitHub/ })).toBeDefined()
     })
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('Agents')
+    ).toContain('Agent')
 
     // Only now does Back leave the step.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))

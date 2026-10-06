@@ -51,24 +51,21 @@ test('two members share comments, moderated steering, and explicit control trans
   const bobPage = await bobContext.newPage()
   try {
     const wizard = await OnboardingWizard.open(bobPage, bob.url)
-    await wizard.expectStep('Link')
-    await wizard.link.link(aether.server.addr, {
+    await wizard.expectStep('Connect')
+    await wizard.connect.link(aether.server.addr, {
       invite,
       name: requestedBobName,
     })
-    await wizard.link.continue().click()
-    await wizard.expectStep('Git identity')
-    await wizard.gitIdentity.skip().click()
-    await wizard.expectStep('Workspace')
-    await wizard.workspace.use('project').click()
+    await wizard.connect.continue().click()
+    await wizard.repository.use('project').click()
     await wizard.expectStep('Repository')
     await wizard.repository.localClone().click()
     const clone = await aether.cloneRepo(repo, 'project-bob')
     await wizard.repository.addRemote(clone)
     await expect(wizard.repository.section).toContainText(`Connected ${clone}`)
     await wizard.repository.continue().click()
-    await wizard.expectStep('Agents')
-    await wizard.agents.skip().click()
+    await wizard.expectStep('Agent')
+    await wizard.agent.skip().click()
     const { member: bobMember } = await bob.api.rpc<{
       member: { display_name: string }
     }>('server.info')
