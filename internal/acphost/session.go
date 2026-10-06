@@ -50,10 +50,11 @@ type Config struct {
 	Logger    *slog.Logger
 
 	// OnState reports execution state: working at every prompt start,
-	// idle at every turn end with the stop reason.
+	// idle at every turn end with the stop reason, and idle once a
+	// restored session opens.
 	OnState func(working bool, reason string)
 	// OnInputs reports the complete set of pending requests whenever it
-	// changes; an empty set clears them.
+	// changes and once a restored session opens; an empty set clears them.
 	OnInputs func(pending []domain.RunInputRequest)
 	// OnActivity reports what the agent is doing, at most once a second.
 	OnActivity func(verb, target string)
@@ -148,6 +149,16 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.stop()
 		s.notify.close(nil)
 		return nil, errors.Join(err, log.Close())
+	}
+	if cfg.SessionID != "" {
+		// The connection that held the restored session's turn and
+		// requests may have ended without reporting their end.
+		s.mu.Lock()
+		s.inputsLocked()
+		if s.cfg.OnState != nil {
+			s.callback(func() { s.cfg.OnState(false, "") })
+		}
+		s.mu.Unlock()
 	}
 	go s.watch()
 	return s, nil

@@ -292,8 +292,9 @@ func TestEnhancedRunCancel(t *testing.T) {
 func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
-	run := e.launchACP(t, "say pong")
-	waitItems(t, e.sched, run.ID, "the task's turn", assistantSaid("pong"))
+	run := e.launchACP(t, acpmock.PromptAskPermission)
+	waitFor(t, "permission request", func() bool { return len(e.sched.PendingInputs(run.ID)) == 1 })
+	e.waitAgentState(t, run.ID, agentstatus.Working)
 	before := len(rt.all())
 	if err := e.sched.Close(); err != nil {
 		t.Fatal(err)
@@ -317,10 +318,16 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 	if methods := execs[before].agent.Methods(); !slices.Contains(methods, acp.AgentMethodSessionResume) || slices.Contains(methods, acp.AgentMethodSessionNew) {
 		t.Fatalf("restored with %v, want session/resume", methods)
 	}
+	waitFor(t, "the restored session's idle state", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		entry := s2.runs[run.ID]
+		return entry != nil && entry.agentReport.State == agentstatus.Idle && len(entry.pendingInputs) == 0
+	})
 	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "after restart", false); err != nil {
 		t.Fatal(err)
 	}
-	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
+	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 1))
 }
 
 func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {

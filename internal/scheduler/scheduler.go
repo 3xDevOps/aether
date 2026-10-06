@@ -659,6 +659,7 @@ func recoveryError(err error) error {
 func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
+	s.acp.shutdown()
 	s.flushPendingRunTitles()
 	return s.DetachDevelopmentTerminals(context.Background())
 }

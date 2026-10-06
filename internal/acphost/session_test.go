@@ -343,9 +343,16 @@ func TestRestore(t *testing.T) {
 
 	t.Run("resume replays nothing", func(t *testing.T) {
 		m := newMockAgent(t, fix)
-		s, _ := startMock(t, m, Config{SessionID: m.sessionID()})
+		s, rec := startMock(t, m, Config{SessionID: m.sessionID()})
 		if !m.called(acp.AgentMethodSessionResume) || m.called(acp.AgentMethodSessionLoad) || m.called(acp.AgentMethodSessionNew) {
 			t.Fatalf("methods %v", m.methods)
+		}
+		// The restored session reports that it holds no turn and no request.
+		if inputs := <-rec.inputsCh; len(inputs) != 0 {
+			t.Fatalf("restored inputs %+v", inputs)
+		}
+		if reason := rec.waitIdle(t); reason != "" {
+			t.Fatalf("restored idle reason %q", reason)
 		}
 		if s.SessionID() != m.sessionID() || len(ofKind(items(t, s), KindMessage)) != 0 {
 			t.Fatalf("resume recorded history: %+v", items(t, s))
@@ -359,6 +366,7 @@ func TestRestore(t *testing.T) {
 		if !m.called(acp.AgentMethodSessionLoad) || m.called(acp.AgentMethodSessionNew) {
 			t.Fatalf("methods %v", m.methods)
 		}
+		rec.waitIdle(t)
 		its := items(t, s)
 		if len(ofKind(its, KindMessage)) != 0 || len(ofKind(its, KindCommands)) != 1 || len(ofKind(its, KindReset)) != 0 {
 			t.Fatalf("load items %+v", its)

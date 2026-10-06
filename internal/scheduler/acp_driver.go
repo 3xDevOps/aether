@@ -45,6 +45,7 @@ type acpDriver struct {
 	s *Scheduler
 
 	mu      sync.Mutex
+	closed  bool
 	runs    map[domain.RunID]*acpRun
 	ops     map[domain.RunID]*sync.Mutex
 	waiters map[domain.RunID]chan struct{}
@@ -366,6 +367,21 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) {
 	}
 }
 
+// shutdown closes every session without stopping its adapter or reporting
+// its end, as the end of the server process would; the next server replaces
+// the adapters and reports the restored sessions' state.
+func (d *acpDriver) shutdown() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.closed = true
+	for _, r := range d.runs {
+		r.stopping = true
+		if r.session != nil {
+			_ = r.session.Close()
+		}
+	}
+}
+
 func (d *acpDriver) stopExec(exec runtime.ManagedExec) {
 	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
 	defer cancel()
@@ -410,6 +426,12 @@ func (d *acpDriver) record(entry *supervised, change func()) {
 // run running only after the session opened, so a report that arrives first
 // waits for that.
 func (d *acpDriver) report(run domain.RunID, report agentstatus.Report) {
+	d.mu.Lock()
+	closed := d.closed
+	d.mu.Unlock()
+	if closed {
+		return
+	}
 	deadline := time.Now().Add(acpReportWait)
 	for {
 		err := d.s.ReportAgentState(context.Background(), run, report)
