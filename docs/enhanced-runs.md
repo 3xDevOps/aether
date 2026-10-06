@@ -78,7 +78,10 @@ takes the lease on `/ws/acp/<run_id>` with the attach control fields
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
 
 Messages go through `run.inject` and the Run Room as for any run. A message
-sent while no turn runs starts one (`outcome: "sent"`). During a turn it waits
+sent while no turn runs starts one and reports `outcome: "sent"` once the
+agent accepts it: its first update, or 1.5 s without a refusal. A prompt
+the agent refuses at once (an error such as `authRequired`) returns that
+error and the message is not sent. During a turn it waits
 for the turn to end (`queued`) unless `steer: true` is set and the agent
 advertised steering when the session opened, which adds it to the running
 turn (`injected`).

@@ -72,6 +72,27 @@ type State struct {
 	Auth          json.RawMessage `json:"auth,omitempty"`
 }
 
+// promptAcceptGrace is how long a prompt that starts a turn waits for the
+// agent to refuse it before it counts as sent. An agent that is working
+// streams an update well within it.
+const promptAcceptGrace = 1500 * time.Millisecond
+
+// turnAck resolves when the agent accepts a turn's prompt (its first update
+// or request) or answers it.
+type turnAck struct {
+	done chan struct{}
+	err  error
+}
+
+func (a *turnAck) resolve(err error) {
+	select {
+	case <-a.done:
+	default:
+		a.err = err
+		close(a.done)
+	}
+}
+
 // Session ties an agent connection to its item log and viewers.
 type Session struct {
 	cfg    Config
@@ -87,6 +108,7 @@ type Session struct {
 	proj       *projector
 	turn       int64
 	turnActive bool
+	starting   *turnAck
 	queue      [][]acp.ContentBlock
 	subs       map[chan Item]struct{}
 	closed     bool
@@ -206,9 +228,10 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 // once its output ends.
 func (s *Session) Close() error { return s.conn.Close() }
 
-// Prompt sends input to the agent. With no turn running it starts one. While
-// a turn runs, steer asks the agent to add the input to that turn if it
-// advertises steering; otherwise the input waits for the turn to end.
+// Prompt sends input to the agent. With no turn running it starts one and
+// returns once the agent accepted it; a refusal is an error. While a turn
+// runs, steer asks the agent to add the input to that turn if it advertises
+// steering; otherwise the input waits for the turn to end.
 func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool) (Receipt, error) {
 	if len(blocks) == 0 {
 		return Receipt{}, errors.New("acphost: empty prompt")
@@ -219,9 +242,9 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		s.startTurnLocked(blocks)
+		ack := s.startTurnLocked(blocks)
 		s.mu.Unlock()
-		return Receipt{Outcome: OutcomeSent}, nil
+		return awaitAccept(ctx, ack)
 	}
 	if !steer || !s.conn.Info().Steering {
 		s.queue = append(s.queue, blocks)
@@ -243,10 +266,10 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		cancelErr = s.conn.cancel(ctx)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	switch outcome {
 	case OutcomeInjected:
 		s.userMessageLocked(blocks)
+		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeInjected}, nil
 	case "startedNewTurn":
 		// The agent has the input; re-sending it would deliver it twice.
@@ -256,24 +279,48 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 			Title:       "Steered message stopped",
 			Description: "The agent started a turn of its own for this message instead of adding it to the running turn, so Aether cancelled that turn. The agent has the message; send a new prompt to continue.",
 		}})
+		s.mu.Unlock()
 		return Receipt{}, errors.Join(fmt.Errorf("acphost: %s: the agent answered startedNewTurn despite idleBehavior promptRequired; its turn was cancelled", methodSteering), cancelErr)
 	case "promptRequired":
 		// The turn ended before the steer reached the agent.
 	default:
+		s.mu.Unlock()
 		return Receipt{}, fmt.Errorf("acphost: %s: unknown outcome %q", methodSteering, outcome)
 	}
 	if s.closed {
+		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		s.startTurnLocked(blocks)
-		return Receipt{Outcome: OutcomeSent}, nil
+		ack := s.startTurnLocked(blocks)
+		s.mu.Unlock()
+		return awaitAccept(ctx, ack)
 	}
 	s.queue = append(s.queue, blocks)
+	s.mu.Unlock()
 	return Receipt{Outcome: OutcomeQueued}, nil
 }
 
-func (s *Session) startTurnLocked(blocks []acp.ContentBlock) {
+// awaitAccept reports a turn's prompt sent once the agent accepted it, or
+// once promptAcceptGrace passed without a refusal.
+func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
+	grace := time.NewTimer(promptAcceptGrace)
+	defer grace.Stop()
+	select {
+	case <-ack.done:
+		if ack.err != nil {
+			return Receipt{}, fmt.Errorf("acphost: the agent refused the prompt: %w", ack.err)
+		}
+	case <-grace.C:
+	case <-ctx.Done():
+		return Receipt{}, ctx.Err()
+	}
+	return Receipt{Outcome: OutcomeSent}, nil
+}
+
+func (s *Session) startTurnLocked(blocks []acp.ContentBlock) *turnAck {
+	ack := &turnAck{done: make(chan struct{})}
+	s.starting = ack
 	s.turn++
 	s.turnActive = true
 	s.emitLocked(Item{Kind: KindTurnStart})
@@ -283,7 +330,16 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock) {
 			s.cfg.OnState(true, "prompt")
 		}
 	})
-	go s.runTurn(blocks)
+	go s.runTurn(blocks, ack)
+	return ack
+}
+
+// acceptedLocked resolves the starting turn's prompt as accepted.
+func (s *Session) acceptedLocked() {
+	if s.starting != nil {
+		s.starting.resolve(nil)
+		s.starting = nil
+	}
 }
 
 func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
@@ -303,8 +359,9 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	}})
 }
 
-func (s *Session) runTurn(blocks []acp.ContentBlock) {
+func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
+	ack.resolve(err)
 	if err != nil && s.conn.closed() {
 		// Record what the agent sent before it went away ahead of the
 		// interruption.
@@ -312,6 +369,9 @@ func (s *Session) runTurn(blocks []acp.ContentBlock) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.starting == ack {
+		s.starting = nil
+	}
 	if s.closed {
 		return
 	}
@@ -542,6 +602,7 @@ func (s *Session) inputsLocked() {
 func (s *Session) update(raw json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.acceptedLocked()
 	s.proj.update(raw)
 }
 
@@ -554,6 +615,7 @@ func (s *Session) authStatus(raw json.RawMessage) {
 func (s *Session) requestOpened(r Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.acceptedLocked()
 	s.proj.flushText()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()

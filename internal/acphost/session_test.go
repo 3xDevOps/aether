@@ -697,14 +697,16 @@ func TestOptionsModesAndAuth(t *testing.T) {
 	}
 }
 
+// A prompt the agent refuses at once is not sent, and the refusal shows.
 func TestPromptErrorIsShown(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
 		return nil, acp.NewAuthRequired(nil)
 	}
 	s, rec := startMock(t, m, Config{})
-	if _, err := s.Prompt(context.Background(), textPrompt("hi"), false); err != nil {
-		t.Fatal(err)
+	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false)
+	if err == nil || !strings.Contains(err.Error(), "Authentication required") || receipt.Outcome != "" {
+		t.Fatalf("Prompt = %+v, %v; want the refusal", receipt, err)
 	}
 	if reason := rec.waitIdle(t); reason != "error" {
 		t.Fatalf("reason %q", reason)
@@ -713,6 +715,29 @@ func TestPromptErrorIsShown(t *testing.T) {
 	if len(notices) != 1 || !strings.Contains(notices[0].Notice.Description, "Authentication required") {
 		t.Fatalf("notices %+v", notices)
 	}
+}
+
+// A prompt counts as sent once the agent streams its first update, without
+// waiting for the turn to end.
+func TestPromptIsSentOnceTheAgentStreams(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	release := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "on it"}})
+		<-release
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	start := time.Now()
+	receipt, err := s.Prompt(context.Background(), textPrompt("hi"), false)
+	if err != nil || receipt.Outcome != OutcomeSent {
+		t.Fatalf("Prompt = %+v, %v", receipt, err)
+	}
+	if waited := time.Since(start); waited >= promptAcceptGrace {
+		t.Fatalf("Prompt waited %s, want it back on the first update", waited)
+	}
+	close(release)
+	rec.waitIdle(t)
 }
 
 func TestStartFailsWithTheAgentError(t *testing.T) {
