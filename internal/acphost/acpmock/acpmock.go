@@ -182,6 +182,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 			"sessionId": session,
 			"toolCall":  map[string]any{"toolCallId": "mock-tool", "title": "rm -rf build", "kind": "execute", "status": "pending"},
 			"options": []any{
+				map[string]any{"optionId": "allow-always", "name": "Always Allow", "kind": "allow_always"},
 				map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
 				map[string]any{"optionId": "reject", "name": "Reject", "kind": "reject_once"},
 			},

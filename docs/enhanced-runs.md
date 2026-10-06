@@ -169,8 +169,10 @@ asking:
 | `codex` | `agent-full-access` |
 | others | the enhanced mode above |
 
-A permission request that still arrives is answered with its first
-`allow_*` option and logged as answered. When the turn ends, the container
+A permission request that still arrives is answered with its `allow_once`
+option, or its first `allow_*` option when it has none, and logged as
+answered. `allow_always` is avoided because the agent may persist it as a
+rule in settings the run commits. When the turn ends, the container
 exits 0 for `end_turn` and 1 for any other stop reason (a cancelled turn, a
 refusal, an adapter that exited or failed to start), and the run finishes
 like any background run: commit, publish, `completed` or `failed` with

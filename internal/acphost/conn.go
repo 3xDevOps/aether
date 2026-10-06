@@ -445,7 +445,12 @@ func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *ac
 	for _, o := range p.Options {
 		req.Options = append(req.Options, Option{ID: string(o.OptionId), Name: o.Name, Kind: string(o.Kind)})
 	}
-	if i := slices.IndexFunc(req.Options, func(o Option) bool { return strings.HasPrefix(o.Kind, "allow_") }); c.autoAllow && i >= 0 {
+	// allow_always can persist a rule into settings the run commits.
+	i := slices.IndexFunc(req.Options, func(o Option) bool { return o.Kind == "allow_once" })
+	if i < 0 {
+		i = slices.IndexFunc(req.Options, func(o Option) bool { return strings.HasPrefix(o.Kind, "allow_") })
+	}
+	if c.autoAllow && i >= 0 {
 		req.ID, req.Status, req.Answer = rand.Text(), RequestAnswered, req.Options[i].ID
 		c.events.requestClosed(req)
 		return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": req.Answer}}, nil
