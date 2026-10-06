@@ -276,6 +276,20 @@ describe('swarm detail', () => {
     expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_integrator' } })
   })
 
+  it('retries a failed agent-message read', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator()) } })
+    const client = showing()
+    vi.mocked(client.coordMessagesList)
+      .mockRejectedValueOnce(new Error('coord.messages.list: server unreachable'))
+      .mockResolvedValueOnce({ messages: [message({ id: 'm1', body: 'back online' })] })
+    await mount(client)
+    const section = within(screen.getByRole('region', { name: 'Agent messages' }))
+    expect(section.getByRole('alert').textContent).toContain('server unreachable')
+    await userEvent.click(section.getByRole('button', { name: 'Retry' }))
+    expect(await section.findByText('back online')).toBeDefined()
+    expect(section.queryByRole('alert')).toBeNull()
+  })
+
   it('says how long the integrator has left mail unread', async () => {
     seed({ runs: { run_integrator: toRecord(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })) } })
     await mount(showing())

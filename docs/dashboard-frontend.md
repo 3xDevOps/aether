@@ -251,6 +251,7 @@ Room, is its own small component and re-renders only its text.
 The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
 swarm, or run scope, merged by message ID. A `coord.message` event carries no
 body, so every loaded scope the message belongs to re-reads its newest page;
+a scope whose first read failed is held empty so it re-reads too.
 `coord.message.acked` stamps the row. Both re-read the recipient run for its
 `unacked_messages`.
 
@@ -3460,7 +3461,7 @@ the accountable human or an admin. Failures stay in the dialog, verbatim.
 
 The section reads `coord.messages.list` with `mission_id` into the messages
 slice and subscribes only to that swarm's list; a `coord.message` event
-re-reads its newest page. `groupMessages` (`store/messages.ts`) groups the
+re-reads its newest page. A failed read shows the error with **Retry**. `groupMessages` (`store/messages.ts`) groups the
 loaded rows by structure, never by content: a reply sits under its question
 when the question is loaded, reports and questions stand alone, and adjacent
 plain messages between the same sender and recipient fold into one line

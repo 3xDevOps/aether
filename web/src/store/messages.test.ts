@@ -161,6 +161,23 @@ describe('agent message events', () => {
     await vi.waitFor(() => expect(store.getState().runs.run_1.unacked_messages).toBe(0))
   })
 
+  it('re-reads a list whose first read failed when a message arrives', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const arrived = runMessage({ id: 'msg-2' })
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error('coord.messages.list: server unreachable'))
+      .mockResolvedValueOnce({ messages: [arrived] })
+    const client = fakeApi({ coordMessagesList: list, runGet: vi.fn(async () => run()) })
+    await loadMessagePage(store, client, missionScope)
+    expect(store.getState().messageErrors['mission:mission-1']).toContain('server unreachable')
+
+    const payload = { message_id: 'msg-2', workspace_id: workspace.id, mission_id: 'mission-1', from_run_id: 'run_worker', to_run_id: 'run_1', kind: 'message' }
+    expect(await applyEvent(store, messageEvent(8, payload), client)).toBe(true)
+    expect(ids(scopeMessages(store.getState(), missionScope))).toEqual(['msg-2'])
+    expect(store.getState().messageErrors['mission:mission-1']).toBeUndefined()
+  })
+
   it('applies the event without waiting for the recipient count', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

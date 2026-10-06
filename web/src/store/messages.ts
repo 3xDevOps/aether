@@ -115,6 +115,8 @@ export async function loadMessagePage(store: RootStore, client: Api, scope: Mess
     store.getState().setMessageError(scope)
   } catch (err) {
     store.getState().setMessageError(scope, message(err))
+    // An empty list still hears coord.message events, which re-read it.
+    if (!store.getState().messageLists[messageScopeKey(scope)]) store.getState().setMessagePage(scope, [], undefined)
   }
 }
 

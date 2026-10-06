@@ -106,7 +106,15 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
   return (
     <section aria-label="Agent messages" className="flex flex-col gap-1">
       <SectionLabel as="h2">Agent messages</SectionLabel>
-      {error && <Callout tone="failed" role="alert">Loading agent messages failed: {error}</Callout>}
+      {error && (
+        <Callout
+          tone="failed"
+          role="alert"
+          actions={<Button size="sm" variant="secondary" onClick={() => void loadMessagePage(useStore, client, scope)}>Retry</Button>}
+        >
+          Loading agent messages failed: {error}
+        </Callout>
+      )}
       {loaded && groups.length === 0 && !error && (
         <p className="text-ui text-muted">No agent messages yet. Workers and the integrator write here as they coordinate.</p>
       )}
