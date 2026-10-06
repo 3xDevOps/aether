@@ -2,10 +2,7 @@ import { useState } from 'react'
 import type * as React from 'react'
 import { ChevronLeft, ChevronRight, Copy, ExternalLink } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Code, CodeBlock } from '@/components/ui/code'
-import { FormField } from '@/components/ui/form-field'
-import { Input } from '@/components/ui/input'
 import { RequestCard } from '@/components/ui/request-card'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
@@ -13,6 +10,7 @@ import { message } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
 import type { SessionOption, SessionRequest, SessionToolCall } from '@/lib/session-types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { useStore } from '@/store'
 import { sessionLease } from '@/store/session-stream'
 import { cn } from '@/lib/utils'
@@ -51,50 +49,6 @@ export function AnsweredText({ request, command }: { request: SessionRequest; co
     <>
       {answerWord(request)}: {command ? <>run <Code>{command}</Code></> : request.title}
     </>
-  )
-}
-
-interface FieldSchema {
-  type?: string
-  title?: string
-  description?: string
-  enum?: string[]
-}
-
-function fieldsOf(schema: unknown): [string, FieldSchema][] {
-  const properties = (schema as { properties?: Record<string, FieldSchema> } | undefined)?.properties
-  return properties ? Object.entries(properties) : []
-}
-
-function FormFields({ schema, values, onChange }: {
-  schema: unknown
-  values: Record<string, unknown>
-  onChange: (values: Record<string, unknown>) => void
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      {fieldsOf(schema).map(([name, field]) => {
-        const label = field.title ?? name
-        if (field.type === 'boolean') {
-          return (
-            <label key={name} className="flex items-center gap-2 text-ui">
-              <Checkbox checked={values[name] === true} onCheckedChange={(checked) => onChange({ ...values, [name]: checked === true })} />
-              {label}
-            </label>
-          )
-        }
-        const numeric = field.type === 'number' || field.type === 'integer'
-        return (
-          <FormField key={name} label={label} help={field.enum ? `One of: ${field.enum.join(', ')}` : field.description}>
-            <Input
-              type={numeric ? 'number' : 'text'}
-              value={String(values[name] ?? '')}
-              onChange={(event) => onChange({ ...values, [name]: numeric ? Number(event.target.value) : event.target.value })}
-            />
-          </FormField>
-        )
-      })}
-    </div>
   )
 }
 
@@ -149,9 +103,11 @@ export function SessionRequestCard({ runID, request, agent, position, id, classN
   const [focused, setFocused] = useState(false)
   const options = request.options ?? []
   const canAnswer = agent.localControl
+  const incomplete = (option: SessionOption) => request.kind === 'question' && option.id === 'accept' && missingRequired(request.schema, values)
   const pick = (index: number) => () => {
     const option = options[index]
-    if (option && canAnswer) void answer(option.id, option.id === 'accept' && request.kind === 'question' ? values : undefined)
+    if (!option || !canAnswer || incomplete(option)) return
+    void answer(option.id, option.id === 'accept' && request.kind === 'question' ? values : undefined)
   }
   useKeybindings('request', focused ? {
     'request-option-1': pick(0),
@@ -200,7 +156,7 @@ export function SessionRequestCard({ runID, request, agent, position, id, classN
                 key={option.id}
                 size="sm"
                 variant={optionVariant(option, options)}
-                disabled={!canAnswer || busy !== null}
+                disabled={!canAnswer || busy !== null || incomplete(option)}
                 hint={focused ? `Press ${index + 1}` : undefined}
                 onClick={pick(index)}
               >

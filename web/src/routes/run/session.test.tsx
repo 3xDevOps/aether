@@ -8,6 +8,7 @@ import '@/routes/run'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
 import { alice, bob, run, serverInfo, workspace } from '@/test/fixtures'
+import { pickOption } from '@/test/select'
 import { StubSocket } from '@/test/stub-socket'
 
 const eventRenders = vi.hoisted(() => new Map<string, number>())
@@ -175,6 +176,26 @@ describe('the Enhanced session view', () => {
     expect(await screen.findByText('Answer the request above to continue.')).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
     expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
+  it('keeps Accept off until a form\'s required fields have values, and offers enum fields as a choice', async () => {
+    const question = {
+      id: 'req_3', kind: 'question' as const, title: 'Which database?', status: 'pending' as const,
+      schema: { type: 'object', required: ['db'], properties: { db: { type: 'string', title: 'Database', enum: ['postgres', 'sqlite'] }, port: { type: 'integer', title: 'Port' } } },
+      options: [{ id: 'accept', name: 'Accept' }, { id: 'decline', name: 'Decline' }],
+    }
+    open()
+    acpSocket().open({ has_control: true, control_generation: 2, state: state({ turn_in_flight: true, pending: [question] }) }, [item('turn_start', 1), item('request', 1, { request: question })])
+    const accept = await screen.findByRole('button', { name: 'Accept' })
+    expect((accept as HTMLButtonElement).disabled).toBe(true)
+    const port = screen.getByRole('spinbutton', { name: 'Port' })
+    await userEvent.type(port, '5')
+    await userEvent.clear(port)
+    await pickOption(screen.getByRole('combobox', { name: 'Database (required)' }), 'sqlite')
+    const enabled = screen.getByRole('button', { name: 'Accept' }) as HTMLButtonElement
+    expect(enabled.disabled).toBe(false)
+    await userEvent.click(enabled)
+    expect(api.runInputAnswer).toHaveBeenCalledWith('run_1', 'req_3', 'accept', expect.anything(), { db: 'sqlite' })
   })
 
   it('leaves a closed turn\'s rows alone while the next turn streams', async () => {
