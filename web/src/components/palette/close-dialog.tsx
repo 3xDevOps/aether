@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
@@ -36,7 +36,7 @@ export function CloseDialog() {
       toast.success(`Closed as ${outcome}`)
     } catch (err) {
       setClosing(false)
-      const detail = `Close failed: ${message(err)}`
+      const detail = `Close failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     }

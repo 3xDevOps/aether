@@ -15,7 +15,7 @@ import {
   api,
   type LocalForwardStatusResult,
 } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
@@ -54,7 +54,7 @@ export function ForwardDialog() {
       })
       .catch((err) => {
         if (!live) return
-        const detail = `Forward status failed: ${message(err)}`
+        const detail = `Forward status failed: ${errorSentence(err)}`
         setError(detail)
         toast.error(detail)
       })
@@ -82,7 +82,7 @@ export function ForwardDialog() {
       await refresh()
       toast.success('Port forwarding started')
     } catch (err) {
-      const detail = `Forward failed: ${message(err)}`
+      const detail = `Forward failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     } finally {
@@ -99,7 +99,7 @@ export function ForwardDialog() {
       await refresh()
       toast.success('Port forwarding stopped')
     } catch (err) {
-      const detail = `Stop failed: ${message(err)}`
+      const detail = `Stop failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     } finally {

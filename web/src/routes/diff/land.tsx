@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { Check, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -23,7 +23,7 @@ export function Land({ run }: { run: RunRecord }) {
       useStore.getState().recordPull(run.id, { ...pull, current: true })
       toast.success(`Now on ${pull.branch}`)
     } catch (err) {
-      toast.error(message(err))
+      toast.error(errorSentence(err))
     } finally {
       setSwitching(false)
     }

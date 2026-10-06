@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence, message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
 import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
@@ -41,7 +41,7 @@ export async function approveRequest(runID: string, approval: Approval) {
       .decideApproval(done.workspace_id, done.id, done.decision, done.decided_by ?? '', done.decided_at ?? new Date().toISOString())
     toast.success(`Approved: ${approval.action}`)
   } catch (err) {
-    toast.error(`Approve failed: ${message(err)}`)
+    toast.error(`Approve failed: ${errorSentence(err)}`)
   }
 }
 

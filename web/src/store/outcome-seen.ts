@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import { awaitingReview } from '@/lib/needs-you'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
@@ -34,7 +34,7 @@ export function watchOutcomeSeen(
         if (!seen.outcome_unseen) store.getState().applyOutcomeSeen(seen.id)
       })
       .catch((err: unknown) => {
-        toast.error(`Could not mark the run seen: ${message(err)}`)
+        toast.error(`Could not mark the run seen: ${errorSentence(err)}`)
       })
       .finally(() => inFlight.delete(run.id))
   }

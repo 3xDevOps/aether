@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { api, ApiError, type Api } from '@/lib/api'
-import { edgeHost, message } from '@/lib/format'
+import { edgeHost, errorSentence } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import { redirectRoute } from '@/lib/url-state'
 import type {
@@ -114,7 +114,7 @@ export async function hydrate(
         if (signal?.aborted) return false
         // Preferences are optional; report the gateway's error without
         // turning a successful server snapshot into a connection failure.
-        toast.error(message(err))
+        toast.error(errorSentence(err))
       }
     }
     s.setIdentityKey(incomingIdentity)

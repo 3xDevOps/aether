@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import type { AuthMethod, SessionItem } from '@/lib/session-types'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunShells } from '@/routes/run/shells'
@@ -66,7 +66,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
       useStore.getState().upsertRun(await api.runClose(run.id, 'abandoned'))
       useStore.getState().navigate('run', { runId: next.id })
     } catch (err) {
-      toast.error(`Open in Standard failed: ${message(err)}`)
+      toast.error(`Open in Standard failed: ${errorSentence(err)}`)
     } finally {
       setBusy(false)
     }
@@ -108,7 +108,7 @@ function LoginActions({ run, methods, shells, nav }: { run: RunRecord; methods: 
     const lease = sessionLease(useStore, run.id)
     if (!tab || !typed || !lease) return
     await api.devTerminalInput({ run_id: run.id, terminal_id: tab.terminal_id, incarnation: tab.incarnation, kind: 'text', text: typed, ...lease })
-      .catch((err: unknown) => toast.error(`Could not type the login command: ${message(err)}`))
+      .catch((err: unknown) => toast.error(`Could not type the login command: ${errorSentence(err)}`))
   }
   return (
     <>
@@ -159,7 +159,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
       await api.runPause(run.id)
       await api.runResume(run.id)
     } catch (err) {
-      toast.error(`Retry Enhanced failed: ${message(err)}`)
+      toast.error(`Retry Enhanced failed: ${errorSentence(err)}`)
     } finally {
       setRetrying(false)
     }

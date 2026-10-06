@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/menu'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
-import { message } from '@/lib/format'
+import { errorSentence, message } from '@/lib/format'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { ConnectionState } from '@/lib/stream'
@@ -198,7 +198,7 @@ export function TerminalDock({
         'terminal',
         uri,
         (port) => toast.success(`OAuth callback ready on localhost:${port}`),
-        (err) => toast.error(`OAuth callback forward failed: ${message(err)}`),
+        (err) => toast.error(`OAuth callback forward failed: ${errorSentence(err)}`),
       )
     },
   })

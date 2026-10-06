@@ -10,7 +10,7 @@ import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/compo
 import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import type { Schedule, Template } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { ScheduleEditor } from '@/routes/templates/schedule-editor'
@@ -117,7 +117,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
       .then((list) => {
         if (!cancelled) setTemplates(list)
       })
-      .catch((err) => toast.error(message(err)))
+      .catch((err) => toast.error(errorSentence(err)))
     if (caps.hasMethod('schedule.list')) {
       client
         .scheduleList(workspaceID)
@@ -138,7 +138,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
       navigate('run', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {
-      toast.error(message(err))
+      toast.error(errorSentence(err))
     }
   }
 

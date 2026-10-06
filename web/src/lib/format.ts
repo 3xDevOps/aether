@@ -65,6 +65,14 @@ export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+const sourcePrefix = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*: (?=\S)/
+
+export function errorSentence(err: unknown): string {
+  let text = message(err)
+  for (let next = text.replace(sourcePrefix, ''); next !== text; next = next.replace(sourcePrefix, '')) text = next
+  return text
+}
+
 export const money = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'USD',

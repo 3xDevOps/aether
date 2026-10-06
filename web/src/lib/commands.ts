@@ -29,7 +29,7 @@ import {
   UserPlus,
 } from '@/components/icons'
 import { api, ApiError, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence, message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { LinkStatus, Member, PullResult, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
@@ -575,7 +575,7 @@ export function useCommandRunner(
         const value = await result
         toast.success(command.report ? command.report(value) : done)
       } catch (err) {
-        toast.error(`${done} failed: ${message(err)}`)
+        toast.error(`${done} failed: ${errorSentence(err)}`)
       }
     },
     [

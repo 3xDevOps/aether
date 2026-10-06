@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import type { RoomPostResult } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import {
@@ -63,7 +63,7 @@ export function InjectDialog() {
       }
     } catch (err) {
       setSending(false)
-      const detail = `Send failed: ${message(err)}`
+      const detail = `Send failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     }
