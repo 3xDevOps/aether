@@ -54,6 +54,7 @@ export interface Run {
   unanswered_questions?: number
   /** Agent mail addressed to the run that it has not acknowledged. */
   unacked_messages?: number
+  oldest_unacked_at?: string
   /** Correlated native requests; independent of execution status. */
   pending_inputs?: RunInputRequest[]
   /** Last run.status reason, sanitized like the event payload. */

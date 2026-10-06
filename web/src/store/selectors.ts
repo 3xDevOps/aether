@@ -22,6 +22,7 @@ export interface RunRow {
   state: PresentationState
   reason: string
   needsYou?: NeedsYouID
+  unread?: number
   group: RunGroup
   waitingSince: string
   owner?: Member
@@ -80,6 +81,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       state: shown.state,
       reason: shown.reason,
       needsYou: shown.needsYou?.id,
+      unread: shown.unread,
       group: groupOf(shown.state),
       waitingSince: shown.needsYou?.since(run, ctx) ?? run.stateChangedAt,
       owner: ctx.members[run.member_id],

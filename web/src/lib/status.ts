@@ -3,6 +3,8 @@ import {
   memberName,
   needsYou,
   supervised,
+  unreadMail,
+  unreadReason,
   waitingOn,
   type NeedsYouCondition,
   type StateContext,
@@ -17,6 +19,8 @@ export interface RunPresentation {
   state: PresentationState
   reason: string
   needsYou?: NeedsYouCondition
+  /** Agent messages an integrator has left unread for over two minutes. */
+  unread?: number
 }
 
 function workingReason(run: RunRecord, ctx: StateContext): string {
@@ -54,6 +58,10 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
     }
   }
   if (isPaused(run, ctx)) return { state: 'paused', reason: 'Paused' }
+  const unread = unreadMail(run, ctx.now)
+  if (unread > 0 && waitingOn(run, ctx) === undefined) {
+    return { state: 'working', reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
+  }
   return { state: 'working', reason: workingReason(run, ctx) }
 }
 

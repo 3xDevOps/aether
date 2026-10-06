@@ -154,6 +154,18 @@ function waited(iso: string, now: number): string {
   return `${Math.floor(hours / 24)} d`
 }
 
+const unreadAfterMs = 2 * 60_000
+
+/** How much mail an integrator has left unacknowledged for over two minutes. */
+export function unreadMail(run: Pick<Run, 'mission_role' | 'unacked_messages' | 'oldest_unacked_at'>, now: number): number {
+  if (run.mission_role !== 'integrator' || !run.unacked_messages || !run.oldest_unacked_at) return 0
+  return now - Date.parse(run.oldest_unacked_at) >= unreadAfterMs ? run.unacked_messages : 0
+}
+
+export function unreadReason(count: number, since: string, now: number): string {
+  return `${count} agent message${count === 1 ? '' : 's'} unread for ${waited(since, now)}`
+}
+
 const nativeRequests = (run: RunRecord, kinds: string[]) =>
   (run.pending_inputs ?? []).filter((request) => kinds.includes(request.kind))
 

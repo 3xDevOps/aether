@@ -612,7 +612,7 @@ function refreshUnacked(store: RootStore, client: Api, runID: string): void {
   coalesce(store, `unacked:${runID}`, () =>
     client
       .runGet(runID)
-      .then((run) => store.getState().applyUnackedMessages(runID, run.unacked_messages))
+      .then((run) => store.getState().applyUnackedMessages(runID, run))
       .catch(ignore),
   )
 }

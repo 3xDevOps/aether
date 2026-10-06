@@ -57,6 +57,16 @@ describe('run presentation', () => {
     expect(presentRun(reading, ctx).reason).toBe('Reading src/auth.ts')
   })
 
+  it('names an integrator that has left agent messages unread for over two minutes', () => {
+    const integrator = (over: Parameters<typeof run>[0]) =>
+      presentRun(toRecord(run({ mission_id: 'mission_1', mission_role: 'integrator', ...over })), ctx)
+    expect(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })).toEqual({
+      state: 'working', reason: '3 agent messages unread for 12 min', unread: 3,
+    })
+    expect(integrator({ unacked_messages: 1, oldest_unacked_at: '2026-08-14T10:19:00Z' }).reason).toBe('Agent working')
+    expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')
+  })
+
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', paused: true }))
     expect(presentRun(paused, ctx).state).toBe('paused')

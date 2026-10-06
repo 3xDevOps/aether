@@ -88,6 +88,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
 function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   if (card.state === 'needs-you') return card.reason
   if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
+  if (card.unread) return card.reason
   return phase ? phaseWord[phase] : 'Swarm'
 }
 

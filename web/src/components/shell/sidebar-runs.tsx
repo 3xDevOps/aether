@@ -178,6 +178,7 @@ function RunRowItem({ tree, nested = false }: { tree: RunTree; nested?: boolean 
       reason={tree.reason}
       workspaceName={tree.workspaceName}
       swarm={tree.swarm}
+      unread={tree.unread}
       nested={nested}
     />
   )
@@ -189,18 +190,20 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   reason: string
   workspaceName?: string
   swarm?: SwarmSummary
+  unread?: number
   nested: boolean
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
 })
 
-function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
+function RunRowButton({ run, state, reason, workspaceName, swarm, unread, nested }: {
   run: RunRecord
   state: PresentationState
   reason: string
   workspaceName?: string
   swarm?: SwarmSummary
+  unread?: number
   nested: boolean
 }) {
   const navigate = useStore((s) => s.navigate)
@@ -209,7 +212,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
   const selected = useStore((s) =>
     swarm ? s.route.name === 'missions' && s.route.params.missionId === run.mission_id : isRunRoute(s.route, run.id))
   const title = swarm ? mission?.objective.split('\n')[0] || runLabel(run) : runLabel(run)
-  const counts = swarm ? swarmCounts(swarm) : ''
+  const counts = swarm ? (unread ? `${unread} unread` : swarmCounts(swarm)) : ''
   const open = () => {
     if (state === 'needs-you') {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
@@ -218,7 +221,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, nested }: {
     else navigate('run', { runId: run.id })
   }
   const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
-  const label = [stateLabel[state], workspaceName, title, swarm ? counts : reason].filter(Boolean).join(' · ')
+  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason].filter(Boolean).join(' · ')
   return (
     <ListRow
       data-run-row=""
