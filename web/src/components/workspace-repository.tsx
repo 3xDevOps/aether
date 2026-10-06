@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Code, CodeBlock } from '@/components/ui/code'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { shellQuote } from '@/lib/shell'
 import type { Workspace, WorkspaceMirrorResult } from '@/lib/types'
@@ -11,7 +10,7 @@ import { actionRow } from '@/routes/onboarding/layout'
 import { RepoStep } from '@/routes/onboarding/repo-step'
 import { OnboardingSourceOption } from '@/routes/onboarding/source-option'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, type Capability } from '@/store/hooks'
+import { useIsAdmin, type Capability } from '@/store/hooks'
 
 type WorkspaceRepositoryProps = {
   client?: Api
@@ -21,9 +20,10 @@ type WorkspaceRepositoryProps = {
   onLocalChange?: (local: boolean) => void
   back?: ReactNode
   onNext?: () => void
+  advancedOpen?: boolean
 }
 
-export function WorkspaceRepository({ client = api, caps, workspace, initialLocal = false, onLocalChange, back, onNext }: WorkspaceRepositoryProps) {
+export function WorkspaceRepository({ client = api, caps, workspace, initialLocal = false, onLocalChange, back, onNext, advancedOpen }: WorkspaceRepositoryProps) {
   const identity = useStore((state) => state.identityKey)
   const epoch = useStore((state) => state.connectionEpoch)
   const isAdmin = useIsAdmin()
@@ -60,7 +60,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={back} cancel={<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Cancel</Button>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
     </div>
     <div className="border-t border-seam pt-1">
-      <Collapsible>
+      <Collapsible defaultOpen={advancedOpen}>
         <CollapsibleTrigger>
           <span className="font-medium">Advanced</span>
           <span className="min-w-0 truncate text-muted">Server-fetched source, checkout origin, deploy keys</span>
@@ -69,7 +69,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
           {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source in Source control before launching.</p>}
           <div className="flex flex-col gap-1.5">
             <h4 className="text-ui font-medium text-text">Checkout origin</h4>
-            <p className="break-all font-code text-ui-sm">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>
+            <p className="break-words font-code text-ui-sm">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>
             <p className="text-ui-sm text-muted">The upstream URL a run checkout publishes to, not the read-only source. To change it, run this on your linked computer with the intended URL:</p>
             <CodeBlock className="whitespace-pre-wrap break-words">{`aether workspace origin --workspace ${shellQuote(workspace.id)} https://your-git-host/your-team/your-repository.git`}</CodeBlock>
           </div>
@@ -82,20 +82,4 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       {back}
     </div>}
   </section>
-}
-
-export function WorkspaceRepositoryDialog({ workspace, client = api, onClose, initialLocal = false }: {
-  workspace: Workspace
-  client?: Api
-  onClose: () => void
-  initialLocal?: boolean
-}) {
-  const caps = useCapability()
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-    <DialogContent className="grid-cols-1 max-w-[min(800px,calc(100%-2rem))] overflow-y-auto">
-      <DialogHeader><DialogTitle>Workspace repository</DialogTitle><DialogDescription>{workspace.name} · source and local clone settings</DialogDescription></DialogHeader>
-      <WorkspaceRepository key={workspace.id} client={client} caps={caps} workspace={workspace} initialLocal={initialLocal} />
-      <Button size="sm" variant="secondary" onClick={onClose}>Close repository settings</Button>
-    </DialogContent>
-  </Dialog>
 }
