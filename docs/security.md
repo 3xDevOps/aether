@@ -30,6 +30,11 @@ second sandbox inside it.
   carries the ownership check (Debian 11's 2.30.2, Ubuntu 20.04's 2.25.1)
   still refuses the checkout. The image's own `ENV GIT_CONFIG_*` entries are
   replaced, not appended to: set them in the workspace environment instead.
+- **An unprivileged server deletes root-owned run files as root.** When it
+  cannot remove a run checkout or a member home, it starts a container of the
+  standard image as `0:0` with only that directory mounted, running `find
+  /reclaim -mindepth 1 -delete` and nothing else. `find -delete` never follows
+  symlinks, so an agent cannot point it at another host path.
 
 Each member's persistent home is mounted as `$HOME` only into that member's
 own containers: their environment and the runs they launch. An

@@ -1095,9 +1095,13 @@ sets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`, so neither the
 agent's git nor the dashboard's Git panel stops at `detected dubious
 ownership`. This needs git 2.31 or newer in the image; the standard image
 qualifies. An unprivileged server cannot delete files a root agent created,
-such as `.git/objects` or `node_modules`, so cleanup of finished runs fails
-with `permission denied` and their checkouts stay under the data directory
-until you remove them as root.
+such as `.git/objects` or `node_modules`. When removing a finished run's
+checkout or a removed member's home fails with `permission denied`, the server
+empties the directory from a short-lived root container of the standard image
+(`find /reclaim -mindepth 1 -delete`, the directory mounted at `/reclaim`) and
+then deletes it. If that fails too, the journal logs `cannot remove files a
+root container created` once per directory with both errors, and the directory
+stays under the data directory until you remove it as root.
 
 Browser support also needs permission to assign its private control directory
 to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
