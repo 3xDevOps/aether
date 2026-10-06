@@ -56,8 +56,19 @@ type acpDriver struct {
 	mu      sync.Mutex
 	closed  bool
 	runs    map[domain.RunID]*acpRun
-	ops     map[domain.RunID]*sync.Mutex
-	waiters map[domain.RunID]chan struct{}
+	ops     map[domain.RunID]*opLock
+	waiters map[domain.RunID]*waiter
+}
+
+// opLock and waiter entries live only while someone holds or waits on them.
+type opLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type waiter struct {
+	ch   chan struct{}
+	refs int
 }
 
 type acpRun struct {
@@ -72,20 +83,30 @@ func newACPDriver(s *Scheduler) *acpDriver {
 	return &acpDriver{
 		s:       s,
 		runs:    make(map[domain.RunID]*acpRun),
-		ops:     make(map[domain.RunID]*sync.Mutex),
-		waiters: make(map[domain.RunID]chan struct{}),
+		ops:     make(map[domain.RunID]*opLock),
+		waiters: make(map[domain.RunID]*waiter),
 	}
 }
 
-func (d *acpDriver) op(run domain.RunID) *sync.Mutex {
+// lockOp takes the run's op lock and returns its unlock.
+func (d *acpDriver) lockOp(run domain.RunID) func() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	m := d.ops[run]
-	if m == nil {
-		m = new(sync.Mutex)
-		d.ops[run] = m
+	l := d.ops[run]
+	if l == nil {
+		l = new(opLock)
+		d.ops[run] = l
 	}
-	return m
+	l.refs++
+	d.mu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if l.refs--; l.refs == 0 {
+			delete(d.ops, run)
+		}
+	}
 }
 
 func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.Attachment) error {
@@ -149,24 +170,34 @@ func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
 	return nil, ErrACPNotRunning
 }
 
-func (d *acpDriver) started(run domain.RunID) (*acphost.Session, <-chan struct{}) {
+// started returns the live session, or else a channel closed when the next
+// one starts and the release for it, both read under one lock.
+func (d *acpDriver) started(run domain.RunID) (*acphost.Session, <-chan struct{}, func()) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if r := d.runs[run]; r != nil && r.session != nil {
-		return r.session, nil
+		return r.session, nil, func() {}
 	}
 	w := d.waiters[run]
 	if w == nil {
-		w = make(chan struct{})
+		w = &waiter{ch: make(chan struct{})}
 		d.waiters[run] = w
 	}
-	return nil, w
+	w.refs++
+	var once sync.Once
+	return nil, w.ch, func() {
+		once.Do(func() {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if w.refs--; w.refs == 0 && d.waiters[run] == w {
+				delete(d.waiters, run)
+			}
+		})
+	}
 }
 
 func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) {
-	lock := d.op(entry.runID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer d.lockOp(entry.runID)()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), acpConnectTimeout)
 	defer cancel()
 	d.stopAdapterLocked(ctx, entry.runID)
@@ -281,7 +312,7 @@ func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
 	d.runs[run] = r
 	if r.session != nil {
 		if w := d.waiters[run]; w != nil {
-			close(w)
+			close(w.ch)
 			delete(d.waiters, run)
 		}
 	}
@@ -331,9 +362,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	}
 	_ = r.exec.Detach()
 	cause = adapterError(cause, r.stderr)
-	lock := d.op(entry.runID)
-	lock.Lock()
-	defer lock.Unlock()
+	defer d.lockOp(entry.runID)()
 	d.mu.Lock()
 	current := d.runs[entry.runID] == r && !r.stopping
 	if current {
@@ -355,9 +384,7 @@ func adapterError(err error, stderr *tailBuffer) error {
 }
 
 func (d *acpDriver) stopAdapter(ctx context.Context, run domain.RunID) {
-	lock := d.op(run)
-	lock.Lock()
-	defer lock.Unlock()
+	defer d.lockOp(run)()
 	d.stopAdapterLocked(ctx, run)
 }
 

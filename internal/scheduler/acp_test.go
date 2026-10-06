@@ -437,3 +437,63 @@ func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
 		t.Fatalf("viewer inside the window: %d items from %d, oldest %d", len(gap.Replay), gap.Replay[0].Seq, gap.OldestSeq)
 	}
 }
+
+// A stream opened while no session is live is released by the next session
+// start, or by the end of a closing session it found; the driver keeps no
+// per-run entries once nobody holds or waits on them.
+func TestACPSubscribeWithoutSessionWaitsForTheNext(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	e.sched.acp.stopAdapter(t.Context(), run.ID)
+
+	closed := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	driverEntries := func() (int, int) {
+		e.sched.acp.mu.Lock()
+		defer e.sched.acp.mu.Unlock()
+		return len(e.sched.acp.ops), len(e.sched.acp.waiters)
+	}
+
+	waiting, err := e.sched.ACPSubscribe(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.Items != nil || waiting.Started == nil || closed(waiting.Started) {
+		t.Fatalf("stream without a session: items %v started %v", waiting.Items, waiting.Started)
+	}
+	// The stopped session stands in for a newly started one: setRun is where
+	// a start publishes it.
+	e.sched.acp.setRun(run.ID, &acpRun{session: sess, stopping: true})
+	if !closed(waiting.Started) {
+		t.Fatal("the session start did not release the waiting stream")
+	}
+	waiting.Cancel()
+
+	closing, err := e.sched.ACPSubscribe(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closing.Started == nil || !closed(closing.Started) {
+		t.Fatal("a stream that found a closed session was not released")
+	}
+	closing.Cancel()
+
+	e.sched.acp.stopAdapter(t.Context(), run.ID)
+	idle, err := e.sched.ACPSubscribe(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle.Cancel()
+	if ops, waiters := driverEntries(); ops != 0 || waiters != 0 {
+		t.Fatalf("driver kept %d op locks and %d waiters", ops, waiters)
+	}
+}

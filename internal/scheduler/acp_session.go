@@ -29,15 +29,17 @@ type ACPStream struct {
 	// when no session is live, and closed when the session ends or the
 	// viewer falls too far behind; either way the viewer resubscribes.
 	Items <-chan acphost.Item
-	// Started is closed when the next session starts, for a stream that
-	// opened with no live session.
+	// Started is closed when the viewer should resubscribe, for a stream
+	// that opened with no live session: the next session started, or the
+	// closing session it found has ended.
 	Started <-chan struct{}
 	State   *acphost.State
 	Cancel  func()
 }
 
 func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, error) {
-	if sess, _ := s.acp.started(run); sess != nil {
+	sess, started, release := s.acp.started(run)
+	if sess != nil {
 		last := sess.Log().LastSeq()
 		reset := afterSeq > last
 		if reset {
@@ -54,18 +56,24 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 		if !errors.Is(err, acphost.ErrClosed) {
 			return ACPStream{}, err
 		}
+		// The session is closing: the viewer resubscribes once it is gone.
+		started = sess.Done()
 	}
-	_, started := s.acp.started(run)
-	out := ACPStream{Started: started, Cancel: func() {}}
+	out := ACPStream{Started: started, Cancel: release}
 	log, err := s.openItemLog(run)
-	if err != nil || log == nil {
-		return out, err
+	if err != nil {
+		release()
+		return ACPStream{}, err
+	}
+	if log == nil {
+		return out, nil
 	}
 	defer func() { _ = log.Close() }()
 	if afterSeq > log.LastSeq() {
 		out.Reset, afterSeq = true, 0
 	}
 	if out.Replay, err = log.ReadAfter(acphost.ReplayStart(afterSeq, log.LastSeq()), 0); err != nil {
+		release()
 		return ACPStream{}, err
 	}
 	out.Epoch, out.Seq = streamMark(log, out.Replay, max(afterSeq, 0))
