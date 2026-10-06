@@ -262,8 +262,8 @@ func TestArchivedSwarmIsSweptAfterTheRetentionPeriod(t *testing.T) {
 	if _, err := f.svc.Archive(ctx, f.human, f.params()); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	if err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil {
-		t.Fatalf("sweep inside retention: %v", err)
+	if swept, err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil || swept {
+		t.Fatalf("sweep inside retention = %v, %v; want nothing swept", swept, err)
 	}
 	f.reload(t)
 	later := time.Now().Add(domain.ArchiveRetention + time.Hour)
@@ -282,8 +282,8 @@ func TestArchivedSwarmIsSweptAfterTheRetentionPeriod(t *testing.T) {
 		t.Fatalf("runs the run sweep may delete = %v, want the integrator but not the worker its swarm references", got)
 	}
 	f.svc.cfg.Now = func() time.Time { return later }
-	if err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil {
-		t.Fatalf("sweep after retention: %v", err)
+	if swept, err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil || !swept {
+		t.Fatalf("sweep after retention = %v, %v; want swept", swept, err)
 	}
 	if _, err := f.db.GetMission(ctx, f.mission.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("mission after sweep = %v, want ErrNotFound", err)

@@ -123,17 +123,15 @@ func (s *Service) Delete(ctx context.Context, actor domain.MemberID, p protocol.
 	return nil
 }
 
-// sweepArchived deletes a swarm archived longer than the run retention
-// period. Its runs, archived with it, are left to the scheduler's own
-// archive sweep, which skips them while this swarm still references them.
-func (s *Service) sweepArchived(ctx context.Context, m *domain.Mission) error {
+// sweepArchived leaves the swarm's runs to the scheduler's archive sweep.
+func (s *Service) sweepArchived(ctx context.Context, m *domain.Mission) (bool, error) {
 	if m.ArchivedAt == nil || s.cfg.Now().Sub(*m.ArchivedAt) < domain.ArchiveRetention {
-		return nil
+		return false, nil
 	}
 	if err := s.cfg.Missions.DeleteMission(ctx, m.ID); err != nil {
-		return err
+		return false, err
 	}
-	return s.publishMissionDeleted(ctx, m, "")
+	return true, s.publishMissionDeleted(ctx, m, "")
 }
 
 func (s *Service) publishMissionDeleted(ctx context.Context, m *domain.Mission, actor domain.MemberID) error {

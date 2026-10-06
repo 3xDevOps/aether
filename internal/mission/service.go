@@ -229,8 +229,12 @@ func (s *Service) reconcile(ctx context.Context) error {
 			return err
 		}
 		for _, m := range missions {
-			if sweepErr := s.sweepArchived(ctx, m); sweepErr != nil {
+			swept, sweepErr := s.sweepArchived(ctx, m)
+			if sweepErr != nil {
 				slog.Warn("mission: archive sweep", "mission", m.ID, "error", sweepErr)
+			}
+			if swept {
+				continue
 			}
 			if missionErr := s.reconcileMission(ctx, m); missionErr != nil {
 				slog.Warn("mission: reconcile mission", "mission", m.ID, "error", missionErr)
