@@ -46,8 +46,6 @@ const (
 	RoomMessageCancelled RoomMessageState = "cancelled"
 )
 
-// AgentDelivery is what an Enhanced run's agent session did with a sent
-// steer it had to queue behind a running turn. It stays empty otherwise.
 type AgentDelivery string
 
 const (

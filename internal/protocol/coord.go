@@ -99,22 +99,19 @@ const (
 // coordination socket. Role is descriptive authority, never a client-provided
 // role flag; an omitted assignment means this is an ordinary run.
 type CoordMissionAssignment struct {
-	MissionID            string                   `json:"mission_id,omitempty"`
-	Role                 string                   `json:"role,omitempty"`
-	TaskID               string                   `json:"task_id,omitempty"`
-	TaskRevision         int                      `json:"task_revision,omitempty"`
-	AttemptID            string                   `json:"attempt_id,omitempty"`
-	IntegratorRunID      string                   `json:"integrator_run_id,omitempty"`
-	IntegratorGeneration uint64                   `json:"integrator_generation,omitempty"`
-	ExecutionChoices     []MissionExecutionChoice `json:"execution_choices,omitempty"`
-	Phase                string                   `json:"phase,omitempty"`
-	OpenQuestions        int                      `json:"open_questions,omitempty"`
-	// ChangeSeq and Changes are set for an integrator only: the swarm's
-	// change counter and, per kind, the counter of the latest change it did
-	// not make itself.
-	ChangeSeq    uint64                          `json:"change_seq,omitempty"`
-	Changes      map[domain.MissionChange]uint64 `json:"changes,omitempty"`
-	Capabilities []string                        `json:"capabilities,omitempty"`
+	MissionID            string                          `json:"mission_id,omitempty"`
+	Role                 string                          `json:"role,omitempty"`
+	TaskID               string                          `json:"task_id,omitempty"`
+	TaskRevision         int                             `json:"task_revision,omitempty"`
+	AttemptID            string                          `json:"attempt_id,omitempty"`
+	IntegratorRunID      string                          `json:"integrator_run_id,omitempty"`
+	IntegratorGeneration uint64                          `json:"integrator_generation,omitempty"`
+	ExecutionChoices     []MissionExecutionChoice        `json:"execution_choices,omitempty"`
+	Phase                string                          `json:"phase,omitempty"`
+	OpenQuestions        int                             `json:"open_questions,omitempty"`
+	ChangeSeq            uint64                          `json:"change_seq,omitempty"`
+	Changes              map[domain.MissionChange]uint64 `json:"changes,omitempty"`
+	Capabilities         []string                        `json:"capabilities,omitempty"`
 }
 
 // IntegratorNotice changes with the phase, the open questions and the

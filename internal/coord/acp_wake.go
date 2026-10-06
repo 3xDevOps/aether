@@ -132,10 +132,8 @@ func (s *Service) integratorNotice(ctx context.Context, run domain.RunID) missio
 	return missionNotice{mission: a.MissionID, seq: a.ChangeSeq, changes: a.Changes}
 }
 
-// missionChanges lists, oldest first, the kinds of change others made since
-// the last notice the integrator saw. The first notice seen is the baseline:
-// the integrator's own task already describes the mission it starts in. Its
-// own changes move the baseline without a wake.
+// The first notice seen is the baseline: the integrator's own task already
+// describes the mission it starts in.
 func (s *Service) missionChanges(run domain.RunID, notice missionNotice) []domain.MissionChange {
 	s.mu.Lock()
 	defer s.mu.Unlock()
