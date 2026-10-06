@@ -75,6 +75,32 @@ describe('run activity', () => {
     expect(activity()).toMatchObject({ verb: 'Ran', target: 'make lint' })
   })
 
+  it('drops the last action when the run changes status', async () => {
+    const store = createRootStore()
+    store.setState({ workspaces: { [workspace.id]: workspace } })
+    store.getState().setRuns([run()])
+    const client = fakeApi()
+    const activity = () => store.getState().runs.run_1.activity
+    const status = (seq: number, to: string): Event => ({
+      ...agentEvent(seq, { from: 'running', to }),
+      type: 'run.status',
+    })
+
+    await applyEvent(store, agentEvent(1, { kind: 'tool_call', tool: 'Read', detail: 'src/auth.ts' }), client)
+    await applyEvent(store, status(2, 'needs-attention'), client)
+    expect(activity()).toBeUndefined()
+
+    await applyEvent(store, agentEvent(3, { kind: 'tool_call', tool: 'Bash', detail: 'make lint' }), client)
+    await applyEvent(store, status(4, 'running'), client)
+    expect(activity()).toBeUndefined()
+
+    await applyEvent(store, agentEvent(5, { kind: 'tool_call', tool: 'Read', detail: 'go.mod' }), client)
+    store.getState().setRuns([run()])
+    expect(activity()).toMatchObject({ verb: 'Reading', target: 'go.mod' })
+    store.getState().setRuns([run({ status: 'provisioning' })])
+    expect(activity()).toBeUndefined()
+  })
+
   it('ignores activity for a run the client has not loaded', async () => {
     const store = createRootStore()
     store.setState({ workspaces: { [workspace.id]: workspace } })

@@ -750,8 +750,10 @@ Removal also repairs the selection and open route before any refresh awaits.
   names: while another call still runs, the line shows the newest one. Only
   runs whose harness has an adapter emit these events, so `activity` is
   optional everywhere. An event about a run the client has not loaded is
-  dropped rather than fetched, and a run re-read keeps its activity, since
-  no snapshot carries it.
+  dropped rather than fetched. A status change - a turn ending or
+  starting, a relaunch - clears the activity, so an earlier action never
+  reads as current; a run re-read keeps it only while the status is
+  unchanged, since no snapshot carries it.
 
 **The capabilities descriptor is the transport seam.** The store holds the
 `GET /api/v1/capabilities` answer (`gateway`, `methods`, `ws`, and `local`

@@ -23,7 +23,7 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
     stateChangedAtEstimated: carry ? previous.stateChangedAtEstimated : !run.finished_at,
   }
   // No snapshot carries activity, so a re-read must not erase it.
-  if (previous?.activity) record.activity = previous.activity
+  if (carry && previous.activity) record.activity = previous.activity
   return record
 }
 
@@ -112,6 +112,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         stateChangedAtEstimated: false,
         outcome_unseen: outcomeUnseen,
       }
+      if (to !== current.status) delete next.activity
       if (to === 'running' && !next.started_at) next.started_at = time
       if (isTerminal(to)) {
         next.finished_at = time
