@@ -61,7 +61,10 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   }
 
   const empty = loaded && workspaces.length === 0
-  const showCreate = canAdd && (adding || empty)
+  // Sticky, so the form outlives the first workspace it creates: an import
+  // still shows its outcome and deploy key after the list stops being empty.
+  if (empty && canAdd && !adding) setAdding(true)
+  const showCreate = canAdd && adding
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
