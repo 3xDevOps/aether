@@ -804,7 +804,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   "Reading src/auth.ts" without opening a socket to the run. A tool call
   sets the present tense with the call's detail (file, command, task) or the
   tool name as the target; the tool result that follows turns it past tense
-  ("Read", "Ran", "Edited") or `Failed`; a subagent reads "Delegating". Only
+  ("Read", "Ran", "Edited") or `Failed`; a subagent reads "Delegating".
+  Calls in flight are kept by `tool_use_id`, so a result ends the call it
+  names: while another call still runs, the line shows the newest one. Only
   runs whose harness has an adapter emit these events, so `activity` is
   optional everywhere. An event about a run the client has not loaded is
   dropped rather than fetched, and a run re-read keeps its activity, since

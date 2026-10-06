@@ -1,3 +1,8 @@
+interface ToolCall {
+  tenses: [string, string]
+  target: string
+}
+
 /** What a run's agent is doing, from its latest `run.agent` event. */
 export interface RunActivity {
   /** "Reading" while a tool runs, "Read" once it returned. */
@@ -5,12 +10,15 @@ export interface RunActivity {
   /** The file, command or task the tool was given, else the tool's name. */
   target: string
   at: string
+  /** Calls still running, by `tool_use_id`; parallel calls return in any order. */
+  running?: Record<string, ToolCall>
 }
 
 /** The `run.agent` payload fields the activity line reads. */
 export interface AgentPayload {
   kind?: string
   tool?: string
+  tool_use_id?: string
   detail?: string
   is_error?: boolean
 }
@@ -32,26 +40,38 @@ const toolVerbs: Record<string, [string, string]> = {
 
 const delegating: [string, string] = ['Delegating', 'Delegated']
 
-/**
- * The activity after one agent event, or `previous` when the event says
- * nothing a state line shows. A tool result carries no tool name, so it
- * puts the call it ends into the past tense.
- */
+/** The activity after one agent event, or `previous` when it changes nothing shown. */
 export function nextActivity(
   previous: RunActivity | undefined,
   payload: AgentPayload,
   at: string,
 ): RunActivity | undefined {
   switch (payload.kind) {
-    case 'tool_call': {
+    case 'tool_call':
+    case 'subagent': {
       const tool = payload.tool ?? ''
-      const [verb] = toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`]
-      return { verb, target: payload.detail || tool, at }
+      const call: ToolCall = payload.kind === 'subagent'
+        ? { tenses: delegating, target: payload.detail || tool }
+        : {
+            tenses: toolVerbs[tool.toLowerCase()] ?? [`Using ${tool || 'a tool'}`, `Used ${tool || 'a tool'}`],
+            target: payload.detail || tool,
+          }
+      const running = payload.tool_use_id
+        ? { ...previous?.running, [payload.tool_use_id]: call }
+        : previous?.running
+      return { verb: call.tenses[0], target: call.target, at, running }
     }
-    case 'subagent':
-      return { verb: delegating[0], target: payload.detail || payload.tool || '', at }
     case 'tool_result': {
       if (!previous) return previous
+      const id = payload.tool_use_id
+      const ended = id ? previous.running?.[id] : undefined
+      if (ended) {
+        const rest = Object.entries(previous.running ?? {}).filter(([key]) => key !== id)
+        const running = rest.length ? Object.fromEntries(rest) : undefined
+        const latest = rest.at(-1)?.[1]
+        if (latest) return { verb: latest.tenses[0], target: latest.target, at, running }
+        return { verb: payload.is_error ? 'Failed' : ended.tenses[1], target: ended.target, at, running }
+      }
       if (payload.is_error) return { ...previous, verb: 'Failed', at }
       const tenses = [...Object.values(toolVerbs), delegating].find(([present]) => present === previous.verb)
       const verb = tenses?.[1] ?? previous.verb.replace(/^Using /, 'Used ')

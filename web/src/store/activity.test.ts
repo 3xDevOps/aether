@@ -50,6 +50,31 @@ describe('run activity', () => {
     expect(store.getState().lastSeq).toBe(8)
   })
 
+  it('ends the call a result names when tool calls interleave', async () => {
+    const store = createRootStore()
+    store.setState({ workspaces: { [workspace.id]: workspace } })
+    store.getState().setRuns([run()])
+    const client = fakeApi()
+    const activity = () => store.getState().runs.run_1.activity
+
+    await applyEvent(store, agentEvent(1, { kind: 'tool_call', tool: 'Read', tool_use_id: 'a', detail: 'src/auth.ts' }), client)
+    await applyEvent(store, agentEvent(2, { kind: 'tool_call', tool: 'Bash', tool_use_id: 'b', detail: 'go test ./...' }), client)
+    expect(activity()).toMatchObject({ verb: 'Running', target: 'go test ./...' })
+
+    await applyEvent(store, agentEvent(3, { kind: 'tool_result', tool_use_id: 'a' }), client)
+    expect(activity()).toMatchObject({ verb: 'Running', target: 'go test ./...' })
+
+    await applyEvent(store, agentEvent(4, { kind: 'tool_result', tool_use_id: 'b', is_error: true }), client)
+    expect(activity()).toMatchObject({ verb: 'Failed', target: 'go test ./...', running: undefined })
+
+    await applyEvent(store, agentEvent(5, { kind: 'tool_call', tool: 'Bash', tool_use_id: 'c', detail: 'make lint' }), client)
+    await applyEvent(store, agentEvent(6, { kind: 'tool_call', tool: 'Read', tool_use_id: 'd', detail: 'go.mod' }), client)
+    await applyEvent(store, agentEvent(7, { kind: 'tool_result', tool_use_id: 'd' }), client)
+    expect(activity()).toMatchObject({ verb: 'Running', target: 'make lint' })
+    await applyEvent(store, agentEvent(8, { kind: 'tool_result', tool_use_id: 'c' }), client)
+    expect(activity()).toMatchObject({ verb: 'Ran', target: 'make lint' })
+  })
+
   it('ignores activity for a run the client has not loaded', async () => {
     const store = createRootStore()
     store.setState({ workspaces: { [workspace.id]: workspace } })
