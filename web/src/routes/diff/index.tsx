@@ -68,6 +68,8 @@ export function ChangesView({ runID }: { runID: string }) {
   if (!run) return <MissingRun />
 
   const canOpen = caps.hasMethod('files.tree') && isLiveRun(run)
+  const openable = (file: PatchFile) =>
+    file.status !== 'deleted' && file.status !== 'binary' && cumulative.find((entry) => entry.path === file.path)?.status !== 'deleted'
   const patchAt = (file: PatchFile, index: number) => (
     <FilePatch
       key={file.path}
@@ -77,7 +79,7 @@ export function ChangesView({ runID }: { runID: string }) {
       lineNumbers
       collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
       onCollapsedChange={toggle}
-      onOpen={canOpen && file.status !== 'deleted' ? open : undefined}
+      onOpen={canOpen && openable(file) ? open : undefined}
     />
   )
   return (

@@ -212,6 +212,14 @@ test('a file path opens that file in Files on the run checkout', () => {
   expect(screen.queryByRole('button', { name: 'db/schema.sql' })).toBeNull()
 })
 
+test('a binary file has no Open in Files link', () => {
+  seed({ ...ready, patch: 'diff --git a/logo.png b/logo.png\nnew file mode 100644\nBinary files /dev/null and b/logo.png differ\n' })
+  useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
+  renderDiff()
+  expect(screen.getByRole('region', { name: 'logo.png' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'logo.png' })).toBeNull()
+})
+
 test('nothing changed is an empty state, not a blank pane', async () => {
   seed({ ...ready, patch: '' })
   renderDiff()

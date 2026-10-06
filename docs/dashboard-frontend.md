@@ -2156,8 +2156,9 @@ both what it renders and the overlap set the conflict chips read.
   reads from the hunk headers.
 - **The path opens the file.** Clicking a file's path opens it in Files on
   the run's checkout (`routes/files/open.ts`): a Files tab for that run and
-  path, then the Files route. It needs `files.tree`, a run the Files tree
-  still lists, and a file that still exists.
+  path, then the Files route. It needs `files.tree` and a run the Files tree
+  still lists. Binary files and files the current diff shows as deleted have
+  no link.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there
   is no editor and no language grammar. The server sends complete run diffs
