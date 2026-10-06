@@ -24,7 +24,6 @@ import {
   createUiSlice,
   maxSidebarWidth,
   minSidebarWidth,
-  normalizeBoardMapViewports,
   onboardingSteps,
   type OnboardingStep,
   type UiSlice,
@@ -75,8 +74,6 @@ const persistedUi = (s: RootState) => ({
   activeWorkspace: s.activeWorkspace,
   mineOnly: s.mineOnly,
   launchDefaults: s.launchDefaults,
-  boardView: s.boardView,
-  boardMapViewports: s.boardMapViewports,
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
@@ -116,7 +113,7 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 6,
+        version: 7,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
@@ -143,6 +140,10 @@ export function createRootStore() {
           if (version < 5) delete (state as { groupBy?: unknown }).groupBy
           if (version < 6) delete state.sidebarWidth
           if (version < 6) delete (state as { lastHarnessByAccount?: unknown }).lastHarnessByAccount
+          if (version < 7) {
+            delete (state as { boardView?: unknown }).boardView
+            delete (state as { boardMapViewports?: unknown }).boardMapViewports
+          }
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate
@@ -156,8 +157,6 @@ export function createRootStore() {
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
-            boardView: stored.boardView === 'map' ? 'map' : 'cards',
-            boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }
         },
         partialize: persistedUi,

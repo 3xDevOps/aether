@@ -12,43 +12,6 @@ import type {
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type BoardView = 'cards' | 'map'
-
-export interface BoardMapViewport {
-  x: number
-  y: number
-  zoom: number
-}
-
-export const minBoardMapZoom = 0.02
-export const maxBoardMapZoom = 2
-
-export function normalizeBoardMapViewport(value: unknown): BoardMapViewport | null {
-  if (!value || typeof value !== 'object') return null
-  const { x, y, zoom } = value as BoardMapViewport
-  if (
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    !Number.isFinite(zoom) ||
-    zoom <= 0
-  ) return null
-  return {
-    x: Math.max(-10_000_000, Math.min(10_000_000, x)),
-    y: Math.max(-10_000_000, Math.min(10_000_000, y)),
-    zoom: Math.max(minBoardMapZoom, Math.min(maxBoardMapZoom, zoom)),
-  }
-}
-
-export function normalizeBoardMapViewports(value: unknown): Record<string, BoardMapViewport> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const viewports: [string, BoardMapViewport][] = []
-  for (const [scope, candidate] of Object.entries(value)) {
-    const viewport = normalizeBoardMapViewport(candidate)
-    if (viewport) viewports.push([scope, viewport])
-  }
-  return Object.fromEntries(viewports)
-}
-
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
 export interface Route {
@@ -158,8 +121,6 @@ export interface UiSlice {
   /** Empty until hydration names one; every consumer treats empty as "all". */
   activeWorkspace: string
   mineOnly: boolean
-  boardView: BoardView
-  boardMapViewports: Record<string, BoardMapViewport>
   /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
   launchDefaults: Record<string, { mode: LaunchMode; at: number }>
   route: Route
@@ -184,8 +145,6 @@ export interface UiSlice {
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
   setMineOnly: (mineOnly: boolean) => void
-  setBoardView: (view: BoardView) => void
-  setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
   rememberLaunch: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
@@ -215,8 +174,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   mineOnly: false,
-  boardView: 'cards',
-  boardMapViewports: {},
   launchDefaults: {},
   route: initialRoute(),
   dismissedUpdates: { cli: '', server: '', shell: '' },
@@ -261,14 +218,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
           : s.route,
     })),
   setMineOnly: (mineOnly) => set({ mineOnly }),
-  setBoardView: (boardView) => set({ boardView }),
-  setBoardMapViewport: (scope, value) => {
-    const viewport = normalizeBoardMapViewport(value)
-    if (!viewport) return
-    set((s) => ({
-      boardMapViewports: { ...s.boardMapViewports, [scope]: viewport },
-    }))
-  },
   rememberLaunch: (agent, mode) =>
     set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: Date.now() } } })),
   navigate: (name, params = {}) => {
