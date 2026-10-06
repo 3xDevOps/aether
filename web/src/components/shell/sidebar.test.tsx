@@ -301,4 +301,15 @@ describe('phone shell', () => {
     expect(banner.getByText('Activity')).toBeDefined()
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Activity' })))
   })
+
+  it('titles a run page "Run" and shrinks New run to an icon there', () => {
+    atViewport(390, { pointer: 'coarse' })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_2' } } })
+    render(<AppShell />)
+
+    const banner = within(topBanners()[0]!)
+    expect(banner.getByText('Run')).toBeDefined()
+    expect(banner.queryByText('answer the schema question')).toBeNull()
+    expect(banner.getByRole('button', { name: 'New run' }).textContent).toBe('')
+  })
 })

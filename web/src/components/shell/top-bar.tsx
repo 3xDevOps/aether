@@ -23,7 +23,7 @@ export function TopBar() {
   const togglePalette = useStore((s) => s.togglePalette)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const needsYou = useNeedsYouCount()
-  const pagePrimary = useStore((s) => s.headerPrimaries > 0)
+  const iconLaunch = useStore((s) => s.headerPrimaries > 0 || s.route.name === 'run')
   const title = route.name === 'run'
     ? 'Run'
     : run
@@ -53,7 +53,7 @@ export function TopBar() {
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
-        {canLaunch({ cap, role }) && (pagePrimary ? (
+        {canLaunch({ cap, role }) && (iconLaunch ? (
           <Button variant="ghost" size="icon" label="New run" onClick={() => openDialog('launch')}>
             <Plus />
           </Button>

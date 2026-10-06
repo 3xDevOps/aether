@@ -391,8 +391,9 @@ A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
 `ui` slice counts the holders in `headerPrimaries`, and while the count is
 above zero the top bar draws **New run** as an icon button with the same
-accessible name. The holders are a run header with a primary action, a swarm
-with an open question the viewer may answer, Environment's **Open** or **Save
+accessible name. A run page always gets the icon, with or without a primary
+action. The holders are a run header with a primary action, a swarm with an
+open question the viewer may answer, Environment's **Open** or **Save
 environment**, onboarding, Files with a file open and the Changes view's
 **Publish…**. The board, lists and settings keep the filled **New run**.
 
