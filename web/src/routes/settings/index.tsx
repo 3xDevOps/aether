@@ -5,6 +5,7 @@ import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { linkTarget, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -31,6 +32,8 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  const singleKeys = useStore((s) => s.singleKeyShortcuts)
+  const setSingleKeys = useStore((s) => s.setSingleKeyShortcuts)
   const machineSettings = caps.hasLocal('daemon.status') || caps.hasLocal('sync.status')
 
   return (
@@ -57,6 +60,21 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
                   <SelectItem value="dark">Dark</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex max-w-md items-start gap-2">
+              <Checkbox
+                id="settings-single-keys"
+                checked={singleKeys}
+                onCheckedChange={(checked) => setSingleKeys(checked === true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="settings-single-keys">Single-key shortcuts</Label>
+                <p className="text-[13px] leading-5 text-muted-foreground">
+                  Letter and symbol keys such as <kbd>n</kbd>, <kbd>?</kbd> and <kbd>g</kbd> then <kbd>b</kbd>.
+                  Turn off if speech input or a stray key triggers them.
+                </p>
+              </div>
             </div>
           </section>
           {machineSettings ? (

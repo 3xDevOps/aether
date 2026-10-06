@@ -1,10 +1,10 @@
 // The keyboard shortcut reference. Like the palette it has no home of its
 // own, so it rides the status bar slot: a small "?" trigger there, and the
-// reference itself is a dialog portalled to the document. Shift+/ opens it
+// reference itself is a dialog portalled to the document. `?` opens it
 // from anywhere, unless a field has focus or a dialog is already up.
 
 import { CircleHelp } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { registerSlot } from '@/components/slots'
 import {
   Dialog,
@@ -14,103 +14,67 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tooltip } from '@/components/ui/heroui'
-import { canLaunch } from '@/lib/commands'
-import { keyboardBusy } from '@/lib/keys'
-import { shortcutLabel } from '@/lib/platform'
+import type { KeyScope } from '@/lib/key-scope'
+import {
+  formatKeys,
+  isSingleKey,
+  keybindings,
+  listed,
+  shortcutLabel,
+  useKeybindings,
+} from '@/lib/keybindings'
 import { cn, focusRing } from '@/lib/utils'
-import { useCapability, useSelfRole } from '@/store/hooks'
+import { useStore } from '@/store'
 
-/**
- * The keys the shell itself listens for, as the reader has to press them.
- * `nav-shortcuts.ts` implements every row below the shell's own key set; a key
- * added there earns a row here.
- */
-function shellKeys(launchable: boolean): [string, string][] {
-  return [
-    [shortcutLabel('K'), 'Open the command palette'],
-    [shortcutLabel('Shift+P'), 'Open the command palette'],
-    [shortcutLabel('B'), 'Toggle the workspace sidebar'],
-    [shortcutLabel('Shift+M'), 'Toggle Run Room (from the terminal or room composer)'],
-    ['Shift+/', 'Open this reference'],
-    ...(launchable ? ([['n', 'Launch a run']] as [string, string][]) : []),
-    ['g then b', 'Go to the board'],
-    ['g then l', 'Go to all runs'],
-    ['Esc', 'Leave a run for the board'],
-  ]
+const scopeNames: Record<KeyScope, string> = {
+  global: 'Everywhere',
+  run: 'In a run',
+  request: 'On a request card',
+  composer: 'In the composer',
 }
 
-// The verb table below is static prose, not a registry crawl: the verbs live
-// in lib/commands.ts and this table is maintained alongside it. A new group
-// of commands earns a row here.
-function commandGroups(): { name: string; entries: [string, string][] }[] {
-  return [
-    {
-      name: 'Steer the focused run',
-      entries: [
-        ['Pause / Resume', 'Suspend or continue the run the centre view shows'],
-        [
-          'Send a message to the agent',
-          'Send text into the run without attaching to it',
-        ],
-        ['Close as merged / abandoned', 'Finish the run and record how it ended'],
-        ['Kill run', 'Stop the run immediately'],
-        ['Release resources', 'Free a finished run’s retained container without hiding its history'],
-        ['Delete run', 'Remove the run, checkout and transcript'],
-        ['Protect / Unprotect', 'Shield the run from the idle reaper'],
-        ['Relaunch run', 'Start a finished run over from its task'],
-        ['Pull branch', 'Fetch the run branch into the local workspace'],
-        ['Hand off', 'Reassign the run to another member'],
-      ],
-    },
-    {
-      name: 'Go to',
-      entries: [
-        [
-          'Approvals, Activity, Members, Manage workspaces, Templates, Agents, Files',
-          'Surfaces, when the gateway serves their methods',
-        ],
-        ['Onboarding', 'Local gateway setup, when a link is configured'],
-        ['Settings', 'Choose appearance; machine settings require local capabilities'],
-      ],
-    },
-    {
-      name: 'Board',
-      entries: [
-        ['Open the board / all runs', 'Jump between the board and the flat list'],
-        ['Launch a run / from a template', 'Start new work'],
-        ['Mark all runs seen', 'Clear the attention markers'],
-        ['Archive closed runs', 'Hide finished runs and schedule their deletion'],
-        ['Release finished resources', 'Free retained containers without archiving runs'],
-      ],
-    },
-    {
-      name: 'When a tab strip or a resize handle has focus',
-      entries: [
-        [
-          'Left / Right, Home / End',
-          'Move along a run or dock tab strip; Enter or Space opens the focused tab',
-        ],
-        [
-          'Arrow keys',
-          'Resize the sidebar or a dock 16px a press; Home and End are its limits, Enter collapses it',
-        ],
-      ],
-    },
-    {
-      name: 'Terminal (in the terminal that has focus)',
-      entries: [
-        ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
-        ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
-        ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
-        [
-          'Zoom',
-          `${shortcutLabel('=')} and ${shortcutLabel('-')} resize every terminal; ` +
-            `${shortcutLabel('0')} restores the default`,
-        ],
-      ],
-    },
-  ]
+/** The keybinding table, grouped by scope, minus what does nothing here. */
+function bindingGroups(singleKeys: boolean): { name: string; entries: [string, string][] }[] {
+  return (Object.keys(scopeNames) as KeyScope[])
+    .map((scope) => ({
+      name: scopeNames[scope],
+      entries: keybindings
+        .filter((binding) => binding.scope === scope && listed(binding))
+        .filter((binding) => singleKeys || !isSingleKey(binding))
+        .map((binding): [string, string] => [shortcutLabel(binding.id), binding.label]),
+    }))
+    .filter((group) => group.entries.length > 0)
 }
+
+// Keys the focused control owns itself, outside the table.
+const localGroups: { name: string; entries: [string, string][] }[] = [
+  {
+    name: 'When a tab strip or a resize handle has focus',
+    entries: [
+      [
+        'Left / Right, Home / End',
+        'Move along a run or dock tab strip; Enter or Space opens the focused tab',
+      ],
+      [
+        'Arrow keys',
+        'Resize the sidebar or a dock 16px a press; Home and End are its limits, Enter collapses it',
+      ],
+    ],
+  },
+  {
+    name: 'Terminal (in the terminal that has focus)',
+    entries: [
+      ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
+      ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
+      ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
+      [
+        'Zoom',
+        `${formatKeys('$mod+=')} and ${formatKeys('$mod+-')} resize every terminal; ` +
+          `${formatKeys('$mod+0')} restores the default`,
+      ],
+    ],
+  },
+]
 
 function ShortcutKeys({ value }: { value: string }) {
   const parts = value.split(/\+|\s+then\s+/)
@@ -172,20 +136,8 @@ function ShortcutGroup({
 
 export function ShortcutsButton() {
   const [open, setOpen] = useState(false)
-  // The same gate the handler answers to, so the reference never offers a key
-  // that would do nothing.
-  const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.defaultPrevented || keyboardBusy(e)) return
-      e.preventDefault()
-      setOpen(true)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  const singleKeys = useStore((s) => s.singleKeyShortcuts)
+  useKeybindings('global', { shortcuts: () => setOpen(true) })
 
   return (
     <>
@@ -214,7 +166,8 @@ export function ShortcutsButton() {
           <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
             <DialogTitle>Keyboard shortcuts</DialogTitle>
             <DialogDescription>
-              Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys.
+              Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys. Every command is in the command palette ({shortcutLabel('palette')}).
+              {!singleKeys && ' Single-key shortcuts are off in Settings > Appearance.'}
             </DialogDescription>
           </DialogHeader>
           <div
@@ -224,20 +177,7 @@ export function ShortcutsButton() {
               'focus-visible:-outline-offset-2 min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
             )}
           >
-            <section aria-labelledby="shortcut-shell" className="space-y-1">
-              <h3
-                id="shortcut-shell"
-                className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"
-              >
-                Shell
-              </h3>
-              <div role="list" className="space-y-px">
-                {shellKeys(launchable).map(([key, what]) => (
-                  <ShortcutRow key={key} value={key} description={what} />
-                ))}
-              </div>
-            </section>
-            {commandGroups().map((group) => (
+            {[...bindingGroups(singleKeys), ...localGroups].map((group) => (
               <ShortcutGroup key={group.name} {...group} />
             ))}
           </div>

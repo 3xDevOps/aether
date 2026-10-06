@@ -76,7 +76,8 @@ beforeEach(() => {
 })
 
 describe('Run Room', () => {
-  it.each(['ctrlKey', 'metaKey'] as const)('toggles with %s+Shift+M without terminal input and preserves draft and focus', (modifier) => {
+  // jsdom reports no Apple platform, so $mod is Ctrl here.
+  it.each(['ctrlKey'] as const)('toggles with %s+Shift+M without terminal input and preserves draft and focus', (modifier) => {
     const terminalInput = vi.fn()
     render(
       <>

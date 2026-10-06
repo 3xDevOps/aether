@@ -31,7 +31,8 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed, useDrag } from '@/lib/hooks'
-import { inModal, keyboardBusy, splitterTarget } from '@/lib/keys'
+import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
+import { splitterTarget } from '@/lib/keys'
 import { runLabel } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
@@ -122,24 +123,12 @@ export function Sidebar() {
     takeToggle.current = !mobile
     toggle()
   }, [mobile, toggle])
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (
-        !(e.metaKey || e.ctrlKey) ||
-        e.altKey ||
-        e.shiftKey ||
-        e.key.toLowerCase() !== 'b' ||
-        e.defaultPrevented ||
-        keyboardBusy(e) ||
-        inModal(e.target)
-      )
-        return
+  useKeybindings('global', {
+    sidebar: (e) => {
       e.preventDefault()
       toggleAndFollow()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [toggleAndFollow])
+    },
+  })
 
   // Every navigation out of the drawer is a navigation into the view the
   // drawer covers, so the route itself closes it: a run row and a rail link
@@ -266,8 +255,7 @@ export function Sidebar() {
               }}
               // A dialog stands the shell's global keys down inside itself,
               // and Mod+B is the pair of the key that opened this one, so the
-              // drawer answers it here. Preventing the default is what stops
-              // the window listener above from toggling it straight back.
+              // drawer answers it here.
               onKeyDown={(event) => {
                 if (
                   !(event.metaKey || event.ctrlKey) ||
@@ -356,6 +344,7 @@ function WorkspaceSwitcher({
         variant="ghost"
         size="icon"
         aria-label="Collapse sidebar"
+        title={`Collapse sidebar · ${shortcutLabel('sidebar')}`}
         onClick={onCollapse}
         className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm coarse:size-11 coarse:min-h-11 coarse:min-w-11"
       >
@@ -682,7 +671,7 @@ export function ActivityRail({
               </button>
             )}
           />
-          <Tooltip.Content>Expand sidebar</Tooltip.Content>
+          <Tooltip.Content>Expand sidebar · {shortcutLabel('sidebar')}</Tooltip.Content>
         </Tooltip>
       )}
       <div className="min-h-0 flex-1">

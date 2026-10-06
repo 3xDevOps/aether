@@ -8,7 +8,7 @@ import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { inModal } from '@/lib/keys'
-import { shortcutLabel } from '@/lib/platform'
+import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { ControlButton } from '@/routes/terminal/control-button'
@@ -164,12 +164,11 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     }
   }, [open, evidenceAnswer])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'm' || !event.shiftKey || !(event.ctrlKey || event.metaKey) || event.altKey) return
+  useKeybindings('run', {
+    'run-room': (event) => {
       const ownDialog = isPhone && event.target instanceof Element &&
         event.target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')?.id === roomID
-      if (event.defaultPrevented || event.isComposing || (inModal(event.target) && !ownDialog)) return
+      if (event.defaultPrevented || (inModal(event.target) && !ownDialog)) return
       const state = useStore.getState()
       if (state.paletteOpen || state.paletteDialog) return
       // Claim the chord before xterm's target handler can turn it into bytes.
@@ -182,10 +181,8 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
         focusComposer.current = true
         setOpen(true)
       }
-    }
-    window.addEventListener('keydown', onKey, { capture: true })
-    return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [open, closeRoom, isPhone, roomID])
+    },
+  })
 
   const load = async () => {
     const current = scope.current
@@ -490,7 +487,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               </span>
             </button>
           )} />
-          <Tooltip.Content placement="left">Toggle Run Room · {shortcutLabel('Shift+M')}</Tooltip.Content>
+          <Tooltip.Content placement="left">Toggle Run Room · {shortcutLabel('run-room')}</Tooltip.Content>
         </Tooltip>
       )}
       <RoomPortal>
@@ -522,7 +519,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               Run Room
             </RoomTitle>
             <div className="flex items-center gap-2">
-              <kbd className="text-[11px] text-muted-foreground">{shortcutLabel('Shift+M')}</kbd>
+              <kbd className="text-[11px] text-muted-foreground">{shortcutLabel('run-room')}</kbd>
               <Button type="button" size="icon" variant="ghost" aria-label="Close Run Room" onClick={closeRoom}><X className="size-4" aria-hidden /></Button>
             </div>
           </header>

@@ -11,14 +11,11 @@ import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
 import { Tooltip } from '@/components/ui/heroui'
 import { useCommandRunner, type Command } from '@/lib/commands'
+import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { inModal } from '@/lib/keys'
-import { shortcutLabel } from '@/lib/platform'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
-
-const shortcut = 'k'
-const alternateShortcut = 'p'
 
 /** The compact no-drag title-bar entry point for the command center. */
 export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean } = {}) {
@@ -48,12 +45,14 @@ export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean
               Search runs and commands <span className="text-muted-foreground/80">· {context}</span>
             </span>
             <span className="hidden shrink-0 font-mono text-[11px] sm:inline">
-              {shortcutLabel('K')}
+              {shortcutLabel('palette')}
             </span>
           </button>
         )}
       />
-      <Tooltip.Content>Search runs and commands · {context}</Tooltip.Content>
+      <Tooltip.Content>
+        Search runs and commands · {context} · {shortcutLabel('palette')}
+      </Tooltip.Content>
     </Tooltip>
   )
 }
@@ -88,35 +87,23 @@ export function CommandPalette() {
     setConfirmation((current) => current?.identityKey === identityKey ? current : null)
   }, [identityKey])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (
-        !(
-          e.key.toLowerCase() === shortcut ||
-          (e.key.toLowerCase() === alternateShortcut && e.shiftKey)
-        ) ||
-        !(e.metaKey || e.ctrlKey)
-      )
-        return
-      // The app owns this chord whether or not it acts on it: left to the
-      // browser, it opens the address bar over whatever is on screen.
-      e.preventDefault()
-      // A form is a modal step out of the palette; do not stack one on top.
-      // The palette itself is the exception, because this is also what
-      // closes it. A terminal is not a modal, so its hidden textarea can
-      // invoke the palette and receive focus back when it is dismissed.
-      const s = useStore.getState()
-      if (s.paletteDialog || templates || confirmation || pendingConfirmation.current) return
-      if (!s.paletteOpen && inModal(e.target)) return
-      // Capture the chord before xterm's target handler and keep it from
-      // becoming terminal input. Guarded modal events deliberately continue
-      // through their normal target path.
-      e.stopPropagation()
-      toggle()
-    }
-    window.addEventListener('keydown', onKey, { capture: true })
-    return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [toggle, templates, confirmation])
+  const onShortcut = (e: KeyboardEvent) => {
+    // The app owns this chord whether or not it acts on it: left to the
+    // browser, it opens the address bar over whatever is on screen.
+    e.preventDefault()
+    // A form is a modal step out of the palette; do not stack one on top.
+    // The palette itself is the exception, because this is also what
+    // closes it. A terminal is not a modal, so its hidden textarea can
+    // invoke the palette and receive focus back when it is dismissed.
+    const s = useStore.getState()
+    if (s.paletteDialog || templates || confirmation || pendingConfirmation.current) return
+    if (!s.paletteOpen && inModal(e.target)) return
+    // Keep the chord from becoming terminal input. Guarded modal events
+    // deliberately continue through their normal target path.
+    e.stopPropagation()
+    toggle()
+  }
+  useKeybindings('global', { palette: onShortcut, 'palette-alt': onShortcut })
 
   return (
     <>

@@ -1254,38 +1254,61 @@ it on the input and tracking the highlighted row with `aria-activedescendant`,
 so a background is all it has, and all it needs. It is the one row the focus
 sweep is told to skip.
 
-**The shell's own keys**, listed in the shortcuts dialog behind the `?`
-trigger in the status bar. `⌘K` lives with the palette in
-`components/palette/index.tsx`, `Shift+/` with the dialog in
-`components/shortcuts/index.tsx`, and the rest in
-`components/shell/nav-shortcuts.ts`:
+**One keybinding table.** `src/lib/keybindings.ts` lists every shortcut as
+`{ id, keys, scope, label, when? }`, with `keys` in
+[tinykeys](https://github.com/jamiebuilds/tinykeys) syntax (`$mod` is Cmd on
+Apple platforms and Ctrl elsewhere; a space separates the two presses of a
+sequence). The table drives the handlers, the tooltips (`shortcutLabel(id)`)
+and the shortcuts dialog behind the `?` trigger in the status bar, which
+groups it by scope and adds the keys a focused tab strip, splitter or terminal
+owns itself. `keybindings.test.ts` fails when two bindings in overlapping
+scopes share keys, or one begins the other's sequence.
 
-| Key | What it does |
-| --- | --- |
-| `⌘K` / `Ctrl+K` | Open the command palette |
-| `⌘Shift+P` / `Ctrl+Shift+P` | Open the command palette |
-| `n` | Launch a run |
-| `g` then `b` | Go to the board |
-| `g` then `l` | Go to all runs |
-| `Esc` | Leave a run for the board |
+| Key | Scope | What it does |
+| --- | --- | --- |
+| `⌘K` / `Ctrl+K` | global | Open the command palette |
+| `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
+| `⌘B` / `Ctrl+B` | global | Toggle the workspace sidebar |
+| `?` | global | Open the shortcuts dialog |
+| `n` | global | Launch a run |
+| `g` then `b`, `l`, `s`, `a`, `f`, `g`, `,` | global | Go to the board, all runs, missions, activity, files, agents, settings |
+| `⌘Shift+M` / `Ctrl+Shift+M` | run | Toggle Run Room |
+| `Esc` | run | Leave a run for the board |
 
-`n` is offered, on both surfaces, only to a member who may launch. The
-single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
-stands them down whenever something else has the keyboard: a text field or a
+A component answers its bindings with `useKeybindings(scope, handlers)`, which
+pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
+The scopes are `global`, `run`, `request` and `composer`; when a key matches
+in two live scopes, the innermost wins. A binding without a handler does
+nothing and is left out of the dialog: `n` is offered only to a member who
+may launch, and a `g` destination only when the gateway serves it. A run's
+keys are listed even from the board, where no run scope is on screen.
+
+Two window listeners serve every scope. Chords (a modifier beyond Shift) are
+matched while the event is capturing, so a terminal's own handler never turns
+them into input. Single keys are matched while it bubbles, after Radix and any
+component that acts on the key first have had their chance to mark it handled.
+
+The single keys stand down whenever something else has the keyboard:
+`keyboardBusy` and `inModal` in `src/lib/keys.ts` cover a text field or a
 select, a live terminal or its focused history surface, an open menu or list
 box, or an open dialog. A stray `n` typed at an agent has to reach the agent;
 in history it does nothing. In a menu it is that menu's typeahead, and on a
 select it jumps to the option that starts with it. The guard finds a select
-by its `combobox` role, since the control is a button.
+by its `combobox` role, since the control is a button. **Settings >
+Appearance > Single-key shortcuts** (on by default, persisted with the other
+view preferences) turns off every character key in the table: `n`, `?` and
+the `g` sequences. Escape and the chords stay live.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 
-The modified palette shortcuts are the exception, and have to be: they cannot
-be mistaken for typing, and with the terminal holding the focus and swallowing
-Tab they are the way out of a run. They stand down for a modal rather than for
-anything that has the keyboard, through `inModal` and the store flag that names
-the form the shell is hosting. They take the key from the browser either way,
-so a stand-down cannot land the reader in the address bar.
+A chord's own handler or its `when` decides where it stands down. The palette
+chords cannot be mistaken for typing, and with the terminal holding the focus
+and swallowing Tab they are the way out of a run. They stand down for a modal
+rather than for anything that has the keyboard, through `inModal` and the
+store flag that names the form the shell is hosting. They take the key from
+the browser either way, so a stand-down cannot land the reader in the address
+bar. `Mod+B` stands down like a single key, so a terminal keeps Ctrl+B for
+tmux.
 
 That guard reads the event target rather than the document. Radix dismisses an
 overlay from a capturing document listener without stopping the event, and
@@ -1315,9 +1338,9 @@ untouched.
 
 The status bar's details popup is the other overlay outside Radix, and it
 dismisses itself, so it has to do by hand what Radix does for a dialog: its
-Escape listener captures, and marks the key handled. The shell's own Escape
-is a window listener registered when the workbench mounted, long before the
-popup opened, so in the bubble phase it would run first and leave the run.
+Escape listener captures, and marks the key handled. The shell's single-key
+listener was registered when the workbench mounted, long before the popup
+opened, so with both bubbling it would run first and leave the run.
 Capturing is what makes Escape dismiss the topmost thing and only that; an
 open dialog still wins, through the same `inModal` target guard.
 
@@ -1327,12 +1350,11 @@ action bar, its overflow trigger, the terminal toolbar and the diff snapshot
 list all keep their tab stops while their verbs are unavailable, and each
 guards its own handler rather than relying on the browser.
 
-**The modifier is named after the reader's keyboard.** The palette shortcuts
-and terminal zoom keys accept Ctrl and Meta alike, because one keyboard sends
-one and the other sends the other; only the printed label has to pick a side,
-and `shortcutLabel` in `src/lib/platform.ts` picks it from the platform. The
-palette badges read `⌘K` and `⌘Shift+P` on macOS, or `Ctrl+K` and
-`Ctrl+Shift+P` elsewhere. Terminal copy, paste and find are Ctrl on every
+**The modifier is named after the reader's keyboard.** `$mod` is Cmd on Apple
+platforms and Ctrl elsewhere, read from `navigator.platform` as tinykeys does,
+and `formatKeys` in `src/lib/keybindings.ts` prints the same side: the palette
+badge reads `⌘K` on macOS and `Ctrl+K` elsewhere. Terminal zoom belongs to
+xterm, not the table, and accepts Ctrl and Meta alike. Terminal copy, paste and find are Ctrl on every
 platform, because that is what xterm binds; see [terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run-detail strip (`tabs.tsx`) and both
@@ -2389,6 +2411,8 @@ their selection and any open deleted workspace or run.
 provides explicit **System**, **Light** and **Dark** choices, backed by the
 existing persisted theme preference and live system-scheme effect. The palette
 offers the same choices; the status bar has no theme-cycle control.
+**Single-key shortcuts** turns the character keys of the keybinding table on
+or off (see [Keyboard and focus](#keyboard-and-focus)).
 
 Machine settings keep their exact local capability gates. The machine section
 requires `daemon.status` or `sync.status`; within it, the local link requires
@@ -3001,7 +3025,9 @@ collapsed by default in Status and every Member group expanded.
 with keyboard events: arrow navigation, Enter and Space activation, Delete and
 Backspace close, focus handoff, clamped resizing and collapse. `src/components/shell/nav-shortcuts.test.tsx`
 covers the shell shortcut precedence across fields, dialogs, menus, lists and
-selects. `src/components/ui/fields.test.tsx` checks that a wrapped Label names
+selects, and the Single-key shortcuts setting; `src/lib/keybindings.test.ts`
+fails on two bindings sharing keys in overlapping scopes.
+`src/components/ui/fields.test.tsx` checks that a wrapped Label names
 its actual input and that an Input ref reaches the field DOM node. These are
 behavior assertions against rendered controls; source scans, literal class
 assertions and CSS text checks are not behavior coverage.

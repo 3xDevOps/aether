@@ -153,6 +153,9 @@ export interface UiSlice {
   runDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
+  /** Off makes character shortcuts (`n`, `?`, `g b`) inert, for speech
+   * input that types words the dashboard would read as commands. */
+  singleKeyShortcuts: boolean
   /**
    * Whether the Diff tab wraps long lines, or null while it still follows
    * the pointer. One run-detail route is mounted at a time, so component
@@ -205,6 +208,7 @@ export interface UiSlice {
   setTerminalDockHeight: (height: number) => void
   setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
+  setSingleKeyShortcuts: (on: boolean) => void
   setDiffWrap: (wrap: boolean) => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
@@ -232,6 +236,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   terminalDockHeight: 280,
   runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
+  singleKeyShortcuts: true,
   diffWrap: null,
   onboarded: false,
   onboardingStep: 'Link',
@@ -257,6 +262,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
+  setSingleKeyShortcuts: (singleKeyShortcuts) => set({ singleKeyShortcuts }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarDrawerOpen: (sidebarDrawerOpen) => set({ sidebarDrawerOpen }),

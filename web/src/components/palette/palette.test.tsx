@@ -51,7 +51,7 @@ function open() {
       <PaletteDialogs />
     </>,
   )
-  fireEvent.keyDown(window, { key: 'k', metaKey: true })
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
 }
 
 /** The agent field, once its roster has landed: until then it is disabled and

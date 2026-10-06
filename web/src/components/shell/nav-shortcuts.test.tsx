@@ -48,6 +48,31 @@ describe('navigation shortcuts', () => {
     expect(useStore.getState().route.name).toBe('board')
   })
 
+  it('reaches every rail destination the gateway serves on its g sequence', () => {
+    render(<AppShell />)
+
+    for (const [key, route] of [['a', 'timeline'], ['g', 'agents'], [',', 'settings'], ['s', 'missions']]) {
+      press('g')
+      press(key!)
+      expect(useStore.getState().route.name).toBe(route)
+    }
+  })
+
+  it('leaves character keys inert while single-key shortcuts are off, but not Escape', () => {
+    useStore.setState({ singleKeyShortcuts: false, route: { name: 'events', params: { runId: 'run_1' } } })
+    onTestFinished(() => { useStore.setState({ singleKeyShortcuts: true }) })
+    render(<AppShell />)
+
+    press('n')
+    press('g')
+    press('l')
+    expect(useStore.getState().paletteDialog).toBe(null)
+    expect(useStore.getState().route.name).toBe('events')
+
+    press('Escape')
+    expect(useStore.getState().route.name).toBe('board')
+  })
+
   it('ignores the second key without the g prefix', () => {
     render(<AppShell />)
 

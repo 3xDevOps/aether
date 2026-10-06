@@ -3,6 +3,7 @@ import { RunActions } from '@/components/run-actions'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { StateIndicator } from '@/components/state-dot'
 import { deletesInLabel, timeAgo } from '@/lib/format'
+import { useKeybindings } from '@/lib/keybindings'
 import { runLabel, runState, stateLabel, type PresentationState } from '@/lib/status'
 import { focusRing } from '@/lib/utils'
 import { MemberAvatar } from '@/routes/board/member-avatar'
@@ -49,6 +50,8 @@ export function RunHeader({
   active: string
 }) {
   const owner = useStore((s) => s.members[run.member_id])
+  const navigate = useStore((s) => s.navigate)
+  useKeybindings('run', { 'leave-run': () => navigate('board') })
   const account = useStore((s) =>
     run.account_member_id ? s.members[run.account_member_id] : undefined,
   )

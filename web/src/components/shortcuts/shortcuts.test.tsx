@@ -41,6 +41,19 @@ describe('shortcut reference', () => {
     expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
   })
 
+  // Only the reference is mounted here, so of the global keys only its own
+  // answers; the run's scope is not on screen and its keys are all listed.
+  it('lists the keys that answer here and a run\'s keys, by scope', async () => {
+    render(<Slot name="statusbar" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+
+    expect(await screen.findByRole('heading', { name: 'Everywhere' })).toBeDefined()
+    expect(screen.getByText('Open this reference')).toBeDefined()
+    expect(screen.queryByLabelText('g then b')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'In a run' })).toBeDefined()
+    expect(screen.getByText('Leave a run for the board')).toBeDefined()
+  })
+
   it('ignores a "?" typed into a field', () => {
     render(
       <>

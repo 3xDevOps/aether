@@ -129,6 +129,19 @@ describe('settings view', () => {
     }
   })
 
+  it('turns single-key shortcuts off and keeps the choice across a reload', () => {
+    seed()
+    onTestFinished(() => { useStore.setState({ singleKeyShortcuts: true }) })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+
+    const toggle = screen.getByRole('checkbox', { name: 'Single-key shortcuts' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
+
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(createRootStore().getState().singleKeyShortcuts).toBe(false)
+  })
+
   it('installs the daemon and shows the unit path and enable note', async () => {
     const client = fakeApi()
     seed()
