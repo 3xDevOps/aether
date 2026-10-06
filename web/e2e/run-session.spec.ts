@@ -1,6 +1,6 @@
 // An Enhanced run's Session view against a real server: the acpmock agent
 // runs as the run's ACP adapter, the dashboard streams /ws/acp, answers a
-// permission natively, sends a message and interrupts a turn.
+// permission natively, sends a message, queues one behind a turn and interrupts it.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -58,7 +58,19 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await box.press('ControlOrMeta+Enter')
   const interrupt = page.getByRole('button', { name: 'Interrupt the agent' })
   await expect(interrupt).toBeVisible()
+  await box.fill('after the wait')
+  await box.press('ControlOrMeta+Shift+Enter')
+  const queued = log.locator('[data-slot="message-row"]', { hasText: 'after the wait' })
+  await expect(queued).toContainText('Queued')
   await interrupt.click()
   await expect(log.getByText(/^Interrupted/)).toBeVisible()
+  await expect(queued).not.toContainText('Queued')
+  await expect.poll(async () => {
+    const { messages } = await alice.api.rpc<{ messages: { body: string; state: string; agent_delivery?: string }[] }>(
+      'run.room.list', { workspace_id: workspaces[0].id, run_id: run.id },
+    )
+    const sent = messages.find((m) => m.body === 'after the wait')
+    return sent && `${sent.state}/${sent.agent_delivery}`
+  }, { message: 'the queued message is recorded as delivered' }).toBe('sent/delivered')
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 })
