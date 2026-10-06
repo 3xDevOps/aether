@@ -1,17 +1,13 @@
-// The update prompts, above everything the shell renders: the CLI on this
-// machine is behind (cli-update-banner.tsx), the desktop app around the
-// dashboard is stale, or the server it talks to is behind. The CLI half
-// comes from `update.check` on the local gateway; the server half
-// comes from `server.update_status`, which any member may read and which
-// says whether the server can replace its own binaries. A server that
-// cannot - the documented unprivileged install - still gets the two
-// commands to run on its host rather than a button that could not work.
+// The update prompts: the CLI on this machine is behind
+// (cli-update-banner.tsx), the desktop app around the dashboard is stale,
+// or the server it talks to is behind. The sidebar shows one notice row;
+// its Update opens this dialog with every prompt that applies.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CircleAlert, MonitorCog, ServerCog } from 'lucide-react'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
-import { desktopBridge } from '@/components/shell/title-bar'
+import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -63,13 +59,11 @@ function shellIsStale(cliVersion: string | undefined): boolean {
 }
 
 /**
- * The three banners and the two reads behind them. The CLI and shell
- * prompts need `update.check`, which only the desktop gateway serves - a
- * remote monitor cannot update a binary on your machine - while the server
- * prompt rides `server.update_status` and shows wherever the member is an
- * admin.
+ * The two reads behind the prompts, mounted once for the whole shell. The
+ * CLI and shell prompts need `update.check`, which only the desktop gateway
+ * serves, while the server prompt rides `server.update_status`.
  */
-export function UpdateBanners({ client = api }: { client?: Api } = {}) {
+export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const caps = useCapability()
   const serves = caps.hasLocal('update.check')
   const readsServerUpdate = caps.hasMethod('server.update_status')
@@ -168,21 +162,59 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
     setServerUpdateFailed,
   ])
 
+  const open = useStore((s) => s.updatesOpen)
+  const setOpen = useStore((s) => s.setUpdatesOpen)
+  const anything = useUpdateNotice() !== null
   return (
-    <>
-      {/* Independent of the release check: the shell goes stale the moment
-          the CLI it was built by is replaced, which is the flow this
-          notice exists for and the one where no update is available any
-          more. */}
-      {serves && <ShellBanner />}
-      {serves && update && (
-        <CliBanner update={update} client={client} recheck={recheck} />
-      )}
-      {/* Not gated on `update.check`: the server answers for itself, so an
-          admin on any gateway can act on it. */}
-      <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
-    </>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Updates</DialogTitle>
+          {!anything && <DialogDescription>Nothing to update.</DialogDescription>}
+        </DialogHeader>
+        <div className="min-w-0">
+          {serves && <ShellBanner />}
+          {serves && update && (
+            <CliBanner update={update} client={client} recheck={recheck} />
+          )}
+          <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
+}
+
+/**
+ * The sidebar's one-line summary of what the dialog holds, or null when
+ * nothing applies. A dismissed offer stays quiet; a server update already
+ * moving is always named, because it is about to restart the server.
+ */
+export function useUpdateNotice(): { text: string; action: boolean } | null {
+  const caps = useCapability()
+  const isAdmin = useIsAdmin()
+  const update = useStore((s) => s.update)
+  const status = useStore((s) => s.serverUpdate)
+  const progress = useStore((s) => s.serverUpdateProgress)
+  const dismissed = useStore((s) => s.dismissedUpdates)
+  const cliVersion = useStore((s) => s.capabilities?.version)
+  const serves = caps.hasLocal('update.check')
+  const latest = update?.cli.latest ?? ''
+  if (serves && update?.cli.update_available && latest && dismissed.cli !== latest) {
+    return { text: `Aether ${bareVersion(latest)} is available`, action: true }
+  }
+  const flow = serverFlow(status, progress)
+  const serverLatest = status?.latest || update?.cli.latest || ''
+  const behind = status ? status.update_available : (update?.server_behind ?? false)
+  if (flow.name === 'scheduled' || flow.name === 'applying' || flow.name === 'restarting') {
+    return { text: 'Server update in progress, terminals reconnect briefly', action: isAdmin }
+  }
+  if (isAdmin && behind && serverLatest && (flow.name === 'failed' || dismissed.server !== serverLatest)) {
+    return { text: `Server ${bareVersion(serverLatest)} is available`, action: true }
+  }
+  if (serves && cliVersion && shellIsStale(cliVersion) && dismissed.shell !== cliVersion) {
+    return { text: 'The desktop app is out of date', action: true }
+  }
+  return null
 }
 
 /**

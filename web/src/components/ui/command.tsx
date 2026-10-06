@@ -62,7 +62,7 @@ function CommandDialog({
         }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          'top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--title-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
+          'top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -87,7 +87,7 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-[var(--title-bar-height)] items-center gap-2 border-b px-2"
+      className="flex h-[var(--top-bar-height)] items-center gap-2 border-b px-2"
     >
       <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
@@ -111,7 +111,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        'max-h-[min(520px,calc(100dvh_-_2_*_var(--title-bar-height)_-_8px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
+        'max-h-[min(520px,calc(100dvh_-_2_*_var(--top-bar-height)_-_8px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
         className,
       )}
       {...props}

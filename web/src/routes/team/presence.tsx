@@ -2,45 +2,10 @@ import { Badge } from '@/components/ui/badge'
 import type { CardSlotProps } from '@/components/slots'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
-import { onlineMembers, watchersOf } from '@/store/presence'
+import { watchersOf } from '@/store/presence'
 
 /** How many avatars a row shows before it collapses into a count. */
 const shown = 4
-
-export function PresenceStatus() {
-  const presence = useStore((s) => s.presence)
-  const members = useStore((s) => s.members)
-  const online = onlineMembers(presence)
-  if (online.length === 0) return null
-
-  const names = online.map((id) => members[id]?.display_name ?? id)
-  return (
-    <span
-      className="flex h-[22px] min-h-[22px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 text-xs"
-      title={`Online: ${names.join(', ')}`}
-      aria-label={`${online.length} online`}
-    >
-      <span className="flex items-center -space-x-1">
-        {online.slice(0, shown).map((id) => (
-          <MemberAvatar
-            key={id}
-            member={members[id]}
-            fallback={id}
-            className="size-4 bg-background text-[9px]"
-          />
-        ))}
-      </span>
-      <Badge tone="done">
-        {online.length} online
-      </Badge>
-      {online.length > shown && (
-        <Badge>
-          +{online.length - shown}
-        </Badge>
-      )}
-    </span>
-  )
-}
 
 /** The watcher avatars on a run card: who holds an attach on this run. */
 export function Watchers({ run }: CardSlotProps) {

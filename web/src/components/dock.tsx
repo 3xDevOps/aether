@@ -12,7 +12,7 @@ export interface DockTab {
   permanent?: boolean
 }
 
-export type DockContainment = 'viewport' | 'parent'
+export type DockContainment = 'viewport' | 'parent' | 'fill'
 
 export interface DockProps {
   tabs: DockTab[]
@@ -25,7 +25,7 @@ export interface DockProps {
   onHeightChange: (height: number) => void
   collapsed: boolean
   onToggleCollapse: () => void
-  /** 'parent' bounds the dock by its immediate parent; 'viewport' by the window. */
+  /** 'parent' bounds the dock by its immediate parent, 'viewport' by the window; 'fill' fills the parent with no resize or collapse. */
   containment?: DockContainment
   actions?: React.ReactNode
   persistentActions?: React.ReactNode
@@ -62,6 +62,7 @@ export function Dock({
   persistentActions,
   children,
 }: DockProps) {
+  const fill = containment === 'fill'
   const atLimit = tabs.length >= maxTabs
   const id = useId()
   const tabID = (tab: string) => `${id}-tab-${tab}`
@@ -231,11 +232,14 @@ export function Dock({
     <section
       ref={dockRef}
       id={dockID}
-      className="relative flex min-h-0 shrink-0 flex-col border-t border-border bg-sidebar"
-      style={collapsed ? undefined : { height: currentHeight }}
+      className={cn(
+        'relative flex min-h-0 flex-col bg-sidebar',
+        fill ? 'h-full flex-1' : 'shrink-0 border-t border-border',
+      )}
+      style={collapsed || fill ? undefined : { height: currentHeight }}
       aria-label="Terminal dock"
     >
-      {!collapsed && !coarse && (
+      {!collapsed && !coarse && !fill && (
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -374,7 +378,7 @@ export function Dock({
             {actions}
           </div>
         )}
-        {!collapsed && coarse && (
+        {!collapsed && coarse && !fill && (
           <Button
             className="max-[640px]:order-2"
             type="button"
@@ -391,7 +395,7 @@ export function Dock({
             {full ? <ChevronsDown /> : <ChevronsUp />}
           </Button>
         )}
-        <Button
+        {!fill && <Button
           ref={collapse}
           className="max-[640px]:order-2"
           type="button"
@@ -402,7 +406,7 @@ export function Dock({
           onClick={onToggleCollapse}
         >
           {collapsed ? <ChevronUp /> : <ChevronDown />}
-        </Button>
+        </Button>}
       </div>
       {!collapsed && (
         <div

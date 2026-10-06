@@ -45,7 +45,6 @@ function AgentsView() {
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title="Agents"
-        subtitle="the agents this server can launch"
         actions={
           caps.hasMethod('config.roots') && caps.hasMethod('config.import') && (
             <Button size="sm" variant="secondary" onClick={() => navigate('configuration')}>
@@ -54,7 +53,7 @@ function AgentsView() {
           )
         }
       />
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
           {caps.hasMethod('member.git') && <section className="space-y-2 border-b pb-3">
             <Button size="sm" variant="secondary" onClick={() => setIdentityOpen(!identityOpen)}>Git commit identity</Button>
@@ -155,7 +154,7 @@ function AgentsView() {
           )}
           {caps.hasMethod('github.connect') && caps.hasMethod('github.probe') && (githubOpen ? <GitHubConnect client={api} caps={caps} onConnected={setGithub} onClose={() => setGithubOpen(false)} /> : <GitHubSection connection={github} onOpen={() => setGithubOpen(true)} />)}
         </div>
-      </main>
+      </div>
     </div>
   )
 }

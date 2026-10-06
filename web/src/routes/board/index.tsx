@@ -33,7 +33,6 @@ export function Board() {
   const { columns, archivedCards } = data
   const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const boardView = useStore((s) => s.boardView)
   const setBoardView = useStore((s) => s.setBoardView)
   const { boardRef, changeView } = useBoardTransition(
@@ -116,9 +115,6 @@ export function Board() {
               {total} {total === 1 ? 'run' : 'runs'}
             </Badge>
           </>
-        }
-        subtitle={
-          workspace ? `${workspace.name} · base ${workspace.base_branch}` : 'All workspaces'
         }
       />
 

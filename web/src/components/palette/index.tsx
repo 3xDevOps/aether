@@ -1,47 +1,13 @@
-import { SearchIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'
 import { TemplateDialog } from '@/components/palette/template-dialog'
 import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
-import { Tooltip } from '@/components/ui/tooltip'
 import { useCommandRunner, type Command } from '@/lib/commands'
-import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
+import { useKeybindings } from '@/lib/keybindings'
 import { inModal } from '@/lib/keys'
-import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
-
-export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean } = {}) {
-  const toggle = useStore((s) => s.togglePalette)
-  const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const workspaces = useStore((s) => s.workspaces)
-  const current = activeWorkspace ? workspaces[activeWorkspace]?.name : undefined
-  const context = current ?? (activeWorkspace ? 'Workspace' : 'All workspaces')
-
-  return (
-    <Tooltip content={<>Search runs and commands · {context} · {shortcutLabel('palette')}</>}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => toggle(true)}
-        aria-label="Search runs and commands"
-        className={cn(
-          focusRing,
-          'flex h-[26px] min-w-0 w-full max-w-[600px] items-center justify-start gap-2 rounded-sm border border-border/70 coarse:h-10 bg-background/50 px-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-toolbar-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60',
-        )}
-      >
-        <SearchIcon aria-hidden className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left">
-          Search runs and commands <span className="text-muted-foreground/80">· {context}</span>
-        </span>
-        <span className="hidden shrink-0 font-mono text-[11px] sm:inline">
-          {shortcutLabel('palette')}
-        </span>
-      </button>
-    </Tooltip>
-  )
-}
 
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)

@@ -22,6 +22,8 @@ import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import {
   createUiSlice,
+  maxSidebarWidth,
+  minSidebarWidth,
   normalizeBoardMapViewports,
   onboardingSteps,
   type OnboardingStep,
@@ -147,6 +149,7 @@ export function createRootStore() {
           return {
             ...current,
             ...stored,
+            sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),

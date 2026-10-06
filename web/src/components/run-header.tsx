@@ -1,7 +1,11 @@
 import { Archive, GitCommitHorizontal, Shield } from 'lucide-react'
+import { PanelLeft } from '@/components/icons'
 import { RunActions } from '@/components/run-actions'
+import { ConnectionLine } from '@/components/shell/connection'
+import { Button } from '@/components/ui/button'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { StateIndicator } from '@/components/state-dot'
+import { useIsMobile } from '@/lib/breakpoints'
 import { deletesInLabel, timeAgo } from '@/lib/format'
 import { useKeybindings } from '@/lib/keybindings'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
@@ -44,6 +48,9 @@ export function RunHeader({
     run.account_member_id ? s.members[run.account_member_id] : undefined,
   )
   const { state, reason } = useRunPresentation(run)
+  const mobile = useIsMobile()
+  const collapsed = useStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
   const label = runLabel(run)
   const task = run.task.trim()
   const detail = subtitle?.trim()
@@ -54,10 +61,17 @@ export function RunHeader({
   return (
     <div className="@container/run-header min-w-0 shrink-0">
       <header className="min-w-0 border-b border-border/80">
+        {!mobile && <ConnectionLine className="px-3 pt-1 sm:px-4" />}
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-3 py-1 sm:px-4">
           <div className="col-span-2 row-start-1 flex min-w-0 items-start gap-2">
+            {!mobile && collapsed && (
+              <Button variant="ghost" size="icon-sm" label="Open sidebar" onClick={toggleSidebar}>
+                <PanelLeft />
+              </Button>
+            )}
             <h1
-              className="line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground"
+              tabIndex={-1}
+              className="line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground outline-none"
               title={label}
             >
               {label}

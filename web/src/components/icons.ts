@@ -43,6 +43,16 @@ import {
   Wrench as LucideWrench,
   X as LucideX,
   Zap as LucideZap,
+  LayoutGrid as LucideLayoutGrid,
+  Compass as LucideCompass,
+  FolderTree as LucideFolderTree,
+  MonitorSmartphone as LucideMonitorSmartphone,
+  ShieldQuestion as LucideShieldQuestion,
+  SlidersHorizontal as LucideSlidersHorizontal,
+  ChevronsUpDown as LucideChevronsUpDown,
+  User as LucideUser,
+  Minus as LucideMinus,
+  ArrowUpCircle as LucideArrowUpCircle,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -102,3 +112,13 @@ export const Users = icon(LucideUsers)
 export const Wrench = icon(LucideWrench)
 export const X = icon(LucideX)
 export const Zap = icon(LucideZap)
+export const LayoutGrid = icon(LucideLayoutGrid)
+export const Compass = icon(LucideCompass)
+export const FolderTree = icon(LucideFolderTree)
+export const MonitorSmartphone = icon(LucideMonitorSmartphone)
+export const ShieldQuestion = icon(LucideShieldQuestion)
+export const SlidersHorizontal = icon(LucideSlidersHorizontal)
+export const ChevronsUpDown = icon(LucideChevronsUpDown)
+export const User = icon(LucideUser)
+export const Minus = icon(LucideMinus)
+export const ArrowUpCircle = icon(LucideArrowUpCircle)

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
-import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
-import { TitleBar } from '@/components/shell/title-bar'
+import { WindowBar } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
@@ -11,7 +10,7 @@ import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
 const toastOffset = {
-  bottom: 'calc(var(--status-bar-height) + 8px + env(safe-area-inset-bottom))',
+  bottom: 'calc(8px + env(safe-area-inset-bottom))',
   right: 'calc(8px + env(safe-area-inset-right))',
 }
 
@@ -63,11 +62,10 @@ export function App() {
   return (
     <>
       <ThemeEffect />
-      <LaunchSplash />
-      {/* Frameless desktop window: the title bar stays outside the error branch
-          so an offline user can still move or close the window. */}
+      {/* Frameless desktop window: its bar stays outside the error branch so
+          an offline user can still move or close the window. */}
       <div className="flex min-w-0 h-full flex-col">
-        <TitleBar commandPaletteDisabled={blocked} />
+        <WindowBar />
         <div className="min-h-0 min-w-0 flex-1">
           {blocked ? (
             <ConnectionError
@@ -86,8 +84,7 @@ export function App() {
                 expand={false}
                 visibleToasts={4}
                 gap={4}
-                // Sonner uses `mobileOffset` under 600px and its 16px default
-                // would sit inside the status bar on a phone.
+                // Sonner uses `mobileOffset` under 600px and its own default without one.
                 offset={toastOffset}
                 mobileOffset={toastOffset}
               />

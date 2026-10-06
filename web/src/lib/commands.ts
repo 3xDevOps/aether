@@ -468,7 +468,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     },
     {
       id: 'overview',
-      label: 'Open all runs',
+      label: 'Open all workspaces',
       Icon: List,
       perform: (d) => d.navigate('overview'),
     },

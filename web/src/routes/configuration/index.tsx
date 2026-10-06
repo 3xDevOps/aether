@@ -14,8 +14,7 @@ export function ConfigurationRoute({ client = api }: RouteProps & { client?: Api
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
-        title="Configuration"
-        subtitle="your persistent remote home"
+        title="Agent config files"
         actions={
           canImport && (
             <Button size="sm" variant="secondary" onClick={() => navigate('files')}>
@@ -24,7 +23,7 @@ export function ConfigurationRoute({ client = api }: RouteProps & { client?: Api
           )
         }
       />
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
           {canImport ? (
             <>
@@ -42,7 +41,7 @@ export function ConfigurationRoute({ client = api }: RouteProps & { client?: Api
             </p>
           )}
         </div>
-      </main>
+      </div>
     </div>
   )
 }

@@ -1,775 +1,287 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  FolderGit2,
-  House,
-  MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Users,
-} from 'lucide-react'
-import { Dialog as DialogPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { StateDot } from '@/components/state-dot'
-import { RunInputIndicator } from '@/components/run-input-indicator'
+import { useCallback, useEffect, useRef } from 'react'
+import { PanelLeft, Plus, Search } from '@/components/icons'
+import { focusView } from '@/components/shell/center-view'
+import { SidebarFooter, UpdateNotice } from '@/components/shell/sidebar-footer'
+import { needsYouRoute, runRowSelector, SidebarRuns } from '@/components/shell/sidebar-runs'
+import { WorkspaceSwitcher } from '@/components/shell/workspace-switcher'
 import { Button } from '@/components/ui/button'
-import { DialogOverlay, DialogPortal } from '@/components/ui/dialog'
-import {
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuTrigger,
-} from '@/components/ui/menu'
-import { Badge } from '@/components/ui/badge'
-import { Tooltip } from '@/components/ui/tooltip'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
-import { useDelayed, useDrag } from '@/lib/hooks'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { ListRow } from '@/components/ui/list-row'
+import { Separator } from '@/components/ui/separator'
+import { useIsMobile } from '@/lib/breakpoints'
+import { canLaunch } from '@/lib/commands'
+import { useDrag } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
-import { runLabel, type PresentationState } from '@/lib/status'
-import { surfaces, type Surface } from '@/lib/surfaces'
+import { surfaces } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
-import { pendingApprovals } from '@/store/approvals'
-import {
-  useCapability,
-  useNeedsYouCount,
-  useRun,
-  useRunInput,
-  useSidebarGroups,
-} from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
-import type { SidebarGroup } from '@/store/selectors'
+import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
+import { sidebarGroups, stateContextOf } from '@/store/selectors'
 import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
 
-/**
- * The desktop shell cannot open a window narrower than 960px, so this matches
- * at the smallest window there is: a sidebar at its default width plus three
- * board columns does not fit in it, and the rail is what keeps the board
- * readable.
- */
-const narrowQuery = '(max-width: 1000px)'
-const mobileQuery = '(max-width: 640px)'
+function moveRowFocus(step: 1 | -1) {
+  const rows = [...document.querySelectorAll<HTMLElement>(runRowSelector)]
+  if (rows.length === 0) return
+  const index = rows.indexOf(document.activeElement as HTMLElement)
+  const next = index === -1 ? (step === 1 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + step))
+  rows[next]?.focus()
+}
+
+function openNextNeedsYou() {
+  const s = useStore.getState()
+  const ctx = stateContextOf(s, Date.now())
+  const waiting = sidebarGroups({ workspace: s.activeWorkspace, mineOnly: s.mineOnly, ctx })
+    .find((group) => group.key === 'needs-you')
+    ?.runs.flatMap((tree) => [tree, ...tree.children])
+    .filter((row) => row.state === 'needs-you') ?? []
+  if (waiting.length === 0) return
+  const current = waiting.findIndex((row) => isRunRoute(s.route, row.run.id))
+  const next = waiting[(current + 1) % waiting.length]!
+  const route = needsYouRoute(next.run, ctx)
+  s.navigate(route.name, route.params)
+}
 
 export function Sidebar() {
+  const mobile = useIsMobile()
   const collapsed = useStore((s) => s.sidebarCollapsed)
-  const width = useStore((s) => Math.max(minSidebarWidth, s.sidebarWidth))
   const toggleSidebar = useStore((s) => s.toggleSidebar)
-  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   const drawerOpen = useStore((s) => s.sidebarDrawerOpen)
   const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
-  const drawerOpener = useRef<HTMLElement | null>(null)
-  const [autoCollapsed, setAutoCollapsed] = useState(
-    () => window.matchMedia?.(narrowQuery).matches ?? false,
-  )
-  const [mobile, setMobile] = useState(
-    () => window.matchMedia?.(mobileQuery).matches ?? false,
-  )
-  // Shadows sidebarCollapsed while the window is narrow, so the toggle answers
-  // the viewport without writing the preference the member stored.
-  const [expandedNarrow, setExpandedNarrow] = useState(false)
-
-  useEffect(() => {
-    const media = window.matchMedia?.(narrowQuery)
-    if (!media) return
-    const apply = (e: MediaQueryListEvent) => {
-      setAutoCollapsed(e.matches)
-      if (!e.matches) setExpandedNarrow(false)
-    }
-    media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
-  }, [])
-
-  useEffect(() => {
-    const media = window.matchMedia?.(mobileQuery)
-    if (!media) return
-    const apply = (e: MediaQueryListEvent) => {
-      setMobile(e.matches)
-      setExpandedNarrow(false)
-      setDrawerOpen(false)
-    }
-    media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
-  }, [setDrawerOpen])
-
-  useEffect(() => () => setDrawerOpen(false), [setDrawerOpen])
-
-  const rail = !mobile && (autoCollapsed ? !expandedNarrow : collapsed)
-
   const toggle = useCallback(() => {
     if (mobile) setDrawerOpen(!useStore.getState().sidebarDrawerOpen)
-    else if (autoCollapsed) setExpandedNarrow((v) => !v)
     else toggleSidebar()
-  }, [mobile, autoCollapsed, setDrawerOpen, toggleSidebar])
+  }, [mobile, setDrawerOpen, toggleSidebar])
 
-  // Either direction unmounts the control that was pressed, so its opposite
-  // takes the focus. They are different elements, which is why this waits for
-  // the render rather than moving focus first.
-  const toggleControl = useRef<HTMLButtonElement>(null)
-  const takeToggle = useRef(false)
+  // Hiding or showing the sidebar removes the control that did it, so its
+  // counterpart takes the focus that fell to the body.
+  const shown = useRef(collapsed)
   useEffect(() => {
-    if (!takeToggle.current) return
-    takeToggle.current = false
-    toggleControl.current?.focus()
-  }, [rail])
-  const toggleAndFollow = useCallback(() => {
-    takeToggle.current = !mobile
-    toggle()
-  }, [mobile, toggle])
+    if (shown.current === collapsed) return
+    shown.current = collapsed
+    if (document.activeElement && document.activeElement !== document.body) return
+    const target = collapsed
+      ? document.querySelector<HTMLElement>('main [aria-label="Open sidebar"]')
+      : document.getElementById('sidebar-hide')
+    target?.focus()
+  }, [collapsed])
+
   useKeybindings('global', {
-    sidebar: (e) => {
-      e.preventDefault()
-      toggleAndFollow()
+    sidebar: (event) => {
+      event.preventDefault()
+      toggle()
     },
+    'row-next': () => moveRowFocus(1),
+    'row-previous': () => moveRowFocus(-1),
+    'next-needs-you': openNextNeedsYou,
   })
 
-  // Every navigation out of the drawer is a navigation into the view the
-  // drawer covers, so the route itself closes it: a run row and a rail link
-  // both land here without either knowing about the drawer. Only a change of
-  // route may close it, which is why the last one is held rather than
-  // compared by the dependency list - opening the drawer re-runs this effect
-  // and must not close it again.
+  useEffect(() => {
+    if (!mobile) setDrawerOpen(false)
+  }, [mobile, setDrawerOpen])
+
+  // Any navigation lands in the view the drawer covers, so the route closes it.
   const route = useStore((s) => s.route)
   const lastRoute = useRef(route)
+  const closedByRoute = useRef(false)
+  const opener = useRef<HTMLElement | null>(null)
   useEffect(() => {
     if (lastRoute.current === route) return
     lastRoute.current = route
-    if (!drawerOpen) return
+    if (!useStore.getState().sidebarDrawerOpen) return
+    closedByRoute.current = true
     setDrawerOpen(false)
-  }, [drawerOpen, route, setDrawerOpen])
+  }, [route, setDrawerOpen])
 
-  const beginDrag = useDrag()
-
-  const startResize = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault()
-      const startX = e.clientX
-      const startWidth = width
-      const drag = beginDrag()
-      const move = (ev: PointerEvent) =>
-        setSidebarWidth(startWidth + ev.clientX - startX)
-      window.addEventListener('pointermove', move, { signal: drag.signal })
-      for (const end of ['pointerup', 'pointercancel']) {
-        window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
-      }
-    },
-    [beginDrag, setSidebarWidth, width],
-  )
-
-  const resizeKey = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        toggleAndFollow()
-        return
-      }
-      const next = splitterTarget(e.key, {
-        value: width,
-        min: minSidebarWidth,
-        max: maxSidebarWidth,
-        grow: 'ArrowRight',
-        shrink: 'ArrowLeft',
-      })
-      if (next === null) return
-      e.preventDefault()
-      setSidebarWidth(next)
-    },
-    [setSidebarWidth, toggleAndFollow, width],
-  )
-
-  const sidebar = rail ? null : (
-    <aside
-      id="sidebar"
-      style={{
-        width,
-        maxWidth: mobile ? 'calc(100vw - 3rem - env(safe-area-inset-left))' : undefined,
-      }}
-      className="relative flex min-w-0 shrink-0 flex-col border-r border-border bg-sidebar"
-      aria-label="Runs"
-    >
-      <WorkspaceSwitcher onCollapse={toggleAndFollow} controlRef={toggleControl} />
-      <SidebarHeader />
-      <RunTree />
-      {/* The drawer is sized by the viewport, not by a splitter. */}
-      {!mobile && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sidebar"
-          aria-controls="sidebar"
-          aria-valuenow={Math.round(width)}
-          aria-valuemin={minSidebarWidth}
-          aria-valuemax={maxSidebarWidth}
-          tabIndex={0}
-          onPointerDown={startResize}
-          onKeyDown={resizeKey}
-          className={cn(
-            focusRing,
-            // Without `touch-none` the browser claims a touch drag as a pan
-            // and cancels the pointer stream this listens to. The coarse hit
-            // area is 24px centred on the edge, and it needs the z-index to
-            // win the half of itself that overhangs the pane beside it.
-            'absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none hover:bg-toolbar-hover coarse:-right-3 coarse:w-6',
-          )}
-        />
-      )}
-    </aside>
-  )
-
-  const nav = (
-    <ActivityRail
-      sidebarCollapsed={rail}
-      onToggleSidebar={toggleAndFollow}
-      toggleControl={toggleControl}
-    />
-  )
-
-  // The phone rail exists only inside the modal: the center owns the full
-  // available width while it is closed and never reflows behind the scrim.
   if (mobile) {
     return (
-        <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <DialogPortal>
-            <DialogOverlay />
-            <DialogPrimitive.Content
-              id="sidebar-drawer"
-              aria-describedby={undefined}
-              onOpenAutoFocus={() => {
-                drawerOpener.current =
-                  document.activeElement instanceof HTMLElement
-                    ? document.activeElement
-                    : null
-              }}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault()
-                const opener = drawerOpener.current
-                if (opener?.isConnected && opener !== document.body) opener.focus()
-                else document.getElementById('sidebar-drawer-trigger')?.focus()
-              }}
-              // A dialog stands the shell's global keys down inside itself,
-              // and Mod+B is the pair of the key that opened this one, so the
-              // drawer answers it here.
-              onKeyDown={(event) => {
-                if (!isPress(event.nativeEvent, 'sidebar')) return
-                event.preventDefault()
-                toggleAndFollow()
-              }}
-              // viewport-fit=cover puts this under the notch and the home
-              // indicator, so it paints to the edges and insets what it
-              // holds, the way the title bar and status bar do.
-              className="fixed inset-y-0 left-0 z-50 flex max-w-full bg-sidebar pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl outline-none animate-sheet-left motion-reduce:animate-none"
-            >
-              <DialogPrimitive.Title className="sr-only">Runs</DialogPrimitive.Title>
-              {nav}
-              {sidebar}
-            </DialogPrimitive.Content>
-          </DialogPortal>
-        </DialogPrimitive.Root>
+      <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DialogContent
+          id="sidebar-drawer"
+          variant="side"
+          side="left"
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="w-[min(20rem,calc(100vw-3rem))]"
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            if (closedByRoute.current) focusView()
+            else (opener.current?.isConnected ? opener.current : document.getElementById('sidebar-drawer-trigger'))?.focus()
+            closedByRoute.current = false
+          }}
+          // A dialog stands the global keys down inside itself, so the
+          // drawer answers the key that toggles it.
+          onKeyDown={(event) => {
+            if (!isPress(event.nativeEvent, 'sidebar')) return
+            event.preventDefault()
+            setDrawerOpen(false)
+          }}
+        >
+          <DialogTitle className="sr-only">Aether</DialogTitle>
+          <SidebarContent onHide={() => setDrawerOpen(false)} />
+        </DialogContent>
+      </Dialog>
     )
   }
 
+  if (collapsed) return null
+  return <DesktopSidebar onHide={toggle} />
+}
+
+function DesktopSidebar({ onHide }: { onHide: () => void }) {
+  const width = useStore((s) => Math.min(maxSidebarWidth, Math.max(minSidebarWidth, s.sidebarWidth)))
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  const beginDrag = useDrag()
+
+  const startResize = (event: React.PointerEvent) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const drag = beginDrag()
+    const move = (ev: PointerEvent) => setSidebarWidth(width + ev.clientX - startX)
+    window.addEventListener('pointermove', move, { signal: drag.signal })
+    for (const end of ['pointerup', 'pointercancel']) {
+      window.addEventListener(end, () => drag.abort(), { signal: drag.signal })
+    }
+  }
+
+  const resizeKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onHide()
+      return
+    }
+    const next = splitterTarget(event.key, {
+      value: width,
+      min: minSidebarWidth,
+      max: maxSidebarWidth,
+      grow: 'ArrowRight',
+      shrink: 'ArrowLeft',
+    })
+    if (next === null) return
+    event.preventDefault()
+    setSidebarWidth(next)
+  }
+
   return (
-    <div className="relative flex h-full min-h-0 shrink-0">
-      {nav}
-      {sidebar}
+    <div
+      id="sidebar"
+      style={{ width }}
+      className="relative flex h-full shrink-0 flex-col border-r border-seam bg-chrome pl-[env(safe-area-inset-left)]"
+    >
+      <SidebarContent onHide={onHide} />
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-controls="sidebar"
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={minSidebarWidth}
+        aria-valuemax={maxSidebarWidth}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onKeyDown={resizeKey}
+        className={cn(
+          focusRing,
+          // Without `touch-none` the browser claims a touch drag as a pan
+          // and cancels the pointer stream this listens to.
+          'absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none hover:bg-hover-chrome coarse:-right-3 coarse:w-6',
+        )}
+      />
     </div>
   )
 }
 
-
-/**
- * The scoping control, above everything it scopes. A single workspace needs
- * no picker, so it renders as a plain label: the affordance appears only
- * when there is a choice to make.
- */
-function WorkspaceSwitcher({
-  onCollapse,
-  controlRef,
-}: {
-  onCollapse: () => void
-  controlRef: React.RefObject<HTMLButtonElement | null>
-}) {
-  const workspaces = useStore((s) => s.workspaces)
-  const active = useStore((s) => s.activeWorkspace)
-  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
-  const list = Object.values(workspaces)
-  const current = workspaces[active]
-  const navigate = useStore((s) => s.navigate)
-  const caps = useCapability()
+function SidebarContent({ onHide }: { onHide: () => void }) {
+  const mobile = useIsMobile()
+  const cap = useCapability()
+  const admin = useIsAdmin()
+  const role = useSelfRole()
+  const togglePalette = useStore((s) => s.togglePalette)
+  const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
+  const openDialog = useStore((s) => s.openPaletteDialog)
+  const all = surfaces(cap, admin)
+  const nav = all.filter((surface) => surface.place === 'nav')
+  const lower = all.filter((surface) => surface.place === 'admin')
 
   return (
-    <div className="flex h-[var(--title-bar-height)] shrink-0 items-center gap-1 border-b border-border px-2">
-      <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-      {list.length > 1 ? (
-        <Select value={active} onValueChange={setActiveWorkspace}>
-          <SelectTrigger aria-label="Workspace" className="min-w-0 flex-1">
-            <SelectValue placeholder="Choose a workspace" />
-          </SelectTrigger>
-          <SelectContent>
-            {list.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
-          <span className="truncate text-[13px] font-semibold">
-            {current?.name ?? 'No workspace'}
-          </span>
-          {current && (
-            <span className="truncate text-[11px] text-muted-foreground">
-              {current.base_branch}
-            </span>
-          )}
-        </span>
-      )}
-      {caps.hasMethod('workspace.list') && <Button variant="ghost" size="icon" label="Add or manage workspaces" onClick={() => navigate('workspaces')}><Plus className="size-4" /></Button>}
-      <Button
-        ref={controlRef}
-        variant="ghost"
-        size="icon"
-        label="Collapse sidebar"
-        hint={`Collapse sidebar · ${shortcutLabel('sidebar')}`}
-        onClick={onCollapse}
-        className="size-[26px] min-h-[26px] min-w-[26px] rounded-sm coarse:size-11 coarse:min-h-11 coarse:min-w-11"
-      >
-        <PanelLeftClose className="size-4" />
-      </Button>
-    </div>
-  )
-}
-
-function SidebarHeader() {
-  return (
-    <div className="flex min-h-[var(--title-bar-height)] shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-0.5">
-      <span className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-        Runs
-      </span>
-      <NeedsYouBadge />
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        <MineToggle />
+    <nav aria-label="Aether" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-11 shrink-0 items-center gap-1 px-2">
+        <WorkspaceSwitcher />
+        <Button
+          variant="ghost"
+          size="icon"
+          label="Search"
+          hint={`Search · ${shortcutLabel('palette')}`}
+          onClick={() => {
+            setDrawerOpen(false)
+            togglePalette(true)
+          }}
+        >
+          <Search />
+        </Button>
+        <Button
+          id="sidebar-hide"
+          variant="ghost"
+          size="icon"
+          label={mobile ? 'Close sidebar' : 'Hide sidebar'}
+          hint={`${mobile ? 'Close' : 'Hide'} sidebar · ${shortcutLabel('sidebar')}`}
+          onClick={onHide}
+        >
+          <PanelLeft />
+        </Button>
       </div>
-    </div>
-  )
-}
-
-function MineToggle() {
-  const mineOnly = useStore((s) => s.mineOnly)
-  const setMineOnly = useStore((s) => s.setMineOnly)
-  return (
-    <Button
-      hint="Show only your runs under Working and Finished"
-      variant="ghost"
-      size="sm"
-      aria-pressed={mineOnly}
-      onClick={() => setMineOnly(!mineOnly)}
-      className={cn(
-        'h-[26px] rounded-sm border border-border px-2 text-[12px] coarse:h-11',
-        mineOnly ? 'bg-selection font-medium text-selection-foreground' : 'text-muted-foreground',
+      {canLaunch({ cap, role }) && (
+        <div className="shrink-0 px-2 pb-1">
+          <Button
+            hint={`New run · ${shortcutLabel('launch')}`}
+            onClick={() => {
+              setDrawerOpen(false)
+              openDialog('launch')
+            }}
+            className="w-full"
+          >
+            <Plus />
+            New run
+          </Button>
+        </div>
       )}
-    >
-      Mine
-    </Button>
-  )
-}
-
-function NeedsYouBadge() {
-  const count = useNeedsYouCount()
-  if (count === 0) return null
-  return (
-    <Badge
-      tone="needs-you"
-      aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
-      title={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
-      role="img"
-    >
-      {count}
-    </Badge>
-  )
-}
-
-function RunTree() {
-  const groups = useSidebarGroups()
-  const hydrated = useStore((s) => s.hydrated)
-  const error = useStore((s) => s.hydrationError)
-  const dead = useStore((s) => s.streamDead)
-  const [expandedByGroup, setExpandedByGroup] = useState<Record<string, boolean>>({})
-  const unreachable = error !== null
-  const loading = useDelayed(!hydrated && !unreachable && groups.length === 0)
-
-  const toggleGroup = useCallback((key: string, initiallyExpanded: boolean) => {
-    setExpandedByGroup((current) => ({
-      ...current,
-      [key]: !(current[key] ?? initiallyExpanded),
-    }))
-  }, [])
-
-  if (groups.length === 0) {
-    return (
-      <div className="flex-1 space-y-2 overflow-y-auto p-2">
-        {unreachable ? (
-          <p className="px-1 py-2 text-xs text-muted-foreground">
-            {dead ? error : 'Cannot reach the server. Retrying.'}
-          </p>
-        ) : loading ? (
+      <SidebarRuns />
+      <div className="shrink-0 border-t border-seam px-2 py-2">
+        <NavRows surfaces={nav} />
+        {lower.length > 0 && (
           <>
-            <Skeleton className="h-6 w-full" />
-            <Skeleton className="h-6 w-4/5" />
-            <Skeleton className="h-6 w-3/5" />
+            <Separator className="my-1" />
+            <NavRows surfaces={lower} />
           </>
-        ) : (
-          hydrated && (
-            <p className="px-1 py-2 text-xs text-muted-foreground">
-              No runs yet.
-            </p>
-          )
         )}
       </div>
-    )
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto py-1">
-      {groups.map((group) => {
-        const initiallyExpanded = group.key !== 'finished'
-        const expanded = expandedByGroup[group.key] ?? initiallyExpanded
-        return (
-          <Group
-            key={group.key}
-            group={group}
-            expanded={expanded}
-            onToggle={() => toggleGroup(group.key, initiallyExpanded)}
-            regionId={`sidebar-run-group-${group.key}`}
-          />
-        )
-      })}
-    </div>
-  )
-}
-
-function approvalsLabel(label: string, waiting: number, error: string | null): string {
-  if (error) return `${label}, ${error}`
-  return waiting > 0 ? `${label}, ${waiting} waiting on a decision` : label
-}
-
-/** Work and workspace navigation stay visible or explicitly reachable in More. */
-export function ActivityRail({
-  sidebarCollapsed,
-  onToggleSidebar,
-  toggleControl,
-}: {
-  sidebarCollapsed: boolean
-  onToggleSidebar: () => void
-  toggleControl: React.RefObject<HTMLButtonElement | null>
-}) {
-  const cap = useCapability()
-  const navigate = useStore((s) => s.navigate)
-  const route = useStore((s) => s.route)
-  const inbox = useStore((s) => s.inbox)
-  const inboxError = useStore((s) => s.inboxError)
-  const waiting = pendingApprovals(inbox).length
-  const surfaceLinks = surfaces(cap)
-  const primaryLinks: Surface[] = [
-    { name: 'board', label: 'Board', Icon: House, group: 'Work' },
-    ...surfaceLinks.filter(({ group }) => group === 'Work' || group === 'Workspace'),
-  ]
-  const adminLinks = surfaceLinks.filter(({ group }) => group === 'Admin')
-  const settingsLinks = surfaceLinks.filter(({ group }) => group === 'Settings')
-  const railRef = useRef<HTMLElement>(null)
-  const [height, setHeight] = useState<number | null>(null)
-
-  useLayoutEffect(() => {
-    const element = railRef.current
-    if (!element) return
-    const measure = () => {
-      const next = element.getBoundingClientRect().height
-      if (next > 0) setHeight(next)
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-
-  // Rows are 48px and each nonempty group has a 20px heading. Measure the
-  // containing rail, not the viewport: update banners also consume shell space.
-  const available = height === null
-    ? Infinity
-    : height - (sidebarCollapsed ? 48 : 0) - 48 - (adminLinks.length ? 48 : 0) - 1
-  const groupHeight = (count: number) => {
-    let groups = 0
-    for (let i = 0; i < count; i++) {
-      if (i === 0 || primaryLinks[i].group !== primaryLinks[i - 1].group) groups++
-    }
-    return count * 48 + groups * 20
-  }
-  let visibleCount = primaryLinks.length
-  if (groupHeight(visibleCount) > available) {
-    while (visibleCount > 0 && groupHeight(visibleCount) + 48 > available) visibleCount--
-  }
-  const visibleLinks = primaryLinks.slice(0, visibleCount)
-  const overflowLinks = primaryLinks.slice(visibleCount)
-  const railButton = cn(
-    focusRing,
-    'focus-visible:-outline-offset-2 relative flex h-12 min-h-12 w-12 shrink-0 items-center justify-center border-l-2 border-transparent text-muted-foreground transition-colors hover:bg-toolbar-hover hover:text-foreground',
-  )
-  const labelFor = ({ name, label }: Surface) =>
-    name === 'approvals' ? approvalsLabel(label, waiting, inboxError) : label
-  const approvalBadge = (waiting > 0 || inboxError !== null) && (
-    <span aria-hidden className="absolute bottom-1 right-1 flex">
-      <Badge tone="needs-you" className="h-4 min-w-4 justify-center px-0.5 text-ui-xs">
-        {inboxError ? '?' : waiting}
-      </Badge>
-    </span>
-  )
-
-  const renderLink = (surface: Surface) => {
-    const { name, label, Icon } = surface
-    return (
-      <Tooltip key={name} content={labelFor(surface)}>
-        <button
-          type="button"
-          aria-label={labelFor(surface)}
-          aria-current={route.name === name ? 'page' : undefined}
-          onClick={() => navigate(name)}
-          className={cn(railButton, route.name === name && 'border-primary text-foreground')}
-        >
-          <Icon className="size-6" aria-hidden />
-          <span className="sr-only">{label}</span>
-          {name === 'approvals' && approvalBadge}
-        </button>
-      </Tooltip>
-    )
-  }
-
-  const renderMenu = (label: string, links: Surface[], Icon: Surface['Icon']) => {
-    const current = links.find(({ name }) => name === route.name)
-    const hasApprovals = links.some(({ name }) => name === 'approvals')
-    const accessibleLabel = [
-      label,
-      current?.label,
-      hasApprovals && (waiting > 0 || inboxError) ? approvalsLabel('Approvals', waiting, inboxError) : null,
-    ].filter(Boolean).join(', ')
-    return (
-      <Menu>
-        <MenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={accessibleLabel}
-            className={cn(railButton, 'flex-col gap-0.5', current && 'border-primary text-foreground')}
-          >
-            <Icon className="size-5" aria-hidden />
-            <span className="text-[10px] leading-3">{label}</span>
-            {hasApprovals && approvalBadge}
-          </button>
-        </MenuTrigger>
-        <MenuContent side="right" align="start" aria-label={label}>
-          {(['Work', 'Workspace', 'Admin'] as const).map((group) => {
-            const entries = links.filter((surface) => surface.group === group)
-            if (!entries.length) return null
-            return (
-              <DropdownMenuPrimitive.Group key={group} aria-label={group}>
-                <div aria-hidden className="px-2 py-1 text-[11px] text-muted-foreground">{group}</div>
-                {entries.map((surface) => (
-                  <MenuItem
-                    key={surface.name}
-                    aria-label={labelFor(surface)}
-                    aria-current={route.name === surface.name ? 'page' : undefined}
-                    onSelect={() => navigate(surface.name)}
-                  >
-                    <surface.Icon aria-hidden />
-                    {surface.label}
-                    {surface.name === 'approvals' && (waiting > 0 || inboxError !== null) && (
-                      <span aria-hidden className="ml-auto text-state-needs-attention">{inboxError ? '?' : waiting}</span>
-                    )}
-                  </MenuItem>
-                ))}
-              </DropdownMenuPrimitive.Group>
-            )
-          })}
-        </MenuContent>
-      </Menu>
-    )
-  }
-
-  return (
-    <nav ref={railRef} aria-label="Surfaces" className="flex h-full w-12 shrink-0 flex-col border-r border-border bg-sidebar">
-      {sidebarCollapsed && (
-        <Tooltip content={<>Expand sidebar · {shortcutLabel('sidebar')}</>}>
-          <button
-            ref={toggleControl}
-            type="button"
-            aria-label="Expand sidebar"
-            onClick={onToggleSidebar}
-            className={railButton}
-          >
-            <PanelLeftOpen className="size-5" aria-hidden />
-          </button>
-        </Tooltip>
-      )}
-      <div className="min-h-0 flex-1">
-        {(['Work', 'Workspace'] as const).map((group) => {
-          const links = visibleLinks.filter((surface) => surface.group === group)
-          if (!links.length) return null
-          return (
-            <div key={group} role="group" aria-label={group}>
-              <div aria-hidden className="flex h-5 items-center justify-center border-t border-border text-[8px] leading-none text-muted-foreground">
-                {group}
-              </div>
-              {links.map(renderLink)}
-            </div>
-          )
-        })}
-        {overflowLinks.length > 0 && renderMenu('More', overflowLinks, MoreHorizontal)}
-      </div>
-      <div className="flex shrink-0 flex-col border-t border-border">
-        {adminLinks.length > 0 && renderMenu('Admin', adminLinks, Users)}
-        {settingsLinks.map(renderLink)}
-      </div>
+      <UpdateNotice />
+      <SidebarFooter />
     </nav>
   )
 }
 
-function Group({
-  group,
-  expanded,
-  onToggle,
-  regionId,
-}: {
-  group: SidebarGroup
-  expanded: boolean
-  onToggle: () => void
-  regionId: string
-}) {
-  return (
-    <section className="mb-1">
-      <h2>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={regionId}
-          onClick={onToggle}
-          className={cn(
-            focusRing,
-            'flex w-full items-center gap-1 px-3 py-0.5 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase hover:bg-toolbar-hover',
-          )}
-        >
-          {expanded ? (
-            <ChevronDown className="size-3.5 shrink-0" />
-          ) : (
-            <ChevronRight className="size-3.5 shrink-0" />
-          )}
-          <span className="truncate">{group.label}</span>
-          <span className="ml-auto shrink-0 normal-case">
-            {group.count}
-          </span>
-        </button>
-      </h2>
-      <ul id={regionId} hidden={!expanded}>
-        {expanded && group.runs.map((run) => (
-          <li key={run.run.id}>
-            <RunRow runID={run.run.id} state={run.state} reason={run.reason} workspaceName={run.workspaceName} />
-            {run.children.length > 0 && (
-              <ul aria-label={`Workers of ${runLabel(run.run)}`}>
-                {run.children.map((child, index) => (
-                  <li key={child.run.id}>
-                    <RunRow runID={child.run.id} state={child.state} reason={child.reason} workspaceName={child.workspaceName} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-/** Subscribes to its own run, so an event about another run leaves it alone. */
-const RunRow = memo(function RunRow({ runID, ...shown }: {
-  runID: string
-  state: PresentationState
-  reason: string
-  workspaceName?: string
-  branch?: 'middle' | 'last'
-}) {
-  const run = useRun(runID)
-  return run ? <RunRowButton run={run} {...shown} /> : null
-})
-
-function RunRowButton({ run, state, reason, workspaceName, branch }: {
-  run: RunRecord
-  state: PresentationState
-  reason: string
-  workspaceName?: string
-  branch?: 'middle' | 'last'
-}) {
+function NavRows({ surfaces: list }: { surfaces: ReturnType<typeof surfaces> }) {
+  const current = useStore((s) => s.route.name)
   const navigate = useStore((s) => s.navigate)
-  const selected = useStore((s) => isRunRoute(s.route, run.id))
-  const ownerColor = useStore((s) => s.members[run.member_id]?.color)
-  const label = runLabel(run)
-  const input = useRunInput(run)
-  const role = run.mission_role === 'integrator'
-    ? 'Integrator'
-    : run.mission_role === 'worker' ? 'Worker' : undefined
-  const description = [workspaceName, label, role, run.harness, reason, input.count > 0 && `Requests: ${input.summary}`].filter(Boolean).join(' · ')
   return (
-    <button
-      type="button"
-      aria-current={selected ? 'page' : undefined}
-      aria-label={description}
-      title={description}
-      onClick={() => navigate('terminal', { runId: run.id })}
-      style={{ borderLeftColor: ownerColor }}
-      className={cn(
-        focusRing,
-        // Full bleed inside a scroll container: an outline drawn outside the
-        // row would be clipped at both edges.
-        'focus-visible:-outline-offset-2',
-        'relative flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 text-left text-[13px] hover:bg-toolbar-hover coarse:h-11 coarse:min-h-11',
-        branch ? 'pl-11' : 'pl-5',
-        selected
-          ? 'bg-selection font-medium text-selection-foreground'
-          : state === 'needs-you'
-            ? 'font-medium'
-            : 'text-muted-foreground',
-      )}
-    >
-      {branch && (
-        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-6 w-3 text-muted-foreground/40">
-          <span className={cn('absolute top-0 left-0 border-l border-current', branch === 'last' ? 'h-1/2' : 'h-full')} />
-          <span className="absolute top-1/2 left-0 w-3 border-t border-current" />
-        </span>
-      )}
-      <StateDot
-        state={state}
-        className={cn(state === 'working' && 'state-pulse')}
-      />
-      {workspaceName && <span className="shrink-0 text-muted-foreground">{workspaceName} ·</span>}
-      <span className="min-w-0 truncate">{label}</span>
-      <RunInputIndicator run={run} compact />
-      {role && !branch && (
-        <span className={cn(
-          'shrink-0 rounded-sm border px-1 text-[10px] font-medium leading-4',
-          selected ? 'border-current/40' : 'border-primary/40 bg-primary/10 text-foreground',
-        )}>
-          {role}
-        </span>
-      )}
-      <span className={cn('ml-auto shrink-0', !selected && 'text-muted-foreground')}>
-        {run.harness}
-      </span>
-    </button>
+    <ul>
+      {list.map(({ name, label, Icon }) => (
+        <li key={name}>
+          <ListRow
+            selected={current === name}
+            aria-current={current === name ? 'page' : undefined}
+            leading={<Icon />}
+            onClick={() => navigate(name)}
+          >
+            {label}
+          </ListRow>
+        </li>
+      ))}
+    </ul>
   )
 }

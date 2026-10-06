@@ -56,7 +56,6 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   // Templates are per workspace on the wire, so there is no "all" reading;
   // before hydration names one, the sole workspace is the only safe answer.
   const workspaceID = active || soleWorkspace(workspaces)
-  const workspace = workspaces[workspaceID]
 
   const refetch = useCallback(async () => {
     if (!workspaceID) return
@@ -104,7 +103,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title="Templates" subtitle={workspace?.name} />
+      <ViewHeader title="Templates" />
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-4 py-2 sm:px-6">
         <div className="min-w-0">
           <p className="text-[13px] font-medium">Saved launch tasks</p>
@@ -119,7 +118,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
         )}
       </div>
 
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6">
           {templates.length > 0 ? (
             <ul className="border-y" aria-label="Saved templates">
@@ -193,7 +192,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
             </div>
           )}
         </div>
-      </main>
+      </div>
 
       {(creating || editing) && (
         <TemplateForm

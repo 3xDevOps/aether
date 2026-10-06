@@ -72,7 +72,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Onboarding" subtitle={current} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <main className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
@@ -204,7 +204,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               />
             )}
           </div>
-        </main>
+        </div>
       </div>
     </div>
 

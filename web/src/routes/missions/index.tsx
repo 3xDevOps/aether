@@ -232,8 +232,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
-        title="Missions"
-        subtitle="Bounded objectives coordinated by one integrator"
+        title="Swarms"
         actions={
           canLaunch ? (
             <Button size="sm" onClick={() => useStore.getState().openPaletteDialog('launch')}>
@@ -408,9 +407,8 @@ function MissionDetailView({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
-        title={mission ? objectiveTitle(mission.objective) : 'Mission'}
-        titleTooltip={mission?.objective}
-        subtitle={mission ? `${missionStatus(mission, detail?.tasks ?? [], detail?.submissions ?? [])} · ${mission.id}` : undefined}
+        title={mission ? objectiveTitle(mission.objective) : 'Swarm'}
+        subtitle={mission ? `${missionStatus(mission, detail?.tasks ?? [], detail?.submissions ?? [])}` : undefined}
         actions={
           <>
             <Button size="sm" variant="secondary" onClick={onBack}>

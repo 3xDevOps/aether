@@ -85,7 +85,6 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
     <div className="flex h-full min-h-0 flex-col">
       <ViewHeader
         title="Devices"
-        subtitle={isAdmin ? "every member's devices" : 'your devices'}
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">

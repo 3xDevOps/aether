@@ -10,6 +10,7 @@ const goTo = {
   'go-activity': 'timeline',
   'go-files': 'files',
   'go-agents': 'agents',
+  'go-environment': 'environment',
   'go-settings': 'settings',
 } as const
 

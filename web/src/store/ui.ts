@@ -102,8 +102,9 @@ export function onboardingStepIndex(step: OnboardingStep): number {
   return Math.max(0, onboardingSteps.indexOf(step))
 }
 
-export const minSidebarWidth = 320
-export const maxSidebarWidth = 520
+export const minSidebarWidth = 220
+export const maxSidebarWidth = 400
+export const defaultSidebarWidth = 260
 
 export interface ConfigImportCandidate {
   path: string
@@ -162,6 +163,8 @@ export interface UiSlice {
   route: Route
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
+  updatesOpen: boolean
+  shortcutsOpen: boolean
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
@@ -185,11 +188,13 @@ export interface UiSlice {
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
+  setUpdatesOpen: (open: boolean) => void
+  setShortcutsOpen: (open: boolean) => void
 }
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   theme: 'system',
-  sidebarWidth: minSidebarWidth,
+  sidebarWidth: defaultSidebarWidth,
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
   terminalDockHeight: 280,
@@ -213,6 +218,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   lastHarnessByAccount: {},
   route: { name: 'board', params: {} },
   dismissedUpdates: { cli: '', server: '', shell: '' },
+  updatesOpen: false,
+  shortcutsOpen: false,
   setTheme: (theme) => set({ theme }),
   setSidebarWidth: (width) =>
     set({
@@ -281,4 +288,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     set((s) => ({ dismissedUpdates: { ...s.dismissedUpdates, [kind]: version } })),
   clearDismissedUpdates: () =>
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
+  setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
 })

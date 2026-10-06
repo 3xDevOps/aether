@@ -75,7 +75,8 @@ export function TerminalDock({
 }: TerminalDockProps) {
 
   const rpc = client
-  const dock = useStore((s) => s.envTerminal ?? initialEnvTerminal)
+  const stored = useStore((s) => s.envTerminal ?? initialEnvTerminal)
+  const dock = containment === 'fill' ? { ...stored, collapsed: false } : stored
   const terminalDockHeight = useStore((s) => s.terminalDockHeight)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
   const paletteDialog = useStore((s) => s.paletteDialog)

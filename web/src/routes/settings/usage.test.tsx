@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { UsageReader } from '@/components/shell/usage'
+import { UsageReader } from '@/routes/settings/usage'
 import { ApiError, type Api } from '@/lib/api'
 import type { UsageResult } from '@/lib/types'
 import { alice, bob, serverInfo } from '@/test/fixtures'

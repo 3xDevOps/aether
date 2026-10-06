@@ -173,7 +173,7 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   if (!canBrowseWorkspaces && !canBrowseConfig) return null
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title="Files" subtitle="Edit workspace files and your agent configuration" />
+      <ViewHeader title="Files" />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <aside
           className={cn(

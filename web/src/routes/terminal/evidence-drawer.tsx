@@ -292,7 +292,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
             variant="bottom"
             showCloseButton={false}
             onCloseAutoFocus={onCloseAutoFocus}
-            className="top-[calc(var(--title-bar-height)+var(--safe-top))] z-[80] flex min-h-0 max-h-none flex-col gap-0 overflow-hidden rounded-none bg-background p-0"
+            className="top-[calc(var(--top-bar-height)+var(--safe-top))] z-[80] flex min-h-0 max-h-none flex-col gap-0 overflow-hidden rounded-none bg-background p-0"
           >
             {content}
           </DialogContent>

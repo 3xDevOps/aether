@@ -21,6 +21,7 @@ import type {
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SyncPanel } from '@/routes/run-sync'
+import { ServerSection } from '@/routes/settings/server'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { Theme } from '@/store/ui'
@@ -37,7 +38,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <main className="mx-auto grid min-w-0 w-full max-w-5xl gap-0 px-4 sm:px-6">
+        <div className="mx-auto grid min-w-0 w-full max-w-5xl gap-0 px-4 sm:px-6">
           <section
             aria-labelledby="appearance-heading"
             className="min-w-0 space-y-3 border-b border-border/70 py-4"
@@ -74,6 +75,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
               </div>
             </div>
           </section>
+          <ServerSection />
           {machineSettings ? (
             <>
               {caps.hasLocal('link.status') && <LinkCard client={client} />}
@@ -90,7 +92,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
               </p>
             </div>
           )}
-        </main>
+        </div>
       </div>
     </div>
   )

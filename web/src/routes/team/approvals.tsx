@@ -2,11 +2,9 @@ import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Tooltip } from '@/components/ui/tooltip'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
@@ -14,45 +12,6 @@ import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { pendingApprovals, sortByCreated } from '@/store/approvals'
-import { useCapability } from '@/store/hooks'
-/** The visible queue signal while the navigation rail lives in the phone drawer. */
-export function ApprovalStatus() {
-  const inbox = useStore((s) => s.inbox)
-  const error = useStore((s) => s.inboxError)
-  const navigate = useStore((s) => s.navigate)
-  const phone = useMediaQuery('(max-width: 640px)')
-  const cap = useCapability()
-  const waiting = pendingApprovals(inbox).length
-  if (!phone || !cap.hasMethod('approval.list') || (waiting === 0 && !error)) return null
-
-  return (
-    <Tooltip content={error ?? 'Open Approvals'}>
-      <button
-        type="button"
-        onClick={() => {
-          navigate('approvals')
-        }}
-        className={cn(
-          focusRing,
-          'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
-        )}
-      >
-        <ShieldQuestion
-          className={cn(
-            'size-3.5',
-            error ? 'text-state-failed' : 'text-state-needs-attention',
-          )}
-          aria-hidden
-        />
-        <Badge tone={error ? 'failed' : 'needs-you'} className="max-w-44">
-          <span className="truncate">
-            {error ? 'queue unreadable' : `${waiting} waiting`}
-          </span>
-        </Badge>
-      </button>
-    </Tooltip>
-  )
-}
 
 /** Decisions go through `approval.decide`, so the server attributes them and owns the refusal for a member without steer. */
 export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {

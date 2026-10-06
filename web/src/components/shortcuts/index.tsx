@@ -1,6 +1,3 @@
-import { CircleHelp } from 'lucide-react'
-import { useState } from 'react'
-import { registerSlot } from '@/components/slots'
 import {
   Dialog,
   DialogContent,
@@ -8,7 +5,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Tooltip } from '@/components/ui/tooltip'
 import type { KeyScope } from '@/lib/key-scope'
 import {
   formatKeys,
@@ -129,51 +125,34 @@ function ShortcutGroup({
   )
 }
 
-export function ShortcutsButton() {
-  const [open, setOpen] = useState(false)
+export function ShortcutsDialog() {
+  const open = useStore((s) => s.shortcutsOpen)
+  const setOpen = useStore((s) => s.setShortcutsOpen)
   const singleKeys = useStore((s) => s.singleKeyShortcuts)
   useKeybindings('global', { shortcuts: () => setOpen(true) })
 
   return (
-    <>
-      <Tooltip content="Keyboard shortcuts">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Keyboard shortcuts"
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(680px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0">
+        <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogDescription>
+            Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys. Every command is in the command palette ({shortcutLabel('palette')}).
+            {!singleKeys && ' Single-key shortcuts are off in Settings > Appearance.'}
+          </DialogDescription>
+        </DialogHeader>
+        <div
+          tabIndex={0}
           className={cn(
             focusRing,
-            'flex h-[var(--status-bar-height)] min-h-[var(--status-bar-height)] items-center gap-1 rounded-sm px-1.5 text-[12px] transition-colors hover:bg-toolbar-hover hover:text-foreground coarse:px-3',
+            'focus-visible:-outline-offset-2 min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
           )}
         >
-          <CircleHelp className="size-3.5" aria-hidden />
-          <span className="hidden lg:inline">Shortcuts</span>
-        </button>
-      </Tooltip>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(680px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0">
-          <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
-            <DialogTitle>Keyboard shortcuts</DialogTitle>
-            <DialogDescription>
-              Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys. Every command is in the command palette ({shortcutLabel('palette')}).
-              {!singleKeys && ' Single-key shortcuts are off in Settings > Appearance.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div
-            tabIndex={0}
-            className={cn(
-              focusRing,
-              'focus-visible:-outline-offset-2 min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
-            )}
-          >
-            {[...bindingGroups(singleKeys), ...localGroups].map((group) => (
-              <ShortcutGroup key={group.name} {...group} />
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+          {[...bindingGroups(singleKeys), ...localGroups].map((group) => (
+            <ShortcutGroup key={group.name} {...group} />
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
-
-registerSlot('statusbar', 'shortcuts', ShortcutsButton)

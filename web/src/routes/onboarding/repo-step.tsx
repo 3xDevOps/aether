@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { desktopBridge } from '@/components/shell/title-bar'
+import { desktopBridge } from '@/components/shell/window-bar'
 import type { Api } from '@/lib/api'
 import type { LinkStatus, Workspace } from '@/lib/types'
 import { useStore } from '@/store'

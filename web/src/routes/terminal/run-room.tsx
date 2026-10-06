@@ -503,7 +503,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
           id={roomID}
           aria-label="Run Room"
           className={isPhone
-            ? 'fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-50 flex min-h-0 w-full flex-col overflow-y-auto bg-background'
+            ? 'fixed inset-x-0 top-[calc(var(--top-bar-height)+var(--safe-top))] bottom-0 z-50 flex min-h-0 w-full flex-col overflow-y-auto bg-background'
             : 'flex min-h-0 w-[min(420px,40%)] shrink-0 flex-col overflow-y-auto border-l border-border bg-background'}
         >
           <header className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-toolbar px-3 py-1.5">

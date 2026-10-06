@@ -1,12 +1,12 @@
 // Import every route file once, for its registerRoute side effect. New views
 // (the board, terminal, diffs, team surfaces) add one line here.
-import '@/components/shortcuts'
 import '@/routes/agents'
 import '@/routes/board'
 import '@/routes/browser'
 import '@/routes/configuration'
 import '@/routes/devices'
 import '@/routes/diff'
+import '@/routes/environment'
 import '@/routes/files'
 import '@/routes/members'
 import '@/routes/missions'

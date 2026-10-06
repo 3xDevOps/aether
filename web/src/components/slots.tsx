@@ -21,7 +21,6 @@ export interface SlotPropsMap {
   'card:chips': CardSlotProps
   /** The card's bottom row, right of the owner: watcher avatars. */
   'card:footer': CardSlotProps
-  statusbar: Record<never, never>
 }
 
 export type SlotName = keyof SlotPropsMap
@@ -46,7 +45,7 @@ export function registerSlot<N extends SlotName>(
   if (entries.some((e) => e.id === id)) {
     throw new Error(`slot already registered: ${name}/${id}`)
   }
-  entries.push({ id, view: view as ComponentType<AnyProps> })
+  entries.push({ id, view: view as unknown as ComponentType<AnyProps> })
   registry.set(name, entries)
 }
 
