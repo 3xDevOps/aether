@@ -96,7 +96,6 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
           aria-label="Display name"
           className="min-w-0 flex-1"
           value={name}
-          maxLength={64}
           disabled={busy}
           onChange={(e) => setName(e.target.value)}
         />
