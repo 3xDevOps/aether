@@ -35,13 +35,13 @@ export function UpdateNotice() {
   const open = useStore((s) => s.setUpdatesOpen)
   if (!notice) return null
   return (
-    <p role="status" className="px-4 py-1 text-ui-sm text-muted">
-      {notice.text}
+    <p role="status" title={notice.text} className="flex min-w-0 items-baseline gap-1 px-4 py-1 text-ui-sm text-muted">
+      <span className="min-w-0 truncate">{notice.text}</span>
       {notice.action && (
-        <>
-          {' · '}
+        <span className="shrink-0">
+          {'· '}
           <Button variant="link" onClick={() => open(true)}>Update</Button>
-        </>
+        </span>
       )}
     </p>
   )
