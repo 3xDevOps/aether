@@ -54,6 +54,7 @@ export function AgentSetup({
   const [installing, setInstalling] = useState(false)
   const [result, setResult] = useState<AgentInstallResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [checked, setChecked] = useState(false)
   const name = label(agent)
@@ -82,15 +83,16 @@ export function AgentSetup({
 
   const install = async () => {
     setInstalling(true)
-    setError(null)
+    setInstallError(null)
     setResult(null)
     try {
       const answer = await client.agentInstall(agent.name, enhanced)
       setResult(answer)
       setAgent((current) => ({ ...current, installed: answer.installed, enhanced_installed: answer.enhanced_installed }))
-      if (!answer.error) await check()
+      if (answer.error) setInstallError(answer.error)
+      else await check()
     } catch (err) {
-      setError(message(err))
+      setInstallError(message(err))
     } finally {
       setInstalling(false)
     }
@@ -142,9 +144,9 @@ export function AgentSetup({
               : `Install the ${agent.name} executable into ~/.local/bin from your environment terminal below.`}
           </p>
         )}
-        {result?.error && (
+        {installError && (
           <Callout tone="failed" role="alert" title="Install failed">
-            {result.error}
+            {installError}
           </Callout>
         )}
         {result && (

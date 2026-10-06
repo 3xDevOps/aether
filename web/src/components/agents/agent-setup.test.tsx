@@ -158,6 +158,17 @@ describe('agent setup', () => {
     expect(screen.getByRole('button', { name: 'Install Claude Code' })).toBeDefined()
   })
 
+  it('shows an install call that fails outright next to the install button', async () => {
+    const client = fakeApi({ agentInstall: vi.fn(async () => { throw new Error('agent.install: environment is stopping') }) })
+    setUp(claude, client)
+    fireEvent.click(screen.getByRole('button', { name: 'Install Claude Code' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Install failed')
+    expect(alert.textContent).toContain('agent.install: environment is stopping')
+    expect(screen.getByRole('region', { name: 'Install and log in' }).contains(alert)).toBe(true)
+  })
+
   it('says No login found and keeps the check open, never claiming a sign-in', async () => {
     const client = fakeApi({
       agentList: vi.fn(async () => [{ ...claude, installed: true, login_found: false }]),
