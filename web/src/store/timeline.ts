@@ -1,4 +1,4 @@
-import type { Event } from '@/lib/types'
+import type { CoordMessagePayload, Event } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 /** Empty strings mean no filter. */
@@ -114,10 +114,14 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set, get) => ({
 /** Per-run firehoses the server's reader leaves out unless asked for by type. */
 const detailTypes = new Set(['run.diff', 'run.title', 'run.agent'])
 
+function mailTo(event: Event, runID: string): boolean {
+  return event.type === 'coord.message' && (event.payload as CoordMessagePayload | undefined)?.to_run_id === runID
+}
+
 /** The server reader's filter (`internal/timeline`), applied to one event. */
 function selects(f: FeedFilters, event: Event): boolean {
   if (!f.workspaceID || event.workspace_id !== f.workspaceID) return false
-  if (f.runID && event.run_id !== f.runID) return false
+  if (f.runID && event.run_id !== f.runID && !mailTo(event, f.runID)) return false
   if (f.memberID && event.actor_id !== f.memberID) return false
   return f.type ? event.type === f.type : !detailTypes.has(event.type)
 }

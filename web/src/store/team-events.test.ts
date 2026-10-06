@@ -256,4 +256,17 @@ describe('team state from events', () => {
     await applyEvent(store, event(6, 'run.diff', { files: [], tree: 'd', parent_tree: 'c' }), client)
     expect(store.getState().feed.map((e) => e.seq)).toEqual([2, 5])
   })
+
+  it('shows mail addressed to the run a feed is filtered to', () => {
+    const store = seeded()
+    store.getState().setFeedFilters({ workspaceID: workspace.id, runID: 'run_1' })
+    const release = store.getState().holdFeed()
+    const mail = (seq: number, to: string) =>
+      event(seq, 'coord.message', { message_id: `msg_${seq}`, from_run_id: 'run_worker', to_run_id: to, kind: 'message' }, { run_id: 'run_worker' })
+    store.getState().appendLiveEvent(mail(1, 'run_1'))
+    store.getState().appendLiveEvent(mail(2, 'run_other'))
+    store.getState().appendLiveEvent(event(3, 'run.status', { to: 'running' }, { run_id: 'run_worker' }))
+    expect(store.getState().feed.map((e) => e.seq)).toEqual([1])
+    release()
+  })
 })
