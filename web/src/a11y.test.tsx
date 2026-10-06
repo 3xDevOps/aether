@@ -1,11 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 // The direct API, which sets itself up against the real clock: adding fake
 // timers to this file would hang the tests that use it.
 import userEvent from '@testing-library/user-event'
 import { Dock } from '@/components/dock'
 
 import { AppShell } from '@/components/shell/app-shell'
-import { RunTabs } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { hydrate } from '@/store/sync'
 import { fakeApi, run } from '@/test/fixtures'
@@ -35,6 +34,7 @@ beforeEach(async () => {
     paletteDialog: null,
     paletteRunID: null,
     sidebarWidth: 280,
+    runViewMemory: {},
     navigate: realNavigate,
   })
   await hydrate(useStore, fakeApi())
@@ -58,143 +58,62 @@ function spare(): HTMLButtonElement {
   return button
 }
 
-describe('run tab strip', () => {
-  it('moves focus with the arrow keys, wrapping at both ends', () => {
-    const navigate = vi.fn()
-    useStore.setState({ navigate })
-    render(<RunTabs runID={active.id} active="terminal" />)
-    const tabs = screen.getAllByRole('tab')
+describe('run view switch', () => {
+  function openRun() {
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
+    render(<AppShell />)
+    return screen.getByRole('tablist', { name: 'Run views' })
+  }
+
+  it('moves focus with the arrow keys, wrapping at both ends, without switching', async () => {
+    const strip = openRun()
+    const tabs = within(strip).getAllByRole('tab')
     const last = tabs.at(-1)!
+    const terminal = within(strip).getByRole('tab', { name: 'Terminal' })
 
-    tabs[0].focus()
-    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(tabs[1])
+    terminal.focus()
+    await userEvent.keyboard('{End}')
+    await waitFor(() => expect(document.activeElement).toBe(last))
+    await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => expect(document.activeElement).toBe(tabs[0]))
+    await userEvent.keyboard('{ArrowLeft}')
+    await waitFor(() => expect(document.activeElement).toBe(last))
 
-    fireEvent.keyDown(tabs[1], { key: 'End' })
-    expect(document.activeElement).toBe(last)
-
-    fireEvent.keyDown(last, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(tabs[0])
-
-    fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(last)
-
-    fireEvent.keyDown(last, { key: 'Home' })
-    expect(document.activeElement).toBe(tabs[0])
-
-    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' })
-    fireEvent.keyDown(tabs[1], { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(tabs[0])
-
-    // Arrowing past a tab must not open it: each one costs an attach socket
-    // or a patch fetch to mount. A click on the same tab proves the strip was
-    // wired up at all.
-    expect(navigate).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
-    expect(navigate).toHaveBeenCalledWith('events', { runId: active.id })
+    // Arrowing past a view must not open it: Changes and Browser fetch on mount.
+    expect(useStore.getState().route.params.view).toBeUndefined()
+    fireEvent.mouseDown(within(strip).getByRole('tab', { name: 'Changes' }))
+    expect(useStore.getState().route.params).toEqual({ runId: active.id, view: 'changes' })
   })
 
-  it.each(['{Enter}', '[Space]'])('opens the focused tab on %s', async (key) => {
-    const navigate = vi.fn()
-    useStore.setState({ navigate })
-    render(<RunTabs runID={active.id} active="terminal" />)
-    screen.getByRole('tab', { name: 'Diff' }).focus()
+  it.each(['{Enter}', ' '])('opens the focused view on %j and keeps focus on its tab', async (key) => {
+    const strip = openRun()
+    const session = within(strip).getByRole('tab', { name: 'Session' })
+    session.focus()
     await userEvent.keyboard(key)
 
-    expect(navigate).toHaveBeenCalledWith('diff', { runId: active.id })
+    expect(useStore.getState().route.params.view).toBe('session')
+    expect(document.activeElement).toBe(within(screen.getByRole('tablist', { name: 'Run views' })).getByRole('tab', { name: 'Session' }))
   })
 
-  it.each(['{Enter}', '[Space]'])(
-    'carries focus into the strip the next route draws, on %s',
-    async (key) => {
-      useStore.setState({ route: { name: 'events', params: { runId: active.id } } })
-      render(<AppShell />)
-      screen.getByRole('tab', { name: 'Events' }).focus()
-
-      fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' })
-      await userEvent.keyboard(key)
-
-      expect(useStore.getState().route.name).toBe('diff')
-      expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Diff' }))
-    },
-  )
-
-  // A handoff armed by anything short of a real activation is never consumed,
-  // and it is module scope, so it survives the strip unmounting and fires on
-  // the next one, stealing focus from whatever the reader clicked.
-  it('does not take focus back after a pointer click', async () => {
-    const navigate = vi.fn()
-    useStore.setState({ navigate })
-    const { unmount } = render(<RunTabs runID={active.id} active="terminal" />)
-    const elsewhere = spare()
-
-    // A real click rather than a fabricated `detail`: the browser's own value
-    // is what the guard reads, and only user-event produces it.
-    await userEvent.click(screen.getByRole('tab', { name: 'Diff' }))
-    unmount()
-    elsewhere.focus()
-    render(<RunTabs runID={active.id} active="diff" />)
-
-    expect(document.activeElement).toBe(elsewhere)
+  it('is one tab stop that lands on the open view', async () => {
+    const strip = openRun()
+    expect(within(strip).getAllByRole('tab').filter((tab) => tab.tabIndex === 0)).toEqual([])
+    strip.focus()
+    await waitFor(() => expect(document.activeElement).toBe(within(strip).getByRole('tab', { name: 'Terminal' })))
   })
 
-  it('does not take focus back after reopening the tab already open', () => {
-    const navigate = vi.fn()
-    useStore.setState({ navigate })
-    const { unmount } = render(<RunTabs runID={active.id} active="terminal" />)
-    const elsewhere = spare()
+  it('cycles views with [ and ] and toggles details with Ctrl+.', () => {
+    openRun()
+    fireEvent.keyDown(window, { key: ']' })
+    expect(useStore.getState().route.params.view).toBe('changes')
+    fireEvent.keyDown(window, { key: '[' })
+    fireEvent.keyDown(window, { key: '[' })
+    expect(useStore.getState().route.params.view).toBe('session')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }))
-    unmount()
-    elsewhere.focus()
-    render(<RunTabs runID={active.id} active="terminal" />)
-
-    expect(document.activeElement).toBe(elsewhere)
+    expect(screen.queryByRole('dialog', { name: 'Run details' })).toBeNull()
+    fireEvent.keyDown(window, { key: '.', ctrlKey: true })
+    expect(screen.getByRole('dialog', { name: 'Run details' })).toBeDefined()
   })
-
-  it('does not take focus back after a Space that was abandoned', async () => {
-    const navigate = vi.fn()
-    useStore.setState({ navigate })
-    const { unmount } = render(<RunTabs runID={active.id} active="terminal" />)
-    const elsewhere = spare()
-
-    // Held, then focus moves, which is how the browser cancels the click a
-    // Space would otherwise fire on release.
-    screen.getByRole('tab', { name: 'Diff' }).focus()
-    await userEvent.keyboard('[Space>]')
-    elsewhere.focus()
-    await userEvent.keyboard('[/Space]')
-    expect(navigate).not.toHaveBeenCalled()
-
-    unmount()
-    render(<RunTabs runID={active.id} active="diff" />)
-    expect(document.activeElement).toBe(elsewhere)
-  })
-
-  it('keeps one tab stop, on the tab focus is on', () => {
-    const { rerender } = render(<RunTabs runID={active.id} active="terminal" />)
-    const tabs = screen.getAllByRole('tab')
-    const terminal = screen.getByRole('tab', { name: 'Terminal' })
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([terminal])
-
-    fireEvent.keyDown(terminal, { key: 'End' })
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs.at(-1)])
-
-    // A run-to-run switch reuses this strip, so the stop has to come back.
-    rerender(<RunTabs runID="run_2" active="terminal" />)
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([terminal])
-  })
-
-  it('leaves a modifier chord to the browser', () => {
-    render(<RunTabs runID={active.id} active="terminal" />)
-    const tabs = screen.getAllByRole('tab')
-    tabs[1].focus()
-
-    fireEvent.keyDown(tabs[1], { key: 'ArrowLeft', altKey: true })
-
-    expect(document.activeElement).toBe(tabs[1])
-  })
-
 })
 
 describe('dock', () => {
@@ -472,11 +391,11 @@ describe('dock', () => {
 
   it('resizes from the keyboard, up to its own bounds', () => {
     const { onHeightChange, onToggleCollapse } = dock()
-    const handle = screen.getByRole('separator', { name: 'Resize terminal dock' })
+    const handle = screen.getByRole('separator', { name: 'Resize terminal' })
 
     expect(handle.tabIndex).toBe(0)
     expect(handle.getAttribute('aria-controls')).toBe(
-      screen.getByRole('region', { name: 'Terminal dock' }).id,
+      screen.getByRole('region', { name: 'Environment terminal' }).id,
     )
 
     fireEvent.keyDown(handle, { key: 'ArrowUp' })
@@ -495,7 +414,7 @@ describe('dock', () => {
 })
 
 const splitter = () => screen.getByRole('separator', { name: 'Resize sidebar' })
-const collapseButton = () => screen.getByRole('button', { name: 'Collapse sidebar' })
+const collapseButton = () => screen.getByRole('button', { name: 'Hide sidebar' })
 
 describe('sidebar resizer', () => {
   it('resizes from the keyboard, up to the bounds it announces', () => {
@@ -522,12 +441,12 @@ describe('sidebar resizer', () => {
 
   it.each([
     ['the splitter', () => fireEvent.keyDown(splitter(), { key: 'Enter' })],
-    ['the collapse button', () => fireEvent.click(collapseButton())],
+    ['the hide button', () => fireEvent.click(collapseButton())],
   ])('hands focus on when the sidebar is collapsed from %s', (_, collapse) => {
     render(<AppShell />)
 
     collapse()
-    const expand = screen.getByRole('button', { name: 'Expand sidebar' })
+    const expand = screen.getByRole('button', { name: 'Open sidebar' })
     expect(document.activeElement).toBe(expand)
 
     fireEvent.click(expand)

@@ -198,6 +198,42 @@ func (s *collabStore) TransitionRoomMessage(_ context.Context, id string, state 
 	m.Failure = failure
 	return nil
 }
+func (s *collabStore) MarkRoomMessageAgentQueued(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.messages[id]
+	if m == nil || m.State != store.RoomMessageSent || m.AgentDelivery != "" {
+		return false, nil
+	}
+	m.AgentDelivery = store.AgentQueued
+	return true, nil
+}
+func (s *collabStore) SettleRoomMessageAgentDelivery(_ context.Context, id string, failure *store.RoomMessageFailure) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.messages[id]
+	if m == nil || m.State != store.RoomMessageSent && m.State != store.RoomMessageUncertain || m.AgentDelivery == store.AgentDelivered {
+		return false, nil
+	}
+	if failure != nil {
+		m.State, m.Failure = store.RoomMessageNotSent, failure
+	} else {
+		m.AgentDelivery = store.AgentDelivered
+	}
+	return true, nil
+}
+func (s *collabStore) DropAgentQueuedRoomMessages(_ context.Context, failure *store.RoomMessageFailure) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for id, m := range s.messages {
+		if m.State == store.RoomMessageSent && m.AgentDelivery == store.AgentQueued {
+			m.State, m.Failure = store.RoomMessageNotSent, failure
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
 func (s *collabStore) DecideRoomMessage(_ context.Context, id string, from, to store.RoomMessageState, by string, at time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -298,11 +334,11 @@ type collabPTY struct {
 	err   error
 }
 
-func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string) error {
+func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, _ bool, _ func(error)) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
-	return p.err
+	return "", p.err
 }
 func (p *collabPTY) Calls() int { p.mu.Lock(); defer p.mu.Unlock(); return p.calls }
 
@@ -729,9 +765,9 @@ func TestOverdueWorkerWaitsForSchedulerRecovery(t *testing.T) {
 	worker, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Now: clock.Now,
 		Ready: ready, WorkerInterval: time.Hour,
-		Inject: func(context.Context, domain.RunID, domain.MemberID, string) error {
+		Inject: func(context.Context, domain.RunID, domain.MemberID, string, bool, func(error)) (string, error) {
 			delivered <- struct{}{}
-			return nil
+			return "", nil
 		},
 	})
 	if err != nil {
@@ -1055,12 +1091,12 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	var injectedMessage string
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string) error {
+		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
 			if gotRun != run.ID {
 				t.Fatalf("injected run=%q, want %q", gotRun, run.ID)
 			}
 			injectedActor, injectedMessage = actor, message
-			return nil
+			return "", nil
 		},
 		Attachments: func(context.Context, domain.WorkspaceID, domain.RunID, string) error { return nil },
 	})
@@ -1090,6 +1126,37 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	if !strings.Contains(injectedMessage, "--- AETHER ATTACHMENTS ---") ||
 		!strings.Contains(injectedMessage, "--- END AETHER ATTACHMENTS ---") {
 		t.Fatalf("injected message lacks attachment framing: %q", injectedMessage)
+	}
+}
+
+func TestControllerSteerReachesInjectorAndReturnsOutcome(t *testing.T) {
+	st, clock, ws, owner, _, run := setupCollab(t)
+	controlService := control.New(control.Config{Now: clock.Now})
+	lease, _, err := controlService.Acquire(string(run.ID), string(owner.ID), "tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var steered bool
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, steer bool, _ func(error)) (string, error) {
+			steered = steer
+			return "injected", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Post(context.Background(), MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest,
+		Body: "also check the tests", IdempotencyKey: "steer", Steer: true,
+		ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !steered || result.Receipt != ReceiptSent || result.Outcome != "injected" {
+		t.Fatalf("steer %v receipt %q outcome %q", steered, result.Receipt, result.Outcome)
 	}
 }
 
@@ -1123,5 +1190,41 @@ func TestStatusCountsQueuedSteerBeyondFirstPage(t *testing.T) {
 	}
 	if status.QueuedSteers != 1 {
 		t.Fatalf("queued steers = %d, want 1", status.QueuedSteers)
+	}
+}
+
+func TestStartRecordsSteersQueuedBeforeTheRestartAsNotSent(t *testing.T) {
+	st, clock, ws, _, other, run := setupCollab(t)
+	st.messages["queued"] = &store.RoomMessage{
+		ID: "queued", WorkspaceID: ws.ID, RunID: run.ID, ActorID: other.ID,
+		Kind: store.RoomMessageSteerRequest, Body: "after this turn",
+		State: store.RoomMessageSent, AgentDelivery: store.AgentQueued, CreatedAt: clock.Now(),
+	}
+	bus, err := events.NewInProc(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	counting := &failingCollabBus{Bus: bus}
+	service, err := New(Config{Store: st, Runs: st, Workspaces: st, Bus: counting, Now: clock.Now, WorkerInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if startErr := service.Start(ctx); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+
+	got, err := st.GetRoomMessage(ctx, "queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != store.RoomMessageNotSent || got.Failure == nil || got.Failure.Code != "agent_disconnected" {
+		t.Fatalf("queued message after start = %q, %+v", got.State, got.Failure)
+	}
+	if n := counting.Successes(); n != 1 {
+		t.Fatalf("room publications = %d, want the dropped message", n)
 	}
 }

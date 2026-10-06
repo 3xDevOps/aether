@@ -1,12 +1,6 @@
-// Package scheduler owns the run lifecycle. It provisions run containers
-// (checkout via the GitEngine seam, container via runtime.Runtime, agent
-// PTY via the PTYHost seam), enforces the legal status transitions,
-// supervises the agent process to exit, detects stalls, recovers
-// supervision after server reboots, garbage-collects expired checkouts,
-// and refuses new runs below the free-space floor. It is the single writer
-// of run statuses and the sole publisher of run.status events. What each
-// of those guards promises, and how they are tuned:
-// docs/failure-handling.md.
+// Package scheduler owns the run lifecycle: provisioning, legal status
+// transitions, supervision, stall detection, recovery and checkout GC. It is the
+// single writer of run statuses; docs/failure-handling.md covers its guards.
 package scheduler
 
 import (
@@ -14,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"strings"
@@ -22,6 +17,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/control"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -32,30 +28,22 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// ErrInvalidTransition is returned when a lifecycle step would move a run
-// through an illegal status transition.
 var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
 
-// ErrDiskFull is returned when a new run would start with less free space
-// than Config.MinFreeBytes. It is a refusal, not a failure: nothing is
-// created, and the runs already on the disk keep going.
+// ErrDiskFull refuses a new run below Config.MinFreeBytes; nothing is created
+// and existing runs keep going.
 var ErrDiskFull = errors.New("scheduler: not enough free disk space to start a new run")
 
-// DefaultMinFreeBytes is the shipped free-space floor: 1 GiB of headroom
-// for the checkout, the container's writes and the event log a new run is
-// about to produce.
+// DefaultMinFreeBytes leaves headroom for a new run's checkout, container
+// writes and event log.
 const DefaultMinFreeBytes = 1 << 30
 
-// BaseCapture is the scheduler's view of immutable workspace-base capture.
-// The mirror service implements this seam for both local-only and configured
-// workspaces.
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
 }
 
-// BaseCaptureError preserves the sanitized capture result alongside a
-// preflight failure so protocol callers can display a cached retry token
-// without creating a run row.
+// BaseCaptureError keeps the sanitized capture result so callers can show a
+// cached retry token without creating a run row.
 type BaseCaptureError struct {
 	Capture mirror.CaptureResult
 	Err     error
@@ -75,7 +63,6 @@ func (e *BaseCaptureError) Unwrap() error {
 	return e.Err
 }
 
-// Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
 	Store                       store.Store
 	Runtime                     runtime.Runtime
@@ -92,54 +79,38 @@ type Config struct {
 	BrowserImage                string
 	Control                     *control.Service
 	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
-	// DefaultStandardImage is the image this build ships with, before any
-	// --standard-image the operator set. A server update only moves the
-	// standard image when the two are the same.
+	// DefaultStandardImage is this build's image; a server update moves the
+	// standard image only when StandardImage still equals it.
 	DefaultStandardImage string
 	StallThreshold       time.Duration
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 168h; negative destroys on close/completion
-	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
-	// on startup to learn whether a container already exited before
-	// attach. Defaults to defaultExitProbeTimeout.
+	// ExitProbeTimeout bounds recovery's startup probe of whether a container
+	// exited before attach.
 	ExitProbeTimeout time.Duration
-	// Now returns the current time. Defaults to time.Now; tests override it
-	// to control the second-granularity saved-environment image tag
-	// (environment_save.go) without a real sleep.
+	// Now defaults to time.Now; tests set it to control the second-granularity
+	// saved-environment image tag.
 	Now func() time.Time
-	// MinFreeBytes is the free-space floor: a launch or relaunch that
-	// would start below it is refused with ErrDiskFull rather than filling
-	// the disk out from under the runs already on it. Runs already
-	// provisioned are never touched - the branch is the artifact and a
-	// half-written checkout is worse than a refused one.
+	// MinFreeBytes refuses a launch or relaunch below it with ErrDiskFull. Runs
+	// already provisioned are never touched: a half-written checkout is worse
+	// than a refused one.
 	MinFreeBytes int64
-	// Harnesses overrides or extends the shipped harness registry
-	// (internal/harness: claude, codex, pi, omp, opencode, custom); "fake"
-	// (the deterministic e2e agent) is registered here by default. An
-	// override replaces the registry argv and keeps the profile's user, key
-	// passthrough, and launch environment; it drops the registry's
-	// coordination flag, which would be appended to an argv nothing has
-	// checked. Member definitions shape argv inside that member's own
-	// container and do not leak across members.
+	// Harnesses overrides or extends the shipped harness registry. An override
+	// replaces the registry argv and drops its coordination flag, which would be
+	// appended to an argv nothing has checked.
 	Harnesses map[string]HarnessSpec
-	// ServerBinary is the server binary staged into every new run and
-	// terminal container for the coordination CLI. Coordinated runs also use
-	// it for lifecycle callbacks; empty means DefaultServerBinary.
+	// ServerBinary is staged into run and terminal containers for the
+	// coordination CLI; empty means DefaultServerBinary.
 	ServerBinary string
-	// HarnessUpdateDisabled stops the scheduler from updating a shipped
-	// harness installed in the member home before a launch
-	// (harness_update.go). The zero value keeps updates on.
+	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
+	// installed in the member home.
 	HarnessUpdateDisabled bool
-	// turnTail overrides defaultTurnTail; only tests set it.
-	turnTail time.Duration
-	// harnessUpdateTimeout overrides defaultHarnessUpdateTimeout; only tests
-	// set it.
+	// Test-only overrides of the matching default* constants.
+	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
-	// harnessUpdateWait overrides defaultHarnessUpdateWait; only tests set
-	// it.
-	harnessUpdateWait time.Duration
+	harnessUpdateWait    time.Duration
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -148,12 +119,12 @@ const DefaultRunContainerTTL = 7 * 24 * time.Hour
 // than os.Args[0].
 const DefaultServerBinary = "/proc/self/exe"
 
-// HarnessSpec is an administrator-supplied generic harness definition. A
-// zero-valued Executable keeps the legacy argv-only override behavior for
-// shipped profiles and the deterministic fake harness.
+// HarnessSpec is an administrator-supplied harness definition. An empty
+// Executable keeps the argv-only override for shipped profiles and "fake".
 type HarnessSpec struct {
 	TUIArgs         []string
 	HeadlessArgs    []string
+	ACPArgs         []string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -166,45 +137,36 @@ const fakeAgentEnv = "AETHER_FAKE_AGENT"
 
 func defaultHarnesses() map[string]HarnessSpec {
 	return map[string]HarnessSpec{
-		// The deterministic e2e agent: argv comes from AETHER_FAKE_AGENT
-		// at launch time. Every other shipped harness lives in
-		// internal/harness.
 		"fake": {},
 	}
 }
 
-// Scheduler is the run lifecycle engine. Its exported method set satisfies
-// the sshd.RunController seam.
+// Scheduler is the run lifecycle engine behind the sshd.RunController seam.
 type Scheduler struct {
 	cfg       Config
 	harnesses map[string]HarnessSpec
 
-	// recoveryReady closes after startup reconciliation has completed. Room
-	// delivery waits for this boundary so overdue steers cannot claim before
-	// recovered PTY sessions are injectable.
+	// recoveryReady closes after startup reconciliation; room delivery waits
+	// for it so overdue steers cannot claim before recovered PTYs are injectable.
 	recoveryReady     chan struct{}
 	recoveryReadyOnce sync.Once
-	// superCtx bounds every supervision goroutine; each Start/Close
-	// cancellation ends it. Containers are never stopped by cancellation.
+	// superCtx bounds every supervision goroutine; cancelling it never stops a
+	// container.
 	superCtx    context.Context
 	superCancel context.CancelFunc
 	wg          sync.WaitGroup
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
-	// archiveMu serializes SetArchived against Relaunch's own restore of
-	// an archived run, so the two can never leave a run stuck between
-	// archived and running.
+	// archiveMu serializes SetArchived against Relaunch restoring an archived run.
 	archiveMu sync.Mutex
 	// workspaceLocks fence launch and retained relaunch during deletion.
 	workspaceLocks map[domain.WorkspaceID]*sync.RWMutex
 	// homeLocks serialize the ownership passes that chown inside one
 	// member's home, so a long walk there never holds mu.
 	homeLocks map[domain.MemberID]*sync.Mutex
-	// pending marks runs whose row exists but whose checkout/provisioning
-	// handoff has not reached runs yet. Delete waits for this short window so
-	// it cannot remove a row while its checkout is still being created; Kill
-	// records its request for the handoff to transfer into supervision.
+	// pending holds runs whose row exists but whose provisioning has not reached
+	// runs yet; Delete waits on it and Kill records its request for the handoff.
 	pending map[domain.RunID]*pendingRun
 	// runShellLocks serialize shell lifecycle within one run.
 	runShellLocks map[domain.RunID]*sync.Mutex
@@ -220,30 +182,25 @@ type Scheduler struct {
 	credentialUsers       map[*credentialUserReservation]struct{}
 	titleMu               sync.Mutex
 	titleUpdates          map[domain.RunID]*pendingRunTitle
-	// coordination is the attached conflict-coordination service and the
-	// staged-bridge directory (UseCoordination); nil means new containers
-	// get no coordination assets.
+	// coordination is nil when new containers get no coordination assets.
 	coordination *coordination
-	// evidence is the attached durable evidence service (UseEvidence);
-	// nil keeps lifecycle behavior unchanged for deployments that do not
-	// enable Release A evidence capture.
+	// evidence is nil when evidence capture is not enabled.
 	evidence EvidenceService
-	// updates is the attached server self-update service (UseUpdates);
-	// nil means a scheduled update never applies.
+	// updates is nil when a scheduled update never applies.
 	updates UpdateTicker
-	// shells counts the live interactive terminal attaches. A restart would
-	// drop each stream under the person typing into it, so they hold the idle
-	// check open the way an active run does.
-	shells int
-	// harnessUpdates is the pre-launch harness update state per member home
-	// and harness (harness_update.go).
+	// shells counts live terminal attaches, which hold the idle-restart check
+	// open like an active run, since a restart would drop them.
+	shells         int
 	harnessUpdates map[harnessUpdateKey]*harnessUpdateState
+	// agentInstalls maps a member with an agent.install in flight to its home's
+	// host path.
+	agentInstalls map[domain.MemberID]string
+	acp           *acpDriver
 }
 
-// credentialUserReservation protects the writable member home a container
-// mounts, and the login it mounts from another member's shared account,
-// from ownership changes to another uid:gid while it is pending or live.
-// Root containers do not need a reservation because they skip chown.
+// credentialUserReservation stops ownership changes to the member home and
+// shared login a pending or live container mounts. Root containers skip chown
+// and need none.
 type credentialUserReservation struct {
 	home domain.MemberID
 	// login is the account owner whose login paths the container mounts,
@@ -253,9 +210,8 @@ type credentialUserReservation struct {
 	owner    string
 	run      *supervised
 	terminal *terminalSupervision
-	// pending remains true between reserveTerminalUser and registerTerminal.
-	// The reservation must survive registry synchronization during that
-	// window, or a concurrent run could chown the shared home first.
+	// pending covers reserveTerminalUser to registerTerminal; the reservation
+	// must survive registry sync then, or a concurrent run could chown the home.
 	pending bool
 }
 
@@ -284,14 +240,10 @@ type supervised struct {
 	// (domain.Run.HomeMember), shared by every live container of that member.
 	memberID domain.MemberID
 	// loginMember is the account owner whose login paths the container
-	// mounts and the ownership pass therefore also changes; empty when
-	// nothing of another member's is mounted.
+	// mounts; empty when none.
 	loginMember domain.MemberID
-	// reporter is how much this run's harness can say about its own state
-	// (internal/harness). It is fixed at launch, because the reporter is
-	// wired into the container's launch command, and recovered from the
-	// sidecar rather than recomputed: only the launch knew which profile
-	// the container actually got.
+	// reporter is recovered from the sidecar, since only the launch or mode
+	// switch knew which command the container runs.
 	reporter harness.Reporter
 	// Mutated only under Scheduler.mu.
 	status        domain.RunStatus
@@ -300,62 +252,54 @@ type supervised struct {
 	killRequested bool
 	killActor     domain.MemberID
 	// agentReport is the last execution report only; input deltas are never
-	// retained or replayed. It is cleared when observed activity un-parks the
-	// run, and mirrored into the sidecar independently of pendingInputs. The
-	// turn-end idle report that starts a reported finish is recorded without
-	// the park (see ReportAgentState).
+	// retained or replayed. A turn-end idle report that starts a reported finish
+	// is recorded without the park (see ReportAgentState).
 	agentReport agentstatus.Report
 	// pendingInputs is an immutable, sorted set for this execution lifetime.
 	pendingInputs []domain.RunInputRequest
 	// inputPublishPending keeps the current snapshot owed to the event log,
 	// including an empty set after the last request closes.
 	inputPublishPending bool
-	// lastWorking is when the agent last said it was working. A report is
-	// the only trace its hook leaves - it writes nothing to the terminal
-	// and touches no files - so the stall detector counts it as the
-	// activity it is, and a run does not park as stalled seconds after the
-	// agent proved it is alive.
+	// lastWorking is when the agent last said it was working. The hook leaves
+	// no other trace, so the stall detector counts it as activity.
 	lastWorking time.Time
-	// parkedAt is when the agent's own waiting report parked this run, and
-	// postParkActivity the newest terminal activity seen since. They are
-	// what a turn-end reporter is judged on: see unparks. Both zero unless
-	// a waiting report is what parked the run.
+	// parkedAt and postParkActivity judge a turn-end reporter (see unparks);
+	// both are zero unless the agent's own waiting report parked the run.
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
+	acp              bool
 	missionAssigned  bool
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
-	// evidencePending means terminalization completed but required evidence
-	// capture did not. The sidecar keeps this bit so a same-status retry
-	// resolves the capture before reporting success or releasing sources.
+	// evidencePending persists a completed terminalization whose required
+	// evidence capture did not finish, so a same-status retry resolves it first.
 	evidencePending bool
-	// finalizing reserves the lifecycle transition after the agent exits.
-	// The reservation is brief: finalize's git/runtime/store work runs
-	// without lifecycleMu so Kill can still record cancellation.
+	// finalizing reserves the post-exit transition briefly; finalize's work
+	// runs without lifecycleMu so Kill can still record cancellation.
 	finalizing  bool
 	done        chan struct{}
 	doneOnce    sync.Once
 	waitStarted bool
-	// lifecycleMu serializes close, relaunch, expiry, and steering admission
-	// for this exact container. It is deliberately independent of Scheduler.mu:
-	// runtime and git calls must not run while the scheduler lock is held.
+	// lifecycleMu serializes close, relaunch, expiry and steering admission for
+	// this container. It is separate from Scheduler.mu: runtime and git calls
+	// must not run under the scheduler lock.
 	lifecycleMu sync.Mutex
-	// runUser is the resolved numeric "uid:gid" the run's container and
-	// ownership pass use; empty means root (no ownership pass). Set once
-	// the user is resolved during provisioning, or from the sidecar on
-	// recovery.
+	// runUser is the resolved "uid:gid" for the container and ownership pass;
+	// empty means root (no ownership pass).
 	runUser string
-	// home is the container-side HOME resolved when this run was
-	// provisioned. Keeping it with supervision avoids reconstructing an old
-	// image/profile choice after a restart or handoff.
+	// home is the container-side HOME resolved at provisioning, kept so a
+	// restart need not reconstruct an old image/profile choice.
 	home            string
 	userReservation *credentialUserReservation
 	// exitObserved / exitCode are the durable Wait result, persisted
 	// before finalize so a crash can resume the original exit.
 	exitObserved bool
 	exitCode     int
+	// exitDetail is the enhanced background session's failure, which its
+	// terminal does not show.
+	exitDetail string
 	// evidenceIdentity is the stable finish-capture identity. It is mirrored
 	// to the sidecar so a retry after a crash cannot create another packet.
 	evidenceIdentity string
@@ -364,37 +308,34 @@ type supervised struct {
 	bridgeDigest string
 	bridgePath   string
 	coordDir     string
-	// gitAuthorEmail is the address the container's GIT_AUTHOR_EMAIL was
-	// created with. It does not move when the run is handed on or when
-	// its owner edits their git identity, so it is what tells the agent's
-	// own commits apart from Aether's.
+	// gitAuthorEmail is fixed at container creation, so it tells the agent's
+	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
-	// coAuthorMu serializes the read-modify-write of this run's co-author
-	// list. Two members steering at once would otherwise interleave
-	// listing the steerers with writing the file, and the list left on
-	// disk would be whichever finished last, not the fuller one.
+	agentSessionID string
+	sessionMu      sync.Mutex
+	agentExec      *runtime.ExecIdentity
+	// switching is the mode a mode switch is moving the run to, empty when
+	// none is in flight. The switch holds lifecycleMu throughout.
+	switching    domain.LaunchMode
+	switchIntent *switchIntent
+	// coAuthorMu serializes the co-author list's read-modify-write so
+	// concurrent steers cannot leave the shorter list on disk.
 	coAuthorMu sync.Mutex
-	// reported is the outcome the agent's terminal coord.report armed this
-	// run to finish with (completed or failed), empty when unarmed, and
-	// reportedAt when it was armed (reportFinishDeadline counts from it).
-	// reportFinishing is set while finishReported owns the finish.
+	// reported is the outcome a terminal coord.report armed (empty when
+	// unarmed), reportedAt when it was armed, and reportFinishing is set while
+	// finishReported owns the finish.
 	reported        domain.RunStatus
 	reportedAt      time.Time
 	reportFinishing bool
-	// blockedReason is the agent's latest blocked report as a status
-	// reason, and blockedShown whether a park has shown it yet; the first
-	// resume after that park clears both (see ReportBlocked).
-	// blockedReportID is the last blocked report applied and
-	// blockedReportAt when it was finalized, kept after the reason clears
-	// so neither a replay of it nor an older report retried after it can
-	// bring a reason back.
+	// blockedReason is the latest blocked report as a status reason and
+	// blockedShown whether a park has shown it. blockedReportID/At outlive the
+	// reason so a replay or an older retried report cannot bring it back.
 	blockedReason   string
 	blockedShown    bool
 	blockedReportID string
 	blockedReportAt time.Time
-	// relaunchedAt is when the last relaunch reopened the run, zero for a
-	// run never relaunched. A report finalized before it speaks for a
-	// launch that relaunch ended.
+	// relaunchedAt is when the last relaunch reopened the run; a report
+	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
 }
 
@@ -440,9 +381,8 @@ func (s *Scheduler) waitPending(ctx context.Context, run domain.RunID) error {
 	}
 }
 
-// startSupervision installs exactly one wait owner for a run. Callers must
-// have already installed the entry in s.runs; the helper is safe when two
-// recovery paths race to adopt the same sidecar.
+// startSupervision installs exactly one wait owner for a run already in
+// s.runs; two recovery paths may race to adopt the same sidecar.
 func (s *Scheduler) startSupervision(entry *supervised) {
 	s.mu.Lock()
 	if s.runs[entry.runID] != entry || entry.waitStarted {
@@ -462,11 +402,9 @@ func (s *Scheduler) closeDone(entry *supervised) {
 }
 
 // RetainsContainer reports whether a durable terminal row still owns a
-// container. It intentionally does not consult in-memory state: coordination
-// recovery calls it during a fresh process boot. Every terminal sidecar with
-// a container ID remains an ownership reference until the scheduler confirms
-// destruction and removes it; TTL policy and close reason are deliberately
-// not consulted here.
+// container. It ignores in-memory state, TTL and close reason: coordination
+// recovery calls it on a fresh boot, and a sidecar with a container ID stays
+// an ownership reference until destruction is confirmed.
 func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil || !r.Status.Terminal() {
@@ -552,7 +490,7 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, fmt.Errorf("scheduler: create state dir: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Scheduler{
+	s := &Scheduler{
 		cfg:                  cfg,
 		harnesses:            harnesses,
 		superCtx:             ctx,
@@ -564,7 +502,9 @@ func New(cfg Config) (*Scheduler, error) {
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
-	}, nil
+	}
+	s.acp = newACPDriver(s)
+	return s, nil
 }
 
 // RecoveryReady returns a channel closed once all persisted runtime state has
@@ -623,20 +563,11 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 }
 
-// recoveryError drops a recovery failure the caller's own shutdown caused.
-// Cancelling the scheduler's context aborts the store calls a recovery pass
-// runs under, and a caller that stopped the scheduler must see that as the
-// clean shutdown the Start loop reports, not as a failed start. Only the
-// cancellation itself is dropped: Server.Run reports whatever Start returns
-// as the reason the server went down, so a real failure that a shutdown
-// merely raced still has to reach it.
-//
-// Matching the error rather than the context is exact for the store calls a
-// recovery pass makes. modernc.org/sqlite checks the context before it steps
-// a statement and replaces its own SQLITE_INTERRUPT with ctx.Err() whenever
-// the cancellation interrupted one, and database/sql closes a Rows with
-// ctx.Err(), so a cancelled query, scan, or iteration all wrap
-// context.Canceled.
+// recoveryError drops only the cancellation the caller's own shutdown caused,
+// so a stopped scheduler reports a clean shutdown while a real failure that
+// merely raced it still reaches Server.Run. Matching the error is exact:
+// modernc.org/sqlite and database/sql both surface an interrupted statement or
+// Rows as ctx.Err(), so it wraps context.Canceled.
 func recoveryError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
@@ -648,29 +579,25 @@ func recoveryError(err error) error {
 func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
+	s.acp.shutdown()
 	s.flushPendingRunTitles()
 	return s.DetachDevelopmentTerminals(context.Background())
 }
 
-// UseBaseCapture attaches the immutable base-capture service. The server
-// builder uses this after constructing the scheduler because services are
-// initialized independently of the core scheduler.
+// UseBaseCapture attaches the base-capture service, built after the scheduler.
 func (s *Scheduler) UseBaseCapture(c BaseCapture) {
 	s.mu.Lock()
 	s.cfg.Bases = c
 	s.mu.Unlock()
 }
 
-// UseEvidence attaches the durable evidence service. The server builder uses
-// this after constructing the scheduler because evidence and lifecycle
-// services are initialized independently.
+// UseEvidence attaches the evidence service, built after the scheduler.
 func (s *Scheduler) UseEvidence(e EvidenceService) {
 	s.mu.Lock()
 	s.evidence = e
 	s.mu.Unlock()
 }
 
-// ContainerAddr returns the network address of a supervised run container.
 func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -686,10 +613,8 @@ func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string
 func validateHarnessSpec(name string, spec HarnessSpec) error {
 	registered, known := harness.Lookup(name)
 	if spec.Executable == "" {
-		// "fake" is a scheduler-owned deterministic harness. Its argv is
-		// resolved from AETHER_FAKE_AGENT at launch time, so an explicit
-		// empty fixture entry must not be treated as an administrator custom
-		// definition.
+		// "fake" resolves its argv from AETHER_FAKE_AGENT at launch, so an
+		// empty fixture entry is not a custom definition.
 		if !known && name != "fake" {
 			return fmt.Errorf("scheduler: custom harness %q requires an explicit definition", name)
 		}
@@ -704,6 +629,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 		Name:            name,
 		TUIArgs:         spec.TUIArgs,
 		HeadlessArgs:    spec.HeadlessArgs,
+		ACPArgs:         spec.ACPArgs,
 		Executable:      spec.Executable,
 		ProfileRoot:     spec.ProfileRoot,
 		CredentialPaths: spec.CredentialPaths,
@@ -719,62 +645,91 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 // command resolves argv and profile for one launch by member on account's
-// shared account, with the profile from launchProfile.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
+// shared account, with the profile from launchProfile. An acp launch has no
+// argv: the task travels over the protocol.
+func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) (argv []string, profile harness.Profile, acp bool, err error) {
 	task = s.withCoAuthorInstruction(task)
-	profile, tui, headless, err := s.launchProfile(ctx, member, account, harnessName)
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
-		return nil, harness.Profile{}, err
+		return nil, harness.Profile{}, false, err
 	}
-	var argv []string
-	switch mode {
-	case domain.LaunchTUI:
-		argv = tui
-	case domain.LaunchHeadless:
-		argv = headless
-	default:
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
+	if !mode.Valid() {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: invalid launch mode %q", mode)
 	}
-	if harnessName == "fake" && len(argv) == 0 {
+	acp = mode == domain.LaunchACP ||
+		(mode == domain.LaunchHeadless && s.backgroundACP(member, account, profile, argvs))
+	argv = argvs[mode]
+	if acp {
+		argv = argvs[domain.LaunchACP]
+	}
+	if harnessName == "fake" && len(argv) == 0 && !acp {
 		argv = strings.Fields(os.Getenv(fakeAgentEnv))
 	}
 	if len(argv) == 0 {
-		return nil, harness.Profile{}, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
-	return harness.Argv(argv, task), profile, nil
+	if acp {
+		return nil, profile, true, nil
+	}
+	return harness.Argv(argv, task), profile, false, nil
+}
+
+func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
+	if !profile.ACPDefault || s.cfg.Homes == nil {
+		return false
+	}
+	installed, err := s.adapterInstalled(member, account, profile, argvs)
+	if err != nil {
+		slog.Warn("scheduler: look for the agent's ACP server; the background run uses its command line", "agent", profile.Name, "error", err)
+	}
+	return installed
+}
+
+// adapterInstalled reports whether the agent's ACP server is installed next
+// to its CLI in the home a launch by member on account uses.
+func (s *Scheduler) adapterInstalled(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) (bool, error) {
+	adapter := argvs[domain.LaunchACP]
+	if len(adapter) == 0 {
+		return false, nil
+	}
+	cli := adapter[0]
+	if tui := argvs[domain.LaunchTUI]; len(tui) > 0 {
+		cli = tui[0]
+	}
+	_, installed, err := s.cfg.Homes.AgentInstalled(member, account, cli, adapter[0], profile.InstallPaths)
+	return installed, err
 }
 
 // errMemberDefinitionOnly refuses member's own harness definition on
 // another member's account. A member definition declares no login the
 // owner agreed to share, so only server-wide definitions can.
-var errMemberDefinitionOnly = errors.New("is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares")
+var errMemberDefinitionOnly = errors.New("is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --agent-definitions) can declare the login it shares")
 
-// launchProfile resolves the profile and argv templates for one launch by
-// member on account's shared account. Resolution precedence, in member's own
-// context: the server-wide admin spec, then member's stored definition, then
-// the shipped registry. Admin specs and the registry are server-controlled,
-// so their CredentialPaths decide what a share exposes; member's own
-// definition is refused on another member's account.
-func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, []string, []string, error) {
+// launchProfile resolves the profile and argv templates. Precedence: the
+// server-wide admin spec, then member's stored definition, then the shipped
+// registry. Only server-controlled CredentialPaths decide what a share
+// exposes, so member's own definition is refused on another member's account.
+func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.MemberID, harnessName string) (harness.Profile, map[domain.LaunchMode][]string, error) {
 	profile, inRegistry := harness.Lookup(harnessName)
-	var tui, headless []string
+	var tui, headless, acp []string
 	spec, ok := s.harnesses[harnessName]
 	memberDefined := false
 	if !ok {
 		memberSpec, found, err := s.memberHarnessSpec(ctx, member, harnessName)
 		if err != nil {
-			return harness.Profile{}, nil, nil, err
+			return harness.Profile{}, nil, err
 		}
 		spec, ok, memberDefined = memberSpec, found, found
 	}
 	switch {
 	case ok:
-		tui, headless = spec.TUIArgs, spec.HeadlessArgs
+		tui, headless, acp = spec.TUIArgs, spec.HeadlessArgs, spec.ACPArgs
 		if spec.Executable != "" {
 			profile = (harness.Definition{
 				Name:            harnessName,
 				TUIArgs:         spec.TUIArgs,
 				HeadlessArgs:    spec.HeadlessArgs,
+				ACPArgs:         spec.ACPArgs,
 				Executable:      spec.Executable,
 				ProfileRoot:     spec.ProfileRoot,
 				CredentialPaths: spec.CredentialPaths,
@@ -792,98 +747,22 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.DiscoveryFiles = nil
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
+		profile.SwitchVerified = false
 	case inRegistry:
-		tui, headless = profile.TUIArgs, profile.HeadlessArgs
+		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
 	default:
-		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
+		return harness.Profile{}, nil, fmt.Errorf("scheduler: unknown harness %q; register it with: aether agent add %s", harnessName, harnessName)
 	}
 	if memberDefined && account != member {
-		return harness.Profile{}, nil, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
+		return harness.Profile{}, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
 	}
-	return profile, tui, headless, nil
+	return profile, map[domain.LaunchMode][]string{domain.LaunchTUI: tui, domain.LaunchHeadless: headless, domain.LaunchACP: acp}, nil
 }
 
-// wrapTUICommand makes the configured harness the first child of a
-// POSIX-shell supervisor. Harness arguments remain positional parameters, so
-// task text and other argv values can never become shell source. Once the
-// harness exits its status is reported and the container stays available via
-// a login shell until the scheduler explicitly closes or kills the run.
-func wrapTUICommand(argv []string) []string {
-	const script = `exec 3<&0
-child=
-child_signal=TERM
-child_signaled=
-pending_signal=
-pending_status=
-
-forward_shutdown() {
-	if [ -n "$child" ] && [ -z "$child_signaled" ]; then
-		kill -"$child_signal" "$child" 2>/dev/null || :
-		child_signaled=1
-	fi
-}
-
-request_shutdown() {
-	if [ -z "$pending_signal" ]; then
-		pending_signal=$1
-		pending_status=$2
-	fi
-	forward_shutdown
-}
-
-trap 'request_shutdown TERM 143' TERM
-trap 'request_shutdown INT 130' INT
-trap 'request_shutdown HUP 129' HUP
-
-run_child() {
-	child_signal=$1
-	shift
-	child_signaled=
-	if [ -n "$pending_signal" ]; then
-		exit "$pending_status"
-	fi
-	"$@" <&3 &
-	child=$!
-	if [ -n "$pending_signal" ]; then
-		forward_shutdown
-		wait "$child" 2>/dev/null || :
-		exit "$pending_status"
-	fi
-	wait "$child"
-	status=$?
-	if [ -n "$pending_signal" ]; then
-		forward_shutdown
-		wait "$child" 2>/dev/null || :
-		exit "$pending_status"
-	fi
-	child=
-	child_signaled=
-	return "$status"
-}
-
-run_child TERM "$@"
-status=$?
-printf '\n[aether] harness exited with code %s\n' "$status"
-while :
-do
-	if [ -n "$pending_signal" ]; then
-		exit "$pending_status"
-	fi
-	if [ -x /bin/bash ]; then
-		run_child HUP /bin/bash -l
-	else
-		run_child HUP /bin/sh -l
-	fi
-done`
-	command := []string{"/bin/sh", "-c", script, "aether-run-supervisor"}
-	return append(command, argv...)
-}
-
-// memberHarnessSpec loads and validates the member's stored definition for
-// name. A corrupt or invalid stored blob is an error, not a miss: silently
-// skipping it would launch a shipped profile the member did not ask for.
-// A stored row shadowing a shipped name is rejected here independently of
-// the write path, so the invariant holds even against a corrupted store.
+// memberHarnessSpec loads the member's stored definition for name. A corrupt
+// blob is an error, not a miss, or a shipped profile the member did not ask
+// for would launch. A row shadowing a shipped name is rejected here too, in
+// case the store is corrupted.
 func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberID, name string) (HarnessSpec, bool, error) {
 	if member == "" {
 		return HarnessSpec{}, false, nil
@@ -908,6 +787,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 	return HarnessSpec{
 		TUIArgs:         def.TUIArgs,
 		HeadlessArgs:    def.HeadlessArgs,
+		ACPArgs:         def.ACPArgs,
 		Executable:      def.Executable,
 		ProfileRoot:     def.ProfileRoot,
 		CredentialPaths: def.CredentialPaths,
@@ -929,7 +809,15 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
-	if run.Mode == domain.LaunchTUI || persistSupervisor {
+	if run.ACP {
+		// An adapter cannot open a browser in a container; its login
+		// prints a URL instead.
+		env["NO_BROWSER"] = "1"
+	}
+	if run.Mode == domain.LaunchACP {
+		env[coordtransport.EnhancedEnv] = "1"
+	}
+	if run.Mode.Interactive() || persistSupervisor || run.ACP {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{

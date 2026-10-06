@@ -45,3 +45,25 @@ func TestRunTitleMigrationAndScan(t *testing.T) {
 		t.Fatalf("set title missing run = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSetRunAgentSession(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+
+	if err := db.SetRunAgentSession(context.Background(), run.ID, "session-1"); err != nil {
+		t.Fatalf("set agent session: %v", err)
+	}
+	got, err := db.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.HarnessSessionID != "session-1" || got.Status != domain.RunRunning {
+		t.Fatalf("run after set = session %q status %s, want session-1 running", got.HarnessSessionID, got.Status)
+	}
+	if err := db.SetRunAgentSession(context.Background(), "missing", "session-2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("set agent session on missing run = %v, want ErrNotFound", err)
+	}
+}

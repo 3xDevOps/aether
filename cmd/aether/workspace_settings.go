@@ -10,24 +10,24 @@ import (
 )
 
 // workspaceSettings implements `aether workspace settings`: without flags
-// it shows the workspace's settings; --steer-others changes the steering
+// it shows the workspace's settings; --message-others changes the messaging
 // policy over workspace.settings. Both methods are limited to admins by
 // the server.
 func workspaceSettings(args []string) error {
 	fs := flag.NewFlagSet("workspace settings", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	steer := fs.String("steer-others", "", "who may steer and kill other members' runs: everyone or admins-only")
+	messageOthers := fs.String("message-others", "", "who may message, control and kill other members' runs: everyone or admins-only")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether workspace settings [--workspace <name-or-id>] [--steer-others everyone|admins-only]")
+		return fmt.Errorf("usage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only]")
 	}
 	change := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "steer-others" {
+		if f.Name == "message-others" {
 			change = true
 		}
 	})
-	policy, err := parseSteerOthers(*steer)
+	policy, err := parseMessageOthers(*messageOthers)
 	if err != nil {
 		return err
 	}
@@ -68,31 +68,31 @@ func workspaceByID(list []protocol.Workspace, id string) (protocol.Workspace, bo
 	return protocol.Workspace{}, false
 }
 
-// parseSteerOthers maps the flag's spellings to the wire value: "" is the
+// parseMessageOthers maps the flag's spellings to the wire value: "" is the
 // permissive default on the wire, so "everyone" has to be spelled out by
 // the user and an empty flag means "no change".
-func parseSteerOthers(v string) (string, error) {
+func parseMessageOthers(v string) (string, error) {
 	switch v {
 	case "", "everyone":
 		return "", nil
 	case "admins-only", domain.SteerOthersAdminsOnly:
 		return domain.SteerOthersAdminsOnly, nil
 	default:
-		return "", fmt.Errorf("invalid --steer-others %q: want everyone or admins-only", v)
+		return "", fmt.Errorf("invalid --message-others %q: want everyone or admins-only", v)
 	}
 }
 
-// describeSteerOthers spells a wire value out the way the flag takes it,
+// describeMessageOthers spells a wire value out the way the flag takes it,
 // with what it means in the same breath.
-func describeSteerOthers(v string) string {
+func describeMessageOthers(v string) string {
 	if v == domain.SteerOthersAdminsOnly {
-		return "admins-only (only a run's owner and admins may steer or kill it)"
+		return "admins-only (only a run's owner and admins may message, control or kill it)"
 	}
-	return "everyone (collaborators may steer and kill each other's runs)"
+	return "everyone (collaborators may message, control and kill each other's runs)"
 }
 
 func printWorkspaceSettings(ws protocol.Workspace) {
 	fmt.Printf("workspace %s %s\n", ws.ID, ws.Name)
-	fmt.Printf("base branch   %s\n", ws.BaseBranch)
-	fmt.Printf("steer others  %s\n", describeSteerOthers(ws.SteerOthers))
+	fmt.Printf("base branch     %s\n", ws.BaseBranch)
+	fmt.Printf("message others  %s\n", describeMessageOthers(ws.SteerOthers))
 }

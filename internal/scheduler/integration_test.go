@@ -14,11 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// TestIntegrationHappyPathDocker drives the full TUI path against the real
-// Docker runtime: a scripted busybox "agent" runs on a TTY with the checkout
-// bind-mounted at /workspace, writes a file, exits cleanly into the
-// supervisor's reusable login shell, and the test explicitly closes the run
-// with committed results.
 func TestIntegrationHappyPathDocker(t *testing.T) {
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
@@ -31,9 +26,8 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Runtime = docker
-		// This TUI lifecycle test closes explicitly but does not exercise
-		// retained-container relaunch; destroy the container after close so
-		// the sidecar cleanup assertion remains meaningful.
+		// Destroy the container after close so the sidecar cleanup assertion
+		// remains meaningful.
 		cfg.RunContainerTTL = -time.Second
 		cfg.Harnesses = map[string]HarnessSpec{
 			// The leading sleep keeps the first output behind the attach:
@@ -71,7 +65,7 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 	waitFor(t, "harness exit", func() bool {
 		return strings.Contains(sess.output(), "[aether] harness exited with code 0")
 	})
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "printf 'scheduler-login-shell-ready\\n'"); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "printf 'scheduler-login-shell-ready\\n'", false, nil); err != nil {
 		t.Fatalf("Inject login-shell probe: %v", err)
 	}
 	waitFor(t, "login shell probe", func() bool {
@@ -87,7 +81,6 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 	}
 	waitStatusEvent(t, sub, run.ID, domain.RunMerged)
 
-	// The agent's TTY output reached the PTY seam.
 	sess = e.pty.session(run.ID)
 	if sess == nil {
 		t.Fatal("no pty session recorded")
@@ -97,7 +90,6 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 		t.Fatalf("pty output = %q", out)
 	}
 
-	// The agent's file write landed in the host-side checkout.
 	if _, err := os.Stat(filepath.Join(run.Worktree, "done.txt")); err != nil {
 		t.Fatalf("agent-written file missing from checkout: %v", err)
 	}

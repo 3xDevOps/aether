@@ -119,6 +119,10 @@ type Store interface {
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
+	// SetRunAgentSession records only the agent's own session id
+	// (Run.HarnessSessionID), leaving every other field untouched.
+	SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error
+	SetRunMode(ctx context.Context, id domain.RunID, mode domain.LaunchMode, acp bool) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error
@@ -128,10 +132,14 @@ type Store interface {
 	// SetRunArchived is the narrow, conditional archive/restore mutator;
 	// see its doc comment on the DB implementation for the exact rules.
 	SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error)
+	// SetMissionArchived archives or restores a swarm together with its
+	// runs; see its doc comment on the DB implementation.
+	SetMissionArchived(ctx context.Context, id domain.MissionID, runs []domain.RunID, at *time.Time) (bool, []domain.RunID, error)
 	// ClearRunOutcomeUnseen clears outcome_unseen while owner owns the
 	// run, and reports whether this call changed it.
 	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
+	DeleteMission(ctx context.Context, id domain.MissionID, runs []domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering
 	// it, and reports whether this call was the one that added them.
 	AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error)
@@ -178,6 +186,7 @@ type Store interface {
 	CostStore
 	ServerUpdateStore
 	CollaborationStore
+	RunMessageHistoryStore
 
 	Close() error
 }

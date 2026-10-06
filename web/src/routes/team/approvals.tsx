@@ -1,11 +1,10 @@
-import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Check, ShieldQuestion, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Badge } from '@/components/ui/badge'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { timeAgo } from '@/lib/format'
-import { useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
@@ -13,63 +12,8 @@ import type { RouteProps } from '@/routes/registry'
 import { refreshInbox } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { pendingApprovals, sortByCreated } from '@/store/approvals'
-import { useCapability } from '@/store/hooks'
-/** The visible queue signal while the navigation rail lives in the phone drawer. */
-export function ApprovalStatus() {
-  const inbox = useStore((s) => s.inbox)
-  const error = useStore((s) => s.inboxError)
-  const navigate = useStore((s) => s.navigate)
-  const phone = useMediaQuery('(max-width: 640px)')
-  const cap = useCapability()
-  const waiting = pendingApprovals(inbox).length
-  if (!phone || !cap.hasMethod('approval.list') || (waiting === 0 && !error)) return null
 
-  return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <button
-            {...triggerProps}
-            type="button"
-            onClick={() => {
-              navigate('approvals')
-            }}
-            className={cn(
-              focusRing,
-              'flex h-[22px] min-h-[22px] coarse:h-11 coarse:min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs hover:bg-toolbar-hover hover:text-foreground',
-            )}
-          >
-            <ShieldQuestion
-              className={cn(
-                'size-3.5',
-                error ? 'text-state-failed' : 'text-state-needs-attention',
-              )}
-              aria-hidden
-            />
-            <Chip
-              color={error ? 'danger' : 'warning'}
-              variant="soft"
-              size="sm"
-              className="max-w-44"
-            >
-              <Chip.Label className="truncate">
-                {error ? 'queue unreadable' : `${waiting} waiting`}
-              </Chip.Label>
-            </Chip>
-          </button>
-        )}
-      />
-      <Tooltip.Content>{error ?? 'Open Approvals'}</Tooltip.Content>
-    </Tooltip>
-  )
-}
-
-/**
- * The shared inbox: every workspace's pending permission requests and plan
- * pauses in one queue. Decisions go through `approval.decide`, so the
- * server attributes them and the refusal a member without steer gets is the
- * server's, never the form's.
- */
+/** Decisions go through `approval.decide`, so the server attributes them and owns the refusal for a member without steer. */
 export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   const inbox = useStore((s) => s.inbox)
   const error = useStore((s) => s.inboxError)
@@ -84,9 +28,8 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
     void refreshInbox(useStore, client)
   }, [client, showDecided])
 
-  // The queue as the last fetch saw it, with our own decisions laid over the
-  // top: a request we just decided reports its outcome instead of vanishing
-  // the moment we click, even though the next fetch no longer returns it.
+  // Our own decisions overlay the last fetch, so a request we just decided
+  // shows its outcome instead of vanishing when the next fetch drops it.
   const byID = new Map(Object.values(inbox).flat().map((a) => [a.id, a]))
   for (const done of Object.values(decisions)) byID.set(done.id, done)
   const rows = sortByCreated([...byID.values()]).filter(
@@ -100,8 +43,8 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
         subtitle={waiting === 1 ? '1 request waiting' : `${waiting} requests waiting`}
         actions={
           <Button
-            variant="outline"
-            size="default"
+            variant="secondary"
+            size="md"
             aria-pressed={showDecided}
             onClick={() => setShowDecided(!showDecided)}
           >
@@ -114,12 +57,12 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
           {error && (
             <p
               role="alert"
-              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
+              className="mb-3 border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-ui text-state-failed"
             >
               {error}
             </p>
           )}
-          <ul className="overflow-hidden border-y border-border">
+          <ul className="overflow-hidden border-y border-seam">
             {rows.map((approval) => (
               <Row
                 key={approval.id}
@@ -133,9 +76,9 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
           </ul>
           {rows.length === 0 && !error && (
             <div className="border-y border-dashed px-4 py-8 text-center">
-              <ShieldQuestion className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden />
-              <p className="text-sm font-medium">Nothing is waiting on a decision.</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">
+              <ShieldQuestion className="mx-auto mb-2 size-5 text-muted" aria-hidden />
+              <p className="text-ui font-medium">Nothing is waiting on a decision.</p>
+              <p className="mt-1 text-ui text-muted">
                 Requests will appear here when an agent needs your approval.
               </p>
             </div>
@@ -180,50 +123,40 @@ function Row({
   return (
     <li
       className={cn(
-        'border-b border-border px-3 py-3 last:border-b-0',
-        !open && 'bg-muted/10',
+        'border-b border-seam px-3 py-3 last:border-b-0',
+        !open && 'bg-chrome/10',
       )}
     >
       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Chip
-              color={open ? 'warning' : approval.decision === 'approved' ? 'success' : 'danger'}
-              variant="soft"
-              size="sm"
-            >
-              <Chip.Label>
-                {open
-                  ? 'Needs decision'
-                  : approval.decision === 'approved'
-                    ? 'Approved'
-                    : 'Denied'}
-              </Chip.Label>
-            </Chip>
-            <span className="min-w-0 break-words text-[13px] font-medium">{approval.action}</span>
+            <Badge tone={open ? 'needs-you' : approval.decision === 'approved' ? 'done' : 'failed'}>
+              {open ? 'Needs decision' : approval.decision === 'approved' ? 'Approved' : 'Denied'}
+            </Badge>
+            <span className="min-w-0 break-words text-ui font-medium">{approval.action}</span>
           </div>
           {approval.detail ? (
-            <div className="mt-2 border-l-2 border-border pl-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="mt-2 border-l-2 border-seam pl-2">
+              <p className="text-ui-sm font-medium text-muted">
                 Reason
               </p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 select-text">
+              <p className="mt-1 whitespace-pre-wrap break-words text-ui leading-5 select-text">
                 {approval.detail}
               </p>
             </div>
           ) : (
-            <p className="mt-2 text-[13px] text-muted-foreground">No additional reason provided.</p>
+            <p className="mt-2 text-ui text-muted">No additional reason provided.</p>
           )}
         </div>
         {open && (
           <span className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-            <Button size="default" disabled={busy} onClick={() => void decide(true)}>
+            <Button size="md" disabled={busy} onClick={() => void decide(true)}>
               <Check />
               Approve
             </Button>
             <Button
-              size="default"
-              variant="outline"
+              size="md"
+              variant="secondary"
               disabled={busy}
               onClick={() => void decide(false)}
             >
@@ -234,28 +167,28 @@ function Row({
         )}
       </div>
 
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
-        <span className="min-w-0 break-words font-medium text-foreground/80">
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ui text-muted">
+        <span className="min-w-0 break-words font-medium text-text/80">
           {workspace?.name ?? approval.workspace_id}
         </span>
         {run && (
           <button
             type="button"
-            onClick={() => navigate('terminal', { runId: run.id })}
+            onClick={() => navigate('run', { runId: run.id })}
             title={runLabel(run)}
             className={cn(
               focusRing,
-              'inline-flex min-h-[26px] coarse:min-h-11 min-w-0 max-w-full items-center truncate text-left hover:text-foreground hover:underline sm:max-w-60',
+              'inline-flex min-h-[26px] coarse:min-h-11 min-w-0 max-w-full items-center truncate text-left hover:text-text hover:underline sm:max-w-60',
             )}
           >
             {runLabel(run)}
           </button>
         )}
-        <time className="sm:ml-auto">{timeAgo(approval.created_at)}</time>
+        <RelativeTime at={approval.created_at} className="sm:ml-auto" />
       </div>
 
       {!open && (
-        <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[13px]">
+        <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-ui">
           <span
             aria-hidden
             className="size-2 shrink-0 rounded-full"
@@ -263,11 +196,11 @@ function Row({
           />
           {approval.decision === 'approved' ? 'Approved' : 'Denied'} by{' '}
           <span className="min-w-0 break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
-          {approval.decided_at && ` ${timeAgo(approval.decided_at)}`}
+          {approval.decided_at && <> <RelativeTime at={approval.decided_at} /></>}
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-2 border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-[13px] text-state-failed">
+        <p role="alert" className="mt-2 border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-ui text-state-failed">
           {error}
         </p>
       )}

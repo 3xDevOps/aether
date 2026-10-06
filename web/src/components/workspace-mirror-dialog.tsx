@@ -177,8 +177,7 @@ export function WorkspaceMirrorDialog({
       toast.success('Workspace source disabled')
     } catch (err) {
       setError(message(err))
-      // Do not leave stale ready/local-only controls visible after a failed
-      // disable. Only a successful status read can establish the next action.
+      // Only a successful status read can establish the next action.
       setResult(null)
       setDisableStateUnavailable(true)
       try {
@@ -216,81 +215,81 @@ export function WorkspaceMirrorDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 space-y-4 overflow-y-auto -mx-1 px-1">
-            {loading && <p className="text-xs text-muted-foreground">Loading source status…</p>}
+            {loading && <p className="text-ui-sm text-muted">Loading source status…</p>}
             {error && (
-              <p role="alert" className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs text-state-failed">
+              <p role="alert" className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-ui-sm text-state-failed">
                 {error}
               </p>
             )}
             {disableStateUnavailable && (
-              <p role="status" className="text-xs text-muted-foreground">
+              <p role="status" className="text-ui-sm text-muted">
                 The persisted source state could not be confirmed after disable failed. Reopen the dialog before trying again.
               </p>
             )}
             {!loading && result && (
-              <section aria-label="Source status" className="space-y-2 border-y bg-sidebar/40 px-3 py-2.5">
+              <section aria-label="Source status" className="space-y-2 border-y bg-chrome/40 px-3 py-2.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">State</p>
-                  <p className="font-mono text-[13px]" data-testid="mirror-state">
+                  <p className="text-ui-sm font-medium text-muted">State</p>
+                  <p className="font-code text-ui" data-testid="mirror-state">
                     {isDisabling ? 'disabling' : result.enabled ? result.status ?? 'Unknown' : 'local-only'}
                   </p>
                 </div>
                 {isDisabling && (
-                  <p role="status" className="text-xs text-muted-foreground">
+                  <p role="status" className="text-ui-sm text-muted">
                     Disabling the workspace source; other actions are unavailable until cleanup finishes.
                   </p>
                 )}
                 {result.enabled && !isDisabling && (
-                  <dl className="grid min-w-0 gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+                  <dl className="grid min-w-0 gap-x-4 gap-y-2 text-ui-sm sm:grid-cols-2">
                     <div className="min-w-0">
-                      <dt className="text-muted-foreground">Source</dt>
-                      <dd className="mt-0.5 break-all font-mono" title={result.source_url}>
-                        {result.source_url || '—'}
+                      <dt className="text-muted">Source</dt>
+                      <dd className="mt-0.5 break-all font-code" title={result.source_url}>
+                        {result.source_url || '-'}
                       </dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-muted-foreground">Source identity</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.source_identity || '—'}</dd>
+                      <dt className="text-muted">Source identity</dt>
+                      <dd className="mt-0.5 break-all font-code">{result.source_identity || '-'}</dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-muted-foreground">Branch</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.branch || '—'}</dd>
+                      <dt className="text-muted">Branch</dt>
+                      <dd className="mt-0.5 break-all font-code">{result.branch || '-'}</dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-muted-foreground">Observed SHA</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.observed_commit || '—'}</dd>
+                      <dt className="text-muted">Observed SHA</dt>
+                      <dd className="mt-0.5 break-all font-code">{result.observed_commit || '-'}</dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-muted-foreground">Accepted SHA</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.accepted_commit || '—'}</dd>
+                      <dt className="text-muted">Accepted SHA</dt>
+                      <dd className="mt-0.5 break-all font-code">{result.accepted_commit || '-'}</dd>
                     </div>
                     <div className="min-w-0 sm:col-span-2">
-                      <dt className="text-muted-foreground">Last checked</dt>
-                      <dd className="mt-0.5 break-all font-mono">
-                        {result.last_attempt_at ?? result.updated_at ?? '—'}
+                      <dt className="text-muted">Last checked</dt>
+                      <dd className="mt-0.5 break-all font-code">
+                        {result.last_attempt_at ?? result.updated_at ?? '-'}
                       </dd>
                     </div>
                   </dl>
                 )}
                 {!isDisabling && result.last_error && (
-                  <p role="status" className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-xs text-state-failed">
+                  <p role="status" className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-ui-sm text-state-failed">
                     {result.last_error}
                   </p>
                 )}
                 {!isDisabling && result.warning && (
-                  <p role="status" className="border-l-2 border-state-attention/60 bg-state-attention/5 px-3 py-2 text-xs text-state-attention">
+                  <p role="status" className="border-l-2 border-state-needs-you/60 bg-state-needs-you-soft px-3 py-2 text-ui-sm text-state-needs-you">
                     {result.warning}
                   </p>
                 )}
                 {!isDisabling && candidate && (
-                  <div className="space-y-2 border-t border-border/70 pt-2">
-                    <p className="text-xs text-state-attention">
-                      Candidate SHA <span className="font-mono">{candidate}</span> is not accepted.
+                  <div className="space-y-2 border-t border-seam/70 pt-2">
+                    <p className="text-ui-sm text-state-needs-you">
+                      Candidate SHA <span className="font-code">{candidate}</span> is not accepted.
                     </p>
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => setConfirmation('adopt')}
                     >
@@ -312,7 +311,7 @@ export function WorkspaceMirrorDialog({
                     autoComplete="off"
                     required
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-ui-sm text-muted">
                     Use a credential-free URL. This source is fetched by the server and owns the workspace base branch; it does not set checkout Origin or grant publishing access.
                   </p>
                 </div>
@@ -329,16 +328,16 @@ export function WorkspaceMirrorDialog({
                   <Label htmlFor="workspace-mirror-auth">Authentication</Label>
                   <select
                     id="workspace-mirror-auth"
-                    className="h-[26px] min-h-[26px] w-full rounded-[2px] border border-input bg-background px-2 text-[13px]"
+                    className="h-[26px] min-h-[26px] w-full rounded-[2px] border border-control bg-canvas px-2 text-ui"
                     value={auth}
                     onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}
                   >
                     <option value="public">Public HTTPS</option>
-                    <option value="deploy-key">Private repository — read-only deploy key</option>
+                    <option value="deploy-key">Private repository - read-only deploy key</option>
                   </select>
                 </div>
                 {auth === 'deploy-key' && (
-                  <div className="space-y-2 border-l-2 border-border/70 pl-3">
+                  <div className="space-y-2 border-l-2 border-seam/70 pl-3">
                     <div className="space-y-1">
                       <Label htmlFor="workspace-mirror-known-hosts">known_hosts (generic SSH only)</Label>
                       <Textarea
@@ -348,11 +347,11 @@ export function WorkspaceMirrorDialog({
                         placeholder="git.example.com ssh-ed25519 AAAA…"
                         rows={3}
                       />
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-ui-sm text-muted">
                         Paste the exact host key verified with the host administrator for a non-GitHub SSH source. Do not blindly trust ssh-keyscan output. GitHub uses its pinned host key.
                       </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">Install the generated key read-only with a repository administrator. It is not your native Git/gh publishing credential. After installation use Verify / Refresh; Save source rotates the key. Fetching is not approval: explicitly adopt the reviewed candidate.</p>
+                    <p className="text-ui-sm text-muted">Install the generated key read-only with a repository administrator. It is not your native Git/gh publishing credential. After installation use Verify / Refresh; Save source rotates the key. Fetching is not approval: explicitly adopt the reviewed candidate.</p>
                     {(result?.public_key || (result?.auth === 'deploy-key' && result.enabled)) && (
                       <div className="space-y-1">
                         <Label htmlFor="workspace-mirror-public-key">Public deploy key</Label>
@@ -360,7 +359,7 @@ export function WorkspaceMirrorDialog({
                           <pre
                             id="workspace-mirror-public-key"
                             ref={publicKeyRef}
-                            className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all border border-border/70 bg-muted px-2 py-1.5 font-mono text-xs"
+                            className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all border border-seam/70 bg-chrome px-2 py-1.5 font-code text-ui-sm"
                           >
                             {result?.public_key || 'The public key is only shown by the server after key setup.'}
                           </pre>
@@ -368,7 +367,7 @@ export function WorkspaceMirrorDialog({
                             <Button
                               type="button"
                               size="sm"
-                              variant="outline"
+                              variant="secondary"
                               onClick={() => void copyText(result.public_key ?? '', publicKeyRef.current)}
                             >
                               Copy public key
@@ -376,16 +375,16 @@ export function WorkspaceMirrorDialog({
                           )}
                         </div>
                         {(githubURL || configuredGithubURL) && (
-                          <div className="space-y-1 text-xs">
+                          <div className="space-y-1 text-ui-sm">
                             <a
-                              className="text-primary underline underline-offset-2"
+                              className="text-accent underline underline-offset-2"
                               href={githubURL || configuredGithubURL || '#'}
                               target="_blank"
                               rel="noreferrer"
                             >
                               Install this key in GitHub deploy keys
                             </a>
-                            <p className="break-all font-mono text-muted-foreground">
+                            <p className="break-all font-code text-muted">
                               {githubURL || configuredGithubURL}
                             </p>
                           </div>
@@ -399,16 +398,16 @@ export function WorkspaceMirrorDialog({
           </div>
           <DialogFooter className="flex-wrap border-t pt-3">
             {!disableStateUnavailable && (result?.enabled || isDisabling) && (
-              <Button type="button" variant="destructive" onClick={() => setConfirmation('disable')} disabled={busy}>
+              <Button type="button" variant="danger" onClick={() => setConfirmation('disable')} disabled={busy}>
                 {isDisabling ? 'Retry disable' : 'Disable source'}
               </Button>
             )}
             <span className="flex-1" />
-            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
               Close
             </Button>
             {!disableStateUnavailable && !isDisabling && result?.enabled && (
-              <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>
+              <Button type="button" variant="secondary" onClick={() => void refresh()} disabled={busy}>
                 {busy ? 'Checking…' : result.status === 'ready' ? 'Refresh' : 'Verify'}
               </Button>
             )}
@@ -426,7 +425,7 @@ export function WorkspaceMirrorDialog({
             <AlertDialogTitle>Adopt source candidate?</AlertDialogTitle>
             <AlertDialogDescription>
               This explicitly replaces the accepted workspace base with candidate SHA{' '}
-              <span className="font-mono">{candidate}</span>. Review the source change before continuing.
+              <span className="font-code">{candidate}</span>. Review the source change before continuing.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

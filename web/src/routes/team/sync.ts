@@ -1,39 +1,28 @@
-// The team surfaces are read models the gateway already serves: the approval
-// inbox, the presence roster, budgets, and workspace history. None of them has
-// a push channel of its own, so they refresh when the event cursor moves -
-// every event the store applies advances `lastSeq`, and that is the signal
-// that something a teammate did may have changed one of these reads.
+// Team read models are read whole on connect, reconnect or wake; between those,
+// `applyEvent` in `store/sync.ts` keeps them current.
 
 import { useEffect, useRef } from 'react'
 import { api, type Api } from '@/lib/api'
 import { onWake } from '@/lib/stream'
 import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
+import { inboxReadFailed, readInbox } from '@/store/approvals'
 import type { FeedFilters } from '@/store/timeline'
 
 /** Presence expires after 45s server-side; a third of it keeps us online. */
 const heartbeatMs = 15_000
-/**
- * Bursts of events coalesce into one refresh at most this often. Most
- * events change none of these reads - a diff snapshot moves the cursor
- * just as an approval does - so the floor is what keeps a chatty run from
- * turning into a request per event.
- */
+/** A wake within this long of the last full read does not read again. */
 const minGapMs = 2500
 /** How far back from the log head the feed opens, in event sequence. */
 const feedWindow = 500
 const feedPage = 200
 /** One read stops here, so a long log cannot be walked in a single click. */
 const maxPages = 5
-/** What that budget works out to, for the notice the view shows. */
 export const pageBudget = maxPages * feedPage
 
 /**
- * The workspace the centre view is showing, falling back to the active one.
  * Presence is keyed on (member, workspace), so this is the only workspace a
- * heartbeat may claim: beating every workspace would report the user online
- * in workspaces they have never opened, to teammates who are working in
- * them. An attach lives inside this view, so it needs no separate account.
+ * heartbeat may claim: beating every one would show the user online where they never looked.
  */
 export function focusedWorkspace(state: RootState): string {
   const { params } = state.route
@@ -43,12 +32,8 @@ export function focusedWorkspace(state: RootState): string {
 }
 
 /**
- * Re-reads every team surface, for every workspace. A workspace is a repo
- * plus its environment plan, so a deployment has a handful and they outlive
- * every run in them; both readouts fed from here ask a whole-deployment
- * question - the status bar claims the worst budget state anywhere, and the
- * queue count claims the whole queue - which no subset can answer. Failures
- * leave the last good data in place.
+ * Reads every workspace: the Team line's worst budget state and the queue
+ * count are whole-deployment claims no subset can answer.
  */
 export async function refreshTeam(store: RootStore, client: Api = api): Promise<void> {
   await Promise.all([
@@ -61,42 +46,36 @@ export async function refreshTeam(store: RootStore, client: Api = api): Promise<
   ])
 }
 
-/**
- * Every workspace's inbox. The queue is shared and a request against a run
- * that has since finished still needs deciding, so this reads every
- * workspace rather than only the ones with something running.
- */
+/** Reads every workspace: a request against a finished run still needs deciding. */
 export async function refreshInbox(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
   const id = s.startInboxRead()
-  const results = await Promise.all(
+  await Promise.all(
     Object.keys(s.workspaces).map((wsp) =>
-      client
-        .approvalList(wsp, s.showDecided)
-        .then((list) => {
-          if (store.getState().inboxRequest === id) store.getState().setInbox(wsp, list)
-          return null
-        })
-        .catch(message),
+      client.approvalList(wsp, s.showDecided).then(
+        (list) => {
+          const now = store.getState()
+          if (now.inboxRequest !== id) return
+          // An approval event applied meanwhile is newer than this answer.
+          if (now.inboxEvents[wsp] !== s.inboxEvents[wsp]) return readInbox(store, client, wsp)
+          now.setInbox(wsp, list)
+          now.setInboxError(wsp, null)
+        },
+        (err) => {
+          if (store.getState().inboxRequest === id) inboxReadFailed(store, client, wsp, err)
+        },
+      ),
     ),
   )
-  if (store.getState().inboxRequest !== id) return
-  store.getState().setInboxError(results.find((r) => r !== null) ?? null)
 }
 
-/** Tells the server we are here, in the workspace we are actually in. */
 export async function heartbeat(store: RootStore, client: Api = api): Promise<void> {
   const workspaceID = focusedWorkspace(store.getState())
   if (!workspaceID) return
   await client.presenceHeartbeat(workspaceID).catch(ignore)
 }
 
-/**
- * Every field the gauge reads. The totals move the bar and the components
- * fill the tooltip, so comparing the totals alone would pin a stale
- * breakdown - a server that starts reporting a new component while its
- * totals sit still would never reach the tooltip.
- */
+/** Compares every field: comparing totals alone would pin a stale breakdown in the tooltip. */
 function sameDisk(a: DiskUsage | undefined, b: DiskUsage): boolean {
   return (
     a !== undefined &&
@@ -110,53 +89,41 @@ function sameDisk(a: DiskUsage | undefined, b: DiskUsage): boolean {
   )
 }
 
-/**
- * Disk usage rides on `server.info` even though it arrives on its own
- * route: the status bar's gauge is the client's one reader of it, and the
- * shared `server.info` result cannot carry it. Only a real change is
- * written, so a quiet server does not re-render the shell every refresh.
- */
+/** Writes only a real change, so a quiet server does not re-render the shell every refresh. */
 function rememberDisk(disk: DiskUsage): void {
   const s = useStore.getState()
   if (!s.info || sameDisk(s.info.disk, disk)) return
   s.setInfo({ ...s.info, disk })
 }
 
-/**
- * Keeps the team reads current for as long as the status bar is mounted:
- * one refresh per burst of events, and a heartbeat on its own interval.
- */
+/** Reads in full on every reconnect: events missed while away are not all replayed. */
 export function useTeamRefresh(client: Api = api): void {
-  const runs = useStore((s) => s.runs)
   const route = useStore((s) => s.route)
-  const lastSeq = useStore((s) => s.lastSeq)
+  const offline = useStore((s) => s.connection !== 'live')
   const showDecided = useStore((s) => s.showDecided)
   const workspaceIDs = useStore((s) => Object.keys(s.workspaces).sort().join(','))
   const lastRun = useRef(0)
 
   useEffect(() => {
-    const wait = Math.max(0, minGapMs - (Date.now() - lastRun.current))
-    const timer = setTimeout(() => {
-      lastRun.current = Date.now()
-      void refreshTeam(useStore, client)
-    }, wait)
-    return () => clearTimeout(timer)
-  }, [runs, route, lastSeq, showDecided, workspaceIDs, client])
+    // Losing the connection is no reason to read; getting it back is.
+    if (offline && lastRun.current > 0) return
+    lastRun.current = Date.now()
+    void refreshTeam(useStore, client)
+  }, [offline, showDecided, workspaceIDs, client])
 
   useEffect(() => {
     void heartbeat(useStore, client)
-    const timer = setInterval(() => void heartbeat(useStore, client), heartbeatMs)
+    const timer = setInterval(() => {
+      void heartbeat(useStore, client)
+      // Disk usage has no event; the heartbeat's pace is plenty for a gauge.
+      void client.disk().then(rememberDisk).catch(ignore)
+    }, heartbeatMs)
     return () => clearInterval(timer)
   }, [route, client])
 
-  // A backgrounded tab freezes both timers above, so a phone comes back with
-  // presence already expired server-side and an inbox that may have gained an
-  // approval while it was away. Neither has a push channel, and the event
-  // cursor only moves if something else happened, so returning to the
-  // foreground is the signal. The fan-out keeps the same floor the debounced
-  // refresh has - flipping between two apps, or a cellular link flapping
-  // `online`, must not become 2 + 2N requests a time - while the heartbeat,
-  // one small request and the reason the wake exists, always goes.
+  // A backgrounded tab freezes the timer above, so presence has expired by wake.
+  // The full read keeps a floor so app flipping or a flapping link cannot
+  // multiply requests; the heartbeat always goes.
   useEffect(
     () =>
       onWake(() => {
@@ -172,10 +139,37 @@ export function useTeamRefresh(client: Api = api): void {
 }
 
 /**
- * Opens the feed on the most recent history. The reader pages forward
- * only, so the window is found by asking for a page past the end: the
- * answer carries the log head, and the window starts `feedWindow` before
- * it.
+ * A read that failed or stopped on its page budget leaves a gap the live tail
+ * cannot close, so the next event applied reads it again.
+ */
+export function useLiveFeed(active: boolean, client: Api = api): void {
+  const holdFeed = useStore((s) => s.holdFeed)
+  const live = useStore((s) => s.connection === 'live')
+  const wasLive = useRef(live)
+
+  useEffect(() => (active ? holdFeed() : undefined), [active, holdFeed])
+
+  useEffect(() => {
+    if (!active) return
+    return useStore.subscribe((s, prev) => {
+      if (s.lastSeq === prev.lastSeq || s.feedLoading) return
+      if (!s.feedError && !s.feedTruncated) return
+      // Nothing loaded means the opening probe may never have found the
+      // head; draining from zero would page the log from its start.
+      void (s.feed.length === 0 ? openFeed(useStore, client) : drain(useStore, client))
+    })
+  }, [active, client])
+
+  useEffect(() => {
+    const reconnected = live && !wasLive.current
+    wasLive.current = live
+    if (reconnected && active && !useStore.getState().feedLoading) void drain(useStore, client)
+  }, [live, active, client])
+}
+
+/**
+ * The reader pages forward only, so a probe past the end finds the log head
+ * and the window starts `feedWindow` before it.
  */
 export async function openFeed(store: RootStore, client: Api = api): Promise<void> {
   const { feedFilters, beginFeed } = store.getState()
@@ -201,11 +195,8 @@ export async function openFeed(store: RootStore, client: Api = api): Promise<voi
 }
 
 /**
- * Widens the window backwards. It reads the new stretch only, up to where
- * the old window began, and keeps everything already loaded: re-reading
- * the whole window would spend the page budget on history the feed
- * already has and lose the newest end of it, which is the end the reader
- * came for.
+ * Reads only the new stretch: re-reading the whole window would spend the
+ * page budget on loaded history and lose its newest end.
  */
 export async function olderFeed(store: RootStore, client: Api = api): Promise<void> {
   const until = store.getState().feedFloor
@@ -215,13 +206,10 @@ export async function olderFeed(store: RootStore, client: Api = api): Promise<vo
   const floor = Math.max(0, until - feedWindow)
   store.getState().extendFeed(floor, floor > 0)
   if (await read(store, client, floor, until, id)) return
-  // The stretch never fully loaded. Putting the floor back lets the next
-  // click retry it, instead of walking past a gap the feed would then
-  // silently skip forever.
+  // Restoring the floor lets the next click retry instead of skipping the gap forever.
   if (store.getState().feedRequest === id) store.getState().extendFeed(until, true)
 }
 
-/** Reads whatever the feed has not seen yet, from its cursor forward. */
 export async function drain(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
   if (!s.feedFilters.workspaceID) return
@@ -230,10 +218,8 @@ export async function drain(store: RootStore, client: Api = api): Promise<void> 
 }
 
 /**
- * Pages history into the feed from `after`, stopping at `until` - zero
- * means the log head. Every iteration re-checks the request stamp, so a
- * read the user has already moved on from writes nothing. False means the
- * read failed partway with the stamp still current.
+ * `until` zero means the log head. Every page re-checks the request stamp, so
+ * a superseded read writes nothing. False means it failed with the stamp current.
  */
 async function read(
   store: RootStore,
@@ -253,6 +239,8 @@ async function read(
       cursor = got.next_seq
       if (!got.more || (until > 0 && cursor >= until)) {
         store.getState().setFeedLoading(false)
+        // Read through to the head, nothing past the cursor is missing.
+        if (until === 0) store.getState().setFeedTruncated(false)
         return true
       }
     }
@@ -283,6 +271,6 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// A read that fails leaves the surface showing what it had; the next event
-// tries again.
+// A read that fails leaves the surface showing what it had; the next
+// heartbeat, reconnect or wake reads it again.
 function ignore(): void {}

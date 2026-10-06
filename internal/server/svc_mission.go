@@ -72,6 +72,7 @@ func init() {
 			},
 		}
 		if d.Runs != nil {
+			cfg.Retire = d.Runs
 			cfg.ObserveMissionRun = func(ctx context.Context, run domain.RunID) (mission.MissionRunObservation, error) {
 				observed, err := d.Runs.ObserveMissionRun(ctx, run)
 				if err != nil {

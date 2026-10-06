@@ -14,8 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// sessionState is the per-session-channel state shared between the
-// request loop and a subsystem handler.
 type sessionState struct {
 	mu         sync.Mutex
 	hasPTY     bool
@@ -36,11 +34,9 @@ func (st *sessionState) geometry() (cols, rows uint, hasPTY bool) {
 	return st.cols, st.rows, st.hasPTY
 }
 
-// handleSession serves one "session" channel: exactly one git exec or one
-// aether subsystem, plus pty-req / window-change bookkeeping for attach.
-// The context handed to handlers is canceled when the channel closes (the
-// request loop ends), so subsystem handlers observe channel teardown even
-// when they are not blocked on channel I/O.
+// handleSession serves one session channel: one git exec or one aether
+// subsystem. The handler context is canceled when the channel closes, so
+// handlers see teardown even when not blocked on channel I/O.
 func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc ssh.NewChannel, abortConn func()) {
 	ch, reqs, err := nc.Accept()
 	if err != nil {
@@ -108,6 +104,8 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				handler = func() { s.serveEvents(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemAttach:
 				handler = func() { s.serveAttach(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
+			case protocol.SubsystemACP:
+				handler = func() { s.serveACP(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemTerminal:
 				handler = func() { s.serveTerminal(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemDevBrowser:
@@ -125,7 +123,6 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 			reply(req, true)
 			s.spawn(handler)
 		default:
-			// shell and everything else are rejected.
 			reply(req, false)
 		}
 	}
@@ -137,9 +134,8 @@ func reply(req *ssh.Request, ok bool) {
 	}
 }
 
-// parseGitCommand recognizes the two git transport commands, in both the
-// hyphenated and two-word spellings, and extracts the workspace ID from
-// the path (optional single quotes, leading slash, and .git suffix).
+// parseGitCommand accepts hyphenated and two-word spellings; the path may
+// carry single quotes, a leading slash and a .git suffix.
 func parseGitCommand(cmd string) (op, wsID string, ok bool) {
 	fields := strings.Fields(cmd)
 	var path string
@@ -162,8 +158,6 @@ func parseGitCommand(cmd string) (op, wsID string, ok bool) {
 	return op, path, true
 }
 
-// runGitCommand validates the caller and workspace, then streams the pack
-// protocol through the git transport seam.
 func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch ssh.Channel, op, wsID string) {
 	defer func() { _ = ch.Close() }()
 	if err := s.checkMember(ctx, member); err != nil {
@@ -211,15 +205,11 @@ func sendExitStatus(ch ssh.Channel, code int) {
 	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(code)}))
 }
 
-// subsystemConn is the stream the events, attach and terminal handlers
-// serve: the session channel under SSH, an in-memory pipe for the
-// in-process client (Local). The wire contract is one header line in,
-// one ack line out, then raw bytes or framed terminal records, plus exit
-// status on the SSH channel.
+// subsystemConn is the SSH session channel, or an in-memory pipe for the
+// in-process client. Wire contract: one header line in, one ack line out,
+// then raw bytes or framed terminal records, plus exit status.
 type subsystemConn interface {
 	io.ReadWriteCloser
-	// exit reports the handler's exit status the way an SSH channel's
-	// exit-status request does.
 	exit(status int)
 }
 
@@ -230,9 +220,8 @@ type sshConn struct {
 	abort func()
 }
 
-// Status and close share the transport's packet writer with every channel.
-// Only abort that transport if the graceful operation itself stops progressing;
-// a responsive peer keeps its other sessions and receives the denial status.
+// Status and close share the transport's packet writer with every channel,
+// so abort the transport only if they stop progressing.
 func (c sshConn) exit(status int) {
 	timer := time.AfterFunc(sshChannelCloseTimeout, c.abort)
 	defer timer.Stop()

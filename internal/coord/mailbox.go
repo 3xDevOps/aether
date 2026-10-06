@@ -475,6 +475,9 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 	if err != nil {
 		return protocol.CoordInboxResult{}, internalError(method, err)
 	}
+	if acked {
+		s.kickOutbox()
+	}
 	if len(msgs) == 0 && waiter != nil {
 		// Close the race between the first read and waiter registration by
 		// reading once more before sleeping.
@@ -934,8 +937,17 @@ func (s *Service) waitOutbox(delay time.Duration) bool {
 	select {
 	case <-timer.C:
 		return true
+	case <-s.outboxKick:
+		return true
 	case <-s.serveCtx.Done():
 		return false
+	}
+}
+
+func (s *Service) kickOutbox() {
+	select {
+	case s.outboxKick <- struct{}{}:
+	default:
 	}
 }
 
@@ -1037,7 +1049,7 @@ func (s *Service) listPendingAudits(ctx context.Context, audit store.CoordAuditS
 		}
 		if len(rows) > 0 {
 			last := rows[len(rows)-1]
-			s.auditCursor = store.CoordOutboxCursor{CreatedAt: last.CreatedAt, ID: last.MessageID}
+			s.auditCursor = store.CoordOutboxCursor{CreatedAt: last.CreatedAt, ID: last.EventID}
 		}
 		return rows, nil
 	}
@@ -1077,8 +1089,8 @@ func (s *Service) recordAuditFailure(ctx context.Context, audit store.CoordAudit
 	if permanent {
 		next = time.Time{}
 	}
-	if rerr := retry.RecordCoordAuditPublicationFailure(ctx, pub.MessageID, err.Error(), next, permanent); rerr != nil {
-		slog.Warn("coord audit outbox failure state unavailable", "message_id", pub.MessageID, "error", rerr)
+	if rerr := retry.RecordCoordAuditPublicationFailure(ctx, pub.EventID, err.Error(), next, permanent); rerr != nil {
+		slog.Warn("coord audit outbox failure state unavailable", "event_id", pub.EventID, "error", rerr)
 	}
 }
 
@@ -1086,24 +1098,29 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 	if pub == nil || pub.MessageID == "" {
 		return store.ErrCoordAuditPublicationConflict
 	}
-	eventID := store.CoordAuditEventID(pub.MessageID)
-	if pub.EventID != eventID {
+	// Coordination is a run-originated protocol event, not a human action:
+	// the actor stays empty rather than naming the run's mutable owner.
+	ev := events.Event{ID: pub.EventID, Time: pub.CreatedAt, WorkspaceID: pub.WorkspaceID}
+	switch {
+	case pub.EventType == store.CoordAuditMessage && pub.EventID == store.CoordAuditEventID(pub.MessageID):
+		ev.RunID = pub.FromRun
+		ev.Payload = events.CoordMessagePayload{
+			MessageID: pub.MessageID, WorkspaceID: pub.WorkspaceID, MissionID: pub.MissionID,
+			FromRunID: pub.FromRun, ToRunID: pub.ToRun, Kind: pub.Kind, CorrelationID: pub.CorrelationID,
+		}
+	case pub.EventType == store.CoordAuditAcked && pub.EventID == store.CoordAuditAckedEventID(pub.MessageID) &&
+		pub.AckedAt != nil:
+		ev.RunID = pub.ToRun
+		ev.Payload = events.CoordMessageAckedPayload{
+			MessageID: pub.MessageID, ToRunID: pub.ToRun, AckedAt: pub.AckedAt.UTC().Format(time.RFC3339Nano),
+		}
+	default:
 		return store.ErrCoordAuditPublicationConflict
 	}
-	_, err := s.cfg.Bus.Publish(ctx, events.Event{
-		ID: eventID, Time: pub.CreatedAt, WorkspaceID: pub.WorkspaceID, RunID: pub.FromRun,
-		// Coordination is a run-originated protocol event, not a human
-		// action. Never resolve the mutable current owner for attribution.
-		ActorID: "",
-		Payload: events.TimelinePayload{
-			Kind:    events.TimelineNote,
-			Message: fmt.Sprintf("coordination message to run %s: %s", pub.ToRun, pub.Body),
-		},
-	})
-	if err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
+	if _, err := s.cfg.Bus.Publish(ctx, ev); err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
 		return err
 	}
-	return outbox.MarkCoordAuditPublished(ctx, pub.MessageID, eventID)
+	return outbox.MarkCoordAuditPublished(ctx, pub.EventID)
 }
 
 // sendMessage is shared by send, ask, and reply. For replies, correlated is
@@ -1226,7 +1243,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	}
 	if created {
 		if audit, ok := s.cfg.Mail.(store.CoordAuditStore); ok {
-			if pub, aerr := audit.GetCoordAuditPublication(ctx, msg.ID); aerr == nil {
+			if pub, aerr := audit.GetCoordAuditPublication(ctx, store.CoordAuditEventID(msg.ID)); aerr == nil {
 				if pubErr := s.publishCoordAudit(ctx, audit, pub); pubErr != nil {
 					slog.Warn("coord: audit publication deferred", "message_id", msg.ID, "error", pubErr)
 				}
@@ -1325,6 +1342,7 @@ func (s *Service) wakeInbox(run domain.RunID) {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)
 	}
+	s.wakeEnhancedLocked(run)
 }
 
 type bucket struct {

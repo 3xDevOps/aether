@@ -1,13 +1,8 @@
 // The update prompts at the smallest window the desktop shell allows, and at
-// one smaller than that.
-//
-// The prompts render above the whole app in a column that cannot scroll
-// sideways and, before the shell had a minimum, could be made shorter than
-// they are. Two things went wrong there. The strip wrapped, so its controls
-// left the top right of the prompt and reappeared at the bottom left under
-// the prose - at 1366px wide and narrower, which is most laptops. And once
-// the prompts were taller than the window, everything below them, the app
-// included, went off the bottom edge.
+// one smaller than that. The sidebar says in one row that an update exists;
+// its Update opens a dialog holding every prompt that applies. However tall
+// the prompts grow, the dialog scrolls inside itself and the app behind it
+// stays where it was.
 //
 // One `aether gui` per test and no server: the CLI half of `update.check` is
 // answered on the member's own machine, so the prompts need nothing else.
@@ -85,10 +80,10 @@ const test = base.extend<{ gateway: Gateway }>({
 })
 
 /**
- * Opens the dashboard as the desktop app does. The bridge in
- * `desktop/preload.js` makes the SPA draw its own title bar and, because the
- * shell version cannot match the CLI serving it, stack the stale-shell prompt
- * above the CLI one. Two prompts at once is the state the report came from.
+ * Opens the dashboard as the desktop app does, then the updates dialog from
+ * the sidebar's notice row. The bridge in `desktop/preload.js` makes the SPA
+ * draw its window bar and, because the shell version cannot match the CLI
+ * serving it, list the stale-shell prompt above the CLI one.
  */
 async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
   await page.addInitScript(() => {
@@ -107,13 +102,10 @@ async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
     }
   })
   await page.goto(gateway.url)
-  // The prompt and status bar prove the app surface mounted. The splash has
-  // its own semantic startup marker; wait for it to detach before measuring,
-  // rather than racing the handoff overlay.
-  const stalePrompt = page.getByText('The desktop app is out of date.')
-  await expect(stalePrompt).toBeVisible()
-  await page.locator('[aria-label="Starting Aether"]').waitFor({ state: 'detached' })
-  await expect(page.getByRole('contentinfo')).toBeVisible()
+  const sidebar = page.getByRole('navigation', { name: 'Aether' })
+  await expect(sidebar.getByText(/is available/)).toBeVisible()
+  await sidebar.getByRole('button', { name: 'Update', exact: true }).click()
+  await expect(page.getByText('The desktop app is out of date.')).toBeVisible()
 }
 
 /** The opening words of the two prompts a stale desktop shell puts up. */
@@ -123,56 +115,23 @@ const prompts = ['The desktop app is out of date.', 'is available.']
  * what it installed rather than what is on offer. */
 const installedPrompts = ['The desktop app is out of date.', 'is installed.']
 
-/**
- * Both prompts expose their actionable controls on their own first row. This
- * is the regression: while the strip wrapped, the controls sat under the
- * prose wherever it was too wide to share the row.
- */
-async function expectControlsOnFirstRow(
-  page: Page,
-  headlines: string[] = prompts,
-): Promise<void> {
-  // The prompts are found by their own opening words rather than by role
-  // alone: other surfaces announce themselves with role="status" too, and a
-  // walk that escaped the strip would measure the app instead.
-  const rows = await page.evaluate((headlines: string[]) => {
-    const primaryActionNames: Record<string, true> = {
-      'Update now': true,
-      'Updating...': true,
-      'Rebuilding...': true,
-      'Relaunching...': true,
+/** Every prompt's actions are on screen, inside the dialog that holds them. */
+async function expectControlsInView(page: Page, headlines: string[] = prompts): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: 'Updates' })
+  for (const headline of headlines) {
+    const prompt = dialog.getByRole('status').filter({ hasText: headline })
+    await expect(prompt).toBeVisible()
+    for (const control of await prompt.getByRole('button').all()) {
+      await control.scrollIntoViewIfNeeded()
+      await expect(control).toBeInViewport({ ratio: 1 })
     }
-    return headlines.map((headline) => {
-      const prompt = [...document.querySelectorAll('[role="status"]')].find((el) =>
-        el.textContent?.includes(headline),
-      )
-      if (!prompt) return null
-      // Select the controls by their visible semantics, not by the
-      // implementation's child order or utility classes.
-      const controls = [...prompt.querySelectorAll<HTMLElement>('button, a')].filter(
-        (control) => {
-          if (control.getAttribute('aria-label') === 'Dismiss') return true
-          if (control.tagName === 'BUTTON') {
-            return primaryActionNames[control.textContent?.trim() ?? ''] === true
-          }
-          return control.textContent?.trim() === 'Release notes'
-        },
-      )
-      const top = prompt.getBoundingClientRect().top
-      return controls
-        .filter(
-          (control) =>
-            control.getClientRects().length > 0 &&
-            getComputedStyle(control).visibility !== 'hidden',
-        )
-        .map((control) => Math.round(control.getBoundingClientRect().top - top))
-    })
-  }, headlines)
-  for (const offsets of rows) {
-    expect(offsets).not.toBeNull()
-    expect(offsets?.length).toBeGreaterThan(0)
-    for (const offset of offsets ?? []) expect(offset).toBeLessThan(40)
   }
+}
+
+/** The app behind the dialog keeps its whole sidebar on screen. The modal
+ * hides it from the accessibility tree, so it is found by its id. */
+async function expectAppInView(page: Page): Promise<void> {
+  await expect(page.locator('#sidebar')).toBeInViewport({ ratio: 1 })
 }
 
 const { width, height } = minimumWindow()
@@ -204,24 +163,15 @@ test('the update prompt offers its button where the prompt starts', async ({
   await expect(page.getByRole('button', { name: 'Dismiss' }).first()).toBeInViewport({
     ratio: 1,
   })
-  await expectControlsOnFirstRow(page)
-  // The prompts must not push the app off the bottom either: the status bar
-  // is the last row of the shell, and its right-hand group is the part that
-  // used to be squeezed off the edge.
-  await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
-  await expect(page.getByRole('button', { name: 'Search runs and commands' })).toBeInViewport({
-    ratio: 1,
-  })
-  await expect(page.getByRole('button', { name: 'Keyboard shortcuts' })).toBeInViewport({
-    ratio: 1,
-  })
+  await expectControlsInView(page)
+  await expectAppInView(page)
 
   await button.click()
   await applyStarted
-  await expect(page.getByRole('button', { name: 'Updating...' })).toBeInViewport({
+  await expect(page.getByRole('button', { name: 'Updating…' })).toBeInViewport({
     ratio: 1,
   })
-  await expectControlsOnFirstRow(page)
+  await expectControlsInView(page)
 })
 
 test('the update prompt keeps its button in place while the app rebuilds', async ({
@@ -247,10 +197,10 @@ test('the update prompt keeps its button in place while the app rebuilds', async
 
   await openDesktop(page, gateway)
   await page.getByRole('button', { name: 'Update now' }).click()
-  await expect(page.getByRole('button', { name: 'Rebuilding...' })).toBeInViewport({
+  await expect(page.getByRole('button', { name: 'Rebuilding…' })).toBeInViewport({
     ratio: 1,
   })
-  await expectControlsOnFirstRow(page, installedPrompts)
+  await expectControlsInView(page, installedPrompts)
 })
 
 for (const [state, status, detail] of [
@@ -275,7 +225,7 @@ for (const [state, status, detail] of [
     // where it was.
     await expect(page.getByText(detail)).toBeVisible()
     await expect(button).toBeInViewport({ ratio: 1 })
-    await expectControlsOnFirstRow(page)
+    await expectControlsInView(page)
   })
 }
 
@@ -307,11 +257,11 @@ test('a long build error cannot hide the prompt underneath it', async ({
   expect(clamped).toBe(true)
 
   // Bounded where it is printed, so however long it runs it cannot scroll the
-  // next prompt's controls out of the strip.
+  // next prompt's controls out of the dialog.
   await expect(page.getByRole('button', { name: 'Update now' })).toBeInViewport({
     ratio: 1,
   })
-  await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
+  await expectAppInView(page)
 })
 
 // A browser tab has no minimum: `aether gui` prints a URL and the member can
@@ -335,7 +285,7 @@ test.describe('a window smaller than the shell allows', () => {
     await expect(page.getByRole('button', { name: 'Update now' })).toBeInViewport({
       ratio: 1,
     })
-    await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
-    await expectControlsOnFirstRow(page)
+    await expectAppInView(page)
+    await expectControlsInView(page)
   })
 })

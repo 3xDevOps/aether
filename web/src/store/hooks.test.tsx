@@ -1,58 +1,63 @@
 import { render, screen } from '@testing-library/react'
 import { useStore } from '@/store'
-import { useAttentionCount } from '@/store/hooks'
+import { useNeedsYouCount } from '@/store/hooks'
 import { toRecord } from '@/store/runs'
-import { alice, roomMessage, run, workspace } from '@/test/fixtures'
+import { alice, bob, otherWorkspace, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 
-function Probe() {
-  return <output aria-label="attention count">{useAttentionCount()}</output>
+function Probe({ workspace }: { workspace?: string }) {
+  return <output aria-label="needs you count">{useNeedsYouCount(workspace)}</output>
 }
 
-describe('attention hooks', () => {
+const count = () => screen.getByLabelText('needs you count').textContent
+
+describe('useNeedsYouCount', () => {
   beforeEach(() => {
     useStore.setState({
+      info: serverInfo,
       activeWorkspace: workspace.id,
-      groupBy: 'status',
       runs: {},
       roomMessages: {},
-      members: {},
+      members: { [alice.id]: alice, [bob.id]: bob },
       inbox: {},
+      approvalsByRun: {},
     })
   })
 
-  it('counts a run with both native input and an unanswered room question once', () => {
-    const attention = run({
-      id: 'attention',
-      status: 'running',
+  it('counts a run with both native input and a room question once', () => {
+    const asked = run({
+      id: 'asked',
       pending_inputs: [{ id: 'q1', session_id: 'session-1', kind: 'question' }],
     })
     useStore.setState({
-      runs: { [attention.id]: toRecord(attention) },
-      members: { [alice.id]: alice },
+      runs: { [asked.id]: toRecord(asked) },
       roomMessages: {
-        [attention.id]: [roomMessage({ run_id: attention.id, kind: 'question', body: 'Need a decision' })],
+        [asked.id]: [roomMessage({ run_id: asked.id, actor_id: bob.id, kind: 'question', body: 'Need a decision' })],
       },
     })
-
     render(<Probe />)
-
-    expect(screen.getByLabelText('attention count').textContent).toBe('1')
+    expect(count()).toBe('1')
   })
-  it('counts unanswered questions from a fresh run snapshot before room open', () => {
-    const attention = run({ id: 'unopened', status: 'running', unanswered_questions: 1 })
+
+  it('counts unanswered questions from a fresh run snapshot before the room opens', () => {
+    const unopened = run({ id: 'unopened', unanswered_questions: 1 })
+    useStore.setState({ runs: { [unopened.id]: toRecord(unopened) } })
+    render(<Probe />)
+    expect(count()).toBe('1')
+  })
+
+  it('treats a zero snapshot count as authoritative over stale room history', () => {
+    const answered = run({ id: 'answered', unanswered_questions: 0 })
     useStore.setState({
-      runs: { [attention.id]: toRecord(attention) },
-      members: { [alice.id]: alice },
+      runs: { [answered.id]: toRecord(answered) },
+      roomMessages: {
+        [answered.id]: [roomMessage({ run_id: answered.id, actor_id: bob.id, kind: 'question' })],
+      },
     })
-
     render(<Probe />)
-
-    expect(screen.getByLabelText('attention count').textContent).toBe('1')
+    expect(count()).toBe('0')
   })
 
-  it('does not badge an archived, final run stuck with an unanswered question', () => {
-    // Same hide guard as the sidebar and board: once a run is archived and
-    // its status is final, it is off every list - including this count.
+  it('leaves out an archived, final run', () => {
     const archived = run({
       id: 'archived',
       status: 'merged',
@@ -60,43 +65,29 @@ describe('attention hooks', () => {
       archived_at: '2026-08-14T10:00:00Z',
       deletes_at: '2026-08-28T10:00:00Z',
     })
-    useStore.setState({
-      runs: { [archived.id]: toRecord(archived) },
-      members: { [alice.id]: alice },
-    })
-
+    useStore.setState({ runs: { [archived.id]: toRecord(archived) } })
     render(<Probe />)
-
-    expect(screen.getByLabelText('attention count').textContent).toBe('0')
+    expect(count()).toBe('0')
   })
 
-  it('leaves an agent outcome awaiting review out of the Needs input count', () => {
-    // Review lists the run in Idle; only a structured request raises Needs input.
-    const success = run({ id: 'success', status: 'completed', outcome_unseen: true })
-    const failure = run({ id: 'failure', status: 'failed', outcome_unseen: true })
-    useStore.setState({
-      runs: Object.fromEntries([success, failure].map((r) => [r.id, toRecord(r)])),
-      members: { [alice.id]: alice },
-    })
-
+  it("counts the viewer's unreviewed outcomes, not another member's", () => {
+    const mine = run({ id: 'mine', status: 'completed', outcome_unseen: true })
+    const theirs = run({ id: 'theirs', member_id: bob.id, status: 'failed', outcome_unseen: true })
+    useStore.setState({ runs: Object.fromEntries([mine, theirs].map((r) => [r.id, toRecord(r)])) })
     render(<Probe />)
-    expect(screen.getByLabelText('attention count').textContent).toBe('0')
+    expect(count()).toBe('1')
   })
 
-  it('treats a modern zero count as authoritative over stale room history', () => {
-    const answered = run({ id: 'answered', status: 'running', unanswered_questions: 0 })
-    useStore.setState({
-      runs: { [answered.id]: toRecord(answered) },
-      members: { [alice.id]: alice },
-      roomMessages: {
-        [answered.id]: [
-          roomMessage({ run_id: answered.id, kind: 'question', body: 'Already answered' }),
-        ],
-      },
-    })
-
-    render(<Probe />)
-
-    expect(screen.getByLabelText('attention count').textContent).toBe('0')
+  it('counts every workspace, or one when named', () => {
+    const here = run({ id: 'here', status: 'needs-attention' })
+    const there = run({ id: 'there', workspace_id: otherWorkspace.id, status: 'needs-attention' })
+    useStore.setState({ runs: Object.fromEntries([here, there].map((r) => [r.id, toRecord(r)])) })
+    render(
+      <>
+        <Probe />
+        <Probe workspace={otherWorkspace.id} />
+      </>,
+    )
+    expect(screen.getAllByLabelText('needs you count').map((node) => node.textContent)).toEqual(['2', '1'])
   })
 })

@@ -5,7 +5,7 @@ import type { Api } from '@/lib/api'
 import { githubLoginCommand } from '@/lib/github'
 import type { GatewayCapabilities, GitHubProbeResult } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
-import { AgentsStep } from '@/routes/onboarding/agents-step'
+import { AgentStep } from '@/routes/onboarding/agent-step'
 import { useStore } from '@/store'
 import {
   registerEnvTerminalSocket,
@@ -22,7 +22,7 @@ const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
   ws: ['events', 'attach', 'terminal'],
-  local: ['link.status', 'link.repo', 'env.harnesses'],
+  local: ['link.status', 'link.repo', 'env.agents'],
 }
 
 function seed(caps: GatewayCapabilities = localCaps) {
@@ -35,7 +35,7 @@ function seed(caps: GatewayCapabilities = localCaps) {
     hydrated: true,
     hydrationError: null,
     route: { name: 'onboarding', params: {} },
-    onboardingStep: 'Link',
+    onboardingStep: 'Connect',
     onboardingWorkspace: '',
     onboardingRepo: null,
   })
@@ -60,14 +60,13 @@ function renderStep(client: Api, caps: GatewayCapabilities = localCaps) {
   function Host() {
     const [setup, onSetup] = useState('')
     return (
-      <AgentsStep
+      <AgentStep
         client={client}
         caps={capability(caps)}
-        workspace={workspace}
         setup={setup}
         onSetup={onSetup}
         onNext={onNext}
-        onReady={vi.fn()}
+        back={setup ? <button type="button" onClick={() => onSetup('')}>Back</button> : null}
       />
     )
   }
@@ -102,10 +101,16 @@ function attachMainTab(): EnvTerminalSocket {
   return socket
 }
 
+function expandGitHub() {
+  const trigger = screen.getByRole('button', { name: /^GitHub/ })
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
+}
+
 /** Opens the Connect GitHub sub-screen from the step's own screen, once the
  * harness list the step loads on mount has settled. */
 async function open() {
   await screen.findByText('Claude Code')
+  expandGitHub()
   fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
   await act(async () => {})
   // Mounting the dock marks its connection unattached until the server
@@ -114,10 +119,8 @@ async function open() {
   act(() => setEnvTerminalSocketReady('main', true))
 }
 
-/** Walks the whole wizard from Link to the Agents step. */
 async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
   fireEvent.click(
     await screen.findByRole('button', { name: `Use ${workspace.name}` }),
   )
@@ -146,12 +149,12 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi())
 
     // The closed section is part of the step, not a screen of its own.
-    expect(
-      await screen.findByRole('region', { name: 'Connect GitHub' }),
-    ).toBeDefined()
+    await screen.findByText('Claude Code')
+    expandGitHub()
+    expect(screen.getByRole('region', { name: 'Connect GitHub' })).toBeDefined()
     await open()
 
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Environment terminal' })).toBeDefined()
     // Ctrl-U, the kill-line every shell the terminal opens honors, so the
     // command cannot land on top of whatever the member typed at the
     // prompt while the check was out.
@@ -209,7 +212,8 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
         'github.connect: not logged in to github.com in the environment terminal; run gh auth login there first',
       ),
     ).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     expect(onNext).toHaveBeenCalled()
   })
 
@@ -229,7 +233,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     const status = screen
       .getAllByRole('status')
       .map((node) => node.textContent)
-    expect(status).toContain('Checking your environment terminal for gh...')
+    expect(status).toContain('Checking your Environment for gh…')
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(socket.send).not.toHaveBeenCalled()
   })
@@ -336,7 +340,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     expect(socket.send).not.toHaveBeenCalled()
     expect(
       screen.getByText(
-        /gh 2\.45\.0 in your environment terminal cannot answer the login check; 2\.81\.0 is the oldest that can\./,
+        /gh 2\.45\.0 in your Environment cannot answer the login check; 2\.81\.0 is the oldest that can\./,
       ),
     ).toBeDefined()
     // A release-tagged standard image never moves in the registry, so
@@ -404,7 +408,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     await open()
 
     expect(
-      screen.getByText('gh is in your environment terminal but would not run.'),
+      screen.getByText('gh is in your Environment but would not run.'),
     ).toBeDefined()
     expect(screen.getByText(/permission denied/)).toBeDefined()
     // Connecting would only collect the matching refusal.
@@ -447,7 +451,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi())
     await open()
     expect(
-      await screen.findByText('The login command is ready in your environment terminal:'),
+      await screen.findByText('The login command is ready in your Environment:'),
     ).toBeDefined()
 
     // Stopping the environment makes the standing answer describe a
@@ -457,7 +461,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     })
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(
-      screen.getByText('Waiting for your environment terminal to start...'),
+      screen.getByText('Waiting for your Environment to start…'),
     ).toBeDefined()
   })
 
@@ -465,7 +469,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi(), { ...localCaps, ws: ['events', 'attach'] })
     await open()
 
-    expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Environment terminal' })).toBeNull()
     expect(screen.getByText('aether terminal')).toBeDefined()
     expect(screen.getByText(githubLoginCommand)).toBeDefined()
     expect(screen.getByText('aether github connect')).toBeDefined()
@@ -483,18 +487,16 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     await toAgentsStep()
     await open()
 
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Environment terminal' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Connect GitHub' }),
-      ).toBeDefined()
+      expect(screen.getByRole('button', { name: /^GitHub/ })).toBeDefined()
     })
     expect(
       screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('Agents')
+    ).toContain('Agent')
 
     // Only now does Back leave the step.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))

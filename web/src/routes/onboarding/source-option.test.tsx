@@ -123,7 +123,7 @@ describe('onboarding source option', () => {
       const status = screen.getByRole('status', { name: 'Source mirror status' })
       expect(status.textContent).toContain('Source mirror configured.')
       expect(status.textContent).toContain(current.source_url)
-      expect(status.textContent).not.toContain('Checking source mirror status...')
+      expect(status.textContent).not.toContain('Checking source mirror status…')
     })
 
     await act(async () => {
@@ -133,7 +133,7 @@ describe('onboarding source option', () => {
     const status = screen.getByRole('status', { name: 'Source mirror status' })
     expect(status.textContent).toContain('Source mirror configured.')
     expect(status.textContent).toContain(current.source_url)
-    expect(status.textContent).not.toContain('Checking source mirror status...')
+    expect(status.textContent).not.toContain('Checking source mirror status…')
     expect(status.textContent).not.toContain('Could not check source mirror status:')
   })
 
@@ -158,7 +158,7 @@ describe('onboarding source option', () => {
       const status = screen.getByRole('status', { name: 'Source mirror status' })
       expect(status.textContent).toContain('Source mirror configured.')
       expect(status.textContent).toContain(current.source_url)
-      expect(status.textContent).not.toContain('Checking source mirror status...')
+      expect(status.textContent).not.toContain('Checking source mirror status…')
     })
 
     await act(async () => {
@@ -168,7 +168,7 @@ describe('onboarding source option', () => {
     const status = screen.getByRole('status', { name: 'Source mirror status' })
     expect(status.textContent).toContain('Source mirror configured.')
     expect(status.textContent).toContain(current.source_url)
-    expect(status.textContent).not.toContain('Checking source mirror status...')
+    expect(status.textContent).not.toContain('Checking source mirror status…')
     expect(status.textContent).not.toContain('Could not check source mirror status:')
   })
 

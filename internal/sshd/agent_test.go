@@ -28,7 +28,7 @@ func newAgentTestServer(t *testing.T) (*Server, *domain.Member) {
 	if createMemberErr := db.CreateMember(ctx, member); createMemberErr != nil {
 		t.Fatal(createMemberErr)
 	}
-	return &Server{cfg: Config{Store: db}}, member
+	return &Server{cfg: Config{Store: db, Runs: &fakeRuns{}}}, member
 }
 
 func validAgentDefinition() protocol.AgentDefinition {
@@ -172,10 +172,27 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 	}
 }
 
+func TestAgentListSwitchableFollowsTheResolvedDefinition(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	s.cfg.Runs = &fakeRuns{unswitchable: map[string]bool{"claude": true}}
+	result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+	if rpcErr != nil {
+		t.Fatalf("agentList: %+v", rpcErr)
+	}
+	switchable := map[string]bool{}
+	for _, a := range result.(protocol.AgentListResult).Agents {
+		switchable[a.Name] = a.Switchable
+	}
+	if switchable["claude"] || !switchable["omp"] || switchable["codex"] {
+		t.Fatalf("switchable = %v, want only omp", switchable)
+	}
+}
+
 func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
 	t.Parallel()
 	s, member := newAgentTestServer(t)
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +254,7 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			s, member := newAgentTestServer(t)
-			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -290,7 +307,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,13 +400,17 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
 	}
 	for name, want := range map[string]protocol.AgentInfo{
-		"claude": {Name: "claude", Source: "shipped", Installed: true, LoginMissing: true},
-		"codex":  {Name: "codex", Source: "shipped", Installed: true},
-		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
-		"omp":    {Name: "omp", Source: "shipped", Installed: false, Unavailable: refusal},
+		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true,
+			Enhanced: "adapter", Switchable: true, DefaultMode: "tui", LoginMissing: true},
+		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true,
+			Enhanced: "adapter", DefaultMode: "tui", EnhancedDefault: true},
+		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true,
+			Enhanced: "none", DefaultMode: "tui", OwnAccountOnly: true},
+		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false,
+			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal},
 	} {
 		got := agents[name]
-		got.InstallScript = ""
+		got.InstallScript, got.EnhancedInstallScript = "", ""
 		if got != want {
 			t.Fatalf("shared %s = %+v, want %+v", name, got, want)
 		}

@@ -30,6 +30,7 @@ func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.Mi
 			MissionID:            mission.ID,
 			IntegratorGeneration: mission.IntegratorGeneration,
 			AcceptedSetVersion:   mission.AcceptedSetVersion,
+			ChangeSeq:            mission.ChangeSeq,
 		},
 	}); err != nil {
 		return fmt.Errorf("mission: publish changed event for %q: %w", mission.ID, err)

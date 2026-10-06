@@ -31,13 +31,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// waitTimeout bounds every wait in this package's tests. CI runs them with
-// the race detector and in parallel on a shared runner, where a login shell
-// or a destroy sweep can take well over ten seconds to settle.
+// waitTimeout is generous because CI runs these with the race detector, in
+// parallel on a shared runner, where a destroy sweep can take over ten seconds.
 const waitTimeout = 30 * time.Second
 
-// testEnv wires a scheduler to the real store, real event bus, fake git/pty,
-// and an in-memory immutable base-capture seam.
 type testEnv struct {
 	t      *testing.T
 	db     *store.DB
@@ -78,9 +75,8 @@ type scriptedWaitOutcome struct {
 	useUnderlying bool
 }
 
-// scriptedWaitRuntime controls each Wait call independently. It lets
-// supervision tests model a daemon transport failure followed by the real
-// container exit without mutating shared fake-runtime state concurrently.
+// scriptedWaitRuntime controls each Wait call independently, without
+// mutating shared fake-runtime state concurrently.
 type scriptedWaitRuntime struct {
 	*fakeRuntime
 	calls    chan runtime.ID
@@ -147,6 +143,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		git: newFakeGit(filepath.Join(dir, "checkouts")),
 		pty: newFakePTY(),
 	}
+	e.pty.logDir = dir
 	ctx := t.Context()
 	e.ws = &domain.Workspace{
 		Name:        "ws",
@@ -166,7 +163,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("create member: %v", cerr)
 	}
 
-	homes, err := memberhome.New(filepath.Join(dir, "homes"))
+	homes, err := memberhome.New(filepath.Join(dir, "homes"), nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
@@ -180,17 +177,11 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		StateDir:      filepath.Join(dir, "scheduler"),
 		Homes:         homes,
 		StandardImage: "busybox:1.36",
-		// The default two-second window exists for a daemon that really
-		// takes that long to answer; the fake runtime never does, so tests
-		// use a probe short enough that a reboot scenario is not the
-		// slowest thing in the package.
+		// The fake runtime never needs the default two-second window, and a short
+		// probe keeps reboot scenarios from being the slowest tests.
 		ExitProbeTimeout: 20 * time.Millisecond,
-		// Gives launchFake (and any other test that just needs a running
-		// fake agent) a real argv without AETHER_FAKE_AGENT: t.Setenv
-		// forbids t.Parallel, and most callers do not care what the
-		// deterministic agent's own argv is. Tests pinning the env
-		// fallback itself still set AETHER_FAKE_AGENT explicitly and stay
-		// serial.
+		// A real argv without AETHER_FAKE_AGENT, because t.Setenv forbids
+		// t.Parallel.
 		Harnesses: map[string]HarnessSpec{
 			"fake": {TUIArgs: []string{"fake-agent", "{task}"}, HeadlessArgs: []string{"fake-agent", "{task}"}},
 		},
@@ -207,9 +198,8 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	return e
 }
 
-// newScheduler builds a second scheduler over the same store, state dir,
-// and bus - a "rebooted server" - with fresh PTY state and the given
-// runtime.
+// newScheduler builds a "rebooted server" over the same store, state dir
+// and bus, with fresh PTY state.
 func (e *testEnv) newScheduler(t *testing.T, rt *fakeRuntime, pty *fakePTY) *Scheduler {
 	t.Helper()
 	cfg := e.cfg
@@ -235,8 +225,6 @@ func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 	return sub
 }
 
-// launchFake launches a run on the deterministic fake harness and returns
-// it together with its fake container.
 func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeContainer) {
 	t.Helper()
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "fake", domain.LaunchTUI)
@@ -267,8 +255,6 @@ func readSavedTerminalImage(t *testing.T, e *testEnv, member domain.MemberID, re
 	return data
 }
 
-// A run's terminal images land in the home its container mounts, which for
-// a shared-account launch is the launcher's, never the account owner's.
 func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -312,8 +298,6 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	}
 }
 
-// waitStatusEvent reads sub until a run.status event with the wanted To
-// status arrives and returns it.
 func waitStatusEvent(t *testing.T, sub events.Subscription, run domain.RunID, to domain.RunStatus) events.Event {
 	t.Helper()
 	deadline := time.After(waitTimeout)
@@ -352,7 +336,6 @@ func waitTimelineEvent(t *testing.T, sub events.Subscription, run domain.RunID, 
 	}
 }
 
-// waitStoreStatus polls the store until the run reaches status.
 func (e *testEnv) waitStoreStatus(t *testing.T, run domain.RunID, status domain.RunStatus) *domain.Run {
 	t.Helper()
 	deadline := time.Now().Add(waitTimeout)
@@ -724,11 +707,8 @@ func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 	case <-time.After(waitTimeout):
 		t.Fatal("supervisor did not exit after TERM reached harness")
 	}
-	// The trap is installed before the harness prints "harness-ready", so
-	// its own process already has it by the time that line was observed
-	// above; what a busy host can still delay is this test's reader
-	// goroutine draining the PTY, so wait for the marker instead of a
-	// fixed sleep.
+	// A busy host can delay this test's PTY reader, not the trap, so wait for
+	// the marker instead of a fixed sleep.
 	p.waitForOutput(t, "harness-term")
 	if got := strings.Count(p.output.String(), "harness-term"); got != 1 {
 		t.Fatalf("harness TERM observations = %d, output = %q", got, p.output.String())
@@ -803,6 +783,9 @@ func TestLaunchValidation(t *testing.T) {
 	}
 	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
 		t.Fatal("invalid mode accepted")
+	}
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchACP); err == nil || !strings.Contains(err.Error(), `no command for mode "acp"`) {
+		t.Fatalf("acp launch of an agent without an ACP command: %v", err)
 	}
 	t.Setenv(fakeAgentEnv, "fake-agent")
 	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
@@ -1015,7 +998,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 func TestCommandTemplates(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	argv, profile, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it")
+	argv, profile, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -1026,7 +1009,7 @@ func TestCommandTemplates(t *testing.T) {
 	if profile.Name != "claude" || len(profile.CredentialPaths) == 0 {
 		t.Fatalf("claude profile = %+v, want registry profile with credential paths", profile)
 	}
-	if _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
+	if _, _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x"); codexErr != nil {
 		t.Fatalf("codex tui: %v", codexErr)
 	}
 	// A Config.Harnesses argv override replaces the registry template but
@@ -1034,7 +1017,7 @@ func TestCommandTemplates(t *testing.T) {
 	e2 := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"my-claude", "{task}"}}}
 	})
-	argv, profile, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go")
+	argv, profile, _, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go")
 	if err != nil {
 		t.Fatalf("command with override: %v", err)
 	}
@@ -1045,14 +1028,11 @@ func TestCommandTemplates(t *testing.T) {
 		t.Fatalf("override lost registry profile: %+v", profile)
 	}
 	// "custom" ships with no command of its own: it requires an override.
-	if _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x"); err == nil {
 		t.Fatal("custom without an override accepted")
 	}
 }
 
-// TestLaunchSpecIdentityAndCreationKey pins the Wave 2 spec construction:
-// the agent's git identity env comes from the owning member and the run
-// ID rides as the creation key for crash recovery.
 func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1126,8 +1106,6 @@ func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) 
 	}
 }
 
-// TestLaunchMountsPersistentHome pins that every launch for one member uses
-// the same writable server-owned home at the container's HOME.
 func TestLaunchMountsPersistentHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
@@ -1161,9 +1139,8 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	}
 }
 
-// TestContainerSpecNonRootHome pins that a non-root run user gets
-// HOME=/home/aether in the container env (Docker leaves HOME wrong for
-// numeric users, and the credential mounts land under that home).
+// Docker leaves HOME wrong for numeric users, and the credential mounts
+// land under that home.
 func TestContainerSpecNonRootHome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1178,12 +1155,8 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 	}
 }
 
-// TestReserveRunUserConflict pins the credential-home ownership guard:
-// a run whose resolved uid:gid differs from a live run of the same member
-// fails provisioning loudly (the ownership pass would otherwise flip the
-// shared home's ownership back and forth), while same mapping, different
-// member, and root runs all pass. The guard is cross-platform; only the
-// chown itself is linux-only.
+// Without the guard the ownership pass would flip the shared home's
+// ownership back and forth. Only the chown itself is linux-only.
 func TestReserveRunUserConflict(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1312,7 +1285,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi"); !errors.Is(err, ptyhost.ErrNoSession) {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi", false, nil); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
 	}
 }
@@ -1357,6 +1330,28 @@ func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 	}
 	if e.rt.byName(string(run.ID)) != nil {
 		t.Fatal("active run container was not destroyed")
+	}
+}
+
+func TestTeardownRunKeepsTheRowAndCanRepeat(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "tear down active run")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := e.sched.TeardownRun(t.Context(), run.ID, e.member.ID); err != nil {
+			t.Fatalf("TeardownRun attempt %d: %v", attempt, err)
+		}
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("teardown left the run's container")
+	}
+	if _, err := os.Stat(e.git.checkoutPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("checkout after teardown: %v, want it removed", err)
+	}
+	current, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || !current.Status.Terminal() {
+		t.Fatalf("run after teardown = %+v (err %v), want a terminal row kept", current, err)
 	}
 }
 
@@ -1419,8 +1414,6 @@ func TestRetentionTTLDefaults(t *testing.T) {
 	}
 }
 
-// TestLaunchPinsProfileWithoutMount pins the snapshot for run provenance,
-// while the member home remains the only environment mount.
 func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
@@ -1493,7 +1486,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 			},
 		}
 	})
-	argv, prof, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
+	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
@@ -1505,9 +1498,6 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	}
 }
 
-// TestValidateMissionLaunchResolvesTheHarnessForTheAccount: validation is the
-// launch's own command resolution, so a harness the account has no definition
-// for fails before a mission records it, and a shipped one passes.
 func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1540,7 +1530,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	argv, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task")
+	argv, _, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task")
 	if err != nil {
 		t.Fatalf("fake command: %v", err)
 	}

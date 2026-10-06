@@ -1,0 +1,299 @@
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { ProfileDialog } from '@/routes/members/personal'
+import { useStore, type RootState } from '@/store'
+import type { Member } from '@/lib/types'
+import { initialEnvTerminal } from '@/store/env-terminal'
+import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
+
+function seed(extra: Partial<RootState> = {}) {
+  useStore.setState({
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
+    members: { [alice.id]: alice, [bob.id]: bob },
+    presence: [],
+    info: serverInfo,
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
+    hydrated: true,
+    hydrationError: null,
+    ...extra,
+  })
+}
+
+describe('profile dialog', () => {
+  it('shows who you are and sets your colour', async () => {
+    const client = fakeApi({ memberColor: vi.fn(async () => ({ ...alice, color: '#3cb44b' })) })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+    const dialog = within(screen.getByRole('dialog', { name: 'Profile' }))
+    expect(dialog.getByText('Alice')).toBeDefined()
+    expect(dialog.getByRole('button', { name: 'Set colour #e6194b' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(dialog.getByRole('button', { name: 'Set colour #3cb44b' }))
+    await waitFor(() => expect(client.memberColor).toHaveBeenCalledWith('#3cb44b'))
+  })
+
+  it('renames you, updates the header and roster, and keeps a refusal inline', async () => {
+    const renamed = { ...alice, display_name: 'Alicia' }
+    const client = fakeApi({
+      memberRename: vi.fn().mockRejectedValueOnce(new Error('member.rename: display_name is longer than 64 characters')).mockResolvedValue(renamed),
+      memberList: vi.fn(async () => [renamed, bob]),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    const save = form.getByRole('button', { name: 'Save' })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: '  Alicia ' } })
+    fireEvent.click(save)
+    expect((await form.findByRole('alert')).textContent).toBe('member.rename: display_name is longer than 64 characters')
+    fireEvent.click(save)
+    await waitFor(() => expect(useStore.getState().info?.member.display_name).toBe('Alicia'))
+    expect(client.memberRename).toHaveBeenLastCalledWith('  Alicia ')
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
+    expect(within(screen.getByRole('dialog', { name: 'Profile' })).getByText('Alicia')).toBeDefined()
+    expect(form.queryByRole('alert')).toBeNull()
+    expect(form.queryByRole('status')).toBeNull()
+  })
+
+  it('keeps a saved name when the roster refresh after it fails', async () => {
+    const renamed = { ...alice, display_name: 'Alicia' }
+    const client = fakeApi({
+      memberRename: vi.fn(async () => renamed),
+      memberList: vi.fn().mockRejectedValue(new Error('member.list: gateway closed')),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alicia' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    expect((await form.findByRole('status')).textContent).toBe('Name saved. Refreshing the member list failed: member.list: gateway closed')
+    expect(form.queryByRole('alert')).toBeNull()
+    expect((form.getByLabelText('Display name') as HTMLInputElement).value).toBe('Alicia')
+    expect(useStore.getState().info?.member.display_name).toBe('Alicia')
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
+    expect(useStore.getState().members[bob.id]).toEqual(bob)
+  })
+
+  it('ignores a roster refresh that answers after a newer name was saved', async () => {
+    const first = { ...alice, display_name: 'Alicia' }
+    const second = { ...alice, display_name: 'Alice B' }
+    let releaseFirst = () => {}
+    const firstList = new Promise<Member[]>((resolve) => { releaseFirst = () => resolve([first, bob]) })
+    const client = fakeApi({
+      memberRename: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second),
+      memberList: vi.fn().mockReturnValueOnce(firstList).mockResolvedValueOnce([second, bob]),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alicia' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(useStore.getState().members[alice.id].display_name).toBe('Alicia'))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alice B' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(useStore.getState().members[alice.id].display_name).toBe('Alice B'))
+    releaseFirst()
+    await act(async () => { await firstList })
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alice B')
+  })
+
+  it('keeps a saved colour when a later colour save fails before its refresh lands', async () => {
+    const green = { ...alice, color: '#3cb44b' }
+    let release = () => {}
+    const delayed = new Promise<Member[]>((resolve) => { release = () => resolve([green, bob]) })
+    const client = fakeApi({
+      memberColor: vi.fn().mockResolvedValueOnce(green).mockRejectedValueOnce(new Error('member.color: gateway closed')),
+      memberList: vi.fn().mockReturnValueOnce(delayed),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const picker = within(screen.getByRole('region', { name: 'Your colour' }))
+    fireEvent.click(picker.getByRole('button', { name: 'Set colour #3cb44b' }))
+    await waitFor(() => expect(client.memberColor).toHaveBeenCalledTimes(1))
+    fireEvent.click(picker.getByRole('button', { name: 'Set colour #f58231' }))
+    expect((await picker.findByRole('alert')).textContent).toContain('member.color: gateway closed')
+    release()
+    await act(async () => { await delayed })
+    expect(useStore.getState().members[alice.id].color).toBe('#3cb44b')
+  })
+
+  it('edits the git identity your agents commit as', () => {
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={fakeApi()} />)
+    expect(within(screen.getByRole('region', { name: 'Git identity' })).getByRole('button', { name: 'Save identity' })).toBeDefined()
+  })
+
+  it('lets a member grant and revoke use of their agent account', async () => {
+    const accountList = vi
+      .fn()
+      .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+      .mockResolvedValueOnce({ accounts: [alice], shared_with: [bob] })
+      .mockResolvedValue({ accounts: [alice], shared_with: [] })
+    const client = fakeApi({
+      accountList,
+      accountShare: vi.fn(async () => ({})),
+      accountRevoke: vi.fn(async () => ({})),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+    await waitFor(() => expect(client.accountShare).toHaveBeenCalledWith(bob.id))
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke access' }))
+    await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
+  })
+
+  describe('after a first share', () => {
+    const notice =
+      "Your Environment was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end."
+    const sharing = (running: boolean) =>
+      fakeApi({
+        accountList: vi
+          .fn()
+          .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+          .mockResolvedValue({ accounts: [alice], shared_with: [bob] }),
+        accountShare: vi.fn(async () => ({})),
+        terminalStatus: vi.fn(async () => ({ running, tabs: running ? ['main'] : [] })),
+        terminalStop: vi.fn(async () => ({})),
+      })
+    beforeEach(() => useStore.setState({ envTerminal: initialEnvTerminal }))
+
+    it('offers to stop a terminal started before the share', async () => {
+      const client = sharing(true)
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      const status = await screen.findByRole('status')
+      expect(status.textContent).toContain(notice)
+
+      fireEvent.click(within(status).getByRole('button', { name: 'Stop environment' }))
+      const dialog = within(await screen.findByRole('alertdialog'))
+      expect(dialog.getByText(/so does everything running in it/)).toBeDefined()
+      expect(client.terminalStop).not.toHaveBeenCalled()
+      fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+      await waitFor(() => expect(client.terminalStop).toHaveBeenCalled())
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+      expect(useStore.getState().envTerminal.status?.running).toBe(false)
+    })
+
+    it('shows the stop error in the confirmation', async () => {
+      const client = sharing(true)
+      vi.mocked(client.terminalStop).mockRejectedValue(new Error('stop container: daemon is down'))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      const dialog = within(await screen.findByRole('alertdialog'))
+      fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+      expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
+    })
+
+    it('still gives the advice when the reads after the share fail', async () => {
+      const client = sharing(true)
+      vi.mocked(client.terminalStatus).mockRejectedValue(new Error('terminal.status: gateway closed'))
+      vi.mocked(client.accountList)
+        .mockReset()
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+        .mockRejectedValue(new Error('account.list: gateway closed'))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      const status = await screen.findByRole('status')
+      expect(status.textContent).toContain(
+        "Your Environment could not be checked. If it is open, it was started before you shared, so a Claude Code login written there will not reach Bob's runs until you stop it and open it again from Environment. Runs you already have running keep the mounts they started with until they end.",
+      )
+      expect(within(status).getByRole('button', { name: 'Stop environment' })).toBeDefined()
+      expect(await screen.findByText('account.list: gateway closed')).toBeDefined()
+    })
+
+    it('drops the advice after a stop, also when the terminal could not be checked', async () => {
+      const client = sharing(true)
+      vi.mocked(client.terminalStatus).mockRejectedValue(new Error('terminal.status: gateway closed'))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
+
+      await waitFor(() => expect(client.terminalStop).toHaveBeenCalled())
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    })
+
+    it('ignores a terminal read answered after the stop', async () => {
+      const client = sharing(true)
+      let answer: (status: { running: boolean; tabs: string[] }) => void = () => {}
+      vi.mocked(client.terminalStatus).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+      useStore.setState({
+        envTerminal: { ...initialEnvTerminal, status: { running: true, tabs: ['main'] } },
+      })
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Stop environment' }))
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Stop environment' }))
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+      await act(async () => answer({ running: true, tabs: ['main'] }))
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(useStore.getState().envTerminal.status?.running).toBe(false)
+    })
+
+    it('says nothing for a share while another grant already exists', async () => {
+      const client = sharing(true)
+      vi.mocked(client.accountList)
+        .mockReset()
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [vera] })
+        .mockResolvedValue({ accounts: [alice], shared_with: [vera, bob] })
+      seed({
+        members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
+        capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] },
+      })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await waitFor(() => expect(screen.getAllByRole('button', { name: 'Revoke access' })).toHaveLength(2))
+      expect(client.terminalStatus).not.toHaveBeenCalled()
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it('drops the advice when the first share is revoked', async () => {
+      const client = sharing(true)
+      vi.mocked(client.accountList)
+        .mockReset()
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [bob] })
+        .mockResolvedValue({ accounts: [alice], shared_with: [] })
+      client.accountRevoke = vi.fn(async () => ({}))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await screen.findByRole('status')
+      fireEvent.click(await screen.findByRole('button', { name: 'Revoke access' }))
+
+      await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
+      await screen.findByRole('button', { name: 'Share account' })
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it('says nothing more when no terminal is running', async () => {
+      const client = sharing(false)
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await waitFor(() => expect(client.terminalStatus).toHaveBeenCalled())
+      await screen.findByRole('button', { name: 'Revoke access' })
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Stop environment' })).toBeNull()
+    })
+  })
+})

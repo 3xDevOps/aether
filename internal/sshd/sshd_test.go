@@ -24,11 +24,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// testAdvertisedSHA is the ref tip the fake git transport advertises.
 const testAdvertisedSHA = "1111222233334444555566667777888899990000"
 
-// fakeGit speaks just enough upload-pack v0 for a client ls-remote: it
-// advertises one branch and drains the client's flush.
+// fakeGit speaks just enough upload-pack v0 for a client ls-remote.
 type fakeGit struct {
 	mu    sync.Mutex
 	calls []string
@@ -58,7 +56,6 @@ func (g *fakeGit) UploadPack(_ context.Context, ws domain.WorkspaceID, stdin io.
 	if _, err := io.WriteString(stdout, adv); err != nil {
 		return 128, err
 	}
-	// Drain until the client's flush-pkt or EOF.
 	buf := make([]byte, 256)
 	var got []byte
 	for !bytes.Contains(got, []byte("0000")) {
@@ -88,9 +85,8 @@ type fakeRecentReplay struct {
 	complete bool
 }
 
-// fakePTY records attach parameters, replays canned output, and echoes
-// keystrokes prefixed with "echo:". transcripts backs the Replay seam:
-// a run with an entry replays it, anything else reports os.ErrNotExist.
+// fakePTY echoes keystrokes prefixed with "echo:". A run with a
+// transcripts entry replays it; anything else reports os.ErrNotExist.
 type fakePTY struct {
 	mu          sync.Mutex
 	err         error
@@ -109,12 +105,10 @@ type fakePTY struct {
 	follow      bool
 	input       bytes.Buffer
 	resizes     [][2]uint
-	// session is the size the fake session is; when set it is what the
-	// host reports to the attach, the way the real one reports the size
-	// the PTY actually has rather than the size the header asked for.
+	// session, when set, is the size reported to the attach, as the real host
+	// reports the PTY's actual size rather than the one the header asked for.
 	session [2]uint
-	// tell carries a later geometry the test wants reported, which is
-	// what someone else resizing the session does.
+	// tell carries a later geometry, as when someone else resizes the session.
 	tell chan [2]uint
 }
 
@@ -329,7 +323,6 @@ func (p *fakePTY) state() (cols, rows uint, readOnly bool, input string, resizes
 	return p.cols, p.rows, p.readOnly, p.input.String(), append([][2]uint(nil), p.resizes...)
 }
 
-// following reports whether the last attach declared itself a follower.
 func (p *fakePTY) following() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -367,6 +360,8 @@ type fakeRuns struct {
 	// the refusal it reports with the same key.
 	sharedLaunches map[string]scheduler.SharedLaunch
 	sharedRefusals map[string]string
+	unswitchable   map[string]bool
+	acpStream      scheduler.ACPStream
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -437,6 +432,12 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	defer f.mu.Unlock()
 	key := fmt.Sprintf("%s:%s:%s", member, account, harness)
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
+}
+
+func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.unswitchable[harness], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
@@ -540,9 +541,8 @@ func (f *fakeRuns) DeleteRun(_ context.Context, run domain.RunID, actor domain.M
 	return f.record(fmt.Sprintf("delete:%s:%s", run, actor))
 }
 
-// SetArchived returns a canned run reflecting the requested archived
-// state; the real Final-check, idempotency, and event shape are tested
-// against the scheduler directly in internal/scheduler/archive_test.go.
+// SetArchived returns a canned run; the real behavior is tested in
+// internal/scheduler/archive_test.go.
 func (f *fakeRuns) SetArchived(_ context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error) {
 	if err := f.record(fmt.Sprintf("archive:%s:%s:%v", run, actor, archived)); err != nil {
 		return nil, err
@@ -559,8 +559,7 @@ func (f *fakeRuns) SetArchived(_ context.Context, run domain.RunID, actor domain
 	return out, nil
 }
 
-// Seen returns a canned run with the flag cleared; the owner rule,
-// idempotency, and events are tested against the scheduler directly in
+// Seen returns a canned run; the real behavior is tested in
 // internal/scheduler/reported_test.go.
 func (f *fakeRuns) Seen(_ context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	if err := f.record(fmt.Sprintf("seen:%s:%s", run, actor)); err != nil {
@@ -600,8 +599,8 @@ func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 	f.paused[run] = paused
 }
 
-func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string) error {
-	return f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
+func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
+	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
 }
 
 func (f *fakeRuns) RecordHandoff(_ context.Context, run domain.RunID, from domain.MemberID) {
@@ -737,6 +736,13 @@ func (f *fakeRuns) SaveEnvironment(_ context.Context, member domain.MemberID) (s
 func (f *fakeRuns) ResetEnvironment(_ context.Context, member domain.MemberID) error {
 	return f.record(fmt.Sprintf("env-reset:%s", member))
 }
+
+func (f *fakeRuns) InstallAgent(_ context.Context, member domain.MemberID, command string) (string, int, error) {
+	if err := f.record(fmt.Sprintf("agent-install:%s:%s", member, command)); err != nil {
+		return "", 0, err
+	}
+	return "installed", 0, nil
+}
 func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error) {
 	if err := f.record(fmt.Sprintf("terminal-image:%s:%s:%s:%d", actor, run, extension, len(data))); err != nil {
 		return "", err
@@ -810,8 +816,7 @@ func newTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 	return newTestEnvWithSigner(t, mod, newSigner(t))
 }
 
-// newFreshTestEnv builds an env against a fresh, unseeded store: no
-// member, workspace, or run rows (bootstrap tests).
+// newFreshTestEnv uses an unseeded store, for bootstrap tests.
 func newFreshTestEnv(t *testing.T, mod func(*Config)) *testEnv {
 	t.Helper()
 	return buildTestEnv(t, mod, newSigner(t), false)
@@ -934,7 +939,6 @@ func (e *testEnv) dial(t *testing.T) *ssh.Client {
 	return client
 }
 
-// subsystemPipe is the client side of one subsystem channel.
 type subsystemPipe struct {
 	io.Reader
 	stdin io.WriteCloser

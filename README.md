@@ -67,7 +67,7 @@ Alternatively, you could also pay money in addition to your (already massive) in
 Aether is the third option: **your hardware, your code, agents that keep working
 while you sleep.**
 
-- **Multiplayer by design.** Several people, one server. **See and steer each other's agents in real time, with every act
+- **Multiplayer by design.** Several people, one server. **See and message each other's agents in real time, with every act
   attributed.**
 - **Agents run continuously in remote containers.** Agents run in containers on the server. Launch them once, close your laptop laptop and they still continue to work. 
 - **Results arrive as git branches.** Every run gets its own worktree and
@@ -75,7 +75,7 @@ while you sleep.**
   to let them handle Git operations autonomously. Run-branch pulls remain
   available whether a workspace is local-only or mirror-backed.
 - **Your agents, your setup.** Each member has a server-owned persistent home,
-  mounted read-write in that member's environment terminal and runs. Import
+  mounted read-write in that member's environment and runs. Import
   configuration once with the local dashboard's directory picker, or edit it
   remotely in **Files**; changes are immediately visible, including to active
   runs. Vendor logins stay on the remote you own, through each vendor's own
@@ -94,16 +94,17 @@ onboarding wizard; use local `aether gui` for the one-time directory picker and
 other local filesystem or repository actions.
 
 Inside either dashboard: a workspace switcher, a board bucketed by what needs
-attention, a live read-only terminal mirror of any run, per-run diff timelines,
-the event feed, the shared approval inbox, presence indicators, the member
-roster, and a disk gauge. Launch, inject, pause, kill, close, relaunch and
-handoff all call the same methods the CLI does, with the same permission checks
+attention (Needs you, Working, Finished; approve or reply from the card), a
+live terminal for any run, each run's **Changes**, the **Activity** feed, the
+shared approval inbox, presence indicators, the member roster, and the disk
+usage in **Settings**. Launch, message, pause, kill, close, reopen and hand
+off all call the same methods the CLI does, with the same permission checks
 and timeline attribution. The server-hosted dashboard also exposes the shared
 member-home **Files** editor through the same authenticated RPCs.
 A live TUI run closed as merged or abandoned keeps its exact run row, container
-and checkout for `--run-container-ttl` (default `7 days`); relaunch reopens that
-retained Done run before expiry rather than creating a new run or container.
-Expired or unavailable runs cannot relaunch.
+and checkout for `--run-container-ttl` (default `7 days`); **Reopen** (`aether
+reopen`) resumes that retained run before expiry rather than creating a new
+run or container. Expired or unavailable runs cannot be reopened.
 Launch freshness is server-owned: before a run row exists, the server captures
 the workspace base. A configured mirror refreshes that base; a local-only
 workspace reads its local base. A failed pre-run check creates no run row.
@@ -113,13 +114,17 @@ pre-launch operation.
 
 ## Supported agents
 
-Aether does not install agents - install the agent CLI in your member
-environment terminal. Built-in launch profiles cover Claude Code, Codex, pi,
-OMP, and OpenCode; other CLIs can use a custom launch definition. Native
-idle wake is available through loaded pi, OMP, and version-matched OpenCode
-integrations; command-hook integrations deliver at the next supported
-boundary instead. Neither a send receipt nor a wake acknowledges mail.
-See [per-harness setup and limits](docs/harnesses.md) and
+Aether does not install agents - install the agent CLI in your
+**Environment**, the container shell that belongs to you. Built-in agents
+cover Claude Code, Codex, pi, OMP, and OpenCode; other CLIs can use a custom
+agent definition. Native idle wake is available through the loaded pi and OMP
+extensions and a version-matched OpenCode plugin; command hooks deliver at the
+next supported boundary instead. Neither a send receipt nor a wake acknowledges mail.
+Every built-in agent can also run in **Enhanced** mode, driven over the Agent Client
+Protocol so the dashboard shows its messages, tool calls and permission
+requests as native controls: `aether run "..." --agent codex --mode enhanced`
+([enhanced runs](docs/enhanced-runs.md)).
+See [per-agent setup and limits](docs/harnesses.md) and
 [member environments](docs/environments.md).
 
 ## Documentation
@@ -132,9 +137,10 @@ See [per-harness setup and limits](docs/harnesses.md) and
 | [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
 | [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
-| [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
-| [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
-| [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
+| [Agents](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
+| [Enhanced runs](docs/enhanced-runs.md) | Driving an agent over the Agent Client Protocol: launch, permissions, restarts, the session log. |
+| [Agent integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
+| [Adapters](docs/adapters.md) | Adding a built-in agent or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
 | [Notices](docs/notices.md) | The licence Aether ships under and what its artifacts bundle. |

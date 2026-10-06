@@ -1,27 +1,24 @@
-// Every verb the dashboard can perform on a run or on the board, as data.
-// The command palette and the visible action buttons render the same list, so
-// a label, an icon or a capability gate is written once and both surfaces
-// agree. Gateway verbs go through the API; deleting also removes the
-// confirmed run from the local store.
+// Run and board verbs as data: the palette and the action buttons render the same list.
 
-import type { LucideIcon } from 'lucide-react'
+import { useCallback } from 'react'
+import { toast } from 'sonner'
 import {
   Archive,
   ArchiveRestore,
   Cable,
-  CheckCheck,
   CircleCheck,
   Download,
   FileText,
   House,
   List,
+  type LucideIcon,
   MessageSquarePlus,
   Monitor,
   Moon,
   Network,
+  PackageX,
   Pause,
   Play,
-  PackageX,
   RefreshCw,
   Rocket,
   Shield,
@@ -30,114 +27,77 @@ import {
   Sun,
   Trash2,
   UserPlus,
-} from 'lucide-react'
-import { useCallback } from 'react'
-import { toast } from 'sonner'
+} from '@/components/icons'
 import { api, ApiError, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence, message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import { runState } from '@/lib/status'
-import type { Member, PullResult, RunStatus, Workspace } from '@/lib/types'
+import type { LinkStatus, Member, PullResult, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
-import { isArchivable, type RunRecord } from '@/store/runs'
+import { isArchivable, isTerminal, type RunRecord } from '@/store/runs'
 import type { Theme } from '@/store/ui'
 
-/** What a command needs to do its work, supplied by the surface running it. */
 export interface CommandDeps {
   api: Api
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
-  openClearDoneDialog: (plan: ClearDonePlan) => void
-  openReleaseFinishedDialog: (plan: ReleaseFinishedPlan) => void
-  ackAll: () => void
   setTheme: (theme: Theme) => void
-  /** Keeps a pull's git output for the diff tab to show. */
+  /** Keeps a pull's git output for the Changes view to show. */
   recordPull: (runID: string, result: PullResult) => void
   /** Removes a run after the server has deleted its durable record. */
   removeRun: (runID: string) => void
-  /** The template form's open state lives with the dialog host, not the store. */
   onTemplates: () => void
 }
 
 export interface Command {
   id: string
-  /** The full sentence, which is what the palette reads best. */
   label: string
-  /**
-   * The one or two words a button uses instead, because eight of these sit
-   * in one header row. The button's tooltip carries the full label.
-   */
+  /** The button's label; its tooltip carries the full one. */
   short?: string
   Icon: LucideIcon
   /** Extra words the palette's fuzzy match should see (handoff targets). */
   value?: string
-  /**
-   * The past-tense toast on success, and the prefix of the failure toast.
-   * Present only when the command calls the gateway; navigation and the
-   * dialog openers report nothing because the thing they opened is the feedback.
-   */
+  /** Success toast and failure-toast prefix; set only on gateway calls. */
   done?: string
-  /**
-   * A success toast that names something the call returned - the ref a pull
-   * fetched - instead of the flat past-tense one.
-   */
+  /** A success toast naming something the call returned, such as a pull's ref. */
   report?: (result: unknown) => string
-  /** A command can be shown but unavailable until its prerequisite exists. */
   disabled?: boolean
-  /**
-   * Set on the verbs a member cannot take back. Both action buttons and the
-   * command palette ask for explicit confirmation before running them.
-   */
+  /** Set on irreversible verbs; every surface confirms before running them. */
   confirm?: { title: string; body: string; action: string }
   perform: (deps: CommandDeps) => Promise<unknown> | void
 }
 
-/** What the focused-run verbs are gated on. */
 export interface RunCommandContext {
   run: RunRecord
   /**
-   * Undefined means nobody knows this run's pause state: hydration seeds it
-   * from the run list's `paused` wire field, but a legacy gateway sends none,
-   * so there a reloaded tab knows no run's state until a pause or resume
-   * event arrives. Offer neither verb rather than the one the server would
-   * refuse. See "Reason and paused on the wire" in
-   * docs/dashboard-frontend.md.
+   * Undefined when unknown (a legacy gateway sends no `paused`): offer neither
+   * verb. See "Reason and paused on the wire" in docs/dashboard-frontend.md.
    */
   paused: boolean | undefined
   cap: Capability
   members: Record<string, Member>
   /** The caller, for the permission questions the server will ask again. */
   self: { id: string | null; role: Member['role'] | null }
-  /** The run's workspace steer_others policy, when the workspace is known. */
   steerOthers?: string
 }
 
-/** What the board-wide verbs are gated on. */
 export interface BoardCommandContext {
   cap: Capability
-  /** The caller's own id and role, null before hydration. */
+  /** Null before hydration. */
   self: { id: string | null; role: Member['role'] | null }
-  /** The Done column's live cards in scope, for bulk archive. */
-  doneCandidates: RunActionCandidate[]
-  /** All runs in the selected workspace, including hidden archived runs. */
-  releaseCandidates: RunActionCandidate[]
 }
 
-/** The run and workspace policy needed for Kill-gated bulk actions. */
 export interface RunActionCandidate {
   run: RunRecord
-  /** The run's workspace, for the steer_others policy the kill permission reads. */
+  /** For the steer_others policy the kill permission reads. */
   workspace?: Workspace
 }
 
 export interface ClearDonePlan {
-  /** Runs Archive closed runs would archive. */
   eligible: RunRecord[]
-  /** Completed runs that have stopped but still await Close; archiving
-   * cannot act on them until then. */
+  /** Stopped but not yet closed; archive cannot act on them. */
   notClosed: number
   /** Runs whose status qualifies but this member may not kill. */
   notAllowed: number
@@ -149,7 +109,7 @@ export interface ReleaseFinishedPlan {
 
 /** The existing status and reason pair is the wire evidence of retention. */
 export function isRetainedRun(run: RunRecord): boolean {
-  if (!isFinished(run.status)) return false
+  if (!isTerminal(run.status)) return false
   switch (run.reason) {
     case 'closed; retained container':
       return run.status === 'merged' || run.status === 'abandoned'
@@ -181,12 +141,7 @@ export function releaseFinishedPlan(
   return plan
 }
 
-/**
- * What Archive closed runs would archive out of the Done column's live cards:
- * every `isArchivable` run, not already archived, that this member may
- * kill, gated the same way as the single Archive command. Other candidates
- * stay for one of two reasons, counted separately for the confirm dialog.
- */
+/** Gated the same way as the single Archive command. */
 export function clearDonePlan(
   candidates: RunActionCandidate[],
   cap: Capability,
@@ -217,12 +172,7 @@ const codeRunNotFound = -32000
 // Both bulk actions bound gateway requests rather than opening one per run.
 const bulkRunConcurrency = 6
 
-/**
- * Archives every eligible run, `bulkRunConcurrency` calls at a time. Each
- * call's own `run.archived` event moves the run in every connected
- * dashboard, this one included, so the count below comes from the settled
- * calls, not from re-applying what the RPC returned.
- */
+/** Each call's `run.archived` event moves the run in every dashboard, so only settled calls are counted here. */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
@@ -280,17 +230,13 @@ export async function runReleaseFinished(
   const failures = errors.filter((error) => error !== undefined)
   const released = eligible.length - failures.length
   if (failures.length > 0) {
-    toast.error(`Released ${released}, ${failures.length} failed: ${failures[0]}`)
+    toast.error(`Freed ${released}, ${failures.length} failed: ${failures[0]}`)
   } else {
-    toast.success(`Released resources for ${released} ${released === 1 ? 'run' : 'runs'}`)
+    toast.success(`Freed the containers of ${released} ${released === 1 ? 'run' : 'runs'}`)
   }
 }
 
-/**
- * Who may be handed a run. Viewers cannot own one, so the server refuses a
- * handoff to one; do not offer what will be refused. A pending member has not
- * been approved yet, and the current owner is not a target.
- */
+/** The server refuses a handoff to a viewer, who cannot own a run. */
 function handoffTargets(
   run: RunRecord,
   members: Record<string, Member>,
@@ -300,11 +246,6 @@ function handoffTargets(
   )
 }
 
-/**
- * One handoff command per eligible member, or none at all when the caller may
- * not give this run away: the server allows a handoff only from the run's
- * owner or an admin.
- */
 export function handoffCommands({ run, members, self }: RunCommandContext): Command[] {
   if (!allowed('handoff', self, { owner: run.member_id })) return []
   return handoffTargets(run, members).map((m) => ({
@@ -317,18 +258,13 @@ export function handoffCommands({ run, members, self }: RunCommandContext): Comm
   }))
 }
 
-/**
- * Everything that acts on one run, in the order both surfaces show it. The
- * handoff entries come last; a surface that draws them as a menu of its own
- * calls `handoffCommands` instead.
- */
+/** In display order, handoffs last; a surface with its own handoff menu calls `handoffCommands`. */
 export function runCommands(ctx: RunCommandContext): Command[] {
   const { run, paused, cap, self, steerOthers } = ctx
   const id = run.id
-  const finished = isFinished(run.status)
+  const finished = isTerminal(run.status)
   const target = { owner: run.member_id, protected: run.protected, steerOthers }
-  // The same three questions internal/permissions asks. A verb the server
-  // would answer with a denial is not offered on either surface.
+  // The same questions internal/permissions asks, so no verb is offered that the server would deny.
   const maySteer = allowed('steer', self, target)
   const mayKill = allowed('kill', self, target)
   const mayProtect = allowed('protect', self, target)
@@ -357,7 +293,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
     list.push({
       id: 'inject',
-      label: 'Send a message to the agent...',
+      label: 'Send a message to the agent…',
       short: 'Message',
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
@@ -365,7 +301,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (cap.hasLocal('forward.start')) {
       list.push({
         id: 'forward',
-        label: 'Forward a port...',
+        label: 'Forward a port…',
         short: 'Forward',
         Icon: Cable,
         perform: (d) => d.openForwardDialog(`run:${id}`),
@@ -373,13 +309,11 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
   }
 
-  // Close resolves the outcome from any state that holds a record: a live
-  // run is stopped first, a finished one re-labeled. The dialog asks
-  // merged or abandoned; Delete stays safe at every stage.
+  // Close works from any state that holds a record: a live run is stopped first.
   if (run.status !== 'queued' && mayKill) {
     list.push({
       id: 'close',
-      label: 'Close run...',
+      label: 'Close run…',
       short: 'Close',
       Icon: CircleCheck,
       perform: (d) => d.openDialog('close', id),
@@ -424,14 +358,14 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (cap.hasMethod('run.release') && mayKill && isRetainedRun(run)) {
     list.push({
       id: 'release',
-      label: 'Release resources...',
-      short: 'Release',
+      label: 'Free container…',
+      short: 'Free container',
       Icon: PackageX,
-      done: 'Released resources',
+      done: 'Freed container',
       confirm: {
-        title: 'Release this run’s resources?',
-        body: 'Its container is removed and cannot be relaunched. The run and its history remain visible; this does not archive it.',
-        action: 'Release resources',
+        title: 'Free this run’s container?',
+        body: 'Its container is removed and the run cannot be reopened. The run and its history remain visible; this does not archive it.',
+        action: 'Free container',
       },
       perform: (d) => d.api.runRelease(id),
     })
@@ -472,17 +406,17 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (
     run.mode === 'tui' &&
     (run.reason === 'closed; retained container'
-      ? runState(run.status) === 'done'
+      ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
       : finished && agentReportRetained.has(run.reason ?? '')) &&
     cap.hasMethod('run.relaunch') &&
     maySteer
   ) {
     list.push({
       id: 'relaunch',
-      label: 'Relaunch run',
-      short: 'Relaunch',
+      label: 'Reopen run',
+      short: 'Reopen',
       Icon: RefreshCw,
-      done: 'Relaunched',
+      done: 'Reopened',
       perform: (d) => d.api.runRelaunch(id),
     })
   }
@@ -512,20 +446,7 @@ const agentReportRetained = new Set([
   'agent reported failure; retained container',
 ])
 
-/**
- * Whether the run has stopped for good. A pending approval only ever reads as
- * needs-attention, so the presentation state decides this on status alone.
- */
-function isFinished(status: RunStatus): boolean {
-  const state = runState(status)
-  return state === 'done' || state === 'failed'
-}
-
-/**
- * Whether this member may start a run. The gateway capability descriptor says
- * what the transport carries; the role says what this member may do, and the
- * local gateway advertises every method regardless of who is behind it.
- */
+/** The local gateway advertises every method regardless of caller, so the role is checked too. */
 export function canLaunch({
   cap,
   role,
@@ -536,7 +457,13 @@ export function canLaunch({
   return cap.hasMethod('run.launch') && allowed('launch', { id: null, role })
 }
 
-/** The verbs that act on the board rather than on one run. */
+export const unlinkedReason = 'Link this computer to a server first'
+
+/** An unlinked gateway serves only onboarding, so nothing can launch yet. */
+export function launchBlocked(linkStatus: Pick<LinkStatus, 'server_configured'> | null): string | undefined {
+  return linkStatus?.server_configured === false ? unlinkedReason : undefined
+}
+
 export function boardCommands(ctx: BoardCommandContext): Command[] {
   const role = ctx.self.role
   const list: Command[] = [
@@ -548,7 +475,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     },
     {
       id: 'overview',
-      label: 'Open all runs',
+      label: 'Open all workspaces',
       Icon: List,
       perform: (d) => d.navigate('overview'),
     },
@@ -556,7 +483,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'launch',
-      label: 'Launch a run...',
+      label: 'New run…',
       Icon: Rocket,
       perform: (d) => d.openDialog('launch'),
     })
@@ -564,7 +491,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('mission.create') && allowed('launch', { id: null, role })) {
     list.push({
       id: 'swarm',
-      label: 'Create swarm...',
+      label: 'New swarm…',
       Icon: Network,
       perform: (d) => d.openDialog('swarm'),
     })
@@ -572,33 +499,26 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {
     list.push({
       id: 'template',
-      label: 'Launch from a template...',
+      label: 'Launch from a template…',
       Icon: FileText,
       perform: (d) => d.onTemplates(),
     })
   }
-  list.push({
-    id: 'ack-all',
-    label: 'Mark all runs seen',
-    Icon: CheckCheck,
-    perform: (d) => d.ackAll(),
-  })
-  const plan = clearDonePlan(ctx.doneCandidates, ctx.cap, ctx.self)
-  if (plan.eligible.length > 0) {
+  // The confirmation computes which runs qualify when it opens.
+  if (ctx.cap.hasMethod('run.archive')) {
     list.push({
       id: 'clear-done',
-      label: 'Archive closed runs...',
+      label: 'Archive closed runs…',
       Icon: Archive,
-      perform: (d) => d.openClearDoneDialog(plan),
+      perform: (d) => d.openDialog('clear-done'),
     })
   }
-  const releasePlan = releaseFinishedPlan(ctx.releaseCandidates, ctx.cap, ctx.self)
-  if (releasePlan.eligible.length > 0) {
+  if (ctx.cap.hasMethod('run.release')) {
     list.push({
       id: 'release-finished',
-      label: 'Release finished resources...',
+      label: 'Free retained containers…',
       Icon: PackageX,
-      perform: (d) => d.openReleaseFinishedDialog(releasePlan),
+      perform: (d) => d.openDialog('release-finished'),
     })
   }
   list.push(
@@ -624,22 +544,13 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   return list
 }
 
-/**
- * Runs a command and reports the outcome the same way on every surface: the
- * gateway verbs toast their past-tense name or the server's refusal verbatim,
- * and dialog openers report nothing because the surface they open provides
- * feedback. `onDone` closes the palette before running a command; action
- * buttons have nothing to close.
- */
+/** Gateway verbs toast their past-tense name or the server's refusal verbatim; dialog openers report nothing. */
 export function useCommandRunner(
   opts: { onDone?: () => void; onTemplates?: () => void } = {},
 ): (command: Command) => Promise<void> {
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
-  const openClearDoneDialog = useStore((s) => s.openClearDoneDialog)
-  const openReleaseFinishedDialog = useStore((s) => s.openReleaseFinishedDialog)
-  const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
   const setTheme = useStore((s) => s.setTheme)
@@ -653,9 +564,6 @@ export function useCommandRunner(
         navigate,
         openDialog,
         openForwardDialog,
-        openReleaseFinishedDialog,
-        openClearDoneDialog,
-        ackAll,
         recordPull,
         removeRun,
         setTheme,
@@ -667,18 +575,15 @@ export function useCommandRunner(
         const value = await result
         toast.success(command.report ? command.report(value) : done)
       } catch (err) {
-        toast.error(`${done} failed: ${message(err)}`)
+        toast.error(`${done} failed: ${errorSentence(err)}`)
       }
     },
     [
-      ackAll,
       navigate,
       onDone,
       onTemplates,
       openDialog,
       openForwardDialog,
-      openClearDoneDialog,
-      openReleaseFinishedDialog,
       recordPull,
       removeRun,
       setTheme,

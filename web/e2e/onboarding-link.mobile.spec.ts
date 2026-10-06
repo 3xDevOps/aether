@@ -9,15 +9,15 @@
 import { expect, shrinkToKeyboardHeight, test } from './mobile'
 import { OnboardingWizard } from './pages/wizard'
 
-test('the Link step stays usable at the height a keyboard leaves', async ({
+test('the Connect step stays usable at the height a keyboard leaves', async ({
   page,
   aether,
 }) => {
   const alice = await aether.member('alice')
   const wizard = await OnboardingWizard.open(page, alice.url)
 
-  await wizard.link.byAddress().tap()
-  const address = wizard.link.section.getByLabel('Server address')
+  await wizard.connect.byAddress().tap()
+  const address = wizard.connect.section.getByLabel('Server address')
   await address.tap()
   const restoreViewport = await shrinkToKeyboardHeight(page)
 
@@ -38,18 +38,20 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
   // The submit is the other half. The wizard's header and step list fill a
   // phone screen on their own, so it starts below the fold: what the short
   // viewport may not do is keep it from being scrolled into reach.
-  const link = wizard.link.button('Link')
+  const link = wizard.connect.button('Link')
   await link.scrollIntoViewIfNeeded()
   await expect(link).toBeInViewport({ ratio: 1 })
   await link.tap()
-  await expect(wizard.link.section).toContainText('(admin)')
+  await expect(wizard.connect.section).toContainText('(admin)')
 
   await restoreViewport()
-  await wizard.link.continue().tap()
-  await wizard.expectStep('Git identity')
+  const next = wizard.connect.continue()
+  await next.scrollIntoViewIfNeeded()
+  await next.tap()
+  await wizard.expectStep('Repository')
 })
 
-test('repository settings keep their content inside the phone after a Git push', async ({
+test('the repository page keeps its content inside the phone after a Git push', async ({
   page,
   aether,
 }) => {
@@ -63,31 +65,23 @@ test('repository settings keep their content inside the phone after a Git push',
   })
   await page.setViewportSize({ width: 390, height: 600 })
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'Search runs and commands', exact: true }).tap()
-  await page.getByPlaceholder('Search commands, runs, workspaces...').fill('Manage workspaces')
+  await page.getByRole('button', { name: 'Search', exact: true }).tap()
+  await page.getByPlaceholder('Search commands, runs, workspaces…').fill('Manage workspaces')
   await page.getByRole('option', { name: 'Manage workspaces' }).tap()
+  await page.getByRole('button', { name: 'More actions for project' }).tap()
+  await page.getByRole('menuitem', { name: 'Repository' }).tap()
   await page.getByRole('button', { name: 'Link local repository', exact: true }).tap()
 
-  const dialog = page.getByRole('dialog', { name: 'Workspace repository', exact: true })
-  await dialog.getByLabel('Repository path').fill(repo)
-  await dialog.getByRole('button', { name: 'Add remote', exact: true }).tap()
-  await dialog.getByRole('button', { name: 'Push now', exact: true }).tap()
-  await expect(dialog).toContainText('Pushed main to aether')
+  const main = page.getByRole('main')
+  const repository = main.getByRole('region', { name: 'Workspace repository', exact: true })
+  await repository.getByLabel('Repository path').fill(repo)
+  await repository.getByRole('button', { name: 'Add remote', exact: true }).tap()
+  await repository.getByRole('button', { name: 'Push now', exact: true }).tap()
+  await expect(repository).toContainText('Pushed main to aether')
 
-  await expect
-    .poll(() => dialog.evaluate((element) => element.scrollWidth - element.clientWidth))
-    .toBe(0)
-  const bounds = await dialog.evaluate((element) => {
-    const { left, right } = element.getBoundingClientRect()
-    return { left, right, viewport: window.innerWidth }
-  })
-  expect(bounds.left).toBeGreaterThanOrEqual(0)
-  expect(bounds.right).toBeLessThanOrEqual(bounds.viewport)
-
-  const repository = dialog.getByRole('region', { name: 'Workspace repository', exact: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   for (const text of [
-    dialog.getByRole('heading', { name: 'Workspace repository', exact: true }),
-    dialog.locator('[data-slot="dialog-description"]'),
+    main.getByRole('heading', { name: 'Local clone', exact: true }),
     repository.locator('p').first(),
   ]) {
     await text.scrollIntoViewIfNeeded()
@@ -95,10 +89,7 @@ test('repository settings keep their content inside the phone after a Git push',
     const fits = await text.evaluate((element) => {
       const range = document.createRange()
       range.selectNodeContents(element)
-      const { left, right } = element.closest('[role="dialog"]')!.getBoundingClientRect()
-      return Array.from(range.getClientRects()).every(
-        (rect) => rect.left >= left && rect.right <= right,
-      )
+      return Array.from(range.getClientRects()).every((rect) => rect.left >= 0 && rect.right <= window.innerWidth)
     })
     expect(fits).toBe(true)
   }

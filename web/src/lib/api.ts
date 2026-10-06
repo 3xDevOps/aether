@@ -1,17 +1,17 @@
-// The one place the dashboard talks to the server. Every endpoint the SPA
-// uses lives here, so a change to the gateway's route table is a one-file
-// edit. The contract is docs/local-gateway.md: POST /api/v1/<rpc.method> with
-// the method's params as the body, bearer token from `aether gui`.
+// The contract is docs/local-gateway.md: POST /api/v1/<rpc.method> with the
+// method's params as the body, bearer token from `aether gui`.
 
 import type {
   AccountAccess,
   AgentDefinition,
+  AgentInstallResult,
   AgentInfo,
   Approval,
   BudgetReport,
   ConfigImportParams,
   ConfigImportResult,
   ConfigRoot,
+  CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
   Device,
@@ -22,7 +22,7 @@ import type {
   EdgeLogin,
   EdgeServer,
   EdgeStatus,
-  EnvHarnessesResult,
+  EnvAgentsResult,
   EnvSaveResult,
   EvidenceGetResult,
   EvidencePacketListResult,
@@ -37,6 +37,7 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  Mission,
   MissionCancelResult,
   MissionCreateResult,
   MissionListResult,
@@ -184,6 +185,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
+import type { SessionFrame, SessionItem, SessionLease } from '@/lib/session-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -215,11 +217,8 @@ function readFileBase64(file: File): Promise<string> {
   return promise
 }
 
-/**
- * Uploads image bytes to the selected terminal's server-owned home. The
- * gateway validates the decoded bytes again; this client-side check avoids
- * reading and sending files the RPC cannot accept.
- */
+/** The gateway validates the decoded bytes again; this check only avoids
+ * sending files the RPC cannot accept. */
 async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: string }> {
   if (!isTerminalImageType(file.type)) {
     throw new Error('Choose a PNG, JPEG, GIF, or WebP image.')
@@ -250,9 +249,8 @@ export class ApiError extends Error {
   }
 }
 
-// Every request carries a token, loopback included: `aether gui` mints one
-// and opens a tokened URL. Keep the token out of the address bar once we have
-// it.
+// Every request carries a token, loopback included. Keep it out of the
+// address bar once read.
 const tokenKey = 'aether.token'
 
 function bearer(): string | null {
@@ -266,25 +264,6 @@ function bearer(): string | null {
     return fromURL
   }
   return window.sessionStorage.getItem(tokenKey)
-}
-
-/**
- * The run an `aether://run/<id>` deep link asked for, once.
- *
- * Both shells map the link to `<dashboard>?run=<id>` and load that, so the id
- * arrives in the query exactly as `token` does and is removed from the
- * address bar the same way. Removing it is also what makes this one-shot:
- * a reload, or the re-hydration a reconnect runs, must not reopen the run
- * the member has since navigated away from.
- */
-export function takeRequestedRun(): string | null {
-  if (typeof window === 'undefined') return null
-  const id = new URLSearchParams(window.location.search).get('run')
-  if (!id) return null
-  const clean = new URL(window.location.href)
-  clean.searchParams.delete('run')
-  window.history.replaceState({}, '', clean.toString())
-  return id
 }
 
 async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
@@ -331,11 +310,8 @@ async function downloadArtifact(params: DevArtifactDownloadRequest, signal?: Abo
 }
 
 
-/**
- * A client-machine verb: POST /local/v1/<verb>. Only the local gateway
- * serves these (useCapability's hasLocal says which); failures carry the
- * same JSON-RPC error envelope as the proxied API.
- */
+/** POST /local/v1/<verb>, served only by the local gateway. Failures carry
+ * the same JSON-RPC error envelope as the proxied API. */
 async function local<T>(
   verb: string,
   params: unknown = {},
@@ -350,10 +326,8 @@ async function local<T>(
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(params),
-    // Aborting closes the connection, which cancels the request context
-    // on the gateway. A verb that walks the user's whole profile root
-    // needs that: leaving the step must stop the work, not just stop
-    // waiting for it.
+    // Aborting cancels the gateway's request context, so leaving a step
+    // stops a profile-wide walk instead of just no longer waiting for it.
     signal,
     keepalive,
   })
@@ -423,8 +397,6 @@ export function browserStreamURL(params: DevBrowserStreamRequest): string {
 }
 
 
-// Only what the SPA actually calls; the team-feature methods land with the
-// tickets that use them.
 export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
   memberList: () =>
@@ -562,13 +534,53 @@ export const api = {
   }) => call<MissionQuestionResult>('mission.question.answer', params),
   missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
     call<MissionCancelResult>('mission.cancel', params),
+  missionArchive: (missionID: string) =>
+    call<{ mission: Mission }>('mission.archive', { mission_id: missionID }).then((r) => r.mission),
+  missionUnarchive: (missionID: string) =>
+    call<{ mission: Mission }>('mission.unarchive', { mission_id: missionID }).then((r) => r.mission),
+  missionDelete: (missionID: string) => call<unknown>('mission.delete', { mission_id: missionID }),
   missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
     call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
-  runInject: (runID: string, message: string, idempotencyKey: string) =>
-    call<RoomPostResult>('run.inject', { run_id: runID, message, idempotency_key: idempotencyKey }),
+  /** steer asks an enhanced run's agent to add the message to its running
+   * turn; the lease makes delivery immediate instead of moderated. */
+  runInject: (
+    runID: string,
+    message: string,
+    idempotencyKey: string,
+    opts?: { steer?: boolean; lease?: SessionLease },
+  ) =>
+    call<RoomPostResult>('run.inject', {
+      run_id: runID,
+      message,
+      idempotency_key: idempotencyKey,
+      ...(opts?.steer ? { steer: true } : {}),
+      ...opts?.lease,
+    }),
+  runInputAnswer: (runID: string, requestID: string, optionID: string, lease: SessionLease, values?: Record<string, unknown>) =>
+    call<unknown>('run.input.answer', {
+      run_id: runID,
+      request_id: requestID,
+      option_id: optionID,
+      ...(values ? { values } : {}),
+      ...lease,
+    }),
+  runACPCancel: (runID: string, lease: SessionLease) =>
+    call<unknown>('run.acp.cancel', { run_id: runID, ...lease }),
+  runACPSetOption: (runID: string, optionID: string, value: string | boolean, lease: SessionLease) =>
+    call<unknown>('run.acp.set_option', { run_id: runID, option_id: optionID, value, ...lease }),
+  runACPHistory: (runID: string, beforeSeq?: number, limit?: number) =>
+    call<{ frames: SessionFrame[] }>('run.acp.history', {
+      run_id: runID,
+      before_seq: beforeSeq,
+      limit,
+    }).then((r) => r.frames),
+  runACPItem: (runID: string, seq: number) =>
+    call<{ item: SessionItem }>('run.acp.item', { run_id: runID, seq }).then((r) => r.item),
+  runModeSwitch: (runID: string, mode: 'tui' | 'acp', lease?: SessionLease) =>
+    call<{ run: Run }>('run.mode.switch', { run_id: runID, mode, ...lease }).then((r) => r.run),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
@@ -579,6 +591,14 @@ export const api = {
     before?: string
     limit?: number
   }) => call<RoomMessageListResult>('run.room.list', params),
+  coordMessagesList: (params: {
+    workspace_id: string
+    mission_id?: string
+    run_id?: string
+    correlation_id?: string
+    before?: string
+    limit?: number
+  }) => call<CoordMessagesListResult>('coord.messages.list', params),
   runRoomStatus: (params: { workspace_id: string; run_id: string }, signal?: AbortSignal) =>
     call<RoomStatusResult>('run.room.status', params, signal),
   runRoomPost: (params: {
@@ -673,7 +693,6 @@ export const api = {
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>
     call<ServerUpdateResult>('server.update', { when }),
-  // Admin and membership: invites, approvals, colors, workspaces.
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {
       ttl_seconds: ttlSeconds,
@@ -684,11 +703,11 @@ export const api = {
     ),
   memberRemove: (memberID: string) =>
     call<unknown>('member.remove', { member_id: memberID }),
-  /** Sets the caller's own attribution color. */
   memberColor: (color: string) =>
     call<{ member: Member }>('member.color', { color }).then((r) => r.member),
-  /** Sets the git identity commits made in this member's runs are authored
-   * as. An empty name or email clears that half back to the fallback. */
+  memberRename: (displayName: string) =>
+    call<{ member: Member }>('member.rename', { display_name: displayName }).then((r) => r.member),
+  /** An empty name or email clears that half back to the fallback. */
   memberGit: (name: string, email: string) =>
     call<{ member: Member }>('member.git', { name, email }).then((r) => r.member),
   /** Sets another member's role; admin only, and never the last admin. */
@@ -781,7 +800,6 @@ export const api = {
       limit_usd: params.clear ? 0 : (params.limit_usd ?? 0),
       warn_usd: params.warn_usd,
     }),
-  // Templates and their cron schedules.
   templateSave: (params: {
     workspace_id: string
     name: string
@@ -814,6 +832,8 @@ export const api = {
     }).then((r) => r.agents),
   agentRegister: (definition: AgentDefinition) =>
     call<unknown>('agent.register', { definition }),
+  agentInstall: (name: string, enhanced: boolean) =>
+    call<AgentInstallResult>('agent.install', { name, ...(enhanced ? { enhanced } : {}) }),
   runProtect: (runID: string, protect: boolean) =>
     call<unknown>('run.protect', { run_id: runID, protected: protect }),
   runArchive: (runID: string, archived: boolean) =>
@@ -822,12 +842,8 @@ export const api = {
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
   runSeen: (runID: string) =>
     call<{ run: Run }>('run.seen', { run_id: runID }).then((r) => r.run),
-  // The two endpoints that are not RPC methods: patch text is a read of a
-  // working tree, and disk usage has no place on the frozen server.info
-  // result. See docs/local-gateway.md.
-  // Without a range this is the cumulative diff against the fork point; with
-  // one it is the diff between two trees the server recorded, whose `base` is
-  // then the `from` tree rather than the fork point.
+  // Not RPC methods; see docs/local-gateway.md. Without a range this is the
+  // diff against the fork point; with one, `base` is the `from` tree.
   runPatch: (runID: string, range?: { from: string; to: string }) =>
     get<RunPatch>(
       `/run/${encodeURIComponent(runID)}/patch` +
@@ -852,7 +868,6 @@ export const api = {
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
-  // The local gateway's client-machine verbs; see the `local` helper.
   localLinkStatus: () => local<LinkStatus>('link.status'),
   localWorkspaceSelection: (workspaceID?: string) =>
     local<{ workspace_id: string }>(
@@ -879,8 +894,6 @@ export const api = {
     local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
   localEdgeClaim: (code: string, edge: string) =>
     local<EdgeLinkResult>('edge.claim', { code, edge }),
-  /** This machine's own git identity, for prefilling the one the server
-   * stores. */
   localGitIdentity: () => local<GitIdentity>('git.identity'),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localPullSwitch: (runID: string) =>
@@ -891,8 +904,7 @@ export const api = {
     local<RepoFastForwardResult>('repo.fast-forward', {
       workspace_id: workspaceID,
     }),
-  /** Pushes the workspace's base branch to the `aether` remote, seeding a
-   * fresh workspace without leaving the app. */
+  /** Pushes the workspace's base branch to the `aether` remote. */
   localRepoPush: (workspaceID?: string) =>
     local<RepoPushResult>('repo.push', { workspace_id: workspaceID }),
   localSyncStart: (runID: string, force?: boolean) =>
@@ -908,18 +920,17 @@ export const api = {
   localDaemonInstall: (server: string, repo: string) =>
     local<DaemonInstallResult>('daemon.install', { server, repo }),
   localDaemonStatus: () => local<DaemonStatusResult>('daemon.status'),
-  /** Whether the CLI on this machine, and the server it talks to, are
-   * behind the newest release. `refresh` skips the gateway's cached
-   * answer, for the read that names the release about to be installed. */
+  /** `refresh` skips the gateway's cached answer, for the read that names
+   * the release about to be installed. */
   localUpdateCheck: (refresh?: boolean) =>
     local<UpdateStatus>('update.check', { refresh }),
   /** Replaces the aether binary on this machine with the newest release. */
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   /** Progress of a desktop-app rebuild started by update.apply. */
   localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
-  /** Which setup-capable harnesses this machine has on PATH, plus the
+  /** Which setup-capable agents this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
-  envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
+  envAgents: () => local<EnvAgentsResult>('env.agents'),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
   terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
     call<TerminalHistoryResult>('terminal.history', params, signal),
@@ -930,10 +941,7 @@ export const api = {
    * in their environment terminal: git credentials there, a signing key in
    * their environment home, and that key registered on the account. */
   githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
-  /** Reports the gh in the member's environment terminal, so the screen can
-   * say what is wrong before it types a login command that container
-   * cannot run. Answers only for a terminal that is already running; the
-   * screen waits for the dock to report one. */
+  /** Answers only for an environment terminal that is already running. */
   githubProbe: () => call<GitHubProbeResult>('github.probe', {}),
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
@@ -941,6 +949,8 @@ export const api = {
   eventsSocket: () => socketURL('/ws/events'),
   attachSocket: (runID: string) =>
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
+  acpSocket: (runID: string) =>
+    socketURL(`/ws/acp/${encodeURIComponent(runID)}`),
   attachShellSocket: (runID: string, tab: string) =>
     socketURL(
       `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,

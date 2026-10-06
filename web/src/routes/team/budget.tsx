@@ -1,69 +1,32 @@
-import { CircleAlert, TriangleAlert } from 'lucide-react'
-import { Chip } from '@/components/ui/heroui'
+import type { ReactNode } from 'react'
 import { budgetStateLabel, money } from '@/lib/format'
-import type { BudgetState } from '@/lib/types'
 import { useStore } from '@/store'
 import { costTotals } from '@/store/cost'
+import { onlineMembers } from '@/store/presence'
 
-/**
- * A budget is a soft cap: it warns and it reports being past the limit, and
- * that is all it ever does. Nothing here may suggest a run was stopped,
- * because none ever is.
- */
-const stateStyle: Record<BudgetState, string> = {
-  ok: '',
-  warn: 'text-state-waiting',
-  exceeded: 'text-state-needs-attention',
-}
-
-/** Workspace spend and budget state, in the status bar. */
-export function BudgetStatus() {
+/** A budget is a soft cap that never stops a run, so nothing here may suggest one was stopped. */
+export function TeamSummary({ heading }: { heading?: ReactNode }) {
+  const presence = useStore((s) => s.presence)
+  const members = useStore((s) => s.members)
   const budgets = useStore((s) => s.budgets)
-  const workspaces = useStore((s) => s.workspaces)
-  const totals = costTotals(budgets)
-  if (Object.keys(budgets).length === 0) return null
-
-  const lines = totals.budgeted.map((report) => {
-    const name = workspaces[report.workspace_id]?.name ?? report.workspace_id
-    return `${name}: ${money.format(report.spend.cost_usd)} of ${money.format(
-      report.budget?.limit_usd ?? 0,
-    )} - ${budgetStateLabel[report.state]}`
-  })
-  lines.push('Budgets are advisory: a run is never stopped for being over one.')
-  if (totals.advisory) {
-    lines.push('Some runs report no usage, so the total is a floor.')
+  const inboxError = useStore((s) => s.inboxError)
+  const online = onlineMembers(presence)
+  const parts: string[] = []
+  if (online.length > 0) parts.push(`${online.length} online`)
+  if (Object.keys(budgets).length > 0) {
+    const totals = costTotals(budgets)
+    const spend = totals.costUSD === 0
+      ? totals.advisory ? 'no spend reported' : 'no spend yet'
+      : `${totals.advisory ? 'at least ' : ''}${money.format(totals.costUSD)} spent`
+    parts.push(totals.state === 'ok' ? spend : `${spend}, ${budgetStateLabel[totals.state]}`)
   }
-
-  const stateColor =
-    totals.state === 'exceeded' ? 'danger' : totals.state === 'warn' ? 'warning' : 'success'
-
+  if (parts.length === 0 && !inboxError) return null
+  const names = online.map((id) => members[id]?.display_name ?? id)
   return (
-    <span
-      className={`inline-flex h-[22px] min-h-[22px] min-w-0 max-w-full items-center gap-1.5 px-1.5 text-xs ${stateStyle[totals.state]}`}
-      title={lines.join('\n')}
-      aria-label={`Budget ${money.format(totals.costUSD)}${totals.advisory ? '+' : ''}`}
-    >
-      <StateIcon state={totals.state} />
-      <Chip color={stateColor} variant="soft" size="sm">
-        <Chip.Label>
-          {money.format(totals.costUSD) + (totals.advisory ? '+' : '')}
-        </Chip.Label>
-      </Chip>
-      {totals.state !== 'ok' && (
-        <Chip color={stateColor} variant="tertiary" size="sm">
-          <Chip.Label>{budgetStateLabel[totals.state]}</Chip.Label>
-        </Chip>
-      )}
-    </span>
+    <div className="pb-1 text-ui-sm text-muted">
+      {heading}
+      {parts.length > 0 && <p className="px-2" title={names.length ? `Online: ${names.join(', ')}` : undefined}>{parts.join(' · ')}</p>}
+      {inboxError && <p role="alert" className="break-words px-2 text-state-failed">{inboxError}</p>}
+    </div>
   )
-}
-
-function StateIcon({ state }: { state: BudgetState }) {
-  if (state === 'exceeded') {
-    return <CircleAlert className="size-3.5" aria-label="Past the cap" />
-  }
-  if (state === 'warn') {
-    return <TriangleAlert className="size-3.5" aria-label="Nearing the cap" />
-  }
-  return null
 }

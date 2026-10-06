@@ -427,7 +427,7 @@ func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error 
 		return err
 	}
 	e.StopDiffWatch(run)
-	if err := os.RemoveAll(checkout); err != nil {
+	if err := e.cfg.RemoveCheckout(ctx, checkout); err != nil {
 		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, err)
 	}
 	if err := os.Remove(meta); err != nil && !errors.Is(err, os.ErrNotExist) {

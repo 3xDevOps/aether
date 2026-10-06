@@ -15,30 +15,23 @@ test('uploads a chosen image and verifies it from the target shell', async ({ pa
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
-  await wizard.agents.skip().click()
-  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  await wizard.agent.skip().click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Environment', exact: true }).click()
 
-  const dock = page.getByRole('region', { name: 'Terminal dock' })
-  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+  const dock = page.getByRole('region', { name: 'Environment terminal' })
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
 
   const screen = dock.locator('.xterm-screen')
   await screen.click()
   await page.keyboard.type('sha256sum ')
-  const toolsButton = dock.getByRole('button', { name: 'Terminal tools', exact: true })
-  let tools = dock
-  if (await toolsButton.isVisible()) {
-    await toolsButton.click()
-    tools = page.getByRole('dialog')
-  }
-  await tools.getByRole('button', { name: 'Upload image to terminal' }).click()
+  await dock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Upload image…' }).click()
   await dock.locator('input[type=file]').setInputFiles({
     name: 'chosen.png',
     mimeType: 'image/png',
@@ -85,31 +78,21 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   })
 
   await page.goto(alice.url)
-  await page.getByRole('complementary').getByRole('button', { name: new RegExp(task) }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: new RegExp(task) }).click()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
-  const runDock = page.getByRole('region', { name: 'Terminal dock' })
-  await runDock.getByRole('button', { name: 'Expand terminal dock' }).click()
-  await expect(runDock.getByRole('button', { name: 'Open shell' })).toBeVisible({
-    timeout: 60_000,
-  })
-  await runDock.getByRole('button', { name: 'Open shell' }).click()
+  const newShell = page.getByRole('main').getByRole('button', { name: 'New shell' })
+  await expect(newShell).not.toHaveAttribute('aria-disabled', 'true', { timeout: 60_000 })
+  await newShell.click()
+  const runDock = page.locator('[data-slot=shell-terminal]')
   const screen = runDock.locator('.xterm-screen')
   await expect(screen).toBeVisible({ timeout: 60_000 })
-  await runDock.getByRole('button', { name: 'Take shell control' }).click()
-  const toolsButton = runDock.getByRole('button', { name: 'Terminal tools', exact: true })
-  let tools = runDock
-  if (await toolsButton.isVisible()) {
-    await toolsButton.click()
-    tools = page.getByRole('dialog')
-  }
-  await expect(
-    tools.getByRole('button', { name: 'Upload image to terminal' }),
-  ).toBeEnabled({ timeout: 60_000 })
+  await runDock.getByRole('button', { name: 'Take control' }).click()
+  await expect(runDock.getByRole('button', { name: 'Release' })).toBeVisible({ timeout: 60_000 })
   await screen.click()
   await page.keyboard.type('sha256sum ')
-  if (await toolsButton.isVisible()) await toolsButton.click()
-  await tools.getByRole('button', { name: 'Upload image to terminal' }).click()
+  await runDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Upload image…' }).click()
   await runDock.locator('input[type=file]').setInputFiles({
     name: 'run-target.png',
     mimeType: 'image/png',

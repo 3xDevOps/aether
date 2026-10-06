@@ -17,8 +17,11 @@ if (!window.matchMedia) {
 // The store persists view preferences under one localStorage key, and
 // `activeWorkspace` is now one of them: without this, the workspace a test
 // hydrated into would still be the scope of the next test's fresh store.
+// A fresh store also reads its route from the address, which a redirect in
+// an earlier test may have rewritten.
 beforeEach(() => {
   window.localStorage.clear()
+  window.history.replaceState(null, '', '/')
 })
 
 // Once a <style> element is disconnected, removing it no longer unregisters
@@ -44,12 +47,14 @@ afterEach(async () => {
 })
 
 // Radix measures, scrolls and captures the pointer over whatever it pops out -
-// an open select, a dialog, a menu - and xterm's fit addon measures its host.
+// an open select, a dialog, a menu - xterm's fit addon measures its host, and
+// the session timeline's virtualizer scrolls its list.
 // jsdom implements none of these, and a component that reaches for one throws
 // before it renders.
 // Assigned rather than stubbed, so a file calling `vi.unstubAllGlobals()`
 // restores this rather than taking it away.
 Element.prototype.scrollIntoView = vi.fn()
+Element.prototype.scrollTo = () => {}
 Element.prototype.hasPointerCapture = () => false
 Element.prototype.releasePointerCapture = () => {}
 globalThis.ResizeObserver = class {

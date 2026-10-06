@@ -1,14 +1,13 @@
-// The rendered half of a terminal: the element xterm draws into, plus the
-// find bar that searches its scrollback. Every terminal surface - the run
-// terminal, the run-shell dock and the environment dock - renders this, so
-// find behaves the same in all three.
-
+import { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import type * as React from 'react'
 import {
-  ClipboardCopy,
-  ClipboardPaste,
+  Camera,
   ChevronDown,
   ChevronUp,
-  Loader2,
+  ClipboardCopy,
+  ClipboardPaste,
+  ImageUp,
+  LoaderCircle,
   Minus,
   Plus,
   RotateCcw,
@@ -16,19 +15,12 @@ import {
   Search,
   SlidersHorizontal,
   X,
-} from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type * as React from 'react'
+} from '@/components/icons'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import {
-  TerminalImageAction,
-  type TerminalImageController,
-  useTerminalImage,
-} from '@/components/terminal-image'
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
+import { type TerminalImageController, useTerminalImage } from '@/components/terminal-image'
 import { TerminalKeys } from '@/components/terminal-keys'
 import { TerminalControlBorder, type TerminalControlAppearance } from '@/components/terminal-control-border'
 import { useTerminalPan } from '@/components/terminal-pan'
@@ -51,170 +43,99 @@ export interface TerminalReadSurface {
   focus(): void
 }
 
-/** A terminal toolbar button and the shortcut its tooltip names. */
-function ToolButton({
-  hint,
-  onClick,
-  disabled,
-  ...props
-}: { hint: string } & React.ComponentProps<typeof Button>) {
-  return (
-    <Tooltip>
-      <Tooltip.Trigger<'button'>
-        render={(triggerProps) => (
-          <Button
-            {...triggerProps}
-            {...props}
-            className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
-            aria-disabled={disabled || undefined}
-            onClick={(event) => {
-              if (disabled) return
-              onClick?.(event)
-            }}
-          >
-            {props.children}
-            <span className="hidden group-data-[expanded=true]/terminal-tools:inline">
-              {props['aria-label']}
-            </span>
-          </Button>
-        )}
-      />
-      <Tooltip.Content>{hint}</Tooltip.Content>
-    </Tooltip>
-  )
-}
+/** Keeps the menu open so the size can be stepped more than once. */
+const stay = (event: Event) => event.preventDefault()
 
-/**
- * What a touch screen reads instead of a tooltip. A tooltip opens on hover,
- * which a finger never produces, so two actions that differ only by icon -
- * copying a selection and copying the screen - need the word beside them
- * where there is no pointer to hover with.
- */
-function ToolLabel({ children }: { children: React.ReactNode }) {
-  return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline group-data-[expanded=true]/terminal-tools:hidden">{children}</span>
-}
+/** The clipboard fallback focuses a helper field, which the open menu's focus trap would refuse. */
+const afterClose = (action: () => void) => () => window.setTimeout(action)
 
 function TerminalTools({
   controller,
   image,
   readingSurface,
-  expanded = false,
+  onCaptures,
 }: {
   controller: XtermController
   image: TerminalImageController
   readingSurface?: React.RefObject<TerminalReadSurface | null>
-  expanded?: boolean
+  onCaptures?: (returnTo: HTMLElement | null) => void
 }) {
+  const trigger = useRef<HTMLButtonElement>(null)
   const terminal = controller.terminal
   const fontSize = useStore((state) => state.terminalFontSize)
   const setFontSize = useStore((state) => state.setTerminalFontSize)
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Terminal controls"
-      data-expanded={expanded}
-      className={cn(
-        'group/terminal-tools flex min-w-32 max-w-full shrink gap-0.5',
-        expanded ? 'flex-col items-stretch [&>span]:hidden' : 'flex-wrap items-center',
-      )}
-    >
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Open terminal search"
-        hint={readingSurface ? 'Find in loaded recorded output (Ctrl+Shift+F)' : 'Find in terminal (Ctrl+Shift+F)'}
-        onClick={() => controller.setFindOpen(true)}
-      >
-        <Search />
-      </ToolButton>
-      <span className="mx-0.5 hidden h-4 w-px bg-border sm:block" aria-hidden />
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Decrease terminal text size"
-        hint="Decrease terminal text size (Ctrl+-)"
-        disabled={!terminal || fontSize <= minTerminalFontSize}
-        onClick={() => setFontSize(fontSize - 1)}
-      >
-        <Minus />
-      </ToolButton>
-      <span
-        className="hidden min-w-8 text-center text-xs tabular-nums text-muted-foreground sm:inline"
-        aria-label={`Terminal text size ${fontSize}px`}
-      >
-        {fontSize}
-      </span>
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Increase terminal text size"
-        hint="Increase terminal text size (Ctrl+=)"
-        disabled={!terminal || fontSize >= maxTerminalFontSize}
-        onClick={() => setFontSize(fontSize + 1)}
-      >
-        <Plus />
-      </ToolButton>
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Reset terminal text size"
-        hint={`Reset terminal text size to ${defaultTerminalFontSize}px (Ctrl+0)`}
-        disabled={!terminal || fontSize === defaultTerminalFontSize}
-        onClick={() => setFontSize(defaultTerminalFontSize)}
-      >
-        <RotateCcw />
-      </ToolButton>
-      <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Copy terminal selection"
-        hint="Copy terminal selection (Ctrl+Shift+C)"
-        disabled={!terminal}
-        onClick={() => {
-          if (readingSurface) readingSurface.current?.copySelection()
-          else if (terminal) void copySelection(terminal)
-        }}
-      >
-        <ClipboardCopy />
-      </ToolButton>
-      <ToolLabel>Selection</ToolLabel>
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Copy last screen"
-        hint="Copy the rows on screen"
-        disabled={!terminal}
-        onClick={() => {
-          if (readingSurface) readingSurface.current?.copyScreen()
-          else if (terminal) void copyScreen(terminal)
-        }}
-      >
-        <ScanText />
-      </ToolButton>
-      <ToolLabel>Screen</ToolLabel>
-      <ToolButton
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label="Paste into terminal"
-        hint="Paste into terminal (Ctrl+Shift+V)"
-        disabled={!terminal || !!readingSurface}
-        onClick={() => {
-          if (terminal) void image.pasteClipboard()
-        }}
-      >
-        <ClipboardPaste />
-      </ToolButton>
-      <TerminalImageAction controller={image} />
-    </div>
+    <Menu>
+      <MenuTrigger asChild>
+        <Button ref={trigger} variant="ghost" size="sm" aria-label="Terminal tools">
+          <SlidersHorizontal />
+          Tools
+        </Button>
+      </MenuTrigger>
+      <MenuContent align="start" className="md:w-60">
+        <MenuItem onSelect={() => controller.setFindOpen(true)}>
+          <Search />
+          {readingSurface ? 'Find in recorded output' : 'Find'}
+          <span className="ml-auto text-ui-sm text-muted">Ctrl+Shift+F</span>
+        </MenuItem>
+        <MenuSeparator />
+        <MenuLabel>Text size {fontSize}px</MenuLabel>
+        <MenuItem disabled={!terminal || fontSize <= minTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize - 1) }}>
+          <Minus />
+          Smaller text
+          <span className="ml-auto text-ui-sm text-muted">Ctrl+-</span>
+        </MenuItem>
+        <MenuItem disabled={!terminal || fontSize >= maxTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(fontSize + 1) }}>
+          <Plus />
+          Larger text
+          <span className="ml-auto text-ui-sm text-muted">Ctrl+=</span>
+        </MenuItem>
+        <MenuItem disabled={!terminal || fontSize === defaultTerminalFontSize} onSelect={(event) => { stay(event); setFontSize(defaultTerminalFontSize) }}>
+          <RotateCcw />
+          Reset text size
+          <span className="ml-auto text-ui-sm text-muted">Ctrl+0</span>
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem
+          disabled={!terminal}
+          onSelect={afterClose(() => {
+            if (readingSurface) readingSurface.current?.copySelection()
+            else if (terminal) void copySelection(terminal)
+          })}
+        >
+          <ClipboardCopy />
+          Copy selection
+        </MenuItem>
+        <MenuItem
+          disabled={!terminal}
+          onSelect={afterClose(() => {
+            if (readingSurface) readingSurface.current?.copyScreen()
+            else if (terminal) void copyScreen(terminal)
+          })}
+        >
+          <ScanText />
+          Copy screen
+        </MenuItem>
+        <MenuItem disabled={!terminal || !!readingSurface} onSelect={afterClose(() => void image.pasteClipboard())}>
+          <ClipboardPaste />
+          Paste
+        </MenuItem>
+        <MenuItem disabled={!image.canUpload} onSelect={image.openPicker}>
+          <ImageUp />
+          Upload image…
+        </MenuItem>
+        {onCaptures && (
+          <>
+            <MenuSeparator />
+            <MenuItem onSelect={() => onCaptures(trigger.current)}>
+              <Camera />
+              Captures…
+            </MenuItem>
+          </>
+        )}
+      </MenuContent>
+    </Menu>
   )
 }
 
@@ -253,14 +174,14 @@ function FindBar({
     <div
       role="search"
       aria-label="Find terminal output"
-      className="flex h-8 min-h-8 min-w-32 flex-[1_1_20rem] items-center gap-1 border border-input bg-background px-1 coarse:h-11 coarse:min-h-11"
+      className="flex min-w-32 flex-1 items-center gap-1"
     >
       <Input
         ref={input}
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className="h-[26px] min-w-0 flex-1 coarse:h-10 coarse:min-h-10 sm:w-40"
+        className="min-w-0 flex-1 sm:max-w-64"
         onChange={(event) => {
           setTerm(event.target.value)
           request.current++
@@ -281,7 +202,7 @@ function FindBar({
       {missing && (
         <span
           role="status"
-          className="shrink-0 whitespace-nowrap px-1 text-[13px] text-muted-foreground"
+          className="shrink-0 whitespace-nowrap px-1 text-ui-sm text-muted"
         >
           No matches
         </span>
@@ -289,8 +210,8 @@ function FindBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        aria-label="Find previous"
+        size="icon-sm"
+        label="Find previous"
         onClick={() => find('previous')}
       >
         <ChevronUp />
@@ -298,13 +219,13 @@ function FindBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        aria-label="Find next"
+        size="icon-sm"
+        label="Find next"
         onClick={() => find('next')}
       >
         <ChevronDown />
       </Button>
-      <Button type="button" variant="ghost" size="icon" aria-label="Close find" onClick={onClose}>
+      <Button type="button" variant="ghost" size="icon-sm" label="Close find" onClick={onClose}>
         <X />
       </Button>
     </div>
@@ -325,19 +246,18 @@ export function TerminalPane({
   readingSurface,
   controlAppearance,
   takeoverProgress,
+  tabs,
+  notice,
+  onCaptures,
 }: {
   controller: XtermController
-  /** Extra classes for the terminal element itself. */
   className?: string
-  /** Additional content drawn over the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
-  /** Controls and state placed after the terminal tools in their shared strip. */
   toolbarEnd?: React.ReactNode
   /** Run ID for a run terminal or shell; omit for the member environment. */
   imageTarget?: string
   /** Active terminal identity, used to reject late uploads after tab changes. */
   imageTargetKey?: string
-  /** Whether this attached terminal may accept an uploaded path. */
   imageUploadEnabled?: boolean
   /** Whether what is typed here reaches the shell. A mirror shows no keys. */
   writable?: boolean
@@ -350,6 +270,9 @@ export function TerminalPane({
   /** Acknowledged local lease state; omitted on surfaces without shared control. */
   controlAppearance?: TerminalControlAppearance
   takeoverProgress?: number
+  tabs?: React.ReactNode
+  notice?: React.ReactNode
+  onCaptures?: (returnTo: HTMLElement | null) => void
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
@@ -361,10 +284,8 @@ export function TerminalPane({
   const coarse = useMediaQuery(coarsePointer)
   const phone = useMediaQuery(phoneScreen)
   useTerminalPan(controller.terminal, phone && !replaying && !readingSurface)
-  // A terminal that cannot take input holds no modifier: the key bar goes
-  // with the write access it needed, and a Ctrl left armed across that
-  // would turn the first character of the next turn at the keyboard into a
-  // control code nobody pressed.
+  // A Ctrl left armed after losing write access would turn the next typed
+  // character into a control code nobody pressed.
   const armCtrl = controller.armCtrl
   const terminal = controller.terminal
   useEffect(() => {
@@ -400,38 +321,12 @@ export function TerminalPane({
   }
   return (
     <div className="@container/terminal-pane relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="relative z-10 flex min-h-9 shrink-0 flex-wrap items-start gap-x-2 border-b border-border bg-sidebar px-1 coarse:min-h-12 @sm/terminal-pane:px-2">
-        <div className="flex min-h-[35px] max-w-full shrink-0 items-center coarse:min-h-[47px]">
-          {!controller.findOpen ? (
-            <>
-              <div className={coarse ? undefined : toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label="Terminal tools">
-                      <SlidersHorizontal />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[min(300px,calc(100vw-16px))] p-1">
-                    <TerminalTools controller={controller} image={image} readingSurface={readingSurface} expanded />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              {!coarse && (
-                <div className={toolbarEnd ? 'hidden @[70rem]/terminal-pane:block' : 'hidden @[42rem]/terminal-pane:block'}>
-                  <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
-                </div>
-              )}
-            </>
-          ) : (
-            <Button variant="ghost" size="icon" aria-label="Close terminal search" onClick={closeFind}>
-              <Search />
-            </Button>
-          )}
-        </div>
-        {toolbarEnd && <div className={cn('min-w-0 flex-1', !phone && 'basis-[28rem]')}>{toolbarEnd}</div>}
-      </div>
-      {controller.findOpen && (
-        <div className="shrink-0 border-b border-border bg-sidebar p-1">
+      <div
+        role="toolbar"
+        aria-label="Terminal toolbar"
+        className="relative z-10 flex h-8 shrink-0 items-center gap-1 border-b border-seam bg-chrome px-1 coarse:h-11"
+      >
+        {controller.findOpen ? (
           <FindBar
             search={readingSurface ? {
               findNext: (term) => readingSurface.current?.findNext(term) ?? false,
@@ -441,14 +336,22 @@ export function TerminalPane({
             onNavigate={controller.noteViewportInteraction}
             onClose={closeFind}
           />
-        </div>
-      )}
+        ) : (
+          <>
+            {tabs}
+            <TerminalTools controller={controller} image={image} readingSurface={readingSurface} onCaptures={onCaptures} />
+            <div className="min-w-0 flex-1" />
+            {toolbarEnd}
+          </>
+        )}
+      </div>
+      {notice}
       <div className="relative z-0 flex min-h-0 min-w-0 flex-1">
       <div
         ref={controller.hostRef}
         inert={replaying || !!readingSurface}
         className={cn(
-          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-background p-2 text-foreground',
+          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-canvas p-2 text-text',
           className,
         )}
         style={{
@@ -471,7 +374,7 @@ export function TerminalPane({
         <div
           role="status"
           aria-label="Restoring terminal history"
-          className="absolute inset-0 z-30 flex items-center justify-center bg-background text-[13px] text-muted-foreground"
+          className="absolute inset-0 z-30 flex items-center justify-center bg-canvas text-ui text-muted"
         >
           Restoring terminal history
         </div>
@@ -481,19 +384,15 @@ export function TerminalPane({
   )
 }
 
-/**
- * What covers a terminal that has nothing to draw yet, because the xterm host
- * is blank until an attach acks. Shared so the run terminal and the
- * environment dock wait the same way and only the words differ.
- */
+/** Covers the xterm host, which stays blank until an attach acks. */
 export function TerminalSpinner({ label }: { label: string }) {
   return (
     <div
       role="status"
       aria-label={label}
-      className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-[13px] text-muted-foreground"
+      className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-canvas text-ui text-muted"
     >
-      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+      <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
       {label}
     </div>
   )

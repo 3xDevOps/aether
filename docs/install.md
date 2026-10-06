@@ -63,7 +63,7 @@ replaces the CLI from the `aether gui` process, which runs as you, and a
 directory you own never asks for a password. A binary in a directory this
 account cannot write, such as `/usr/local/bin`, still updates from the button
 on macOS, through one administrator dialog (Touch ID or password); on Linux
-the banner shows the `sudo aether update` to run instead (see
+the update prompt shows the `sudo aether update` to run instead (see
 [Upgrading](#upgrading)).
 `--bin-dir` overrides the choice for every role.
 
@@ -231,15 +231,15 @@ live only in the server's Docker daemon; `aether env reset` removes a saved
 image and returns that member to the standard image.
 
 **From the dashboard.** The **Update now** button installs whatever is newest
-at the click: the version in the banner is re-read first, so it names the
+at the click: the version in the prompt is re-read first, so it names the
 release the install is about to write. It runs the same swap from the
 `aether gui` process, which runs as you. A CLI in
 a directory you own - `~/.local/bin`, a Homebrew prefix - is replaced without
 a question on macOS and Linux (Windows has no self-update). A CLI in a
 directory this account cannot write, such as `/usr/local/bin`, splits by
-platform, and the banner says which case you are in before you click:
+platform, and the prompt says which case you are in before you click:
 
-- **macOS.** The banner says *macOS will ask for an administrator password:
+- **macOS.** The prompt says *macOS will ask for an administrator password:
   /usr/local/bin/aether is in a directory this account cannot write to. The
   dialog is labelled osascript, the tool Aether asks through. Aether never
   sees your password.* The button shows the standard macOS administrator
@@ -254,13 +254,13 @@ platform, and the banner says which case you are in before you click:
   fixed copy-and-verify command made of system tools, never Aether's own
   code ([security.md](security.md#client-self-update-on-macos) has the
   command). Cancelling the dialog, or a wrong password macOS gives up on,
-  changes nothing: the banner says *Update cancelled, nothing was changed.*
+  changes nothing: the prompt says *Update cancelled, nothing was changed.*
   and the button comes back. The button is offered only where the dialog
   can install: the gateway must be in a GUI login session (not started over
   SSH), and only root can write the binary's directory or any directory
-  above it. Anywhere else the banner shows `sudo aether update` instead;
+  above it. Anywhere else the prompt shows `sudo aether update` instead;
   the full rule, and why, sits beside the quoted text in local-gateway.md.
-- **Linux.** No button. The banner shows `sudo aether update` to run in a
+- **Linux.** No button. The prompt shows `sudo aether update` to run in a
   terminal instead.
 
 **It rebuilds the desktop app too.** The dashboard ships inside the CLI, but
@@ -304,7 +304,7 @@ It resolves the tag from the GitHub releases redirect, with no token and no
 rate limit. A build whose version is `dev` never reports an update. Set
 `AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release check on
 an air-gapped machine: the CLI's, the `aether gui` startup line, and the
-dashboard banner all answer `disabled` without touching the network.
+dashboard's update prompt all answer `disabled` without touching the network.
 
 A binary built from a checkout reports what `git describe` produced
 (`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
@@ -316,39 +316,42 @@ bare commit, which cannot be ordered against anything and never updates
 automatically; `--version <tag>` explicitly selects a release instead.
 
 **In the dashboard.** `aether gui` runs the same check in the background and
-prints one line to stderr when a newer release exists. The dashboard shows a
-dismissible banner naming the new version, with an **Update now** button that
-replaces the binary on this machine. It re-checks about every half hour while
+prints one line to stderr when a newer release exists. The dashboard's
+sidebar shows a one-line notice naming the new version; its **Update** link,
+or **Update…** in the sidebar footer menu or Settings > **Server**, opens the
+**Updates** dialog. Each pending update is one dismissible prompt there, and
+the CLI's has an **Update now** button that replaces the binary on this
+machine. It re-checks about every half hour while
 the window is on screen, and again whenever you come back to it, so a release
 that lands after launch shows up without restarting the app. The restart takes
 the gateway's own work with it - attached terminals and any running
 `aether sync` session stop, while the runs themselves keep going on the
 server. Dismissing silences that version only - the next release shows the
-banner again.
+prompt again.
 
 The button does the same two steps the command does. It swaps the binaries,
-then rebuilds the app when one is installed, and the banner follows along:
-*Updating the CLI...*, then *Rebuilding the app (about a minute; the first
-time also fetches Node)...*, then *Relaunching*. On macOS with a binary in
+then rebuilds the app when one is installed, and the prompt follows along:
+*Updating the CLI…*, then *Rebuilding the app (about a minute; the first
+time also fetches Node)…*, then *Relaunching*. On macOS with a binary in
 a directory this account cannot write, the first step reads *Downloading
-v1.3.0, then macOS asks for an administrator password...* and the dialog
+v1.3.0, then macOS asks for an administrator password…* and the dialog
 (Touch ID or password) opens once the download is verified; cancelling it
 ends the update there with nothing changed.
 **Update now** stays disabled until it is over. In the desktop app the shell relaunches itself onto the new
 build, so the window you end up in is the new one. In a browser tab the
 gateway never exits (it is your terminal's process, not the app's): the app is
-still rebuilt, and the banner tells you to restart it.
+still rebuilt, and the prompt tells you to restart it.
 
 A rebuild that fails does not cost you the CLI update. The gateway records the
 build's error, the desktop app comes back on the new CLI in the old shell, and
-the "desktop app is out of date" banner then shows that error above the
+the "desktop app is out of date" prompt then shows that error above the
 `aether gui build` to run by hand. A successful build clears it.
 
 On a single-box install the same update replaces the `aether-server` beside
-the CLI. The banner then names both binaries and the
+the CLI. The prompt then names both binaries and the
 `sudo systemctl restart aether-server` that the running server still needs.
 
-Administrators see a second banner when the **server** is behind the latest
+Administrators see a second prompt when the **server** is behind the latest
 release. An admin updates it from their laptop, no shell on the server box
 needed:
 
@@ -383,21 +386,22 @@ containers when the server comes back. Attached terminals and live syncs do
 not - `aether attach` and `aether sync --live` drop and reconnect, the same
 as a client-side update.
 
-**In the dashboard.** An admin does the same from the server banner:
+**In the dashboard.** An admin does the same from the server prompt in the
+**Updates** dialog:
 **Update now** asks to confirm, naming how many runs are active first, and
 **Update when idle** records the pending update and leaves a **Cancel**
-button in its place. The banner then follows the phases live - scheduled,
+button in its place. The prompt then follows the phases live - scheduled,
 applying, restarting - and disappears once the server reports the new
 version. A failure shows the server's own error and the two commands below.
 Every phase is in the workspace activity feed as well, and a member who is
-not an admin sees a one-line notice in the status bar while an update is
+not an admin sees a one-line notice in the sidebar while an update is
 scheduled or applying, so the restart does not look like an outage. See
 [dashboard-frontend.md](dashboard-frontend.md#update-prompts).
 
 On the documented unprivileged install (the server binary's directory not
 writable by the server process, see [First boot](#first-boot)), `--status`
 reports that the server cannot update itself and `server update` refuses.
-The dashboard banner offers no buttons there either: it names the same
+The dashboard's prompt offers no buttons there either: it names the same
 reason and these commands, with a copy button. Run them on the server host:
 
 ```sh
@@ -410,8 +414,8 @@ updating the CLI updates the dashboard. The Electron shell around it - window
 chrome, notifications, `aether://` deep links - is whatever `aether gui build`
 last produced, and records the full version and executable path of the CLI
 that built it. Both `aether update` and the dashboard's **Update now** rebuild
-it for you; the banner below is what is left when that rebuild was skipped
-(`--no-app`) or failed, or the shell deliberately uses another CLI through
+it for you; the "desktop app is out of date" prompt is what is left when that
+rebuild was skipped (`--no-app`) or failed, or the shell deliberately uses another CLI through
 `AETHER_BIN`. It is not tied to a release being available, because the usual
 way to get there is to have just updated.
 
@@ -424,18 +428,18 @@ agent installation, read-only, when the launcher has none
 GitHub (**Connect GitHub** in the local dashboard's onboarding, or `aether
 github connect`); they no longer get the owner's image, GitHub login, or
 other files. Runs on a shared account, and every container
-that mounts a sharing owner's home (their runs, their environment terminal,
+that mounts a sharing owner's home (their runs, their environment,
 and candidate verification started by them or by their runs), need Docker
 Engine 26.0 or newer; on an older engine Aether refuses them with `runtime:
 docker engine API "1.44" cannot mount a path beneath a member home; that needs
 API 1.45 (Docker Engine 26.0) or newer`. A member-defined agent no longer
 launches on a shared account. Containers created before the upgrade still
-mount the owner's whole home until they end, and relaunching one is refused;
+mount the owner's whole home until they end, and reopening one is refused;
 stop shared runs before or after upgrading to end that exposure immediately
-(**Kill** in the run's header, or `aether kill <run-id>`). A member who
-already shares stops and reopens their environment terminal once after the
+(**Kill run** in the run header's **More** menu, or `aether kill <run-id>`).
+A member who already shares stops and reopens their environment once after the
 upgrade, so a Claude Code login refreshed there reaches recipients' runs:
-**Stop environment**, then **Open**, in the terminal dock on the Board, or
+**Stop environment**, then **Open**, on the dashboard's **Environment** page, or
 `aether terminal stop`, then `aether terminal`.
 
 ## Manual install
@@ -776,7 +780,7 @@ session's `PATH`. If that executable is gone or cannot run, the error names
 its exact path: restore it, set `AETHER_BIN` to a working CLI, or rerun that
 installed CLI's `gui build` command. Older shells without a recorded path
 still search `PATH` and the installer defaults. This CLI selection is
-the launcher's job alone: once the app is running, the dashboard's harness
+the launcher's job alone: once the app is running, the dashboard's agent
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the
 application menu too, and "Check again" picks up a fresh install without a
@@ -871,10 +875,10 @@ Building the APK from a checkout is in
 
 - **Linux.** Windows and macOS are client platforms.
 - **Docker**, running, with the server's user able to reach its socket. Every
-  environment terminal and run is a container. Agent installation happens in
-  the member's environment terminal. Runs on a shared agent account
+  member environment and run is a container. Agent installation happens in
+  the member's environment. Runs on a shared agent account
   ([teams.md](teams.md#agent-accounts)), and every container that mounts a
-  sharing owner's home - their runs, their environment terminal, and
+  sharing owner's home - their runs, their environment, and
   candidate verification started by them or by their runs - need Docker
   Engine 26.0 or newer (API 1.45);
   `docker version --format '{{.Server.Version}}'` prints yours.
@@ -902,13 +906,13 @@ runtime instance of that image. The server opens terminals only inside
 containers, never on the host, and never mounts the Docker socket into a
 workspace container.
 
-Every container a member receives - agent runs, workspace shells, and the
-environment terminal - starts from that member's saved image. When the member
+Every container a member receives - agent runs, workspace shells, and their
+environment - starts from that member's saved image. When the member
 has not saved one, the server uses its standard image, configured with
 `--standard-image`. See [environments.md](environments.md) for the standard
 image contents, saving, resetting, and missing-image behavior.
 
-The environment terminal is where members install system packages and
+The environment is where members install system packages and
 toolchains. Files in the member home persist across containers. Files outside
 the home live in the container layer and reach later runs only after the
 member saves the environment.
@@ -1022,7 +1026,7 @@ Do not treat every failure as a request to upgrade Git.
 If a custom image lacks transaction support, install an appropriate native
 Git package in the selected member environment and save it for future runs,
 or use `aether env reset` to return to the standard image. Reset discards saved
-image customizations. Open a new environment terminal and start a new run;
+image customizations. Stop and reopen your environment and start a new run;
 saving or resetting does not change an already-running container. See
 [environments.md](environments.md#git-in-run-environments).
 
@@ -1085,7 +1089,19 @@ The unit runs the server as root and creates `/var/lib/aether` through
 root-equivalent on the host, and member images with a non-root user make the
 server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
-give up.
+give up: every environment image must keep a root user. Git works in those
+runs - the checkout stays owned by the server's user, and every run container
+sets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`, so neither the
+agent's git nor the dashboard's Git panel stops at `detected dubious
+ownership`. This needs git 2.31 or newer in the image; the standard image
+qualifies. An unprivileged server cannot delete files a root agent created,
+such as `.git/objects` or `node_modules`. When removing a finished run's
+checkout or a removed member's home fails with `permission denied`, the server
+empties the directory from a short-lived root container of the standard image
+(`find /reclaim -mindepth 1 -delete`, the directory mounted at `/reclaim`) and
+then deletes it. If that fails too, the journal logs `cannot remove files a
+root container created` once per directory with both errors, and the directory
+stays under the data directory until you remove it as root.
 
 Browser support also needs permission to assign its private control directory
 to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
@@ -1121,13 +1137,13 @@ uses the default; negative values have the semantics in the table.
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
-| `--harness-update` | on | Update a shipped agent installed in the member home before launching it; see [harnesses.md](harnesses.md#updates-before-launch). |
+| `--agent-update` | on | Update a shipped agent installed in the member home before launching it; see [harnesses.md](harnesses.md#updates-before-launch). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed mission run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long a closed Standard or Enhanced run, one its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
-| `--harness-definitions` | none | Inline JSON custom harness definitions via this flag or `AETHER_HARNESS_DEFINITIONS`; see [harnesses.md](harnesses.md). |
+| `--agent-definitions` | none | Inline JSON custom agent definitions via this flag or `AETHER_AGENT_DEFINITIONS`; see [harnesses.md](harnesses.md). |
 
 Swarms run over conflict coordination, so `--conflict-coordination=false` also
 turns them off. The dashboard still offers **Swarm**, but `mission.create`
@@ -1166,7 +1182,7 @@ warning naming the key and the file, and boots on the remaining settings.
 is still an error, because a typo means a setting you believe is in force
 never was.
 
-Key-driven harnesses read the documented API-key environment variable names
+Key-driven agents read the documented API-key environment variable names
 from `/etc/aether/aether-server.env`, which the unit loads if it exists. Provide
 those values through your deployment's secret manager; do not commit them or
 paste them into public configuration examples.
@@ -1195,7 +1211,7 @@ Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
 `schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
 does the same work in the foreground on any of them. The daemon syncs git
 branches only; it does not watch agent configuration directories. Configuration
-is imported explicitly through **Agents → Configuration** in either the local
+is imported explicitly through **Agents → Agent config files** in either the local
 dashboard (`aether gui`) or the server-hosted dashboard, and edited in **Files**.
 
 If a service unit was generated by an older release, it may still contain the
@@ -1275,12 +1291,12 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees. A retained TUI run (closed, or finished by its agent's report) and a completed mission run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
+| `checkouts/` | Per-run worktrees. A retained Standard or Enhanced run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk usage reports. |
 | `transcripts/` | Per-run PTY transcripts (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
-| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed mission runs retain this mount until expiry/deletion. |
+| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes and mirror credentials are server-owned state. Back up the
@@ -1303,7 +1319,7 @@ Three consequences worth knowing:
   configured source mirrors.**
 - **Four of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, `aether.db` (the event log), and `repos/` (every push,
-  run branch and reflog entry stays). The dashboard's disk gauge reports those
+  run branch and reflog entry stays). The disk usage in Settings > **Server** reports those
   four, and new runs are refused below `--min-free-disk`. A checkout is a
   `git clone --local` of its workspace repo, so its object files are hard
   links to the same bytes in `repos/`; the gauge counts them once, under
@@ -1368,7 +1384,7 @@ the history if you want a silent baseline.
 
 `/etc/aether` only exists if you used `aether-server setup`, `install`,
 `config set`, or `config edit`, or if you created `aether-server.env` by hand
-for API-key harnesses. No system user or group is ever created, so there is nothing to
+for API-key agents. No system user or group is ever created, so there is nothing to
 `userdel`.
 
 ### Client

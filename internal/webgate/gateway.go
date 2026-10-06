@@ -19,51 +19,39 @@ import (
 	"github.com/3xDevOps/Aether/web"
 )
 
-// Config wires a gateway to the identity it trusts and the static assets
-// it serves.
 type Config struct {
-	// Authorize identifies every /api and /ws caller. Required.
+	// Required.
 	Authorize Authorizer
-	// Capabilities is what GET /api/v1/capabilities answers, minus the
-	// fields every gateway shares: Methods is always "*", and Version and
-	// Commit are this build's.
+	// Methods, Version and Commit are filled in by the gateway.
 	Capabilities protocol.GatewayCapabilities
 	// Static is the built SPA; nil means the embedded web/dist.
 	Static fs.FS
-	// PingInterval and PingTimeout bound how long a half-open socket - a
-	// phone that changed networks or went to sleep - keeps the PTY client
-	// it was holding. Zero means the defaults.
+	// Bound how long a half-open socket (a phone that slept or changed
+	// networks) keeps its PTY client. Zero means the defaults.
 	PingInterval time.Duration
 	PingTimeout  time.Duration
 }
 
 const (
-	// httpReadHeaderTimeout bounds how long a client may dribble request
-	// headers.
 	httpReadHeaderTimeout = 10 * time.Second
-	// closeTimeout bounds the graceful drain in Close.
-	closeTimeout = 5 * time.Second
+	closeTimeout          = 5 * time.Second
 )
 
-// Gateway is the transport-neutral dashboard gateway: the SPA, the
-// /api/v1 shape, and the events, attach and terminal WebSockets, each
-// bridged onto whatever Backend the authorizer hands back. It is an
-// http.Handler the composer adds its own routes to, and it serves the
-// listeners the composer binds.
+// Gateway is the transport-neutral dashboard gateway, bridged onto whatever
+// Backend the authorizer hands back. Composers add their own routes to it.
 type Gateway struct {
 	*http.ServeMux
 	cfg Config
 	srv *http.Server
 
-	// Imports retain their wire body while the backend decodes and applies
-	// it. Admission covers that entire lifetime, including the response.
+	// Admission covers an import's whole lifetime, including the response,
+	// because it retains its wire body until then.
 	configImports        chan struct{}
 	configImportIdle     time.Duration
 	configImportDuration time.Duration
 
-	// ctx bounds every WebSocket handler, which http.Server.Shutdown
-	// cannot reach once the connection is hijacked; Close cancels it and
-	// waits on wg for those handlers to return.
+	// Bounds every WebSocket handler, which http.Server.Shutdown cannot
+	// reach once hijacked.
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -71,16 +59,12 @@ type Gateway struct {
 	mu      sync.Mutex
 	conns   map[*websocket.Conn]struct{}
 	closing bool
-	// serving counts listeners Serve is still running on; failed is the
-	// first error a listener died with, and done closes once every
-	// listener is gone because of one - the composer surfaces that into
-	// its own lifecycle rather than staying up and answering nothing.
 	serving int
 	failed  error
 	done    chan struct{}
 }
 
-// New builds the gateway. It binds nothing: the caller serves it.
+// New binds nothing: the caller serves it.
 func New(cfg Config) (*Gateway, error) {
 	if cfg.Authorize == nil {
 		return nil, errors.New("webgate: config requires an Authorizer")
@@ -118,15 +102,14 @@ func New(cfg Config) (*Gateway, error) {
 	g.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	g.HandleFunc("GET /ws/events", g.handleEvents)
 	g.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
+	g.HandleFunc("GET /ws/acp/{run}", g.handleACP)
 	g.HandleFunc("GET /ws/terminal", g.handleTerminal)
 	g.HandleFunc("GET /ws/dev/browser/{run}", g.handleDevelopmentBrowser)
 	g.HandleFunc("GET /api/v1/dev/{run}/artifacts/{artifact}", g.handleDevelopmentArtifact)
 	static := StaticHandler(cfg.Static)
 	g.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// An /api or /ws request that misses every method-qualified
-		// pattern lands here; answering it with the SPA would turn a
-		// wrong-verb client bug into a silent 200. The local verbs are the
-		// local gateway's to mount; without them the path does not exist.
+		// Serving the SPA here would turn a wrong-verb client bug into a
+		// silent 200.
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/"):
 			WriteError(w, http.StatusMethodNotAllowed, &protocol.Error{
@@ -146,17 +129,10 @@ func New(cfg Config) (*Gateway, error) {
 	return g, nil
 }
 
-// Authorize runs the same-origin rule and then the authorizer, writing
-// the refusal and reporting whether the request may proceed. The core's
-// routes call it, and so must every route a composer adds, so the rule
-// holds for the whole gateway.
-//
-// A browser sends Origin on every cross-site request and on every
-// WebSocket handshake. The server gateway has no bearer token - the
-// browser's tailnet position is the whole credential - so a page on any
-// other origin could otherwise act as the member with a plain fetch: a
-// request an Origin names that is not this host is refused before any
-// identity is resolved.
+// Authorize must guard every route, including those a composer adds. The
+// server gateway has no bearer token - tailnet position is the whole
+// credential - so without the same-origin check any other page could act
+// as the member with a plain fetch.
 func (g *Gateway) Authorize(w http.ResponseWriter, r *http.Request, handshake bool) (Backend, bool) {
 	if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
 		(&Refusal{
@@ -173,8 +149,7 @@ func (g *Gateway) Authorize(w http.ResponseWriter, r *http.Request, handshake bo
 	return backend, true
 }
 
-// sameOrigin reports whether an Origin header names host, the same rule
-// coder/websocket applies to a handshake.
+// sameOrigin is the same rule coder/websocket applies to a handshake.
 func sameOrigin(origin, host string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
@@ -183,9 +158,6 @@ func sameOrigin(origin, host string) bool {
 	return strings.EqualFold(u.Host, host)
 }
 
-// Serve serves the gateway on ln in the background until Close. A
-// listener that stops serving for any other reason is logged, and once
-// the last one has, Done closes.
 func (g *Gateway) Serve(ln net.Listener) {
 	g.mu.Lock()
 	g.serving++
@@ -207,21 +179,18 @@ func (g *Gateway) Serve(ln net.Listener) {
 	}()
 }
 
-// Done is closed when every listener has stopped serving because of an
-// error, so the gateway is up but reachable on nothing. It stays open
+// Done is closed when every listener has died with an error. It stays open
 // through Close.
 func (g *Gateway) Done() <-chan struct{} { return g.done }
 
-// Err is the first error a listener died with, valid once Done is
-// closed.
+// Err is valid once Done is closed.
 func (g *Gateway) Err() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.failed
 }
 
-// beginHandler registers a WebSocket handler with the shutdown WaitGroup
-// unless the gateway is closing, so an Add can never race the Wait in
+// beginHandler refuses once closing so wg.Add can never race the Wait in
 // Close.
 func (g *Gateway) beginHandler(conn *websocket.Conn) bool {
 	g.mu.Lock()
@@ -241,10 +210,7 @@ func (g *Gateway) endHandler(conn *websocket.Conn) {
 	g.wg.Done()
 }
 
-// Close stops serving, drains in-flight requests briefly before cutting
-// them off, then ends every live WebSocket - which http.Server.Shutdown
-// cannot reach once hijacked - and waits for its handler to return. Safe
-// before Serve, and safe to call twice.
+// Close is safe before Serve and safe to call twice.
 func (g *Gateway) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()

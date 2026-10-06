@@ -1,17 +1,28 @@
 import { useState } from 'react'
 import { api } from '@/lib/api'
-import { runClearDone, runReleaseFinished } from '@/lib/commands'
+import type { StateContext } from '@/lib/needs-you'
+import { clearDonePlan, releaseFinishedPlan, runClearDone, runReleaseFinished } from '@/lib/commands'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
+import { finishedRuns, workspaceRuns } from '@/routes/board/selectors'
 import { useStore } from '@/store'
+import { stateContextOf } from '@/store/selectors'
+import { useCapability, useSelf } from '@/store/hooks'
 
-/** Hosts the archive confirmation over the palette's snapshotted plan. */
+// Each plan is snapshotted when its confirmation opens, so the count the
+// member confirms is the set that is acted on even as runs keep changing.
+
+function scope(): [string, StateContext] {
+  const s = useStore.getState()
+  return [s.activeWorkspace, stateContextOf(s, Date.now())]
+}
+
 export function ClearDoneDialog() {
-  const plan = useStore((s) => s.paletteClearDonePlan)
+  const cap = useCapability()
+  const self = useSelf()
   const close = useStore((s) => s.closePaletteDialog)
   const removeRun = useStore((s) => s.removeRun)
+  const [plan] = useState(() => clearDonePlan(finishedRuns(...scope()), cap, self))
   const [running, setRunning] = useState(false)
-
-  if (!plan) return null
 
   const confirm = async () => {
     setRunning(true)
@@ -31,11 +42,11 @@ export function ClearDoneDialog() {
 }
 
 export function ReleaseFinishedDialog() {
-  const plan = useStore((s) => s.paletteReleaseFinishedPlan)
+  const cap = useCapability()
+  const self = useSelf()
   const close = useStore((s) => s.closePaletteDialog)
+  const [plan] = useState(() => releaseFinishedPlan(workspaceRuns(...scope()), cap, self))
   const [running, setRunning] = useState(false)
-
-  if (!plan) return null
 
   const confirm = async () => {
     setRunning(true)

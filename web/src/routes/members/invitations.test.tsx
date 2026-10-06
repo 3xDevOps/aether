@@ -34,6 +34,11 @@ async function section() {
   return within(await screen.findByRole('region', { name: 'Invitations' }))
 }
 
+async function inviteDialog() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Invite…' }))
+  return within(await screen.findByRole('dialog', { name: 'Invite a member' }))
+}
+
 describe('invitations', () => {
   it('is an admin view', async () => {
     seed(bob)
@@ -71,12 +76,11 @@ describe('invitations', () => {
 
     const list = within((await section()).getByRole('list', { name: 'Open invitations' }))
     const octocat = list.getByText('octocat on GitHub').closest('li')!
-    expect(within(octocat).getByText('collaborator')).toBeDefined()
-    expect(octocat.textContent).toContain('invited by Alice · expires')
+    expect(octocat.textContent).toContain('Collaborator · invited by Alice · expires')
     expect(list.getByText('dev@example.com on GitHub')).toBeDefined()
     expect(list.getByText('old@example.com on google')).toBeDefined()
-    expect(list.getAllByText('viewer')).toHaveLength(2)
-    expect(list.getByText('links Bob')).toBeDefined()
+    expect(list.getAllByText(/^Viewer · invited by/)).toHaveLength(2)
+    expect(list.getByText(/^Links to Bob/)).toBeDefined()
   })
 
   it('invites by email with the chosen role and re-reads the list', async () => {
@@ -91,12 +95,13 @@ describe('invitations', () => {
     const invitations = await section()
     expect(await invitations.findByText('No open invitations.')).toBeDefined()
 
-    await pickOption(invitations.getByLabelText('Invite by'), 'Email')
+    const dialog = await inviteDialog()
+    await pickOption(dialog.getByLabelText('Invite by'), 'Email')
     // The closing list hands focus back to its trigger; the next pick waits.
     await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
-    fireEvent.change(invitations.getByLabelText('Email'), { target: { value: 'new@example.com' } })
-    await pickOption(invitations.getByLabelText('Role'), 'viewer')
-    fireEvent.click(invitations.getByRole('button', { name: 'Invite account' }))
+    fireEvent.change(dialog.getByLabelText('Email'), { target: { value: 'new@example.com' } })
+    await pickOption(dialog.getByLabelText('Role'), 'Viewer')
+    fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
 
     expect(await invitations.findByText('new@example.com on GitHub')).toBeDefined()
     expect(client.memberInvitationCreate).toHaveBeenCalledWith({
@@ -109,10 +114,10 @@ describe('invitations', () => {
     seed()
     const client = fakeApi({ memberInvitationCreate: vi.fn(async () => invitation()) })
     render(<MembersRoute params={{}} client={client} />)
-    const invitations = await section()
+    const dialog = await inviteDialog()
 
-    fireEvent.change(invitations.getByLabelText('GitHub login'), { target: { value: ' octocat ' } })
-    fireEvent.click(invitations.getByRole('button', { name: 'Invite account' }))
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: ' octocat ' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
 
     await vi.waitFor(() =>
       expect(client.memberInvitationCreate).toHaveBeenCalledWith({
@@ -125,7 +130,9 @@ describe('invitations', () => {
   it('says what an invitation admits under each access policy', async () => {
     seed()
     render(<MembersRoute params={{}} client={fakeApi()} />)
-    const text = (await section()).getByText(/Invite a person by the account/).textContent
+    const dialog = await inviteDialog()
+    fireEvent.click(dialog.getByRole('button', { name: 'Learn more' }))
+    const text = screen.getByRole('dialog', { name: 'Invite a member' }).textContent
 
     expect(text).toContain('When signing in is enough for this server')
     expect(text).toContain('When the server admits approved devices only')
@@ -140,12 +147,12 @@ describe('invitations', () => {
       ),
     })
     render(<MembersRoute params={{}} client={client} />)
-    const invitations = await section()
+    const dialog = await inviteDialog()
 
-    fireEvent.change(invitations.getByLabelText('GitHub login'), { target: { value: '-x' } })
-    fireEvent.click(invitations.getByRole('button', { name: 'Invite account' }))
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: '-x' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
 
-    expect((await invitations.findByRole('alert')).textContent).toBe(
+    expect((await dialog.findByRole('alert')).textContent).toBe(
       'member.invitation.create: login "-x" is not a GitHub login',
     )
     expect(client.memberInvitationCreate).toHaveBeenCalledWith({

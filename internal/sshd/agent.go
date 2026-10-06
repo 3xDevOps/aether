@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -17,6 +19,7 @@ import (
 func init() {
 	registerMethod(protocol.MethodAgentRegister, (*Server).agentRegister)
 	registerMethod(protocol.MethodAgentList, (*Server).agentList)
+	registerGuarded(protocol.MethodAgentInstall, permissions.Launch, nil, (*Server).agentInstall)
 }
 
 // reservedAgentNames are names a member can never register: "custom" is the
@@ -46,6 +49,7 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		Name:            p.Definition.Name,
 		TUIArgs:         p.Definition.TUIArgs,
 		HeadlessArgs:    p.Definition.HeadlessArgs,
+		ACPArgs:         p.Definition.ACPArgs,
 		Executable:      p.Definition.Executable,
 		ProfileRoot:     p.Definition.ProfileRoot,
 		CredentialPaths: p.Definition.CredentialPaths,
@@ -65,10 +69,8 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 	return protocol.AgentRegisterResult(p), nil
 }
 
-// agentList describes what a launch by member on the requested account would
-// run: member's own definitions, since a run uses its launcher's environment,
-// the executables installed for it, and on another member's account whether
-// that account has the login the launch needs.
+// agentList lists member's own definitions, not the account owner's, since a
+// run uses its launcher's environment.
 func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.AgentListParams](raw)
 	if perr != nil {
@@ -78,16 +80,20 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
-	describe := func(name, source, executable, installScript string, installPaths []string) (protocol.AgentInfo, error) {
-		installed, err := s.agentInstalled(member, account, executable, installPaths)
+	describe := func(profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
+		info, err := s.describeAgent(member, account, profile, source, executable)
 		if err != nil {
-			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", name, err)
+			return protocol.AgentInfo{}, fmt.Errorf("check agent %q: %w", profile.Name, err)
 		}
-		info := protocol.AgentInfo{Name: name, Source: source, Installed: installed, InstallScript: installScript}
+		if info.Switchable {
+			if info.Switchable, err = s.cfg.Runs.AgentSwitchable(ctx, member, account, profile.Name); err != nil {
+				return protocol.AgentInfo{}, fmt.Errorf("check agent %q switch: %w", profile.Name, err)
+			}
+		}
 		if account != member {
-			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
+			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, profile.Name)
 			if err != nil {
-				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", name, err)
+				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", profile.Name, err)
 			}
 			info.LoginMissing = shared == scheduler.SharedLoginMissing
 			info.OwnAccountOnly = shared == scheduler.SharedOwnDefinitionOnly
@@ -104,7 +110,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if p.Name == "custom" {
 			continue
 		}
-		info, err := describe(p.Name, "shipped", p.TUIArgs[0], p.InstallScript, p.InstallPaths)
+		info, err := describe(p, "shipped", p.TUIArgs[0])
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -119,9 +125,7 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
 		}
-		// A member's own definition runs only on their own account, so there
-		// is no installation to borrow for it.
-		info, err := describe(row.Name, "member", def.Executable, "", nil)
+		info, err := describe(def.Profile(), "member", def.Executable)
 		if err != nil {
 			return nil, rpcError(err)
 		}
@@ -133,14 +137,90 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	return protocol.AgentListResult{Agents: agents}, nil
 }
 
-// agentInstalled reports whether a launch by member on account finds
-// executable: in member's home, or on another member's account in that
-// owner's home, whose installation the launch then borrows (see
-// memberhome.Manager.Installation for which links installPaths let resolve).
-func (s *Server) agentInstalled(member, account domain.MemberID, executable string, installPaths []string) (bool, error) {
-	if s.cfg.Homes == nil {
-		return true, nil
+// describeAgent describes a launch by member on account. A member's own
+// definition runs only on their own account, so it has no install command.
+func (s *Server) describeAgent(member, account domain.MemberID, profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
+	info := protocol.AgentInfo{
+		Name:            profile.Name,
+		DisplayName:     profile.Label(),
+		Glyph:           profile.Name,
+		Source:          source,
+		Enhanced:        string(profile.EnhancedSupport()),
+		Switchable:      profile.Switchable(),
+		DefaultMode:     string(domain.LaunchTUI),
+		EnhancedDefault: profile.ACPDefault,
 	}
-	installation, err := s.cfg.Homes.Installation(member, account, executable, installPaths)
-	return installation != "", err
+	if source == "member" {
+		info.Glyph = "custom"
+	} else {
+		info.InstallScript = profile.InstallScript
+		if profile.ACPInstall != nil {
+			info.EnhancedInstallScript = profile.InstallCommand(true)
+		}
+	}
+	var err error
+	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {
+		return protocol.AgentInfo{}, err
+	}
+	if profile.ACPDefault && info.EnhancedInstalled {
+		// The wire name of the enhanced launch mode.
+		info.DefaultMode = "acp"
+	}
+	// A definition whose login path is the whole home has no login file to
+	// look for; a launch on a shared account refuses it with that reason.
+	if logins, pathErr := profile.LoginPaths(); s.cfg.Homes != nil && pathErr == nil {
+		// A launch on another member's account signs in with the owner's
+		// login, so that is the home to look in.
+		found, loginErr := s.cfg.Homes.LoginFound(account, logins)
+		if loginErr != nil {
+			slog.Warn("sshd: agent.list cannot check the login", "agent", profile.Name, "account", account, "error", loginErr)
+		} else {
+			info.LoginFound = found
+		}
+	}
+	return info, nil
+}
+
+// agentInstalled looks in member's home, or on another member's account in
+// the owner's home whose installation the launch borrows.
+func (s *Server) agentInstalled(member, account domain.MemberID, executable string, profile harness.Profile) (installed, acp bool, err error) {
+	if s.cfg.Homes == nil {
+		return true, len(profile.ACPArgs) > 0, nil
+	}
+	var adapter string
+	if len(profile.ACPArgs) > 0 {
+		adapter = profile.ACPArgs[0]
+	}
+	return s.cfg.Homes.AgentInstalled(member, account, executable, adapter, profile.InstallPaths)
+}
+
+// agentInstall runs a shipped agent's install command in the caller's own
+// environment terminal. A failed command is a result, not an error: the
+// member needs its output to act on it.
+func (s *Server) agentInstall(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.AgentInstallParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	profile, ok := harness.Lookup(p.Name)
+	if !ok || profile.InstallScript == "" {
+		return nil, invalidParams(fmt.Sprintf("agent %q has no install command; install it in the environment terminal", p.Name))
+	}
+	if p.Enhanced && profile.EnhancedSupport() == harness.EnhancedNone {
+		return nil, invalidParams(fmt.Sprintf("agent %q has no enhanced mode", p.Name))
+	}
+	tail, code, err := s.cfg.Runs.InstallAgent(ctx, member, profile.InstallCommand(p.Enhanced))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	result := protocol.AgentInstallResult{LogTail: tail}
+	if code != 0 {
+		result.Error = fmt.Sprintf("the install command exited %d", code)
+	}
+	info, err := s.describeAgent(member, member, profile, "shipped", profile.TUIArgs[0])
+	if err != nil {
+		return nil, rpcError(fmt.Errorf("check agent %q: %w", p.Name, err))
+	}
+	result.Installed, result.EnhancedInstalled = info.Installed, info.EnhancedInstalled
+	return result, nil
 }

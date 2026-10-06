@@ -25,8 +25,7 @@ const (
 	retainedUnavailableReason = "retained container unavailable"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
-	// defaultExitProbeTimeout is Config.ExitProbeTimeout's default: the
-	// short non-destructive Wait window used on startup to learn whether a
+	// defaultExitProbeTimeout is the startup Wait window that learns whether a
 	// container already exited before attach.
 	defaultExitProbeTimeout = 2 * time.Second
 )
@@ -50,7 +49,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	if old.Mode != domain.LaunchTUI || !retainedReason(old.Status, old.Reason) {
+	if !old.Mode.Interactive() || !retainedReason(old.Status, old.Reason) {
 		return nil, retainedTransitionError()
 	}
 
@@ -84,7 +83,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if entry == nil {
 		sc, serr := s.readSidecar(run)
 		if serr == nil && (sc.Retained || sc.RetainedUntil != nil) &&
-			sc.Mode == domain.LaunchTUI && sc.ContainerID != "" {
+			sc.Mode.Interactive() && sc.ContainerID != "" {
 			entry = s.entryFromSidecar(old, sc)
 			entry.retained = true
 			s.runs[run] = entry
@@ -115,7 +114,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, ferr
 	}
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
-		fresh.Mode == domain.LaunchTUI && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
+		fresh.Mode.Interactive() && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
 		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
@@ -135,14 +134,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, retainedTransitionError()
 	}
 
-	// Re-read under the lifecycle admission before promoting so title or
-	// other metadata updates are not clobbered by a stale terminal snapshot.
-	// The retained sidecar still carries the report that closed the run and
-	// the turn end it finished on. Both are cleared on disk before the row
-	// reopens, with the new launch generation, so a crash after the
-	// promotion cannot re-arm the reopened run with that report, and the
-	// reopened agent's own report does not finish it on the old turn end.
-	// On the terminal row this clears, the arm is already spent.
+	// Re-read so a stale snapshot cannot clobber metadata. The sidecar's
+	// closing report and turn end are cleared on disk before the row reopens,
+	// so a crash after promotion cannot re-arm the reopened run with them.
 	now := time.Now().UTC()
 	s.mu.Lock()
 	sameEntry := s.runs[run] == entry
@@ -169,7 +163,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.archiveMu.Unlock()
 		return nil, err
 	}
-	if latest.Mode != domain.LaunchTUI || !retainedReason(latest.Status, latest.Reason) {
+	if !latest.Mode.Interactive() || !retainedReason(latest.Status, latest.Reason) {
 		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}
@@ -219,7 +213,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run))
+		_ = s.entryDriver(entry).Stop(context.WithoutCancel(ctx), run)
 		mustPause := resumed || !paused
 		var pauseErr error
 		if mustPause {
@@ -265,11 +259,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			return joinRollback(pauseErr)
 		}
 
-		// Install the retained marker and deadline before restoring the
-		// terminal row. A reboot between these writes then sees either an
-		// active row (which wins over stale retention) or a terminal row
-		// protected by a durable retained ownership promise. The new launch
-		// generation is written with that marker before the row promotion.
+		// Retained marker before the terminal row: a reboot between the writes
+		// sees either an active row (which wins over stale retention) or a
+		// terminal row with durable retained ownership.
 		s.mu.Lock()
 		entry.evidenceIdentity = relaunchIdentity
 		activeSidecar = entry.sidecar()
@@ -325,13 +317,17 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			return nil, rollback(errors.Join(retainedTransitionError(), resumeErr))
 		}
 		resumed = true
+		// The ACP driver will not exec into a container it thinks is frozen.
+		s.mu.Lock()
+		entry.paused = false
+		s.mu.Unlock()
 	}
 
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
 		return nil, rollback(err)
 	}
-	if startSessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(run), att); startSessionErr != nil {
+	if startSessionErr := s.entryDriver(entry).Resume(ctx, entry, att); startSessionErr != nil {
 		_ = att.Close()
 		return nil, rollback(startSessionErr)
 	}
@@ -347,11 +343,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.mu.Unlock()
 		return nil, rollback(retainedTransitionError())
 	}
-	// The terminal report is superseded only once nothing can roll the
-	// relaunch back, so a failed relaunch leaves the run's report standing.
-	// A late hand-off of the old report is older than relaunchedAt, and
-	// once the reopened run exits, overrideExitLocked finds it superseded;
-	// both rely on this write happening under s.mu.
+	// Superseded only once nothing can roll the relaunch back. Must be
+	// written under s.mu: overrideExitLocked relies on relaunchedAt.
 	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
 		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
 			s.mu.Unlock()
@@ -379,10 +372,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 
 }
 
-// installRetainedDestroyOwner installs the sidecar's exact container as a
-// retained owner before a boot-time destroy. That makes an uncertain destroy
-// visible to the in-memory lifecycle and gives the bounded sweep a due entry
-// to retry.
+// installRetainedDestroyOwner makes an uncertain boot-time destroy visible to
+// the in-memory lifecycle and gives the bounded sweep a due entry to retry.
 func (s *Scheduler) installRetainedDestroyOwner(ctx context.Context, r *domain.Run, scanned sidecar) *supervised {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -422,10 +413,9 @@ func (s *Scheduler) adoptRetainedOwnerLocked(r *domain.Run, sc sidecar) *supervi
 	return s.adoptTerminalOwnerLocked(r, sc)
 }
 
-// adoptDestroyOwnerLocked adopts any durable terminal sidecar that still
-// names a container and makes it due immediately. It is used for terminal
-// sidecars whose first cleanup Destroy failed; the bounded sweep then retries
-// without releasing credential or coordination ownership.
+// adoptDestroyOwnerLocked makes a sidecar whose first Destroy failed due at
+// once; the sweep retries without releasing credential or coordination
+// ownership.
 func (s *Scheduler) adoptDestroyOwnerLocked(r *domain.Run, sc sidecar) *supervised {
 	sc.DestroyPending = true
 	entry := s.adoptTerminalOwnerLocked(r, sc)
@@ -436,8 +426,7 @@ func (s *Scheduler) adoptDestroyOwnerLocked(r *domain.Run, sc sidecar) *supervis
 	return entry
 }
 
-// adoptTerminalOwnerLocked installs one terminal sidecar owner. The caller
-// must hold s.mu; validation of whether the sidecar is a retained close or an
+// adoptTerminalOwnerLocked requires s.mu.
 func (s *Scheduler) adoptTerminalOwnerLocked(r *domain.Run, sc sidecar) *supervised {
 	if r == nil || (!sc.DestroyPending && sc.ContainerID == "") {
 		return nil
@@ -538,11 +527,9 @@ func (s *Scheduler) markRetainedDestroyDueLocked(entry *supervised) {
 	}
 }
 
-// recoverRuns reconciles the store's runtime-active runs against the
-// runtime's actual containers on startup (§6.8): resume supervision where
-// the container still runs, otherwise preserve the work and mark the run
-// interrupted. Terminal rows never regain runtime supervision; lingering
-// sidecars for them are cleaned up separately.
+// recoverRuns resumes supervision where the container still runs and
+// otherwise marks the run interrupted. Terminal rows never regain
+// supervision.
 func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {
@@ -639,10 +626,8 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		}
 		retained := sc.Retained || sc.RetainedUntil != nil
 		if !retained || !retentionValid(mode, sc.MissionAssigned, r.Status, r.Reason) {
-			// Invalid terminal markers are not relaunchable, but their
-			// container may still be live. Keep durable ownership while
-			// the first cleanup Destroy is uncertain, then let the normal
-			// due-owner sweep retry it.
+			// An invalid marker's container may still be live: keep ownership
+			// until the sweep confirms Destroy.
 			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
 				s.mu.Lock()
 				owner := s.adoptDestroyOwnerLocked(r, sc)
@@ -700,10 +685,8 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		case ctx.Err() != nil:
 			return
 		default:
-			// Any non-nil result other than NotFound is inconclusive:
-			// a transport/daemon error cannot prove the retained
-			// container exited. Reconcile the durable row and install
-			// its owner before supervision or the next TTL sweep.
+			// Only NotFound proves the container exited; anything else is
+			// inconclusive.
 			s.mu.Lock()
 			if s.runs[run] != nil {
 				s.mu.Unlock()
@@ -852,8 +835,8 @@ func (s *Scheduler) recoverDestroyMetadata(ctx context.Context, cid runtime.ID, 
 	}
 }
 
-// path won admission; an existing owner or a row that changed concurrently
-// means the caller must leave cleanup to that owner.
+// admitDestroyPendingOwner reports false when an existing owner or a changed
+// row means cleanup belongs to someone else.
 func (s *Scheduler) admitDestroyPendingOwner(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) (*supervised, bool) {
 	if r == nil {
 		return nil, false
@@ -1023,13 +1006,9 @@ func (s *Scheduler) preserveRecoveryWork(ctx context.Context, run domain.RunID, 
 	return nil
 }
 
-// recoverUnstarted handles queued/provisioning rows whose launch died with
-// the server. Any container created for the run must be destroyed before
-// interrupting, or a still-running agent would keep mutating the checkout
-// forever. The sidecar (written right after Runtime.Start) names the
-// container for the wide crash window; a crash in the narrow window between
-// Runtime.Create and the sidecar write is reconciled through the container's
-// creation key (the run ID, persisted by the runtime at Create).
+// recoverUnstarted destroys any container before interrupting, or a live
+// agent would keep mutating the checkout. A crash between Runtime.Create and
+// the sidecar write is reconciled through the container's creation key.
 func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 	var (
 		cid       runtime.ID
@@ -1092,9 +1071,8 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 	s.interrupt(ctx, r)
 }
 
-// interrupt marks a run interrupted ("server restarted"), preserving its
-// checkout for inspection and pull. The status is re-read under s.mu so a
-// steering call that raced recovery (e.g. a kill) is never overwritten.
+// interrupt re-reads the status under s.mu so a kill that raced recovery is
+// never overwritten.
 func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 	s.mu.Lock()
 	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
@@ -1143,13 +1121,8 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		}
 		return
 	}
-	// A successful relaunch persists RunRunning before clearing its retained
-	// marker. On reboot, the active durable row wins: stale terminal-retention
-	// metadata must not make the sweep destroy this live container. A close
-	// that died between its retained marker and its row transition leaves
-	// the same pair, and its arm still stands: Relaunch clears the arm on
-	// disk before it promotes the row, so an armed marker on an active row
-	// is never a reopened run's.
+	// The active row wins over a stale retained marker. An armed marker on an
+	// active row is never a reopened run's: Relaunch clears the arm first.
 	if sc.Retained || sc.RetainedUntil != nil {
 		sc.Retained = false
 		sc.RetainedUntil = nil
@@ -1181,10 +1154,8 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	case ctx.Err() != nil:
 		return
 	default:
-		// A transport/daemon error is not evidence that the container
-		// exited. Install the durable sidecar owner without attaching; the
-		// Wait owner retries until the daemon recovers, and therefore lets
-		// Kill/Close and eventual exit cleanup destroy it safely.
+		// A daemon error is not evidence of exit: own the container without
+		// attaching and let the Wait owner retry.
 		entry := s.adoptLiveSidecar(r, sc)
 		if entry != nil {
 			s.startSupervision(entry)
@@ -1194,10 +1165,8 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 
 func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc sidecar) {
 	entry := s.entryFromSidecar(r, sc)
-	// Match the lifecycle lock order used by steering and supervision:
-	// lifecycleMu precedes Scheduler.mu. Claim finalizing before releasing
-	// either lock, then run the potentially blocking finalization work with
-	// both locks released.
+	// Lock order: lifecycleMu before Scheduler.mu. Claim finalizing before
+	// releasing either, then finalize with both released.
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
 	if s.runs[r.ID] != nil {
@@ -1205,10 +1174,8 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 		entry.lifecycleMu.Unlock()
 		return
 	}
-	// Kill and Close both use s.mu to serialize their status write. Read
-	// the durable status while holding that same lock, then register the
-	// recovered entry before releasing it so a concurrent Kill cannot win
-	// unsupervised and be overwritten by the observed clean exit.
+	// Register under s.mu so a concurrent Kill cannot be overwritten by the
+	// observed clean exit.
 	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
 	if err != nil {
 		s.mu.Unlock()
@@ -1303,10 +1270,8 @@ func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtim
 	s.interrupt(ctx, r)
 }
 
-// admitRecoveryAttachment installs one recovered run owner while holding its
-// lifecycle lock. The lock is kept by the caller through Attach and PTY
-// setup, so Close/adoption either wins before admission or waits behind this
-// exact owner; it can never replace it between the probe and attachment.
+// admitRecoveryAttachment's lock is held by the caller through Attach and PTY
+// setup, so nothing can replace the owner between probe and attachment.
 func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, cid runtime.ID) (*supervised, bool) {
 	s.mu.Lock()
 	if existing := s.runs[r.ID]; existing != nil || s.pending[r.ID] != nil {
@@ -1352,10 +1317,8 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 	return entry, true
 }
 
-// cleanupFailedRecoveryAttachment reuses the owner admitted before Attach or
-// PTY setup. The owner remains in s.runs while destruction and terminalization
-// complete, so Delete/ Kill cannot observe a gap and install a second owner.
-// The caller must hold entry.lifecycleMu.
+// cleanupFailedRecoveryAttachment keeps the owner in s.runs until cleanup
+// completes so no second owner fills a gap. Caller holds entry.lifecycleMu.
 func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *supervised, cid runtime.ID) {
 	if entry == nil {
 		return
@@ -1388,13 +1351,14 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 	}
 }
 
-func (s *Scheduler) startRecoveryPTYSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
+func (s *Scheduler) resumeRecoveredAgent(ctx context.Context, entry *supervised, att runtime.Attachment) error {
+	driver := s.entryDriver(entry)
 	backoff := recoveryPTYRetryInitial
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		err := s.cfg.PTY.StartSession(ctx, key, att)
+		err := driver.Resume(ctx, entry, att)
 		if !errors.Is(err, ptyhost.ErrSnapshotPending) {
 			return err
 		}
@@ -1420,9 +1384,8 @@ func (s *Scheduler) startRecoveryPTYSession(ctx context.Context, key ptyhost.Ses
 }
 
 func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) {
-	// Sidecars written before captured HOME and RunUser fields were introduced
-	// need a live inspection. A failed inspection is inconclusive metadata,
-	// not evidence that the container exited: keep the survivor supervised.
+	// Older sidecars lack HOME and RunUser. A failed inspection is not
+	// evidence of exit: keep the survivor supervised.
 	metadataRecovered := false
 	if sc.Home == "" || sc.RunUser == "" {
 		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
@@ -1465,12 +1428,13 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		}
 		s.mu.Unlock()
 	}
+	s.settleSwitch(ctx, entry)
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err == nil {
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
 		}
-		if serr := s.startRecoveryPTYSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
+		if serr := s.resumeRecoveredAgent(ctx, entry, att); serr != nil {
 			_ = att.Close()
 			s.cfg.Git.StopDiffWatch(r.ID)
 			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(serr, ctxErr) {
@@ -1517,9 +1481,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 			slog.Warn("scheduler: discard invalid input sidecar", "run", r.ID, "error", err)
 		}
 	}
-	// The sidecar does not carry when the report parked the run, and it
-	// does not need to: nothing has been observed on the terminal since the
-	// restart, so the park effectively begins again here.
+	// Nothing has been observed since the restart, so the park begins here.
 	var parked, reportedAt time.Time
 	if sc.agentReport().State == agentstatus.Idle {
 		parked = time.Now().UTC()
@@ -1544,23 +1506,21 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if mode == "" {
 		mode = r.Mode
 	}
+	// A mode switch writes the sidecar before the run row.
+	acp := r.ACP
+	if mode.Interactive() {
+		acp = mode == domain.LaunchACP
+	}
 	return &supervised{
 		runID: r.ID,
-		// The workspace comes off the run row, not the sidecar: a sidecar
-		// written by an older build has no workspace scope at all, and the
-		// row is the source of truth either way.
+		// Older sidecars have no workspace scope; the row is the source of truth.
 		workspaceID: r.WorkspaceID,
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
 		memberID:    r.HomeMember(),
 		loginMember: domain.MemberID(sc.LoginMember),
-		// The reporter and the last report both come off the sidecar,
-		// because only the live server saw either: which reporter the
-		// container was actually given, and whether the agent parked this
-		// run itself. Reattaching resizes the terminal, so a full-screen
-		// agent repaints at once - and without the report that repaint
-		// would read as work resuming and hand the run back to an agent
-		// that is still waiting for their member.
+		// Reattaching makes a full-screen agent repaint; without the saved
+		// report that repaint would read as work resuming.
 		reporter:            sc.Reporter,
 		agentReport:         sc.agentReport(),
 		pendingInputs:       pendingInputs,
@@ -1573,6 +1533,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		blockedReportID:     sc.BlockedReportID,
 		blockedReportAt:     blockedAt,
 		launchMode:          mode,
+		acp:                 acp,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		startedAt:           started,
@@ -1592,6 +1553,9 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		bridgePath:          sc.BridgePath,
 		coordDir:            sc.CoordDir,
 		gitAuthorEmail:      sc.GitAuthorEmail,
+		agentSessionID:      sc.AgentSessionID,
+		agentExec:           sc.AgentExec,
+		switchIntent:        sc.Switch,
 		done:                make(chan struct{}),
 	}
 }

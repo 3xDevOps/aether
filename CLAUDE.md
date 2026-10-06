@@ -83,10 +83,12 @@ bun run test
 - Write only the code the change needs. No dead code, single-use helpers,
   flags nobody sets, branches for cases that cannot happen, or "while I'm
   here" edits.
-- Comment only when the code cannot say it: a constraint, an invariant, or a
-  reason that is not obvious from the diff. Never restate what the code does.
-  How something works, why it is designed that way, and how to operate it
-  belong in `docs/`, not in comments.
+- Comment only when the code cannot say it: a constraint, an invariant, or an
+  external quirk that is not obvious from the diff, and keep it concise. Never
+  restate what the code does, narrate a change, add section banners or leave
+  commented-out code. Most files need no comments at all. How something works,
+  why it is designed that way, and how to operate it belong in `docs/` and the
+  commit message, not in comments.
 - Keep Go files below 1000 lines where practical.
 - Return errors with context; do not log and swallow them.
 - Avoid speculative configuration, abstractions, and compatibility paths.

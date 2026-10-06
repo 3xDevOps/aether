@@ -13,20 +13,10 @@ export interface CardSlotProps {
 
 /** Every slot and the props its contributors receive. */
 export interface SlotPropsMap {
-  /** Compact state and policy markers. */
-  'card:badges': CardSlotProps
-  /** Compact warning controls kept outside the status metadata scroller. */
-  'card:warnings': CardSlotProps
-  /** Full conflict diagnostics in the card's Details disclosure. */
-  'card:chips': CardSlotProps
-  /** The card's bottom row, right of the owner: watcher avatars. */
-  'card:footer': CardSlotProps
-  statusbar: Record<never, never>
+  'card:meta': CardSlotProps
 }
 
 export type SlotName = keyof SlotPropsMap
-/** The slots that live inside a run card and take its run. */
-export type CardSlotName = 'card:badges' | 'card:warnings' | 'card:chips' | 'card:footer'
 
 type AnyProps = Record<string, unknown>
 type Entry = { id: string; view: ComponentType<AnyProps> }
@@ -46,7 +36,7 @@ export function registerSlot<N extends SlotName>(
   if (entries.some((e) => e.id === id)) {
     throw new Error(`slot already registered: ${name}/${id}`)
   }
-  entries.push({ id, view: view as ComponentType<AnyProps> })
+  entries.push({ id, view: view as unknown as ComponentType<AnyProps> })
   registry.set(name, entries)
 }
 

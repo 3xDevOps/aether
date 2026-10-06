@@ -13,6 +13,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,20 +36,16 @@ const (
 	// recover a container created before its ID was persisted.
 	labelCreationKey = "aether.creation-key"
 
-	// setupSentinelPrefix is the base of the per-container sentinel file
-	// that gates the main command: Start creates it once the setup script
-	// has succeeded. The suffix is random per Create so neither image
-	// contents nor container processes can pre-release the gate.
+	// The suffix is random per Create so neither image contents nor
+	// container processes can pre-release the setup gate.
 	setupSentinelPrefix = "/tmp/.aether-setup-"
 )
 
-// execOutputLimit is the most Exec keeps from one command's stdout and
-// stderr together.
+// execOutputLimit covers stdout and stderr together.
 const execOutputLimit = 1 << 20
 
-// hijackWriteTimeout is the maximum time one physical stdin write may hold a
-// Docker hijack connection. Cancellation only interrupts this write through
-// its deadline; it never closes the shared stdin stream.
+// hijackWriteTimeout bounds one stdin write. Cancellation interrupts a write
+// only through its deadline; it never closes the shared stdin stream.
 const hijackWriteTimeout = 5 * time.Second
 
 type dockerWaitClient interface {
@@ -56,7 +53,6 @@ type dockerWaitClient interface {
 	ContainerWait(context.Context, string, client.ContainerWaitOptions) client.ContainerWaitResult
 }
 
-// Docker is the Runtime implementation backed by the local Docker daemon.
 type Docker struct {
 	cli         *client.Client
 	waitClient  dockerWaitClient
@@ -67,29 +63,23 @@ type Docker struct {
 
 var _ Runtime = (*Docker)(nil)
 
-// DockerOption customizes a Docker runtime.
 type DockerOption func(*Docker)
 
-// WithNamePrefix sets the prefix applied to container names built from
-// Spec.Name (default "aether-run-").
+// WithNamePrefix defaults to "aether-run-".
 func WithNamePrefix(prefix string) DockerOption {
 	return func(d *Docker) { d.namePrefix = prefix }
 }
 
-// WithLabels adds labels to every container the runtime creates.
 func WithLabels(labels map[string]string) DockerOption {
 	return func(d *Docker) { d.labels = maps.Clone(labels) }
 }
 
-// WithNetworkMode sets the network mode for created containers (e.g.
-// "bridge", "host", "none"); empty means the daemon default.
+// WithNetworkMode: empty means the daemon default.
 func WithNetworkMode(mode string) DockerOption {
 	return func(d *Docker) { d.networkMode = mode }
 }
 
-// NewDocker connects to the Docker daemon using the standard environment
-// (DOCKER_HOST and friends) and negotiates the API version. The connection
-// is lazy: daemon reachability surfaces on first use.
+// NewDocker connects lazily: daemon reachability surfaces on first use.
 func NewDocker(opts ...DockerOption) (*Docker, error) {
 	cli, err := client.New(client.FromEnv)
 	if err != nil {
@@ -102,10 +92,9 @@ func NewDocker(opts ...DockerOption) (*Docker, error) {
 	return d, nil
 }
 
-// Close releases the client's connections to the daemon.
 func (d *Docker) Close() error { return d.cli.Close() }
 
-// Create implements Runtime. The image is pulled if not present locally.
+// Create pulls the image if it is not present locally.
 func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
@@ -160,11 +149,8 @@ func (d *Docker) pull(ctx context.Context, ref string) error {
 	return nil
 }
 
-// containerConfig translates a Spec into Docker create arguments. The
-// entrypoint is always overridden so Spec.Command is exactly the main
-// process; when a setup script is present the command is held behind the
-// setup gate (see gateEntrypoint) and the script and sentinel path ride
-// along as labels for Start to use.
+// containerConfig always overrides the entrypoint so Spec.Command is exactly
+// the main process; a setup script holds it behind gateEntrypoint.
 func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostConfig) {
 	labels := map[string]string{labelManaged: "true"}
 	maps.Copy(labels, d.labels)
@@ -172,7 +158,7 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 	cfg := &container.Config{
 		Image:      spec.Image,
 		User:       spec.User,
-		Env:        dockerEnv(spec.Env),
+		Env:        dockerEnv(trustCheckout(spec.Env, spec.WorktreeMountPath)),
 		WorkingDir: spec.WorkingDir,
 		Entrypoint: spec.Command,
 		Labels:     labels,
@@ -195,10 +181,8 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 
 	initEnabled := true
 	hostCfg := &container.HostConfig{
-		// The agent command replaces the image entrypoint and can spawn
-		// descendants without waiting for them. Docker's minimal init stays
-		// outside that command to adopt and reap orphaned children while
-		// preserving the command argv and signal path.
+		// The agent can spawn descendants without waiting for them; Docker's
+		// init reaps the orphans.
 		Init:        &initEnabled,
 		NetworkMode: container.NetworkMode(d.networkMode),
 		Resources: container.Resources{
@@ -222,15 +206,12 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 	return cfg, hostCfg
 }
 
-// minSubpathAPI is the first Docker API version whose engine honours a volume
-// subpath. An older engine, or a request sent at an older version, ignores
-// the field and mounts the whole base, so a subpath mount is refused there
-// instead of sent.
+// minSubpathAPI: an older engine, or a request sent at an older version,
+// silently mounts the whole base, so a subpath mount is refused there.
 const minSubpathAPI = "1.45"
 
-// requireSubpathAPI checks both the engine's API version and the one the
-// client sends requests at. Negotiation never sends below the engine's, so a
-// lower client version is a DOCKER_API_VERSION pin.
+// requireSubpathAPI checks the client version too: negotiation never sends
+// below the engine's, so a lower one is a DOCKER_API_VERSION pin.
 func requireSubpathAPI(engine, sent string) error {
 	if engine == "" || versions.LessThan(engine, minSubpathAPI) {
 		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", engine, minSubpathAPI)
@@ -241,14 +222,9 @@ func requireSubpathAPI(engine, sent string) error {
 	return nil
 }
 
-// subpathMount translates a Subpath mount into a volume mount of the base
-// directory with a volume subpath. A plain bind of HostPath/Subpath would be
-// resolved by path at every container start, following any symlink a
-// container sharing the base planted after validation. The engine instead
-// resolves a volume subpath beneath the volume root at every start: a
-// symlink that stays inside the base is followed, one that leaves it is
-// refused (Docker API 1.45 or later). The volume name is derived from the
-// base so every run mounting one base reuses one volume.
+// subpathMount uses a volume subpath, not a plain bind of HostPath/Subpath:
+// a bind would follow a symlink another container planted in the base after
+// validation, while the engine refuses a volume subpath that leaves it.
 func subpathMount(m Mount) mount.Mount {
 	sum := sha256.Sum256([]byte(m.HostPath))
 	return mount.Mount{
@@ -269,11 +245,8 @@ func subpathMount(m Mount) mount.Mount {
 	}
 }
 
-// bindMount translates one Mount into Docker create arguments using only
-// the supported controls: the per-bind read-only flag and rprivate
-// propagation (mount events never leak between host and container).
-// Docker has no per-bind nosuid/nodev; see the ValidateMounts security
-// note.
+// bindMount: Docker has no per-bind nosuid/nodev; see the ValidateMounts
+// security note.
 func bindMount(m Mount) mount.Mount {
 	return mount.Mount{
 		Type:        mount.TypeBind,
@@ -284,7 +257,6 @@ func bindMount(m Mount) mount.Mount {
 	}
 }
 
-// newSetupSentinel returns a fresh unguessable sentinel path.
 func newSetupSentinel() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -293,16 +265,13 @@ func newSetupSentinel() string {
 	return setupSentinelPrefix + hex.EncodeToString(b[:])
 }
 
-// gateEntrypoint waits for the setup sentinel, then execs the container's
-// Cmd (which docker appends as "$@") so the main command runs directly under
-// Docker's minimal init. The fractional-sleep fallback covers strictly POSIX
-// sleep utilities.
+// gateEntrypoint's fractional-sleep fallback covers strictly POSIX sleep
+// utilities.
 func gateEntrypoint(sentinel string) []string {
 	script := fmt.Sprintf(`until [ -e %s ]; do sleep 0.1 2>/dev/null || sleep 1; done; exec "$@"`, sentinel)
 	return []string{"/bin/sh", "-c", script, "aether-gate"}
 }
 
-// dockerEnv flattens an env map into sorted KEY=VALUE form.
 func dockerEnv(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
@@ -314,17 +283,35 @@ func dockerEnv(env map[string]string) []string {
 	return out
 }
 
-// nanoCPUs converts a fractional core limit into Docker's NanoCPUs unit.
+// Execs inherit the container env, so this also covers every git the server
+// runs inside the container.
+func trustCheckout(env map[string]string, checkout string) map[string]string {
+	if checkout == "" {
+		return env
+	}
+	n := 0
+	if count, ok := env["GIT_CONFIG_COUNT"]; ok {
+		parsed, err := strconv.Atoi(count)
+		if err != nil || parsed < 0 {
+			return env
+		}
+		n = parsed
+	}
+	out := make(map[string]string, len(env)+3)
+	maps.Copy(out, env)
+	out["GIT_CONFIG_KEY_"+strconv.Itoa(n)] = "safe.directory"
+	out["GIT_CONFIG_VALUE_"+strconv.Itoa(n)] = checkout
+	out["GIT_CONFIG_COUNT"] = strconv.Itoa(n + 1)
+	return out
+}
+
 func nanoCPUs(cores float64) int64 {
 	return int64(math.Round(cores * 1e9))
 }
 
-// Start implements Runtime. With a setup script present, Start returns only
-// after the script has succeeded and the main command has been released; a
-// nonzero setup exit kills the container and fails Start. Starting a
-// container whose setup already completed (restart after Stop, an
-// orchestrator retry against a live run) skips the script: the sentinel on
-// the container filesystem marks it done.
+// Start returns only after any setup script succeeded; a nonzero setup exit
+// kills the container. The sentinel on the container filesystem makes a
+// later Start skip the script.
 func (d *Docker) Start(ctx context.Context, id ID) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -332,9 +319,8 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 	}
 	wasRunning := info.Container.State != nil && info.Container.State.Running
 	if _, err := d.cli.ContainerStart(ctx, string(id), client.ContainerStartOptions{}); err != nil {
-		// The daemon may have started the container even though the client
-		// reports an error (a cancelled ctx mid-request); don't leave a
-		// container this call launched running.
+		// The daemon may have started it despite the error (a cancelled ctx
+		// mid-request).
 		if !wasRunning {
 			_, _ = d.cli.ContainerKill(
 				context.WithoutCancel(ctx),
@@ -402,9 +388,6 @@ func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir 
 	return code, stdout + stderr, err
 }
 
-// Exec implements Runtime: it runs cmd inside the container, blocking
-// until it finishes or ctx is cancelled, and returns its exit code with
-// stdout and stderr kept apart.
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
 	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
 		Cmd:          cmd,
@@ -454,11 +437,8 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 	}
 }
 
-// readExecOutput splits a hijacked exec stream into stdout and stderr,
-// refusing a command that writes more than execOutputLimit bytes in all.
-// What a command inside a container prints is the container's to choose,
-// and a caller buffers the whole answer, so an endless stream has to end
-// as an error rather than as the server's memory.
+// readExecOutput refuses output past execOutputLimit: the container chooses
+// what it prints and the caller buffers it all.
 func readExecOutput(r io.Reader) (stdout, stderr string, err error) {
 	// One byte past the cap, so an output of exactly that size is not
 	// mistaken for a truncated one.
@@ -471,8 +451,6 @@ func readExecOutput(r io.Reader) (stdout, stderr string, err error) {
 	return out.String(), errOut.String(), copyErr
 }
 
-// countingReader reports how much has been read through it, so the caller
-// can tell a stream that ended from one that was cut off at the cap.
 type countingReader struct {
 	r    io.Reader
 	read int64
@@ -484,7 +462,6 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Pause implements Runtime via the cgroup freezer (SIGSTOP semantics).
 func (d *Docker) Pause(ctx context.Context, id ID) error {
 	if _, err := d.cli.ContainerPause(ctx, string(id), client.ContainerPauseOptions{}); err != nil {
 		return fmt.Errorf("runtime: pause container: %w", err)
@@ -492,7 +469,6 @@ func (d *Docker) Pause(ctx context.Context, id ID) error {
 	return nil
 }
 
-// Resume implements Runtime.
 func (d *Docker) Resume(ctx context.Context, id ID) error {
 	if _, err := d.cli.ContainerUnpause(ctx, string(id), client.ContainerUnpauseOptions{}); err != nil {
 		return fmt.Errorf("runtime: resume container: %w", err)
@@ -500,8 +476,7 @@ func (d *Docker) Resume(ctx context.Context, id ID) error {
 	return nil
 }
 
-// Stop implements Runtime. A paused container is thawed first so the
-// termination signal can be delivered.
+// Stop thaws a paused container first so the signal can be delivered.
 func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -523,8 +498,7 @@ func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 	return nil
 }
 
-// Destroy implements Runtime. Removal is forced, so running or paused
-// containers are killed first; a missing container is not an error.
+// Destroy treats a missing container as success.
 func (d *Docker) Destroy(ctx context.Context, id ID) error {
 	_, err := d.cli.ContainerRemove(ctx, string(id), client.ContainerRemoveOptions{
 		Force:         true,
@@ -536,7 +510,6 @@ func (d *Docker) Destroy(ctx context.Context, id ID) error {
 	return nil
 }
 
-// Attach implements Runtime.
 func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -555,8 +528,6 @@ func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	return newDockerAttachment(d.cli, string(id), tty, resp.HijackedResponse), nil
 }
 
-// ContainerIP implements Runtime by inspecting the container's network
-// endpoints.
 func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -572,7 +543,6 @@ func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
 	return "", fmt.Errorf("runtime: container %q has no network IP", id)
 }
 
-// ExecTTY opens an additional TTY process inside a running container.
 func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error) {
 	opts := client.ExecCreateOptions{
 		TTY:          true,
@@ -595,7 +565,7 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 		}
 		return nil, fmt.Errorf("runtime: exec attach: %w", err)
 	}
-	att := newExecAttachment(d.cli, created.ID, resp.HijackedResponse)
+	att := newExecAttachment(d.cli, created.ID, true, resp.HijackedResponse)
 	if cols != 0 && rows != 0 {
 		if err := att.Resize(ctx, cols, rows); err != nil {
 			_ = att.Close()
@@ -610,8 +580,6 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 	return att, nil
 }
 
-// execExitError reports an exec that already exited with a
-// missing-executable status (126/127), or nil.
 func (d *Docker) execExitError(ctx context.Context, execID string) error {
 	ins, err := d.cli.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil || ins.Running {
@@ -623,8 +591,8 @@ func (d *Docker) execExitError(ctx context.Context, execID string) error {
 	return nil
 }
 
-// Wait implements Runtime. A container that has never been started waits
-// for its first run to finish rather than reporting a phantom zero exit.
+// Wait on a never-started container waits for its first run rather than
+// reporting a phantom zero exit.
 func (d *Docker) Wait(ctx context.Context, id ID) (ExitStatus, error) {
 	cond := container.WaitConditionNotRunning
 	info, err := d.waitClient.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
@@ -653,9 +621,8 @@ func dockerWaitError(action string, id ID, err error) error {
 	return fmt.Errorf("runtime: %s container %q: %w", action, id, err)
 }
 
-// Inspect implements Runtime by returning the container configuration that
-// was captured at creation time. It deliberately does not resolve the image
-// tag again: recovered callers need the HOME and user of this container.
+// Inspect deliberately does not resolve the image tag again: recovered
+// callers need the HOME and user of this container.
 func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -671,8 +638,7 @@ func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
 	}, nil
 }
 
-// FindByCreationKey implements Runtime via the aether.creation-key label,
-// matching containers in any state.
+// FindByCreationKey matches containers in any state.
 func (d *Docker) FindByCreationKey(ctx context.Context, key string) (ID, error) {
 	if key == "" {
 		return "", fmt.Errorf("runtime: find by creation key: %w", ErrNotFound)
@@ -690,9 +656,8 @@ func (d *Docker) FindByCreationKey(ctx context.Context, key string) (ID, error) 
 	return ID(list.Items[0].ID), nil
 }
 
-// ImageUser reports the user the image is configured to run as (the OCI
-// config User field: a name, uid, or uid:gid; empty means root). The
-// image is pulled if not present locally.
+// ImageUser returns the OCI config User (name, uid, or uid:gid; empty means
+// root), pulling the image if needed.
 func (d *Docker) ImageUser(ctx context.Context, ref string) (string, error) {
 	info, err := d.cli.ImageInspect(ctx, ref)
 	if cerrdefs.IsNotFound(err) {
@@ -710,10 +675,8 @@ func (d *Docker) ImageUser(ctx context.Context, ref string) (string, error) {
 	return info.Config.User, nil
 }
 
-// dockerAttachment adapts a hijacked attach connection. Without a TTY,
-// Docker multiplexes stdout/stderr over one stream, demuxed here into two
-// independently buffered streams so reading only one never stalls the
-// other; with a TTY the raw merged stream feeds Stdout.
+// dockerAttachment buffers demuxed stdout and stderr independently so
+// reading only one never stalls the other.
 type dockerAttachment struct {
 	cli       *client.Client
 	id        string
@@ -772,10 +735,8 @@ func (a *dockerAttachment) Close() error {
 	return nil
 }
 
-// hijackStdin writes to the container's stdin stream of one attachment.
-// Close half-closes the connection only for an explicit caller request. The
-// PTY host never uses it for cancellation: WriteContext changes only the
-// write deadline, preserving shared stdin for later inputs and attachments.
+// hijackStdin's WriteContext changes only the write deadline on
+// cancellation, preserving shared stdin for later inputs and attachments.
 type hijackStdin struct {
 	resp client.HijackedResponse
 }
@@ -808,21 +769,19 @@ func (h hijackStdin) WriteContext(ctx context.Context, p []byte) (int, error) {
 
 func (h hijackStdin) Close() error { return h.resp.CloseWrite() }
 
-// maxStreamBuffer caps how much unread attachment output one stream holds.
 const maxStreamBuffer = 8 << 20
 
-// streamBuffer is an in-memory pipe: writes never block, reads block until
-// data or close. Writes never block because blocking the demux goroutine on
-// a slow reader would stall the sibling stream; consumers that do drain
-// continuously (the PTY pump) never approach the cap, while one that stalls
-// (a setup shell whose SSH peer stopped reading) would otherwise grow the
-// buffer without limit, so past maxStreamBuffer the oldest bytes are dropped.
+// streamBuffer writes never block, since blocking the demux goroutine would
+// stall the sibling stream; past maxStreamBuffer the oldest bytes are
+// dropped. A lossless buffer blocks at the cap instead, for protocol streams
+// that cannot lose a byte.
 type streamBuffer struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    bytes.Buffer
-	closed bool
-	err    error
+	mu       sync.Mutex
+	cond     *sync.Cond
+	buf      bytes.Buffer
+	lossless bool
+	closed   bool
+	err      error
 }
 
 func newStreamBuffer() *streamBuffer {
@@ -831,13 +790,26 @@ func newStreamBuffer() *streamBuffer {
 	return b
 }
 
+func newLosslessStreamBuffer() *streamBuffer {
+	b := newStreamBuffer()
+	b.lossless = true
+	return b
+}
+
 func (b *streamBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	for b.lossless && !b.closed && b.buf.Len() >= maxStreamBuffer {
+		b.cond.Wait()
+	}
 	if b.closed {
 		return 0, io.ErrClosedPipe
 	}
 	n, _ := b.buf.Write(p) // bytes.Buffer.Write cannot fail
+	if b.lossless {
+		b.cond.Broadcast()
+		return n, nil
+	}
 	if over := b.buf.Len() - maxStreamBuffer; over > 0 {
 		b.buf.Next(over)
 	}
@@ -852,6 +824,9 @@ func (b *streamBuffer) Read(p []byte) (int, error) {
 		b.cond.Wait()
 	}
 	if b.buf.Len() > 0 {
+		if b.lossless {
+			b.cond.Broadcast()
+		}
 		return b.buf.Read(p)
 	}
 	if b.err != nil {
@@ -860,9 +835,8 @@ func (b *streamBuffer) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
-// CloseWithError ends the stream: buffered data remains readable, then
-// readers get err (or io.EOF when err is nil). Only the first close takes
-// effect.
+// CloseWithError leaves buffered data readable first. Only the first close
+// takes effect.
 func (b *streamBuffer) CloseWithError(err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

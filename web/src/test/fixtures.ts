@@ -26,6 +26,31 @@ import type {
   Workspace,
 } from '@/lib/types'
 import type { Candidate } from '@/lib/integration-types'
+import type { StateContext } from '@/lib/needs-you'
+import { toRecord, type RunRecord } from '@/store/runs'
+
+/** A viewer's state context: Alice looking, nothing pending, at 10:20. */
+export function stateContext(over: Partial<StateContext> = {}): StateContext {
+  return {
+    viewerID: alice.id,
+    viewerRole: alice.role,
+    members: { [alice.id]: alice, [bob.id]: bob },
+    runs: {},
+    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
+    approvalsByRun: {},
+    roomMessages: {},
+    roomStatus: {},
+    missions: {},
+    missionDetails: {},
+    pausedRuns: {},
+    now: Date.parse('2026-08-14T10:20:00Z'),
+    ...over,
+  }
+}
+
+export function runRecords(...runs: Run[]): Record<string, RunRecord> {
+  return Object.fromEntries(runs.map((r) => [r.id, toRecord(r)]))
+}
 export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',
@@ -262,8 +287,7 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
   }
 }
 
-/** One server.update_status answer: a current server that could replace
- * its own binaries if it had to. The banner tests override it. */
+/** A current server that could replace its own binaries. */
 export function serverUpdateStatus(
   over: Partial<ServerUpdateStatus> = {},
 ): ServerUpdateStatus {
@@ -308,7 +332,6 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 }
 
 
-/** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   const terminals = new Map<string, Map<string, DevTerminal>>()
   const controllers = new Map<string, DevController>()
@@ -359,6 +382,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
     missionQuestionAnswer: vi.fn(async () => ({ question: missionQuestion({ answer: 'the guest flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }) })),
     missionCancel: vi.fn(async () => ({ mission: mission({ phase: 'cancelled' }) })),
+    missionArchive: vi.fn(async () => mission({ phase: 'completed', archived_at: '2026-10-06T00:00:00Z' })),
+    missionUnarchive: vi.fn(async () => mission({ phase: 'completed' })),
+    missionDelete: vi.fn(async () => ({})),
     missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
@@ -487,9 +513,16 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
     runInject: vi.fn(async () => ({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })),
+    runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
+    runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),
+    runACPSetOption: vi.fn(async () => needsOverride('runACPSetOption')),
+    runACPHistory: vi.fn(async () => needsOverride('runACPHistory')),
+    runACPItem: vi.fn(async () => needsOverride('runACPItem')),
+    runModeSwitch: vi.fn(async () => needsOverride('runModeSwitch')),
     runClose: vi.fn(async () => run({ status: 'merged' })),
     runHandoff: vi.fn(async () => ({})),
     runRoomList: vi.fn(async () => ({ messages: [] })),
+    coordMessagesList: vi.fn(async () => ({ messages: [] })),
     runRoomStatus: vi.fn(async (): Promise<RoomStatusResult> => ({
       workspace_id: workspace.id,
       run_id: 'run_1',
@@ -563,6 +596,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
+    acpSocket: vi.fn((runID: string) => `ws://localhost/ws/acp/${runID}`),
     attachShellSocket: vi.fn(
       (runID: string, tab: string) =>
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
@@ -595,13 +629,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberApprove: vi.fn(async () => bob),
     memberRemove: vi.fn(async () => ({})),
     memberColor: vi.fn(async () => alice),
+    memberRename: vi.fn(async (display_name: string) => ({ ...alice, display_name })),
     memberGit: vi.fn(async (name: string, email: string) => ({
       ...alice,
       git_name: name,
       git_email: email,
     })),
     memberRole: vi.fn(async () => bob),
-    // No edge devices or invitations unless a test says so.
     memberDeviceList: vi.fn(async () => []),
     memberDeviceLookup: vi.fn(async () => needsOverride('memberDeviceLookup')),
     memberDeviceApprove: vi.fn(async () => needsOverride('memberDeviceApprove')),
@@ -613,8 +647,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceDelete: vi.fn(async () => ({ ok: true as const })),
     workspaceSettings: vi.fn(async () => workspace),
-    // Local-only is the default in the mirror control plane; tests that
-    // exercise configuration override the relevant response.
     workspaceMirrorStatus: vi.fn(async () => ({ enabled: false })),
     workspaceMirrorConfigure: vi.fn(async () => ({ enabled: false })),
     workspaceMirrorRefresh: vi.fn(async () => ({ enabled: false })),
@@ -630,18 +662,21 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       roots: [
         {
           harness: 'claude',
+          display_name: 'Claude Code',
           path: '~/.claude',
           runtime_ignores: ['projects/'],
           credential_names: ['.credentials.json', 'credentials.json', 'credentials', '.claude.json', 'auth.json', 'keychain', 'token.json', 'tokens.json', 'oauth.json', 'agent.db', 'agent.db-wal', 'agent.db-shm'],
         },
         {
           harness: 'codex',
+          display_name: 'Codex',
           path: '~/.codex',
           runtime_ignores: ['tmp/'],
           credential_names: ['auth.json', 'keychain', 'token.json'],
         },
         {
           harness: 'pi',
+          display_name: 'pi',
           path: '~/.pi',
           runtime_ignores: ['agent/sessions/'],
           credential_names: ['auth.json', 'oauth.json'],
@@ -660,10 +695,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       harness, files: files.length, bytes: 0, excluded: [],
     })),
     agentList: vi.fn(async () => [
-      agentInfo(),
+      agentInfo({ display_name: 'Claude Code' }),
       agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
     ]),
     agentRegister: vi.fn(async () => ({})),
+    agentInstall: vi.fn(async () => ({ log_tail: 'installed\n', installed: true, enhanced_installed: false })),
     runProtect: vi.fn(async () => ({})),
     runArchive: vi.fn(async (runID: string, archived: boolean) =>
       run({
@@ -682,8 +718,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       user: 'alice',
       repo: '/src/repo',
     })),
-    // The machine's own git config, which the wizard offers as the
-    // default identity.
     localGitIdentity: vi.fn(async () => ({
       name: 'Alice Local',
       email: 'alice@example.invalid',
@@ -698,12 +732,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       remote: 'aether',
       url: 'ssh://alice@host:2222/wsp_1',
     })),
-    // Mirrors the gateway: link.switch always refuses with the restart
-    // instruction; the SSH identity is process-lifetime.
+    // Like the gateway: the SSH identity is process-lifetime, so link.switch always refuses.
     localLinkSwitch: vi.fn(async (name: string) => {
       throw new Error(`restart aether gui --server ${name} to switch servers`)
     }),
-    // Signed in to no edge.
     localEdgeStatus: vi.fn(async () => ({ edges: [] })),
     localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
     localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),
@@ -782,10 +814,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       requested_by: alice.id,
       requested_at: '2026-08-14T10:06:00Z',
     })),
-    // The gateway knows one linked repo, so the verb suggests its folder
-    // for the wizard's from-repo input.
-    envHarnesses: vi.fn(async () => ({
-      harnesses: [
+    envAgents: vi.fn(async () => ({
+      agents: [
         { name: 'claude', installed: true },
         { name: 'codex', installed: false },
         { name: 'pi', installed: false },

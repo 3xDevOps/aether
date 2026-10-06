@@ -1,0 +1,853 @@
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { vi } from 'vitest'
+import { api } from '@/lib/api'
+import { TerminalDock } from '@/routes/environment/terminal-dock'
+import { standardGeometry } from '@/routes/terminal/attach'
+import type { AttachHandlers } from '@/routes/terminal/attach'
+import type * as attachModule from '@/routes/terminal/attach'
+import { initialEnvTerminal } from '@/store/env-terminal'
+import { useStore } from '@/store'
+import type * as apiModule from '@/lib/api'
+import { StubSocket } from '@/test/stub-socket'
+
+const xterm = vi.hoisted(() => ({
+  hostRef: () => {},
+  input: null as ((data: string) => void) | null,
+  terminal: {
+    cols: 80,
+    rows: 24,
+    options: { disableStdin: false },
+    reset: vi.fn(),
+    write: vi.fn(),
+    focus: vi.fn(),
+    blur: vi.fn(),
+  },
+  ready: true,
+  geometry: () => ({ cols: 80, rows: 24 }),
+  structuralGeneration: 0,
+  beginStructuralReplay: vi.fn(),
+  cancelStructuralReplay: vi.fn(),
+  finishStructuralReplay: vi.fn(),
+  setGeometry: vi.fn(),
+  search: null,
+  findOpen: false,
+  setFindOpen: vi.fn(),
+  ctrlArmed: false,
+  armCtrl: vi.fn(),
+  focusTerminal: vi.fn(),
+}))
+
+const attach = vi.hoisted(() => ({
+  handlers: null as AttachHandlers | null,
+  send: vi.fn(),
+}))
+
+
+vi.mock('@/components/xterm-host', () => ({
+  // A disabled hook has no terminal, which is what a collapsed dock gets and
+  // what stops its attach effect from running.
+  useXterm: (options?: { enabled?: boolean; onData?: (data: string) => void }) => {
+    xterm.input = options?.enabled === false ? null : (options?.onData ?? null)
+    return options?.enabled === false ? { ...xterm, terminal: null, ready: false } : xterm
+  },
+}))
+vi.mock('@/routes/terminal/attach', async (importOriginal) => {
+  const actual = await importOriginal<typeof attachModule>()
+  return {
+    ...actual,
+    connectAttach: (
+      socketURL: () => string,
+      handlers: AttachHandlers,
+    ) => {
+      attach.handlers = handlers
+      const connection = actual.connectAttach(socketURL, handlers)
+      return {
+        ...connection,
+        send: (data: string) => {
+          attach.send(data)
+          connection.send(data)
+        },
+        rebind: (next: AttachHandlers) => {
+          attach.handlers = next
+          connection.rebind(next)
+        },
+      }
+    },
+  }
+})
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+      terminalStop: vi.fn(async () => ({})),
+      envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
+      envReset: vi.fn(async () => ({})),
+      terminalSocket: vi.fn(() => 'ws://localhost/ws/terminal?tab=main'),
+    },
+  }
+})
+
+async function openEnvironmentActions() {
+  const trigger = await screen.findByRole('button', { name: 'Environment actions' })
+  trigger.focus()
+  await userEvent.keyboard('{Enter}')
+  return within(await screen.findByRole('menu'))
+}
+
+async function selectEnvironmentAction(name: string) {
+  const menu = await openEnvironmentActions()
+  menu.getByRole('menuitem', { name }).focus()
+  await userEvent.keyboard('{Enter}')
+}
+
+
+
+describe('environment terminal dock', () => {
+  beforeEach(() => {
+    useStore.getState().resetEnvTerminal()
+    attach.handlers = null
+    vi.clearAllMocks()
+    xterm.structuralGeneration = 0
+    xterm.ctrlArmed = false
+    xterm.armCtrl.mockReset()
+    xterm.beginStructuralReplay.mockReset()
+    xterm.beginStructuralReplay.mockImplementation(() => ++xterm.structuralGeneration)
+    xterm.cancelStructuralReplay.mockReset()
+    xterm.cancelStructuralReplay.mockResolvedValue(undefined)
+    xterm.finishStructuralReplay.mockReset()
+    xterm.finishStructuralReplay.mockResolvedValue(undefined)
+    xterm.terminal.write.mockReset()
+    xterm.terminal.write.mockImplementation((_chunk: Uint8Array | string, done?: () => void) => done?.())
+    xterm.input = null
+    vi.mocked(api.terminalStatus).mockReset()
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    vi.mocked(api.terminalStop).mockReset()
+    vi.mocked(api.terminalStop).mockResolvedValue({})
+    vi.mocked(api.envSave).mockReset()
+    vi.mocked(api.envSave).mockResolvedValue({ image: 'aether/member-1:123' })
+    vi.mocked(api.envReset).mockReset()
+    vi.mocked(api.envReset).mockResolvedValue({})
+    vi.mocked(api.terminalSocket).mockReset()
+    vi.mocked(api.terminalSocket).mockReturnValue('ws://localhost/ws/terminal?tab=main')
+    useStore.setState({
+      // The dock ships collapsed; these cases are about what it shows open.
+      envTerminal: { ...initialEnvTerminal, collapsed: false },
+      terminalDockHeight: 280,
+      capabilities: null,
+      paletteDialog: null,
+      paletteForwardTarget: null,
+    })
+    StubSocket.install()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the first-open empty state and opens the main tab', async () => {
+    render(<TerminalDock />)
+
+    expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.activeTab).toBe('main'))
+  })
+  it('shows Save environment and the unsaved hint after first open attaches', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+
+    expect(await screen.findByRole('button', { name: 'Save environment' })).toBeDefined()
+    expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
+  })
+  it('rebinds a persistent main socket after the dock remounts', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    const first = render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    first.unmount()
+
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+  it('ignores late callbacks from a prior tab after switching terminals', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const oldHandlers = attach.handlers
+    const oldSocket = StubSocket.last()
+    const oldMessage = oldSocket.onmessage
+    const oldClose = oldSocket.onclose
+    act(() => {
+      oldHandlers?.onAttached(true, standardGeometry)
+      oldHandlers?.onReplayStart?.(0, true)
+    })
+
+    xterm.terminal.write.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+    await waitFor(() => {
+      expect(useStore.getState().envTerminal.activeTab).toBe('t2')
+      expect(attach.handlers).not.toBe(oldHandlers)
+      expect(StubSocket.opened).toHaveLength(2)
+    })
+    const currentHandlers = attach.handlers
+    const currentSocket = StubSocket.last()
+    const currentMessage = currentSocket.onmessage
+    act(() => {
+      currentHandlers?.onAttached(true, standardGeometry)
+      currentHandlers?.onReplayStart?.(0, true)
+    })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+    const currentOutput = new TextEncoder().encode('current output')
+    const oldOutput = new TextEncoder().encode('old output')
+    act(() => {
+      currentMessage?.({ data: currentOutput.buffer })
+      oldMessage?.({ data: oldOutput.buffer })
+      oldClose?.({ code: 1000 })
+    })
+
+    expect(useStore.getState().envTerminal.activeTab).toBe('t2')
+    expect(screen.queryByRole('status')).toBeNull()
+    const outputWrites = xterm.terminal.write.mock.calls
+      .map(([chunk]) => chunk as Uint8Array)
+      .filter((chunk) => chunk.byteLength > 0)
+    expect(outputWrites).toHaveLength(1)
+    expect(Array.from(outputWrites[0])).toEqual(Array.from(currentOutput))
+  })
+
+  it('opens the environment forward dialog when forwarding is available', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({
+      capabilities: {
+        gateway: 'local',
+        methods: [],
+        ws: [],
+        local: ['forward.start'],
+      },
+    })
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Forward port')
+
+    expect(useStore.getState().paletteDialog).toBe('forward')
+    expect(useStore.getState().paletteForwardTarget).toBe('terminal')
+  })
+  it.each(['local', 'remote'] as const)('hides forwarding without local permission on a %s gateway', async (gateway) => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ capabilities: { gateway, methods: ['*'], ws: [], local: [] } })
+    render(<TerminalDock />)
+
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Forward port' })).toBeNull()
+    expect(menu.getByRole('menuitem', { name: 'Stop environment…' })).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+  it('mutes input and hides replay until xterm parsing completes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const socket = StubSocket.last()
+
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.terminal.write).toHaveBeenCalledWith(new Uint8Array(), expect.any(Function))
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
+    )
+    xterm.input?.('allowed before replay')
+    expect(attach.send).toHaveBeenCalledWith('allowed before replay')
+    attach.send.mockClear()
+    xterm.beginStructuralReplay.mockClear()
+    xterm.cancelStructuralReplay.mockClear()
+    xterm.finishStructuralReplay.mockClear()
+    xterm.setGeometry.mockClear()
+    let restore: (() => void) | undefined
+    xterm.finishStructuralReplay.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { restore = resolve }),
+    )
+
+    let finish: (() => void) | undefined
+    xterm.terminal.write.mockImplementation((_chunk: Uint8Array, done?: () => void) => {
+      finish = done
+    })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+    })
+    expect(xterm.beginStructuralReplay).toHaveBeenCalledTimes(1)
+    expect(xterm.setGeometry).toHaveBeenCalledWith(80, 24, true)
+    expect(xterm.beginStructuralReplay.mock.invocationCallOrder[0]).toBeLessThan(
+      xterm.setGeometry.mock.invocationCallOrder[0],
+    )
+    xterm.input?.('blocked')
+    expect(attach.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const host = document.querySelector('.min-h-0.flex-1.bg-canvas') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => socket.onmessage?.({ data: new Uint8Array([1]).buffer }))
+    await waitFor(() => expect(finish).toBeDefined())
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => finish?.())
+    await waitFor(() => expect(xterm.finishStructuralReplay).toHaveBeenCalled())
+    xterm.input?.('blocked while restoring viewport')
+    expect(attach.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => restore?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
+    )
+    expect(host.style.visibility).toBe('')
+
+    xterm.input?.('allowed')
+    expect(attach.send).toHaveBeenCalledWith('allowed')
+
+    xterm.beginStructuralReplay.mockClear()
+    xterm.cancelStructuralReplay.mockClear()
+    xterm.finishStructuralReplay.mockClear()
+    // A resumed attach reports zero replay and must not clear the only
+    // settled copy already on screen.
+    xterm.terminal.reset.mockClear()
+    act(() => attach.handlers?.onAttached?.(true, standardGeometry, true))
+    expect(xterm.terminal.reset).not.toHaveBeenCalled()
+    act(() => attach.handlers?.onReplayStart?.(0, false))
+    act(() => finish?.())
+    expect(xterm.beginStructuralReplay).not.toHaveBeenCalled()
+    expect(xterm.cancelStructuralReplay).not.toHaveBeenCalled()
+    expect(xterm.finishStructuralReplay).not.toHaveBeenCalled()
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    expect(host.style.visibility).toBe('')
+  })
+
+
+  it('cancels an aborted full environment replay without restoring it', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry, false)
+      attach.handlers?.onReplayStart?.(3, true)
+    })
+    const generation = xterm.beginStructuralReplay.mock.results[0].value
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+
+    act(() => attach.handlers?.onReplayAbort?.(true))
+
+    await waitFor(() => expect(xterm.cancelStructuralReplay).toHaveBeenCalledWith(generation))
+    expect(xterm.finishStructuralReplay).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+  })
+
+  it('reveals a completed replay when viewport restoration rejects', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    xterm.finishStructuralReplay.mockRejectedValueOnce(new Error('restore failed'))
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry, false)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
+    )
+  })
+  it('does not let a stale replay callback reveal a newer replay', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const socket = StubSocket.last()
+
+    let firstFinish: (() => void) | undefined
+    let secondFinish: (() => void) | undefined
+    xterm.terminal.write
+      .mockImplementationOnce((_chunk: Uint8Array, done?: () => void) => {
+        firstFinish = done
+      })
+      .mockImplementationOnce((_chunk: Uint8Array, done?: () => void) => {
+        secondFinish = done
+      })
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+      socket.onmessage?.({ data: new Uint8Array([1]).buffer })
+    })
+    await waitFor(() => expect(firstFinish).toBeDefined())
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+    })
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => firstFinish?.())
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+
+    act(() => socket.onmessage?.({ data: new Uint8Array([2]).buffer }))
+    await waitFor(() => expect(secondFinish).toBeDefined())
+    act(() => secondFinish?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledTimes(1)
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[1].value,
+    )
+  })
+  it('confirms before stopping the running environment', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Stop environment…')
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(api.terminalStop).not.toHaveBeenCalled()
+    fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+    await waitFor(() => expect(api.terminalStop).toHaveBeenCalledTimes(1))
+    expect(useStore.getState().envTerminal.tabs).toEqual([])
+    // Whether the dock is open is the member's choice, not part of the
+    // environment's state, so stopping must not close it under them.
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
+  })
+  it('saves the running environment and hides the unsaved hint', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    const save = Promise.withResolvers<{ image: string }>()
+    vi.mocked(api.envSave).mockReturnValue(save.promise)
+    render(<TerminalDock />)
+
+    const saveButton = await screen.findByRole('button', { name: 'Save environment' })
+    expect(screen.getByText('Installs here reach agents after you save.')).toBeDefined()
+    fireEvent.click(saveButton)
+    expect((screen.getByRole('button', { name: 'Saving…' }) as HTMLButtonElement).disabled).toBe(true)
+
+    save.resolve({ image: 'aether/member-1:123' })
+    await waitFor(() =>
+      expect(screen.getByText('Saved - new runs use this environment')).toBeDefined(),
+    )
+    expect(screen.queryByText('Installs here reach agents after you save.')).toBeNull()
+    expect(api.envSave).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces save errors in the dock status', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    vi.mocked(api.envSave).mockRejectedValue(new Error('could not save'))
+    render(<TerminalDock />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save environment' }))
+    expect(await screen.findByText('could not save')).toBeDefined()
+  })
+
+  // Stopping the container and throwing the saved image away are different
+  // decisions, so the stop dialog offers stopping alone.
+  it('keeps discarding the saved image out of the stop dialog', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Stop environment…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    expect(dialog.queryByRole('button', { name: 'Reset to standard' })).toBeNull()
+  })
+
+  it('offers no environment actions before the first open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+
+    await screen.findByText('Your environment starts on first open')
+    expect(screen.queryByRole('button', { name: 'Add terminal tab' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save environment' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Environment actions' })).toBeNull()
+  })
+
+  it('does not offer a reset when no image is saved', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Reset to standard…' })).toBeNull()
+  })
+
+  it('keeps the saved image after a stop and leaves only reset available', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Stop environment…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+    await waitFor(() => expect(api.terminalStop).toHaveBeenCalled())
+    expect(useStore.getState().envTerminal.status?.saved_image).toBe('aether/member-1:123')
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    const menu = await openEnvironmentActions()
+    expect(menu.queryByRole('menuitem', { name: 'Stop environment…' })).toBeNull()
+    expect(menu.queryByRole('menuitem', { name: 'Forward port' })).toBeNull()
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Reset to standard…' }))
+    const resetDialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(resetDialog.getByRole('button', { name: 'Reset to standard' }))
+    await waitFor(() => expect(api.envReset).toHaveBeenCalledTimes(1))
+    expect(api.terminalStop).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().envTerminal.status).toEqual({ running: false, tabs: [], saved_image: '' })
+  })
+
+  it('keeps the stop dialog open while the stop is in flight', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    const stop = Promise.withResolvers<never>()
+    vi.mocked(api.terminalStop).mockReturnValue(stop.promise)
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Stop environment…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+    await screen.findByRole('button', { name: 'Stopping…' })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+
+    stop.reject(new Error('stop container: daemon is down'))
+    expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
+  })
+
+  it('keeps the saved image when the shell exits on its own', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+
+    act(() => attach.handlers?.onExit?.())
+
+    expect(useStore.getState().envTerminal.status).toEqual({
+      running: false,
+      tabs: [],
+      saved_image: 'aether/member-1:123',
+    })
+    const menu = await openEnvironmentActions()
+    expect(menu.getByRole('menuitem', { name: 'Reset to standard…' })).toBeDefined()
+  })
+
+  it('shows a failed stop inside the stop dialog', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    vi.mocked(api.terminalStop).mockRejectedValueOnce(new Error('stop container: daemon is down'))
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Stop environment…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Stop environment' }))
+
+    expect(await dialog.findByText('stop container: daemon is down')).toBeDefined()
+    expect(useStore.getState().envTerminal.statusError).toBeNull()
+  })
+
+  it('shows a failed reset inside the reset dialog', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    vi.mocked(api.envReset).mockRejectedValueOnce(new Error('remove image: image is in use'))
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Reset to standard…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
+
+    expect(await dialog.findByText('remove image: image is in use')).toBeDefined()
+    expect(useStore.getState().envTerminal.statusError).toBeNull()
+  })
+
+  it('resets the running environment and discards its saved image only after confirmation', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Reset to standard…')
+    const dialog = within(screen.getByRole('alertdialog'))
+    expect(api.envReset).not.toHaveBeenCalled()
+    expect(dialog.queryByRole('button', { name: 'Stop environment' })).toBeNull()
+    fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
+
+    await waitFor(() => expect(api.envReset).toHaveBeenCalledTimes(1))
+    expect(useStore.getState().envTerminal.tabs).toEqual([])
+    expect(useStore.getState().envTerminal.collapsed).toBe(false)
+    expect(useStore.getState().envTerminal.status).toEqual({
+      running: false,
+      tabs: [],
+      saved_image: '',
+    })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open' })))
+  })
+
+  it.each(['Stop environment', 'Reset to standard'])('cancels %s without changing the environment', async (name) => {
+    const status = { running: true, tabs: ['main'], saved_image: 'aether/member-1:123' }
+    vi.mocked(api.terminalStatus).mockResolvedValue(status)
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction(`${name}…`)
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment actions' })))
+    expect(api.terminalStop).not.toHaveBeenCalled()
+    expect(api.envReset).not.toHaveBeenCalled()
+    expect(useStore.getState().envTerminal.status).toEqual(status)
+    expect(useStore.getState().envTerminal.tabs).toEqual(['main'])
+  })
+
+  it('hands its actions and hint to the page header when the view draws one', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(
+      <TerminalDock
+        containment="fill"
+        header={(actions, hint) => (
+          <header aria-label="Page header">
+            {actions}
+            <p>{hint}</p>
+          </header>
+        )}
+      />,
+    )
+    const header = within(await screen.findByRole('banner', { name: 'Page header' }))
+    expect(await header.findByRole('button', { name: 'Save environment' })).toBeDefined()
+    expect(header.getByRole('button', { name: 'Environment actions' })).toBeDefined()
+    expect(header.getByText('Installs here reach agents after you save.')).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'Save environment' })).toHaveLength(1)
+  })
+
+  it('keeps its actions in the tab row when it fills a view without a header', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock containment="fill" />)
+    const dock = within(await screen.findByRole('region', { name: 'Environment terminal' }))
+    expect(await dock.findByRole('button', { name: 'Save environment' })).toBeDefined()
+    expect(dock.getByText('Installs here reach agents after you save.')).toBeDefined()
+  })
+
+  it('keeps reset locked until the request settles', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    const reset = Promise.withResolvers<unknown>()
+    vi.mocked(api.envReset).mockReturnValue(reset.promise)
+    render(<TerminalDock />)
+
+    await selectEnvironmentAction('Reset to standard…')
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Reset to standard' }))
+    const pending = await dialog.findByRole('button', { name: 'Resetting…' })
+    expect((pending as HTMLButtonElement).disabled).toBe(true)
+    expect((dialog.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(pending)
+    expect(screen.getByRole('alertdialog')).toBeDefined()
+    expect(api.envReset).toHaveBeenCalledTimes(1)
+
+    reset.resolve({})
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(useStore.getState().envTerminal.status).toEqual({ running: false, tabs: [], saved_image: '' })
+  })
+
+  it('does not show the unsaved hint when an image is saved', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({
+      running: true,
+      tabs: ['main'],
+      saved_image: 'aether/member-1:123',
+    })
+    render(<TerminalDock />)
+
+    await screen.findByRole('button', { name: 'Save environment' })
+    expect(screen.queryByText('Installs here reach agents after you save.')).toBeNull()
+  })
+
+  it('shows the starting indicator until the terminal attaches', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+
+    expect(await screen.findByRole('status')).toBeDefined()
+    expect(screen.getByText('Starting your environment container')).toBeDefined()
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+  })
+
+  it('does not claim a container start when reattaching to a running one', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+    // A second tab runs another shell in the container that is already up.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+    expect(await screen.findByText('Connecting to your environment')).toBeDefined()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+
+    // And neither does switching back to the first tab.
+    fireEvent.click(screen.getByRole('tab', { name: 'main' }))
+    expect(await screen.findByText('Connecting to your environment')).toBeDefined()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+  })
+
+  it('replaces the starting indicator with the real start failure', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    render(<TerminalDock />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+
+    expect(
+      await screen.findByText('Starting your environment container'),
+    ).toBeDefined()
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onRefused('start environment: no space left on device'))
+
+    expect(
+      await screen.findByText('start environment: no space left on device'),
+    ).toBeDefined()
+    expect(screen.queryByText('Starting your environment container')).toBeNull()
+  })
+
+  it('shows an attach refusal with open tabs and clears it after attaching', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    act(() => attach.handlers?.onRefused('membership withdrawn'))
+    expect(screen.getByText('membership withdrawn')).toBeDefined()
+
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+    await waitFor(() => expect(screen.queryByText('membership withdrawn')).toBeNull())
+  })
+
+  it('starts collapsed and opens from the header toggle', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    expect(screen.queryByText('Your environment starts on first open')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal' }))
+
+    expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
+  })
+
+  it('opens itself for a caller that mounts it open, and still closes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock openOnMount />)
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Expand terminal' })).toBeDefined(),
+    )
+    expect(useStore.getState().envTerminal.collapsed).toBe(true)
+  })
+
+  it('opens the dock when a collapsed strip is asked for a tab', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock />)
+
+    // The strip's controls stay live while the dock is shut, and a tab with
+    // no mounted terminal never attaches, so + has to open the dock too.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+    expect(useStore.getState().envTerminal.tabs).toContain('main')
+  })
+
+  it('opens the dock when a collapsed strip tab is picked', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    useStore.getState().setEnvTerminalCollapsed(true)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'main' }))
+
+    await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
+  })
+
+  it('closes the find bar when the tab under it changes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toContain('main'))
+    xterm.setFindOpen.mockClear()
+
+    // The query and its answer belong to the buffer find was opened over.
+    fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
+
+    await waitFor(() => expect(xterm.setFindOpen).toHaveBeenCalledWith(false))
+  })
+
+  it('names the real tab ceiling when every environment tab is open', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+
+    const add = await screen.findByRole('button', { name: 'Add terminal tab' })
+    for (let n = 0; n < 5; n++) fireEvent.click(add)
+    await waitFor(() => expect(useStore.getState().envTerminal.tabs).toHaveLength(6))
+
+    expect(screen.getByText('At most 6 tabs')).toBeDefined()
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+  })
+})

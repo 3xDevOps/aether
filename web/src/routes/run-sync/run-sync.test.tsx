@@ -8,7 +8,6 @@ import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
 import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
 
-// The local gateway's descriptor: the sync verbs the panel rides on.
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
@@ -24,7 +23,6 @@ function seed(extra: Partial<RootState> = {}) {
     runs: {},
     syncSessions: {},
     linkStatus: null,
-    acked: {},
     pausedRuns: {},
     inbox: {},
     info: serverInfo,
@@ -55,15 +53,15 @@ describe('sync panel', () => {
     seed()
     render(<SyncPanel runID="run_1" client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Start mirroring' }))
 
-    expect(await screen.findByText('Overlay running')).toBeDefined()
+    expect(await screen.findByText('Mirroring')).toBeDefined()
     expect(client.localSyncStart).toHaveBeenCalledWith('run_1')
     expect(useStore.getState().syncSessions.run_1?.state).toBe('running')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop mirroring' }))
 
-    expect(await screen.findByText('No sync session for this run.')).toBeDefined()
+    expect(await screen.findByText('Not mirroring')).toBeDefined()
     expect(client.localSyncStop).toHaveBeenCalledWith('run_1')
   })
 
@@ -76,7 +74,7 @@ describe('sync panel', () => {
     seed()
     render(<SyncPanel runID="run_1" client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Start mirroring' }))
 
     expect(
       await screen.findByText('sync.start: overlay checkout has local changes'),
@@ -113,7 +111,6 @@ describe('sync panel', () => {
     resolveStatus({
       sessions: [{ run_id: 'run_1', state: 'running', conflict: null }],
     })
-    // Let the resolved fetch's continuation run before asserting.
     await statusPromise
     await Promise.resolve()
 
@@ -135,7 +132,7 @@ describe('sync badge', () => {
     })
     render(<Board />)
 
-    const badges = screen.getAllByLabelText('Sync overlay running')
+    const badges = screen.getAllByRole('button', { name: 'Syncing' })
     expect(badges).toHaveLength(1)
     const card = screen
       .getByRole('button', { name: 'mirrored locally' })

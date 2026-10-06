@@ -1,17 +1,8 @@
-// The update prompts, above everything the shell renders: the CLI on this
-// machine is behind (cli-update-banner.tsx), the desktop app around the
-// dashboard is stale, or the server it talks to is behind. The CLI half
-// comes from `update.check` on the local gateway; the server half
-// comes from `server.update_status`, which any member may read and which
-// says whether the server can replace its own binaries. A server that
-// cannot - the documented unprivileged install - still gets the two
-// commands to run on its host rather than a button that could not work.
-
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CircleAlert, MonitorCog, ServerCog } from 'lucide-react'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
-import { desktopBridge } from '@/components/shell/title-bar'
+import { CircleAlert, MonitorCog, ServerCog } from '@/components/icons'
+import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -46,30 +37,17 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import type { UpdateKind } from '@/store/ui'
 
-/** How often the CLI release check is repeated while the app stays open. */
 export const RECHECK_MS = 30 * 60 * 1000
 
-/**
- * Whether the desktop app was built by a different CLI than the one serving
- * this local gateway. Both sides have to be known: a browser tab has no
- * shell at all, and a gateway that predates the capabilities field reports
- * no version. Release tags alone carry an optional leading "v".
- */
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
   if (!shell || !cliVersion) return false
   return bareVersion(shell) !== bareVersion(cliVersion)
 }
 
-/**
- * The three banners and the two reads behind them. The CLI and shell
- * prompts need `update.check`, which only the desktop gateway serves - a
- * remote monitor cannot update a binary on your machine - while the server
- * prompt rides `server.update_status` and shows wherever the member is an
- * admin.
- */
-export function UpdateBanners({ client = api }: { client?: Api } = {}) {
+export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const caps = useCapability()
   const serves = caps.hasLocal('update.check')
   const readsServerUpdate = caps.hasMethod('server.update_status')
@@ -77,11 +55,8 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
   const setUpdate = useStore((s) => s.setUpdate)
   const setServerUpdate = useStore((s) => s.setServerUpdate)
   const setServerUpdateFailed = useStore((s) => s.setServerUpdateFailed)
-  // Re-read whenever the connection changes state or server.info names a
-  // different version. The reconnect is the one that matters: a server
-  // that updates itself re-executes, the socket drops, and the fresh
-  // status is what ends the banner and the status bar's notice. A read
-  // that failed is retried by the same rule, plus the banner's Retry.
+  // A self-updating server re-executes and drops the socket; the read on
+  // reconnect is what clears the prompt.
   const serverVersion = useStore((s) => s.info?.server_version)
   const connection = useStore((s) => s.connection)
   const [statusReads, setStatusReads] = useState(0)
@@ -96,13 +71,8 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
     }
   }, [])
 
-  // The one reader of `update.check`, shared with the Update button, and the
-  // only writer of the answer. Every read takes the next number and only the
-  // answer still holding the highest one is written, so the click - which
-  // always takes a fresh number - makes every read before it stale. `pending`
-  // counts readers rather than flagging them: with a boolean the first of two
-  // overlapping lookups would clear it for the second, letting a plain read
-  // start under the click's and win with the tag the click superseded.
+  // Only the newest read writes, so a click supersedes reads in flight.
+  // `pending` counts because reads overlap.
   const recheck = useCallback(
     async (refresh?: boolean) => {
       const id = ++issued.current
@@ -122,12 +92,10 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
     if (!serves) return
     const read = () => {
       if (pending.current > 0 || document.visibilityState === 'hidden') return
-      // An install holds the banner: what it names has to stay the release
-      // being written to disk until that finishes.
+      // The prompt must keep naming the release being installed.
       if (useStore.getState().installingUpdate) return
       void recheck()
-        // A failed check is not worth a banner of its own: the release
-        // lookup is a network read the member did not ask for.
+        // A background lookup the member did not ask for fails silently.
         .catch(() => {})
     }
     read()
@@ -150,9 +118,6 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
         if (live) setServerUpdate(status)
       })
       .catch((err) => {
-        // Recorded rather than swallowed: the banner has to say it could
-        // not read the status instead of claiming the server cannot
-        // update itself, which is a different thing entirely.
         if (live) setServerUpdateFailed(message(err))
       })
     return () => {
@@ -168,34 +133,63 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
     setServerUpdateFailed,
   ])
 
+  const open = useStore((s) => s.updatesOpen)
+  const setOpen = useStore((s) => s.setUpdatesOpen)
+  const anything = useUpdateNotice() !== null
   return (
-    <>
-      {/* Independent of the release check: the shell goes stale the moment
-          the CLI it was built by is replaced, which is the flow this
-          notice exists for and the one where no update is available any
-          more. */}
-      {serves && <ShellBanner />}
-      {serves && update && (
-        <CliBanner update={update} client={client} recheck={recheck} />
-      )}
-      {/* Not gated on `update.check`: the server answers for itself, so an
-          admin on any gateway can act on it. */}
-      <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
-    </>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Updates</DialogTitle>
+          {!anything && <DialogDescription>Nothing to update.</DialogDescription>}
+        </DialogHeader>
+        <div className="min-w-0">
+          {serves && <ShellBanner />}
+          {serves && update && (
+            <CliBanner update={update} client={client} recheck={recheck} />
+          )}
+          <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-/**
- * The desktop app was built by a different CLI than the one serving this
- * gateway. Almost always because an update just replaced the CLI: the SPA
- * ships inside it and is already new, the Electron shell around it is not.
- * A browser tab has no shell and renders nothing.
- */
+/** A server update already moving is named even when dismissed: it is about to restart the server. */
+export function useUpdateNotice(includeDismissed = false): { text: string; action: boolean } | null {
+  const caps = useCapability()
+  const isAdmin = useIsAdmin()
+  const update = useStore((s) => s.update)
+  const status = useStore((s) => s.serverUpdate)
+  const progress = useStore((s) => s.serverUpdateProgress)
+  const stored = useStore((s) => s.dismissedUpdates)
+  const dismissed = includeDismissed ? noneDismissed : stored
+  const cliVersion = useStore((s) => s.capabilities?.version)
+  const serves = caps.hasLocal('update.check')
+  const latest = update?.cli.latest ?? ''
+  if (serves && update?.cli.update_available && latest && dismissed.cli !== latest) {
+    return { text: `Aether ${bareVersion(latest)} is available`, action: true }
+  }
+  const flow = serverFlow(status, progress)
+  const serverLatest = status?.latest || update?.cli.latest || ''
+  const behind = status ? status.update_available : (update?.server_behind ?? false)
+  if (flow.name === 'scheduled' || flow.name === 'applying' || flow.name === 'restarting') {
+    return { text: 'Server update in progress, terminals reconnect briefly', action: isAdmin }
+  }
+  if (isAdmin && behind && serverLatest && (flow.name === 'failed' || dismissed.server !== serverLatest)) {
+    return { text: `Server ${bareVersion(serverLatest)} is available`, action: true }
+  }
+  if (serves && cliVersion && shellIsStale(cliVersion) && dismissed.shell !== cliVersion) {
+    return { text: 'The desktop app is out of date', action: true }
+  }
+  return null
+}
+
+const noneDismissed: Record<UpdateKind, string> = { cli: '', server: '', shell: '' }
+
 function ShellBanner() {
   const cliVersion = useStore((s) => s.capabilities?.version)
   const dismissed = useStore((s) => s.dismissedUpdates.shell)
-  // A failed in-app rebuild explains why the shell is still on the old
-  // version, so keep its exact output in the notice.
   const buildError = useStore((s) => s.update?.shell_build_error)
   if (!shellIsStale(cliVersion) || !cliVersion) return null
   if (dismissed === cliVersion) return null
@@ -207,23 +201,22 @@ function ShellBanner() {
       <div className={bannerContent}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="font-medium">The desktop app is out of date.</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ui-sm text-muted">
             Built by aether {desktopBridge()?.shellVersion}; serving {cliVersion}.
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-ui-sm text-muted">
           The dashboard itself is current - it ships inside the CLI. Only the
           window around it is old.
         </p>
         {buildError && (
           <div className="space-y-1">
-            <p className="text-xs font-medium text-state-failed">The last rebuild failed:</p>
-            {/* This prompt renders above the CLI and server ones. */}
+            <p className="text-ui-sm font-medium text-state-failed">The last rebuild failed:</p>
             <p className={cn(verbatim, 'text-state-failed')}>{buildError}</p>
           </div>
         )}
-        <Collapsible className="text-xs text-muted-foreground">
-          <CollapsibleTrigger className="font-medium hover:text-foreground">
+        <Collapsible className="text-ui-sm text-muted">
+          <CollapsibleTrigger className="font-medium hover:text-text">
             Rebuild instructions
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -236,13 +229,7 @@ function ShellBanner() {
   )
 }
 
-/**
- * How far the running server update has got, from the two sources that
- * know: the `server.update` feed, and the pending update the status call
- * reports. A cancel is not a state of its own - the update it cleared is
- * simply gone - and a progress frame always beats the fetched status,
- * because it is newer.
- */
+/** A progress frame beats the fetched status because it is newer. */
 type ServerFlow =
   | { name: 'available' }
   | { name: 'scheduled'; version: string; by: string }
@@ -280,12 +267,7 @@ function serverFlow(
   return { name: 'available' }
 }
 
-/**
- * How many runs are working in the scope this member can see. It mirrors
- * the server's own idle check (internal/scheduler): needs-attention is
- * treated as idle and a paused run is a frozen container, so neither is
- * counted as active work interrupted by a restart.
- */
+/** Mirrors the server's idle check in internal/scheduler. */
 function activeRunCount(
   runs: Record<string, RunRecord>,
   paused: Record<string, boolean>,
@@ -297,13 +279,6 @@ function activeRunCount(
   ).length
 }
 
-/**
- * Why the buttons are missing, in the terms the dashboard can defend.
- * Three different things end up here and only one of them is the server
- * saying it cannot update itself: the status read may have failed, and a
- * gateway may not carry the method at all. Claiming the first for either
- * of the others would be a friendlier sentence that is not true.
- */
 function noButtonsLine(
   status: ServerUpdateStatus | null,
   error: string | null,
@@ -318,13 +293,7 @@ function noButtonsLine(
   return 'The dashboard cannot update the server. Run these on the server host:'
 }
 
-/**
- * What a pending update is still waiting for. The scheduled line says "no
- * run is active", but an open workspace shell holds an update back too -
- * it has no container to reattach to - and an admin whose update never
- * fires needs to see that here rather than in `aether server update
- * --status`. Paused runs are left out: they hold nothing back.
- */
+/** An open workspace shell holds an update back too: it has no container to reattach to. */
 function waitingLine(waiting: ServerUpdateWaiting | undefined): string {
   if (!waiting) return ''
   const parts: string[] = []
@@ -337,7 +306,6 @@ function waitingLine(waiting: ServerUpdateWaiting | undefined): string {
   return parts.length ? `Waiting for ${parts.join(' and ')}.` : ''
 }
 
-/** What the confirm dialog says a restart costs, with the live run count. */
 function confirmLine(active: number): string {
   if (active === 0) {
     return 'No runs are active right now. Attached terminals reconnect on their own.'
@@ -346,25 +314,13 @@ function confirmLine(active: number): string {
   return `${runs} active right now. They keep running: the server reattaches to their containers when it comes back, and attached terminals reconnect on their own.`
 }
 
-/** The commands to run on a server that cannot update itself. */
 function manualCommands(status: ServerUpdateStatus | null): string[] {
   return status?.manual_commands?.length
     ? status.manual_commands
     : ['sudo aether update', 'sudo systemctl restart aether-server']
 }
 
-/**
- * The server is behind. Admins only: `server.update` is an admin method,
- * and the local gateway advertises every method regardless of who is
- * behind it, so the capability is half the gate and the caller's role is
- * the other half.
- *
- * A server that serves `server.update_status` says whether it can replace
- * its own binaries. When it can, this is a pair of buttons; when it cannot
- * - the documented unprivileged install - it is the two commands to run on
- * the server host, as it has always been. A server too old to answer the
- * method at all keeps that older banner too.
- */
+/** The local gateway advertises every method to anyone, so the admin role is checked too. */
 function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void }) {
   const update = useStore((s) => s.update)
   const status = useStore((s) => s.serverUpdate)
@@ -381,10 +337,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The status call is the authority once the server answers it: after the
-  // restart it reports the new version, which is how this banner goes away
-  // on its own. `update.check` is the fallback for a server too old to
-  // serve it, and it is fetched once, so it cannot answer that question.
+  // update.check is read once, so only the status call clears this after a restart.
   const behind = status ? status.update_available : (update?.server_behind ?? false)
   const latest = status?.latest || update?.cli.latest || ''
   const running = status?.server_version || update?.server_version || ''
@@ -392,8 +345,6 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
 
   if (!isAdmin) return null
   if (!behind || !latest) return null
-  // Dismissing silences the offer, not an update that is already moving:
-  // the phases are what say why the server is about to restart.
   if (dismissed === latest && flow.name === 'available') return null
 
   const act = async (when: ServerUpdateWhen) => {
@@ -401,17 +352,13 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
     setBusy(true)
     try {
       const result = await client.serverUpdate(when)
-      // The server publishes the same phase to the feed, but only into a
-      // workspace timeline: a server with no workspaces yet has nowhere to
-      // put it, and the result is then the only thing that arrives.
+      // The feed reaches workspace timelines only, so a server with no workspaces sends nothing else.
       applyProgress({
         phase: result.status,
         version: result.version,
         actor_id: result.requested_by,
       })
     } catch (err) {
-      // The server's own refusal, verbatim: an incapable server names the
-      // commands to run on its host inside that message.
       setError(message(err))
     } finally {
       setBusy(false)
@@ -421,8 +368,6 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const capable = status?.capable ?? false
   const active = activeRunCount(runs, pausedRuns)
   const waiting = waitingLine(status?.waiting)
-  // The feed and the pending row both name the member by id; a member the
-  // store has never seen falls back to that id rather than to nobody.
   const scheduledBy =
     flow.name === 'scheduled' ? (members[flow.by]?.display_name ?? flow.by) : ''
 
@@ -436,13 +381,13 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
       <div className={bannerContent}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="font-medium">The server is behind.</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ui-sm text-muted">
             Server {running}, latest {latest}.
           </p>
         </div>
         {flow.name === 'available' && capable && (
-          <Collapsible className="text-xs text-muted-foreground">
-            <CollapsibleTrigger className="font-medium hover:text-foreground">
+          <Collapsible className="text-ui-sm text-muted">
+            <CollapsibleTrigger className="font-medium hover:text-text">
               What a server restart affects
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -456,27 +401,27 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         )}
         {flow.name === 'scheduled' && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               Update to {flow.version || latest} scheduled by {scheduledBy}, applies
               when no run is active.
             </p>
-            {waiting && <p className="text-muted-foreground">{waiting}</p>}
+            {waiting && <p className="text-muted">{waiting}</p>}
           </>
         )}
         {flow.name === 'applying' && (
-          <p className="text-muted-foreground">
+          <p className="text-muted">
             Downloading and verifying the release. Nothing has been replaced yet.
           </p>
         )}
         {flow.name === 'restarting' && (
-          <p className="text-muted-foreground">
+          <p className="text-muted">
             Restarting on the new version. Attached terminals reconnect on their
             own.
           </p>
         )}
         {flow.name === 'failed' && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               The update failed and nothing was replaced.
             </p>
             <p className={cn(verbatim, 'text-state-failed')}>{flow.detail}</p>
@@ -485,7 +430,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
         {(!capable || flow.name === 'failed') && (
           <>
-            <p className="text-muted-foreground">
+            <p className="text-muted">
               {capable
                 ? 'Run these on the server host instead:'
                 : noButtonsLine(status, statusError)}
@@ -500,7 +445,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
       </div>
       {!status && statusError && (
         <div className={bannerActions}>
-          <Button size="sm" variant="outline" onClick={onRetry}>
+          <Button size="sm" variant="secondary" onClick={onRetry}>
             Retry
           </Button>
         </div>
@@ -510,7 +455,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
           {flow.name === 'scheduled' ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={busy}
               onClick={() => void act('cancel')}
             >
@@ -524,7 +469,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => void act('idle')}
                 >
@@ -543,7 +488,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
             <DialogDescription>{confirmLine(active)}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirming(false)}>
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
               Keep waiting
             </Button>
             <Button

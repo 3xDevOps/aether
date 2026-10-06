@@ -1,0 +1,451 @@
+{
+ "initialize": {
+  "protocolVersion": 1,
+  "agentCapabilities": {
+   "_meta": {
+    "claudeCode": {
+     "promptQueueing": true
+    },
+    "authStatus": {}
+   },
+   "promptCapabilities": {
+    "image": true,
+    "embeddedContext": true
+   },
+   "mcpCapabilities": {
+    "http": true,
+    "sse": true
+   },
+   "auth": {
+    "logout": {}
+   },
+   "providers": {},
+   "loadSession": true,
+   "sessionCapabilities": {
+    "additionalDirectories": {},
+    "close": {},
+    "delete": {},
+    "fork": {},
+    "list": {},
+    "resume": {},
+    "subagents": {}
+   }
+  },
+  "agentInfo": {
+   "name": "@agentclientprotocol/claude-agent-acp",
+   "title": "Claude Agent",
+   "version": "0.86.0"
+  },
+  "authMethods": [],
+  "_meta": {
+   "steering": {
+    "supported": true
+   }
+  }
+ },
+ "session_new": {
+  "sessionId": "dd6af2e5-4b03-4b80-88cf-53a2b8b4cb54",
+  "modes": {
+   "currentModeId": "auto",
+   "availableModes": [
+    {
+     "id": "default",
+     "name": "Manual",
+     "description": "Always ask before making changes"
+    },
+    {
+     "id": "acceptEdits",
+     "name": "Accept edits",
+     "description": "Automatically accept all file edits"
+    },
+    {
+     "id": "plan",
+     "name": "Plan",
+     "description": "Create a plan before making changes"
+    },
+    {
+     "id": "auto",
+     "name": "Auto",
+     "description": "Claude handles permission decisions"
+    },
+    {
+     "id": "bypassPermissions",
+     "name": "Bypass permissions",
+     "description": "Accepts all permissions"
+    }
+   ]
+  },
+  "configOptions": [
+   {
+    "id": "mode",
+    "name": "Mode",
+    "description": "Session permission mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "auto",
+    "options": [
+     {
+      "value": "default",
+      "name": "Manual",
+      "description": "Always ask before making changes"
+     },
+     {
+      "value": "acceptEdits",
+      "name": "Accept edits",
+      "description": "Automatically accept all file edits"
+     },
+     {
+      "value": "plan",
+      "name": "Plan",
+      "description": "Create a plan before making changes"
+     },
+     {
+      "value": "auto",
+      "name": "Auto",
+      "description": "Claude handles permission decisions"
+     }
+    ]
+   },
+   {
+    "id": "model",
+    "name": "Model",
+    "description": "AI model to use",
+    "category": "model",
+    "type": "select",
+    "currentValue": "claude-fable-5-1[1m]",
+    "options": [
+     {
+      "value": "default",
+      "name": "Default (recommended)",
+      "description": "Opus 5.5"
+     },
+     {
+      "value": "opus",
+      "name": "Opus 5.5",
+      "description": "For complex work and everyday tasks"
+     },
+     {
+      "value": "claude-fable-5-1[1m]",
+      "name": "Fable 5.1",
+      "description": "For your toughest challenges"
+     },
+     {
+      "value": "sonnet",
+      "name": "Sonnet 5.5",
+      "description": "Most efficient for simpler tasks"
+     }
+    ]
+   },
+   {
+    "id": "effort",
+    "name": "Effort",
+    "description": "Available effort levels for this model",
+    "category": "thought_level",
+    "type": "select",
+    "currentValue": "high",
+    "options": [
+     {
+      "value": "default",
+      "name": "Default"
+     },
+     {
+      "value": "low",
+      "name": "Low"
+     },
+     {
+      "value": "medium",
+      "name": "Medium"
+     },
+     {
+      "value": "high",
+      "name": "High"
+     }
+    ]
+   },
+   {
+    "id": "agent",
+    "name": "Agent",
+    "description": "Main-thread agent persona",
+    "type": "select",
+    "currentValue": "default",
+    "options": [
+     {
+      "value": "default",
+      "name": "Default",
+      "description": "Standard Claude Code agent"
+     },
+     {
+      "value": "code-simplifier:code-simplifier",
+      "name": "code-simplifier:code-simplifier",
+      "description": "Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise."
+     }
+    ]
+   }
+  ]
+ },
+ "prompt": {
+  "updates": [
+   {
+    "sessionUpdate": "available_commands_update",
+    "availableCommands": [
+     {
+      "name": "review",
+      "description": "Review the current changes",
+      "input": null
+     },
+     {
+      "name": "compact",
+      "description": "Summarize the conversation to free context",
+      "input": null
+     }
+    ]
+   },
+   {
+    "sessionUpdate": "available_commands_update",
+    "availableCommands": [
+     {
+      "name": "review",
+      "description": "Review the current changes",
+      "input": null
+     },
+     {
+      "name": "compact",
+      "description": "Summarize the conversation to free context",
+      "input": null
+     }
+    ]
+   },
+   {
+    "sessionUpdate": "usage_update",
+    "used": 27113,
+    "size": 1000000,
+    "_meta": {
+     "_claude/model": "claude-fable-5-1"
+    }
+   },
+   {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "pong"
+    },
+    "messageId": "msg_011CfkH4jGTppbtKXrdQ63K8"
+   },
+   {
+    "sessionUpdate": "usage_update",
+    "used": 27113,
+    "size": 1000000,
+    "_meta": {
+     "_claude/rateLimit": {
+      "status": "allowed",
+      "resetsAt": 1791264000,
+      "rateLimitType": "five_hour",
+      "overageStatus": "rejected",
+      "overageDisabledReason": "org_level_disabled",
+      "isUsingOverage": false,
+      "unifiedWindows": {
+       "five_hour": {
+        "utilization": 0.28,
+        "resetsAt": 1791264000
+       },
+       "seven_day": {
+        "utilization": 0.1,
+        "resetsAt": 1791738000
+       },
+       "seven_day_overage_included": {
+        "utilization": 0.17,
+        "resetsAt": 1791738000
+       }
+      }
+     },
+     "_claude/model": "claude-fable-5-1"
+    }
+   },
+   {
+    "sessionUpdate": "usage_update",
+    "used": 27113,
+    "size": 1000000,
+    "cost": {
+     "amount": 0.34183850000000005,
+     "currency": "USD"
+    },
+    "_meta": {
+     "_claude/origin": {
+      "kind": "human"
+     },
+     "_claude/model": "claude-fable-5-1"
+    }
+   }
+  ],
+  "result": {
+   "stopReason": "end_turn",
+   "usage": {
+    "inputTokens": 2,
+    "outputTokens": 4,
+    "cachedReadTokens": 10202,
+    "cachedWriteTokens": 16905,
+    "totalTokens": 27113
+   }
+  }
+ },
+ "load": {
+  "updates": [
+   {
+    "sessionUpdate": "user_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "Reply with exactly the word pong and nothing else; do not use tools."
+    },
+    "messageId": "128f1b8e-ec76-4424-8577-8d0b70322edf"
+   },
+   {
+    "sessionUpdate": "agent_message_chunk",
+    "content": {
+     "type": "text",
+     "text": "pong"
+    },
+    "messageId": "msg_011CfkH4jGTppbtKXrdQ63K8"
+   }
+  ],
+  "result": {
+   "sessionId": "dd6af2e5-4b03-4b80-88cf-53a2b8b4cb54",
+   "modes": {
+    "currentModeId": "auto",
+    "availableModes": [
+     {
+      "id": "default",
+      "name": "Manual",
+      "description": "Always ask before making changes"
+     },
+     {
+      "id": "acceptEdits",
+      "name": "Accept edits",
+      "description": "Automatically accept all file edits"
+     },
+     {
+      "id": "plan",
+      "name": "Plan",
+      "description": "Create a plan before making changes"
+     },
+     {
+      "id": "auto",
+      "name": "Auto",
+      "description": "Claude handles permission decisions"
+     },
+     {
+      "id": "bypassPermissions",
+      "name": "Bypass permissions",
+      "description": "Accepts all permissions"
+     }
+    ]
+   },
+   "configOptions": [
+    {
+     "id": "mode",
+     "name": "Mode",
+     "description": "Session permission mode",
+     "category": "mode",
+     "type": "select",
+     "currentValue": "auto",
+     "options": [
+      {
+       "value": "default",
+       "name": "Manual",
+       "description": "Always ask before making changes"
+      },
+      {
+       "value": "acceptEdits",
+       "name": "Accept edits",
+       "description": "Automatically accept all file edits"
+      },
+      {
+       "value": "plan",
+       "name": "Plan",
+       "description": "Create a plan before making changes"
+      },
+      {
+       "value": "auto",
+       "name": "Auto",
+       "description": "Claude handles permission decisions"
+      }
+     ]
+    },
+    {
+     "id": "model",
+     "name": "Model",
+     "description": "AI model to use",
+     "category": "model",
+     "type": "select",
+     "currentValue": "claude-fable-5-1[1m]",
+     "options": [
+      {
+       "value": "default",
+       "name": "Default (recommended)",
+       "description": "Opus 5.5"
+      },
+      {
+       "value": "opus",
+       "name": "Opus 5.5",
+       "description": "For complex work and everyday tasks"
+      },
+      {
+       "value": "claude-fable-5-1[1m]",
+       "name": "Fable 5.1",
+       "description": "For your toughest challenges"
+      },
+      {
+       "value": "sonnet",
+       "name": "Sonnet 5.5",
+       "description": "Most efficient for simpler tasks"
+      }
+     ]
+    },
+    {
+     "id": "effort",
+     "name": "Effort",
+     "description": "Available effort levels for this model",
+     "category": "thought_level",
+     "type": "select",
+     "currentValue": "high",
+     "options": [
+      {
+       "value": "default",
+       "name": "Default"
+      },
+      {
+       "value": "low",
+       "name": "Low"
+      },
+      {
+       "value": "medium",
+       "name": "Medium"
+      },
+      {
+       "value": "high",
+       "name": "High"
+      }
+     ]
+    },
+    {
+     "id": "agent",
+     "name": "Agent",
+     "description": "Main-thread agent persona",
+     "type": "select",
+     "currentValue": "default",
+     "options": [
+      {
+       "value": "default",
+       "name": "Default",
+       "description": "Standard Claude Code agent"
+      },
+      {
+       "value": "code-simplifier:code-simplifier",
+       "name": "code-simplifier:code-simplifier",
+       "description": "Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise."
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

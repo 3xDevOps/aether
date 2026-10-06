@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dialog'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 
-/** The shared archive confirmation for Cards, Map and the palette. */
 export function ClearDoneConfirm({
   plan,
   running,
@@ -23,21 +22,29 @@ export function ClearDoneConfirm({
   onCancel: () => void
 }) {
   const n = plan.eligible.length
+  const swarmRuns = plan.eligible.some((run) => run.mission_id)
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
+      <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
           <DialogTitle>
-            Archive {n} closed {n === 1 ? 'run' : 'runs'}?
+            {n === 0 ? 'No closed runs to archive' : `Archive ${n} closed ${n === 1 ? 'run' : 'runs'}?`}
           </DialogTitle>
           <DialogDescription>
-            Archive hides these runs and schedules their deletion after the retention
-            period. It does not free container memory; release resources separately
-            before archiving if you want to free them now.
+            {n === 0 ? (
+              'Archive acts on merged, abandoned, failed and interrupted runs you may act on.'
+            ) : (
+              <>
+                Archive hides these runs and schedules their deletion after the retention
+                period. It does not free their containers; free them separately before
+                archiving if you want the memory back now.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
-        {(plan.notClosed > 0 || plan.notAllowed > 0) && (
-          <ul className="list-disc space-y-1 pl-4 text-[13px] leading-5 text-muted-foreground">
+        {(plan.notClosed > 0 || plan.notAllowed > 0 || swarmRuns) && (
+          <ul className="list-disc space-y-1 pl-4 text-ui leading-5 text-muted">
+            {swarmRuns && <li>Swarm runs are archived, but their swarms stay in Swarms; archive a swarm from its page.</li>}
             {plan.notClosed > 0 && (
               <li>
                 {plan.notClosed} {plan.notClosed === 1 ? 'run stays' : 'runs stay'}: completed but
@@ -53,20 +60,21 @@ export function ClearDoneConfirm({
           </ul>
         )}
         <DialogFooter>
-          <Button variant="outline" disabled={running} onClick={onCancel}>
-            Cancel
+          <Button variant="secondary" disabled={running} onClick={onCancel}>
+            {n === 0 ? 'Close' : 'Cancel'}
           </Button>
-          <Button disabled={running} onClick={onConfirm}>
-            {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
-            Archive {n}
-          </Button>
+          {n > 0 && (
+            <Button disabled={running} onClick={onConfirm}>
+              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
+              Archive {n}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-/** The same confirmation surface for retained containers, archived or visible. */
 export function ReleaseFinishedConfirm({
   plan,
   running,
@@ -81,20 +89,34 @@ export function ReleaseFinishedConfirm({
   const n = plan.eligible.length
   return (
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
+      <DialogContent className="max-w-[min(440px,calc(100%-2rem))]">
         <DialogHeader>
-          <DialogTitle>Release resources for {n} finished {n === 1 ? 'run' : 'runs'}?</DialogTitle>
+          <DialogTitle>
+            {n === 0
+              ? 'No finished runs keep a container'
+              : `Free the retained containers of ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
+          </DialogTitle>
           <DialogDescription>
-            Their retained containers will be removed and cannot be relaunched.
-            Run records and history remain visible; this does not archive or delete them.
+            {n === 0 ? (
+              'This acts on finished runs you may act on that still keep their container.'
+            ) : (
+              <>
+                Their retained containers will be removed and the runs cannot be reopened.
+                Run records and history remain visible; this does not archive or delete them.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" disabled={running} onClick={onCancel}>Cancel</Button>
-          <Button disabled={running} onClick={onConfirm}>
-            {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
-            Release {n}
+          <Button variant="secondary" disabled={running} onClick={onCancel}>
+            {n === 0 ? 'Close' : 'Cancel'}
           </Button>
+          {n > 0 && (
+            <Button disabled={running} onClick={onConfirm}>
+              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
+              Free {n}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

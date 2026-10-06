@@ -1484,6 +1484,72 @@ DROP TABLE missions_migrate;
 CREATE INDEX idx_missions_workspace ON missions(workspace_id, created_at, id);
 CREATE INDEX idx_missions_integrator_run ON missions(current_integrator_run_id);
 `,
+	// v50: agent messages stay as history with their sender's swarm, and the
+	// audit outbox holds only unpublished typed message and acknowledgement
+	// events, never bodies.
+	`
+ALTER TABLE run_messages ADD COLUMN mission_id TEXT;
+ALTER TABLE run_messages ADD COLUMN retired_at INTEGER;
+CREATE INDEX idx_run_messages_workspace ON run_messages(workspace_id, created_at, id);
+CREATE INDEX idx_run_messages_mission ON run_messages(mission_id, created_at, id) WHERE mission_id IS NOT NULL;
+CREATE INDEX idx_run_messages_from ON run_messages(from_run, created_at, id);
+CREATE INDEX idx_run_messages_to ON run_messages(to_run, created_at, id);
+CREATE TABLE coord_audit_publications_v50 (
+	event_id          TEXT PRIMARY KEY,
+	event_type        TEXT NOT NULL CHECK (event_type IN ('coord.message', 'coord.message.acked')),
+	message_id        TEXT NOT NULL,
+	workspace_id      TEXT NOT NULL,
+	mission_id        TEXT NOT NULL DEFAULT '',
+	from_run          TEXT NOT NULL,
+	to_run            TEXT NOT NULL,
+	kind              TEXT NOT NULL,
+	correlation_id    TEXT NOT NULL DEFAULT '',
+	acked_at          INTEGER,
+	attempts          INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at   INTEGER NOT NULL DEFAULT 0,
+	last_error        TEXT NOT NULL DEFAULT '',
+	quarantined_at    INTEGER,
+	quarantine_error  TEXT NOT NULL DEFAULT '',
+	created_at        INTEGER NOT NULL
+);
+INSERT INTO coord_audit_publications_v50
+	(event_id, event_type, message_id, workspace_id, from_run, to_run, kind, correlation_id,
+	 attempts, next_attempt_at, last_error, quarantined_at, quarantine_error, created_at)
+	SELECT a.event_id, 'coord.message', a.message_id, a.workspace_id, a.from_run, a.to_run,
+	       COALESCE(m.kind, 'message'), COALESCE(m.correlation_id, ''),
+	       a.attempts, a.next_attempt_at, a.last_error, a.quarantined_at,
+	       a.quarantine_error, a.created_at
+	FROM coord_audit_publications a LEFT JOIN run_messages m ON m.id = a.message_id
+	WHERE a.publication_state = 'pending';
+DROP TABLE coord_audit_publications;
+ALTER TABLE coord_audit_publications_v50 RENAME TO coord_audit_publications;
+CREATE INDEX idx_coord_audit_publications_due
+	ON coord_audit_publications(quarantined_at, next_attempt_at, created_at, event_id);
+`,
+	// v51: a run whose agent the server drives over the Agent Client
+	// Protocol: every enhanced run, and a background run whose agent
+	// serves it.
+	`
+ALTER TABLE runs ADD COLUMN acp INTEGER NOT NULL DEFAULT 0;
+UPDATE runs SET acp = 1 WHERE mode = 'acp';
+`,
+	// v52: archived_at hides a finished swarm from the default swarm list,
+	// as runs.archived_at does for runs.
+	`
+ALTER TABLE missions ADD COLUMN archived_at INTEGER;
+`,
+	// v53: whether an enhanced run's agent has taken a steer it queued
+	// behind a running turn.
+	`
+ALTER TABLE room_messages ADD COLUMN agent_delivery TEXT NOT NULL DEFAULT '';
+`,
+	// v54: a swarm's change counter, and per kind of change the counter of
+	// its latest one the integrator did not make, so an enhanced
+	// integrator is woken for an ask and answer within one turn.
+	`
+ALTER TABLE missions ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN change_kinds TEXT NOT NULL DEFAULT '{}';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

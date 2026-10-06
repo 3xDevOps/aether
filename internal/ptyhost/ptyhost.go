@@ -1,12 +1,5 @@
-// Package ptyhost owns persistent server-side PTY sessions.
-//
-// A Host adopts the runtime.Attachment opened by the scheduler and keeps the
-// agent's terminal alive independently of any connected client (tmux
-// semantics): clients attach and detach freely without the agent noticing,
-// new clients get a scrollback replay, concurrent write-capable clients share
-// the terminal with tmux-style geometry clamping, and members can inject
-// attributed instructions. All output is recorded incrementally as an
-// asciinema cast v2 transcript.
+// Package ptyhost owns persistent server-side PTY sessions that outlive any
+// attached client and records their output as asciinema cast v2 transcripts.
 package ptyhost
 
 import (
@@ -41,25 +34,21 @@ func newResumeID() (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
-// WriteGate is the Wave 3 capability-check hook for write-mode attach.
-// nil = allow everyone (Wave 1 default). The hook is the whole contract;
-// no permission logic lives in ptyhost.
+// WriteGate authorizes write-mode attach; nil allows everyone. No permission
+// logic lives in ptyhost.
 type WriteGate func(ctx context.Context, member domain.MemberID, key SessionKey) error
 
-// Config configures a Host.
 type Config struct {
-	TranscriptDir string    // <data>/transcripts
-	ReplayBytes   int       // scrollback replayed to new attachments; default 1 MiB
-	DefaultCols   uint      // 120
-	DefaultRows   uint      // 30
-	Gate          WriteGate // nil = allow
+	TranscriptDir string // <data>/transcripts
+	ReplayBytes   int    // scrollback replayed to new attachments; default 1 MiB
+	DefaultCols   uint
+	DefaultRows   uint
+	Gate          WriteGate
 	// OnTitle is declared for the title scanner and never called yet.
 	OnTitle func(key SessionKey, title string)
 	// OnInput reports that member typed into the session, at most once per
 	// write attach and only after the keystrokes reached the PTY. Bytes a
-	// terminal sends by itself do not count; see input.go. Who is typing is
-	// known here and nowhere below: neither the session nor its clients
-	// carry a member.
+	// terminal sends by itself do not count; see input.go.
 	OnInput func(key SessionKey, member domain.MemberID)
 }
 
@@ -281,8 +270,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 // it into server-owned terminal query replies and retained post-exit observation.
 // The caller must use the same geometry in the runtime ExecSpec. Adoption never
 // resizes the process: a short-lived command may already have exited, and its
-// buffered output must be interpreted at its original geometry. Primary harnesses
-// keep their existing initial resize and client responder through StartSession.
+// buffered output must be interpreted at its original geometry.
 func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint) error {
 	if !strings.HasPrefix(string(key), "run-shell:") {
 		return errors.New("ptyhost: development session must be a run shell")
@@ -490,8 +478,13 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	return s.stop()
 }
 
-// RemoveRunTranscripts removes the agent transcript and every run-shell
-// transcript for a run after the scheduler has stopped their sessions.
+func (h *Host) ItemLogPath(run domain.RunID) string {
+	return filepath.Join(h.cfg.TranscriptDir, string(run)+".items.jsonl")
+}
+
+// RemoveRunTranscripts removes the agent transcript, every run-shell
+// transcript and the session item log of a run after the scheduler has
+// stopped their sessions.
 func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -505,7 +498,7 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	if err != nil {
 		return fmt.Errorf("ptyhost: find run transcript history: %w", err)
 	}
-	paths := append(archives, transcript, checkpointPath(transcript))
+	paths := append(archives, transcript, checkpointPath(transcript), h.ItemLogPath(run))
 	patterns := []string{
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
@@ -757,9 +750,7 @@ type AttachClient struct {
 	// compatibility fields for older in-process callers.
 	Position TerminalPosition
 	// Cursor is how much of the session's output this client has already
-	// seen, as reported to it by the ack it is resuming from. It is what
-	// makes the reattach lossless: the session hands back exactly what it
-	// missed, rather than everything or nothing.
+	// seen, as reported to it by the ack it is resuming from.
 	Cursor uint64
 	// ResumeID identifies the PTY process incarnation that produced Cursor.
 	// Resume is honored only when this matches the current session.

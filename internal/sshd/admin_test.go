@@ -148,7 +148,7 @@ func TestRefuseDeletingLastAdmin(t *testing.T) {
 func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	t.Parallel()
 	homeRoot := t.TempDir()
-	homes, err := memberhome.New(homeRoot)
+	homes, err := memberhome.New(homeRoot, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

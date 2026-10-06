@@ -67,7 +67,7 @@ func runTemplate(args []string) error {
 				budget = fmt.Sprintf("$%.2f", t.BudgetUSD)
 			}
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				t.Name, t.Harness, t.Mode, formatParams(t.Params), budget, firstLine(t.Task))
+				t.Name, t.Harness, modeName(t.Mode), formatParams(t.Params), budget, firstLine(t.Task))
 		}
 		return tw.Flush()
 	})
@@ -75,9 +75,9 @@ func runTemplate(args []string) error {
 
 func templateSave(args []string) error {
 	fs := flag.NewFlagSet("template save", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
-	mode := fs.String("mode", "headless", "tui or headless")
+	mode := fs.String("mode", "background", launchModeHelp)
 	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	params := kvFlag{}
@@ -86,6 +86,11 @@ func templateSave(args []string) error {
 	if err != nil || name == "" || *task == "" || *agent == "" {
 		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--param k=v] [--budget] [--workspace]")
 	}
+	wireMode, err := parseLaunchMode(*mode)
+	if err != nil {
+		return err
+	}
+	*mode = wireMode
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
@@ -103,7 +108,7 @@ func templateSave(args []string) error {
 		}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("template %s (%s, %s)\n", res.Template.Name, res.Template.Harness, res.Template.Mode)
+		fmt.Printf("template %s (%s, %s)\n", res.Template.Name, res.Template.Harness, modeName(res.Template.Mode))
 		return nil
 	})
 }

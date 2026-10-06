@@ -17,7 +17,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// EnvironmentPurpose identifies the consumer of an environment plan.
 type EnvironmentPurpose string
 
 const (
@@ -41,12 +40,10 @@ type EnvironmentPlan struct {
 	LoginMember domain.MemberID
 }
 
-// BuildEnvironmentPlan resolves the image, user, environment, and
-// server-owned mounts for one member container: the member's image and home.
-// A run launched on another member's shared account additionally mounts the
-// harness's declared login paths from that account owner's home over the
-// same paths in the member's home and, when the member has no installation
-// of the harness, the owner's, read-only, and nothing else of the owner's.
+// BuildEnvironmentPlan mounts the member's home. A run on another member's
+// shared account also mounts the harness's login paths from the owner's home
+// and, when the member has no installation, the owner's read-only - nothing
+// else of the owner's.
 func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, profile harness.Profile, purpose EnvironmentPurpose) (*EnvironmentPlan, error) {
 	switch purpose {
 	case EnvironmentPurposeRun, EnvironmentPurposeTerminal:
@@ -175,8 +172,6 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	return plan, nil
 }
 
-// loginMounts mounts each of account's logins for profile over the same path
-// in launcher's home.
 func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
 	logins, err := s.accountLogins(ctx, account, profile)
 	if err != nil || len(logins) == 0 {
@@ -214,11 +209,8 @@ const (
 	accountLib = ".aether/account/lib"
 )
 
-// installMounts borrows account's installation of profile's executable for a
-// launch by launcher, whose home has none: account's ~/.local/bin and
-// ~/.local/lib at accountBin and accountLib, and each of profile's
-// InstallPaths at its own path, all read-only. It mounts nothing when
-// launcher has the executable or account has none either.
+// installMounts borrows account's installation read-only, only when
+// launcher's home has none of its own.
 func (s *Scheduler) installMounts(launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
 	if len(profile.TUIArgs) == 0 {
 		return nil, nil
@@ -271,19 +263,12 @@ type accountLogin struct {
 	dir bool
 }
 
-// errNotLoggedIn marks accountLogins' refusal of an owner with no login at
-// any declared path.
 var errNotLoggedIn = errors.New("not logged in")
 
-// unshareableLoginError is accountLogins' refusal of a login path that exists
-// but cannot be shared.
 type unshareableLoginError struct{ error }
 
-// accountLogins resolves profile's login paths in account's home without
-// changing anything in it. A profile that declares none has nothing to share.
-// One whose declared paths are all missing or empty files is refused, since
-// the run could only start logged out, and so is a path that cannot be
-// shared.
+// accountLogins changes nothing in account's home. When every declared path is
+// missing it refuses, since the run could only start logged out.
 func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, profile harness.Profile) ([]accountLogin, error) {
 	paths, err := profile.LoginPaths()
 	if err != nil {
@@ -341,7 +326,7 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	if account == member || s.cfg.Homes == nil {
 		return SharedLaunchable, "", nil
 	}
-	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
+	profile, _, err := s.launchProfile(ctx, member, account, harnessName)
 	if errors.Is(err, errMemberDefinitionOnly) {
 		return SharedOwnDefinitionOnly, "", nil
 	}

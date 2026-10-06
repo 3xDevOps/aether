@@ -69,6 +69,10 @@ func (r *terminalTestRuntime) StartExecTTY(_ context.Context, container runtime.
 	return execution, nil
 }
 
+func (r *terminalTestRuntime) StartExecPipe(ctx context.Context, container runtime.ID, spec runtime.ExecSpec) (runtime.ManagedExec, error) {
+	return r.StartExecTTY(ctx, container, spec)
+}
+
 func (r *terminalTestRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

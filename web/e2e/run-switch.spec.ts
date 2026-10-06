@@ -190,17 +190,16 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText('Pushed main to aether')
   await wizard.repository.continue().click()
   // The picker offers only the agents this account has installed.
   aether.installAgent(await memberID(alice), 'claude', agentShim)
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', 'write the result file')
 
@@ -217,7 +216,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   })
   unanswered = run.id
 
-  const sidebar = page.getByRole('complementary')
+  const sidebar = page.getByRole('navigation', { name: 'Aether' })
   await sidebar.getByRole('button', { name: /the second run/ }).click()
   await expect(
     page.getByRole('heading', { name: 'the second run', exact: true }),
@@ -322,8 +321,8 @@ done
 
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
   await open(launched[0].task)
@@ -398,7 +397,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
     return controller
   }
   await page.goto(alice.url)
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
   const open = async (task: string) => {
     await sidebar.getByRole('button', { name: task }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
@@ -423,4 +422,41 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
   expect(Date.now() - left).toBeLessThan(15_000)
   await expect(page.getByRole('button', { name: 'Take control' })).toBeHidden()
   await expect(page.getByText('run control is held by another session')).toBeHidden()
+})
+
+test('reviewing a run leaves its control free until its terminal is shown', async ({ page, aether }) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  const aliceID = await memberID(alice)
+  aether.installAgent(aliceID, 'claude', 'sleep 600')
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id,
+    harness: 'claude',
+    task: 'reviewed run',
+  })
+  await expect
+    .poll(
+      async () => (await alice.api.rpc<{ run: { status: string } }>('run.get', { run_id: run.id })).run.status,
+      { timeout: 3 * 60 * 1000 },
+    )
+    .toBe('running')
+  const controller = async () =>
+    (await alice.api.rpc<{ controller?: { member_id: string } }>('run.room.status', {
+      workspace_id: workspaces[0].id,
+      run_id: run.id,
+    })).controller
+
+  const url = new URL(alice.url)
+  url.searchParams.set('run', run.id)
+  url.searchParams.set('view', 'changes')
+  await page.goto(url.toString())
+  await expect(page.getByRole('heading', { name: 'reviewed run', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Session' }).click()
+  await page.waitForTimeout(3000)
+  expect(await controller()).toBeUndefined()
+
+  await page.getByRole('tab', { name: 'Terminal' }).click()
+  await expect.poll(controller, { timeout: 30_000 }).toMatchObject({ member_id: aliceID })
 })

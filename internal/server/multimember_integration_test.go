@@ -40,6 +40,7 @@ collab*)
   ;;
 crash*)
   printf 'half-finished\n' > partial.txt
+  echo 'crash: database unreachable' >&2
   exit 3
   ;;
 esac
@@ -377,8 +378,8 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("budget.set override: %v", err)
 	}
 
-	// The admitted run crashes: the run lands failed with the exit code in
-	// the reason and its partial work committed as wip (the failure
+	// The admitted run crashes: the run lands failed with the exit code and
+	// its last output line in the reason and its partial work committed as wip (the failure
 	// table's agent-crash row).
 	var crashed protocol.RunResult
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
@@ -391,7 +392,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 		p, ok := e.Payload.(events.RunStatusPayload)
 		return ok && string(e.RunID) == crashed.Run.ID && p.To == domain.RunFailed
 	})
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited 3" {
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited 3: crash: database unreachable" {
 		t.Fatalf("failed reason = %q", p.Reason)
 	}
 	var pull protocol.RunPullResult

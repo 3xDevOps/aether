@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -104,6 +105,7 @@ func TestRPCErrorMapping(t *testing.T) {
 		{errNoSession, protocol.CodeUnavailable},
 		{errSessionEnded, protocol.CodeUnavailable},
 		{store.ErrMissionPhase, protocol.CodeInvalidState},
+		{fmt.Errorf("%w: the run is completed", scheduler.ErrNoLiveEnvironment), protocol.CodeInvalidState},
 		{errors.New("boom"), protocol.CodeInternal},
 	}
 	for _, tt := range tests {

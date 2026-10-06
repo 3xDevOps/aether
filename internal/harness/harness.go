@@ -1,16 +1,5 @@
 // Package harness is the static registry of agent launch profiles: how
-// Aether starts each supported agent CLI. A profile carries the argv
-// templates for tui and headless modes (auto/full-permission flags applied
-// by default), the environment variables that pass plain API keys from
-// server-side config into run containers and the fixed ones the CLI needs to
-// start there at all, the home-relative login paths an account share exposes
-// from the account owner's home, an explicit numeric uid:gid mapping for
-// images whose configured user is named rather than numeric, and the short
-// runtime-scoped discovery mechanism that points the agent at the staged
-// coordination CLI. Lifecycle status reporting remains a separate per-launch
-// profile capability.
-//
-// The registry is a map and a few functions, not a plugin system.
+// Aether starts each supported agent CLI.
 
 package harness
 
@@ -41,33 +30,23 @@ const (
 
 // CoordPlaceholder is replaced by the container path of the run's
 // coordination directory in per-launch profile arguments and environment.
-// The directory is where the server writes the harness's runtime assets, and
-// a profile must not have to know the mount point.
 const CoordPlaceholder = "{aether}"
 
 // Reporter says how much the harness's status reporter can tell the
-// server: nothing, only that a turn ended, or every start and stop. It is
-// what lets the scheduler tell an agent that has gone quiet because it is
-// waiting for its member from one that has hung.
+// server: nothing, only that a turn ended, or every start and stop.
 type Reporter int
 
 const (
-	// ReporterNone: the harness cannot report at all, so "working" or
-	// "waiting" is inferred from silence alone.
+	// ReporterNone: working or waiting is inferred from silence alone.
 	ReporterNone Reporter = iota
-	// ReporterTurnEnd: the harness says when a turn ends but not when the
-	// next one starts, so activity is still what un-parks the run.
+	// ReporterTurnEnd: reports turn ends only, so activity still un-parks the run.
 	ReporterTurnEnd
-	// ReporterFull: the harness reports both, so only the agent's own
-	// "working" un-parks the run and a repaint while the member types
-	// does not.
+	// ReporterFull: only the agent's own "working" un-parks the run.
 	ReporterFull
 )
 
-// reporterNames is the text form a Reporter travels in. The server records
-// the reporter a run was launched with so a restart knows it without
-// recomputing it, and a name survives reordering the constants where the
-// iota's number would not.
+// reporterNames is the persisted form of a Reporter; a name survives
+// reordering the constants where the iota's number would not.
 var reporterNames = map[Reporter]string{
 	ReporterNone:    "none",
 	ReporterTurnEnd: "turn-end",
@@ -81,7 +60,6 @@ func (r Reporter) String() string {
 	return "reporter(" + strconv.Itoa(int(r)) + ")"
 }
 
-// MarshalText and UnmarshalText are what put a Reporter in a JSON document.
 func (r Reporter) MarshalText() ([]byte, error) {
 	name, ok := reporterNames[r]
 	if !ok {
@@ -104,20 +82,21 @@ func (r *Reporter) UnmarshalText(text []byte) error {
 // Paths are absolute container paths so the server never has to infer where
 // credentials live from an executable name.
 type Definition struct {
-	Name            string
-	TUIArgs         []string
-	HeadlessArgs    []string
+	Name         string
+	TUIArgs      []string
+	HeadlessArgs []string
+	// ACPArgs optionally serves the Agent Client Protocol; its first value
+	// may name a separate adapter executable.
+	ACPArgs         []string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
 	DenyNames       []string
 }
 
-// Validate checks a generic definition before it can be used for a run.
 func (d Definition) Validate() error {
-	// The name becomes a host path segment (<homes>/<member>/<name>) and a
-	// store key; it must be a plain single-segment identifier, never a
-	// relative path that could address another member's credential home.
+	// The name becomes a host path segment and a store key, so it must never
+	// address another member's credential home.
 	if err := validateName(d.Name); err != nil {
 		return err
 	}
@@ -129,6 +108,14 @@ func (d Definition) Validate() error {
 	}
 	if err := validateArgv(d.HeadlessArgs, d.Executable); err != nil {
 		return fmt.Errorf("harness: headless argv: %w", err)
+	}
+	if len(d.ACPArgs) > 0 {
+		if err := validateExecutable(d.ACPArgs[0]); err != nil {
+			return fmt.Errorf("harness: acp argv: %w", err)
+		}
+		if err := validateArgv(d.ACPArgs, d.ACPArgs[0]); err != nil {
+			return fmt.Errorf("harness: acp argv: %w", err)
+		}
 	}
 	if d.ProfileRoot != "" {
 		if err := validateContainerPath(d.ProfileRoot); err != nil {
@@ -163,8 +150,6 @@ func validateName(name string) error {
 	return nil
 }
 
-// ValidateMemberDefinition applies the generic definition validation to a
-// member-owned definition.
 func ValidateMemberDefinition(d Definition) error {
 	return d.Validate()
 }
@@ -217,19 +202,15 @@ func isPathWithin(candidate, root string) bool {
 	return candidate == root || strings.HasPrefix(candidate, root+"/")
 }
 
-// Profile converts a generic definition to the launch profile used by the
-// scheduler and mount code. A definition names the argv and the paths, not
-// the CLI's environment, so the registry entry of the same name still
-// supplies EnvPassthrough and Env: an override that renames the executable
-// must not silently drop the key passthrough or a variable the CLI needs to
-// start at all. A registered name contributes only those environment
-// settings; the generic definition supplies its own launch and control
-// capabilities. A name the registry does not know contributes nothing.
+// Profile converts a generic definition to a launch profile. The registry
+// entry of the same name still supplies EnvPassthrough and Env, so an
+// override that renames the executable keeps the variables the CLI needs.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
 		TUIArgs:         append([]string(nil), d.TUIArgs...),
 		HeadlessArgs:    append([]string(nil), d.HeadlessArgs...),
+		ACPArgs:         append([]string(nil), d.ACPArgs...),
 		CredentialPaths: append([]string(nil), d.CredentialPaths...),
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
@@ -241,115 +222,97 @@ func (d Definition) Profile() Profile {
 	return p
 }
 
-// Profile is one agent harness's launch profile.
 type Profile struct {
-	// Name is the harness name runs reference (domain.Run.Harness).
-	Name string
-	// TUIArgs and HeadlessArgs are argv templates for the two launch
-	// modes; TaskPlaceholder is substituted with the task prompt.
+	Name        string
+	DisplayName string
+	// TaskPlaceholder is substituted with the task prompt.
 	TUIArgs      []string
 	HeadlessArgs []string
-	// EnvPassthrough names environment variables copied from the server
-	// process into run containers when set (plain API-key harnesses;
-	// keys are never baked into images).
+	// ACPArgs serves ACP over stdio: the agent's own CLI or ACPInstall's
+	// adapter. Prompts travel over the protocol.
+	ACPArgs []string
+	// ACPInstall is the adapter package for an agent whose CLI does not serve ACP itself.
+	ACPInstall *ACPInstall
+	// ACPSessionShared means the ACP server and the TUI keep one session
+	// store, so a session started in one resumes in the other.
+	ACPSessionShared bool
+	// ACPMode is the session mode an enhanced run starts in, for agents whose
+	// default mode asks before most actions. Empty keeps the agent's default.
+	ACPMode string
+	// ACPAutoMode is the session mode a background run's one-shot session
+	// starts in: the agent's mode that acts without asking. Empty keeps
+	// ACPMode.
+	ACPAutoMode string
+	// ACPDefault makes an enhanced run the agent's default once its ACP
+	// server is installed. Claude stays on its terminal by default: its
+	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
+	ACPDefault bool
+	// ResumeArgs reopens a stored session, SessionPlaceholder being its id.
+	// Empty when the CLI cannot target one session.
+	ResumeArgs []string
+	// SwitchVerified records that the live switch test (ACP_LIVE=1,
+	// switch_live_test.go) passed in both directions for this agent.
+	SwitchVerified bool
+	// EnvPassthrough names server environment variables copied into run
+	// containers when set; keys are never baked into images.
 	EnvPassthrough []string
-	// Env are fixed environment variables every container run of this
-	// harness needs. Unlike EnvPassthrough they carry no server-side
-	// value: they state a launch requirement of the CLI itself, so a
-	// workspace variable never overrides them.
+	// Env are fixed variables the CLI needs to start at all; a workspace
+	// variable never overrides them.
 	Env map[string]string
-	// CredentialPaths is the explicit allowlist of paths an account share
-	// exposes from the account owner's home: each is a file or directory
-	// holding the harness's native login state. Everything else in a shared
-	// run is the launcher's. Resolve them with LoginPaths.
+	// CredentialPaths is the allowlist of paths an account share exposes from
+	// the owner's home. Resolve them with LoginPaths.
 	CredentialPaths []string
-	// InstallPaths are home-relative directories the CLI's ~/.local/bin
-	// launcher links into. A launch on another member's account that
-	// borrows the owner's installation mounts each read-only from the
-	// owner's home at the same path. Definitions never set them.
+	// InstallPaths are home-relative directories the ~/.local/bin launcher
+	// links into, mounted read-only when a launch borrows the owner's install.
 	InstallPaths []string
-	// BorrowedState maps a home-relative JSON file to the keys a launch
-	// that borrows this harness's login sets in the LAUNCHER's copy of it
-	// when they are absent, so the CLI starts signed in with the owner's
-	// login instead of running first-time setup against an empty home.
-	// Definitions never set it.
+	// BorrowedState maps a home-relative JSON file to keys a borrowing launch
+	// sets in the launcher's copy when absent, so the CLI starts signed in
+	// instead of running first-time setup.
 	BorrowedState map[string]map[string]any
-	// PinLogin means the CLI replaces its login file by rename instead of
-	// rewriting it, so once the member has shared their account the file is
-	// mounted in place in their own containers too; the rename then fails
-	// with EBUSY and the CLI's own in-place fallback keeps every writer on
-	// the inode recipients' runs hold. Definitions never set it.
+	// PinLogin means the CLI replaces its login file by rename, so the file is
+	// mounted in place in the owner's own containers too; the rename then fails
+	// with EBUSY and the CLI falls back to rewriting the shared inode.
 	PinLogin bool
-	// LocalRoot is the home-relative directory captured as the agent
-	// profile (e.g. ".claude"). Empty means no profile sync (custom).
-	// The container target is filepath.ToSlash(path.Join(HomeDir(user), LocalRoot)).
+	// LocalRoot is the home-relative profile directory (e.g. ".claude");
+	// empty means no profile sync.
 	LocalRoot string
-	// DenyNames are basenames always excluded from profile snapshots
-	// (credentials, auth caches, keychains, known token files).
+	// DenyNames are basenames always excluded from profile snapshots.
 	DenyNames []string
 	// User is an explicit numeric "uid:gid" run user for images whose
 	// configured user is named rather than numeric; empty resolves from
 	// the image (see ResolveUser).
 	User string
-	// SteerSubmit is the literal bytes appended to a steering message
-	// written to the agent's stdin (run.inject). TUIs submit on Enter
-	// ("\r"), but some - opencode - treat the first Enter as "accept the
-	// text into the editor" and need a second one to send. Empty means
-	// the default single Enter; see SteerSuffix.
+	// SteerSubmit ends a steering message written to stdin. Empty means one
+	// Enter; opencode needs a second Enter to send.
 	SteerSubmit string
-	// DiscoveryArgs are appended to a supported taskless interactive
-	// launch so the harness loads the short runtime-scoped discovery hint.
-	// CoordPlaceholder stands for the coordination directory inside the
-	// container.
+	// DiscoveryArgs load the discovery hint on a taskless interactive launch.
 	DiscoveryArgs []string
-	// DiscoveryEnv is the environment form of DiscoveryArgs for a harness
-	// such as opencode that has no startup flag for instruction files.
+	// DiscoveryEnv is DiscoveryArgs for a harness with no startup flag for it.
 	DiscoveryEnv map[string]string
-	// DiscoveryFiles are read-only assets written into the coordination
-	// directory before a taskless interactive container exists, keyed by
-	// the file name they take there.
+	// DiscoveryFiles are written into the coordination directory before a
+	// taskless interactive container exists.
 	DiscoveryFiles map[string][]byte
-	// NativeCoordination enables the shipped run-scoped mailbox integration.
-	// The scheduler applies it only to coordinated interactive runs with a task.
-	// Overrides never inherit this capability from a registry name.
+	// NativeCoordination enables the run-scoped mailbox for coordinated
+	// interactive runs with a task. Overrides never inherit it.
 	NativeCoordination bool
-	// Reporter is how much this harness's status reporter can say.
-	Reporter Reporter
-	// StatusArgs are appended to an interactive launch so the harness runs
-	// the reporter on its own lifecycle events. CoordPlaceholder stands for
-	// the coordination directory inside the container. Headless runs never
-	// get them: a headless agent exits when it is done and never waits for
-	// anyone.
+	Reporter           Reporter
+	// StatusArgs make the harness run the reporter on its lifecycle events.
+	// Interactive runs only: a headless agent never waits for anyone.
 	StatusArgs []string
-	// StatusEnv is what a harness that has no flag for its reporter needs
-	// in the launch environment instead: opencode loads a plugin named in
-	// OPENCODE_CONFIG_CONTENT. CoordPlaceholder stands for the same
-	// directory as in StatusArgs. It is applied after the workspace's own
-	// variables, so these names carry the server's value whatever a
-	// workspace sets them to, and like StatusArgs only an interactive run
-	// gets it. That is not a guarantee the reporter loads: a harness has
-	// other switches of its own, and Aether takes none of them away from
-	// the member (docs/harnesses.md).
+	// StatusEnv is the environment alternative to StatusArgs. It is applied
+	// after the workspace's variables, so the server's value wins.
 	StatusEnv map[string]string
-	// StatusFiles are the assets StatusArgs and StatusEnv point at, written
-	// into the run's coordination directory before the container exists,
-	// keyed by the file name they take there. A harness whose reporter is
-	// a launch flag alone needs none: the Reporter field above is what
-	// declares a reporter, not this map.
+	// StatusFiles are the assets StatusArgs and StatusEnv point at. Reporter,
+	// not this map, declares a reporter.
 	StatusFiles map[string][]byte
-	// InstallScript is the vendor's documented install command, run in the
-	// member's terminal (aether terminal). It must install into ~/.local/bin.
-	// A failed install leaves the member in the terminal to install manually.
+	// InstallScript is the vendor's install command, run in the member's
+	// terminal. It must install into ~/.local/bin.
 	InstallScript string
-	// UpdateScript brings the CLI installed in ~/.local/bin current and is a
-	// cheap no-op when it already is. The scheduler runs it with /bin/sh -c
-	// before a launch. It updates the program only, never the member's
-	// plugins, extensions, channel or configuration.
+	// UpdateScript updates the CLI in ~/.local/bin, is a cheap no-op when
+	// current, and never touches plugins, channel or configuration.
 	UpdateScript string
 }
 
-// SteerSuffix returns the bytes that follow a steering message: the
-// profile's SteerSubmit, or the default single Enter.
 func (p Profile) SteerSuffix() string {
 	if p.SteerSubmit == "" {
 		return "\r"
@@ -357,8 +320,7 @@ func (p Profile) SteerSuffix() string {
 	return p.SteerSubmit
 }
 
-// installed is a shell case pattern matching the CLI's current version
-// against $latest.
+// installed is a shell case pattern matching `{exe} --version` against $latest.
 func npmUpdateScript(pkg, exe, installed string, extra ...string) string {
 	return strings.NewReplacer("{pkg}", pkg, "{exe}", exe, "{installed}", installed,
 		"{server}", agentstatus.ReporterCommand,
@@ -382,23 +344,24 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 "{server}" package-exchange "$dir" "$stage/lib/node_modules/{pkg}"`)
 }
 
-// profiles is the shipped registry. "custom" is the escape hatch: its
-// command comes from the deployment's run/workspace harness configuration
-// (scheduler Config.Harnesses), never from here, and it declares no
-// credentials or key passthrough.
+// profiles is the shipped registry. "custom" takes its command from
+// deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:    "claude",
-		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
-		// Claude Code refuses "--print --output-format stream-json" without
-		// --verbose. The flag only adds records to the stream; the envelope
-		// the adapter parses is unchanged.
-		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
-		// Runs execute as root on the standard image, and Claude Code
-		// refuses --dangerously-skip-permissions as root unless the
-		// environment declares a sandbox. The run container is that
-		// sandbox.
+		Name:        "claude",
+		DisplayName: "Claude Code",
+		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		// Claude Code refuses stream-json in print mode without --verbose.
+		HeadlessArgs:     []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		ACPArgs:          []string{claudeACP.Binary},
+		ACPInstall:       claudeACP,
+		ACPMode:          "auto",
+		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		ACPSessionShared: true,
+		SwitchVerified:   true,
+		EnvPassthrough:   []string{"ANTHROPIC_API_KEY"},
+		// Claude Code refuses --dangerously-skip-permissions as root unless the
+		// environment declares a sandbox; the run container is one.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
 		CredentialPaths: []string{".claude/.credentials.json"},
 		// The native installer links ~/.local/bin/claude, by absolute
@@ -414,77 +377,82 @@ var profiles = map[string]Profile{
 		LocalRoot:     ".claude",
 		DenyNames:     []string{".credentials.json", "credentials", ".claude.json"},
 		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
-		// Claude Code runs a command on every lifecycle event a settings
-		// file registers, and --settings merges one more settings document
-		// over the member's own for this launch alone.
+		// --settings merges a settings document registering the reporter over
+		// the member's own, for this launch alone.
 		Reporter:      ReporterFull,
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
-		UpdateScript:  "claude update",
+		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
 		Name:            "codex",
+		DisplayName:     "Codex",
 		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:         []string{codexACP.Binary},
+		ACPInstall:      codexACP,
+		ACPMode:         "agent",
+		ACPAutoMode:     "agent-full-access",
+		ACPDefault:      true,
+		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
-		// Codex's developer_instructions config key is a one-launch
-		// additional developer instruction, unlike model_instructions_file
-		// which replaces the vendor's built-in instructions.
-		DiscoveryArgs: []string{"-c", codexDiscoverySetting},
-		// Codex runs an external program when a turn completes, and a -c
-		// override points it at the reporter for this launch alone. It
-		// says nothing when the next turn starts, so the run comes back
-		// on the agent's own output.
+		DiscoveryArgs:   []string{"-c", codexDiscoverySetting},
+		// Codex notifies only when a turn completes, so the run comes back on
+		// the agent's own output.
 		Reporter:   ReporterTurnEnd,
 		StatusArgs: []string{"-c", agentstatus.CodexNotifySetting},
-		// Codex ships via npm; --prefix keeps the install inside the
-		// member's persistent home. Without npm in the image the member
-		// installs manually, as before.
-		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
+		// --prefix keeps the install inside the member's persistent home.
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @openai/codex; else echo \"npm is not in this environment's PATH, and codex installs through npm\" >&2; false; fi",
 		// Not "codex update": it installs into the image's global npm
 		// prefix, outside the home.
-		UpdateScript: npmUpdateScript("@openai/codex", "codex", `*" $latest"`),
+		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
 	},
 	"pi": {
 		Name:         "pi",
+		DisplayName:  "pi",
 		TUIArgs:      []string{"pi", TaskPlaceholder},
 		HeadlessArgs: []string{"pi", "-p", TaskPlaceholder},
+		ACPArgs:      []string{piACP.Binary},
+		ACPInstall:   piACP,
 		// pi has no permission prompt, so there is no bypass flag to apply.
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths: []string{".pi/agent/auth.json"},
-		LocalRoot:       ".pi",
-		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
-		DenyNames:     []string{"auth.json", "oauth.json"},
-		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
-		// pi loads an extension with -e, and the one Aether ships reports
-		// every start and stop of a turn.
+		EnvPassthrough:     []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		CredentialPaths:    []string{".pi/agent/auth.json"},
+		LocalRoot:          ".pi",
+		DenyNames:          []string{"auth.json", "oauth.json"},
+		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
 		Reporter:           ReporterFull,
 		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
-		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent; else echo \"npm is not in this environment's PATH, and pi installs through npm\" >&2; false; fi",
 		// Not "pi update --self": it replaces files in place, under a
 		// running or starting pi.
-		UpdateScript: npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"),
+		UpdateScript: withAdapterUpdate(npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"), piACP),
 	},
 	// omp is a fork of pi and takes the same extension. It has a
 	// permission prompt of its own, which --auto-approve bypasses.
 	"omp": {
-		Name:           "omp",
-		TUIArgs:        []string{"omp", "--auto-approve", TaskPlaceholder},
-		HeadlessArgs:   []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		Name:         "omp",
+		DisplayName:  "oh-my-pi",
+		TUIArgs:      []string{"omp", "--auto-approve", TaskPlaceholder},
+		HeadlessArgs: []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
+		ACPArgs:      []string{"omp", "acp"},
+		// omp acp and the TUI read and write one session store.
+		ACPSessionShared: true,
+		ACPDefault:       true,
+		ResumeArgs:       []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
+		SwitchVerified:   true,
+		EnvPassthrough:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
 		CredentialPaths: []string{".omp/agent"},
 		LocalRoot:       ".omp",
-		// omp keeps provider keys and OAuth tokens in the SQLite database
-		// under ~/.omp/agent/, so the write-ahead log holds them too.
+		// The WAL and shm files hold provider keys too.
 		DenyNames:          []string{"agent.db", "agent.db-wal", "agent.db-shm"},
 		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
 		Reporter:           ReporterFull,
@@ -496,8 +464,12 @@ var profiles = map[string]Profile{
 	},
 	"opencode": {
 		Name:            "opencode",
+		DisplayName:     "OpenCode",
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
+		ACPArgs:         []string{"opencode", "acp"},
+		ACPDefault:      true,
+		ResumeArgs:      []string{"opencode", "--session=" + SessionPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".config/opencode",
@@ -505,20 +477,17 @@ var profiles = map[string]Profile{
 		// The TUI accepts steered text into its editor on the first
 		// Enter and sends on the second.
 		SteerSubmit: "\r\r",
-		// opencode has no flag for a plugin, but it merges the inline JSON
-		// config in OPENCODE_CONFIG_CONTENT over the member's own and
-		// concatenates the plugin lists, so naming the reporter there adds
-		// it to whatever the member already loads. It reports both ends
-		// of a turn: session.status busy and session.idle.
+		// opencode has no plugin flag, but it merges OPENCODE_CONFIG_CONTENT over
+		// the member's config and concatenates plugin lists, so this adds the
+		// reporter to whatever the member already loads.
 		Reporter: ReporterFull,
 		StatusEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"]}`,
 		},
 		StatusFiles:        map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
 		NativeCoordination: true,
-		// OpenCode discovers instruction files from its merged config.
-		// Discovery must also work without the lifecycle reporter. The
-		// scheduler combines these independent config overlays when both apply.
+		// Discovery must work without the reporter; the scheduler merges this
+		// overlay with StatusEnv when both apply.
 		DiscoveryEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + DiscoveryFileName + `"]}`,
 		},
@@ -530,15 +499,11 @@ var profiles = map[string]Profile{
 	"custom": {Name: "custom"},
 }
 
-// Lookup returns the shipped profile for name.
 func Lookup(name string) (Profile, bool) {
 	p, ok := profiles[name]
 	return p, ok
 }
 
-// SubmitSequence returns the bytes that end terminal input for the named
-// harness: its profile's SteerSuffix, or a single Enter for a harness with
-// no shipped profile.
 func SubmitSequence(name string) string {
 	if p, ok := Lookup(name); ok {
 		return p.SteerSuffix()
@@ -546,7 +511,6 @@ func SubmitSequence(name string) string {
 	return "\r"
 }
 
-// Profiles lists the shipped profiles sorted by name.
 func Profiles() []Profile {
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
@@ -557,11 +521,8 @@ func Profiles() []Profile {
 }
 
 // SetupHarnesses lists the harnesses that may drive environment setup, in
-// the order setup surfaces present them. This list is the single authority:
-// the wizard, the local inventory engine, and the docs all follow it.
-// omp, opencode and custom stay launchable for runs but are never offered
-// here, and the deterministic fake harness is a scheduler registration,
-// not a registry profile.
+// display order. It is the single authority for the wizard, the inventory
+// engine and the docs.
 func SetupHarnesses() []Profile {
 	out := make([]Profile, 0, 3)
 	for _, name := range []string{"claude", "codex", "pi"} {
@@ -574,12 +535,9 @@ func SetupHarnesses() []Profile {
 	return out
 }
 
-// Argv instantiates an argv template with the run's task. An empty task is a
-// taskless launch (drop the user straight into the agent's interactive TUI
-// with no seeded prompt): every argv token that carries the placeholder is
-// dropped whole, so a flag whose only purpose is to deliver the prompt
-// (opencode's "--prompt={task}") leaves with it rather than dangling with an
-// empty value. A non-empty task substitutes in place as before.
+// An empty task is a taskless launch: tokens carrying the placeholder are
+// dropped whole, so a prompt-only flag such as opencode's
+// "--prompt={task}" does not dangle.
 func Argv(template []string, task string) []string {
 	out := make([]string, 0, len(template))
 	for _, a := range template {
@@ -591,10 +549,6 @@ func Argv(template []string, task string) []string {
 	return out
 }
 
-// DiscoveryLaunchArgs renders DiscoveryArgs, the startup arguments appended
-// to a supported taskless interactive launch, with CoordPlaceholder replaced
-// by dir, the container path of the coordination directory. Nil for a
-// harness whose discovery mechanism is environment- or file-based instead.
 func (p Profile) DiscoveryLaunchArgs(dir string) []string {
 	if len(p.DiscoveryArgs) == 0 || dir == "" {
 		return nil
@@ -606,8 +560,6 @@ func (p Profile) DiscoveryLaunchArgs(dir string) []string {
 	return out
 }
 
-// DiscoveryLaunchEnv renders DiscoveryEnv, the environment variables a
-// supported taskless interactive launch needs to load its runtime guidance.
 func (p Profile) DiscoveryLaunchEnv(dir string) map[string]string {
 	if len(p.DiscoveryEnv) == 0 || dir == "" {
 		return nil
@@ -619,12 +571,6 @@ func (p Profile) DiscoveryLaunchEnv(dir string) map[string]string {
 	return out
 }
 
-// StatusLaunchArgs renders StatusArgs, the arguments appended to an
-// interactive run's launch command so the harness reports its own state,
-// with CoordPlaceholder replaced by dir, the container path of the
-// coordination directory. Nil for a harness that takes no arguments for
-// its reporter, whether because it has none or because it loads it from
-// the environment instead (StatusLaunchEnv).
 func (p Profile) StatusLaunchArgs(dir string) []string {
 	if len(p.StatusArgs) == 0 || dir == "" {
 		return nil
@@ -636,11 +582,6 @@ func (p Profile) StatusLaunchArgs(dir string) []string {
 	return out
 }
 
-// StatusLaunchEnv renders StatusEnv, the environment variables an
-// interactive run needs for the harness to load its reporter, with
-// CoordPlaceholder replaced by dir, the container path of the
-// coordination directory. Nil for a harness whose reporter needs no
-// environment.
 func (p Profile) StatusLaunchEnv(dir string) map[string]string {
 	if len(p.StatusEnv) == 0 || dir == "" {
 		return nil
@@ -652,11 +593,8 @@ func (p Profile) StatusLaunchEnv(dir string) map[string]string {
 	return out
 }
 
-// HomeDir is the container-side home directory for a resolved run user:
-// root (uid 0, or the empty root default) lives in /root; any other user
-// gets /home/aether, since typical images make /root untraversable for
-// non-root users. Docker creates bind-mount target directories on demand,
-// and the scheduler exports HOME so harnesses look in the right place.
+// HomeDir is /root for root and /home/aether otherwise, since typical
+// images make /root untraversable for non-root users.
 func HomeDir(user string) string {
 	uid, _, _ := strings.Cut(user, ":")
 	if uid == "" || uid == "0" {
@@ -665,8 +603,6 @@ func HomeDir(user string) string {
 	return "/home/aether"
 }
 
-// HomeRelative returns a path relative to the resolved container home.
-// Absolute paths outside either supported home are returned cleaned.
 func HomeRelative(p string) string {
 	clean := path.Clean(p)
 	for _, prefix := range []string{"/root/", "/home/aether/"} {
@@ -680,18 +616,15 @@ func HomeRelative(p string) string {
 	return clean
 }
 
-// BorrowRoots is what a launch that borrows an account owner's installation
-// mounts read-only from the owner's home. bin and lib travel together because
-// npm links a launcher into ../lib; InstallPaths cover installers that link by
-// absolute path instead.
+// BorrowRoots are mounted read-only from the owner's home for a borrowing
+// launch. bin and lib travel together because npm links a launcher into
+// ../lib; InstallPaths cover installers that link by absolute path.
 func (p Profile) BorrowRoots() []string {
 	return append([]string{".local/bin", ".local/lib"}, p.InstallPaths...)
 }
 
-// LoginPaths returns CredentialPaths relative to the container home. A
-// definition carries absolute /root or /home/aether paths; whatever the
-// spelling, each result is a clean local path strictly below the home, so a
-// share can never expose the home itself or anything outside it.
+// LoginPaths returns CredentialPaths relative to the container home, each
+// strictly below it, so a share never exposes the home or anything outside it.
 func (p Profile) LoginPaths() ([]string, error) {
 	out := make([]string, 0, len(p.CredentialPaths))
 	for _, raw := range p.CredentialPaths {
@@ -704,8 +637,6 @@ func (p Profile) LoginPaths() ([]string, error) {
 	return out, nil
 }
 
-// ContainerLocalRoot is the absolute container path of the profile
-// directory for a resolved run user. Empty LocalRoot yields "".
 func (p Profile) ContainerLocalRoot(user string) string {
 	if p.LocalRoot == "" {
 		return ""
@@ -716,13 +647,10 @@ func (p Profile) ContainerLocalRoot(user string) string {
 	return path.Join(HomeDir(user), p.LocalRoot)
 }
 
-// ResolveUser resolves the one numeric "uid:gid" a run's container and
-// host-side ownership pass share. override is the profile's explicit
-// mapping and wins when set; imageUser is the user the image is
-// configured to run as. An empty image user means root ("0:0"); a numeric
-// image user is accepted (a bare uid implies gid = uid, so the checkout
-// is never handed to the root group); a named user cannot be mapped to
-// host ownership and fails unless the profile supplies the mapping.
+// ResolveUser resolves the numeric uid:gid the container and host-side
+// ownership share; override wins. A bare uid implies gid = uid so the
+// checkout is never handed to the root group, and a named image user needs
+// the profile to supply the mapping.
 func ResolveUser(override, imageUser string) (string, error) {
 	if override != "" {
 		u, ok := normalizeUser(override)

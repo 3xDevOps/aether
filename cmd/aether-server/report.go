@@ -103,6 +103,7 @@ func report(args []string) {
 		State:        string(rep.State),
 		Reason:       rep.Reason,
 		InputUpdates: rep.InputUpdates,
+		SessionID:    rep.SessionID,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)

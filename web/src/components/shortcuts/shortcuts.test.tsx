@@ -1,68 +1,71 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import '@/components/shortcuts'
-import { Slot } from '@/components/slots'
-import { hintOn } from '@/test/tooltip'
+import { ShortcutsDialog } from '@/components/shortcuts'
+import { useStore } from '@/store'
+
+beforeEach(() => {
+  useStore.setState({ shortcutsOpen: false, singleKeyShortcuts: true })
+})
 
 describe('shortcut reference', () => {
-  it('rides the status bar slot, and says so on focus', async () => {
-    render(<Slot name="statusbar" />)
-
-    const trigger = screen.getByRole('button', { name: 'Keyboard shortcuts' })
-
-    expect(await hintOn(trigger)).toBe('Keyboard shortcuts')
-  })
-
-  it('lets Escape dismiss its tooltip before the reference opens', async () => {
-    render(<Slot name="statusbar" />)
-    const trigger = screen.getByRole('button', { name: 'Keyboard shortcuts' })
-
-    expect(await hintOn(trigger)).toBe('Keyboard shortcuts')
-    await userEvent.keyboard('{Escape}')
-
-    expect(screen.queryByRole('tooltip')).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
-  })
-
-  it('opens on Shift+/ and from the trigger', async () => {
-    render(<Slot name="statusbar" />)
+  it('opens on Shift+/ and from the store, and Escape closes it', async () => {
+    render(<ShortcutsDialog />)
 
     fireEvent.keyDown(window, { key: '?', shiftKey: true })
-
-    expect(
-      await screen.findByRole('heading', { name: 'Keyboard shortcuts' }),
-    ).toBeDefined()
-    await userEvent.keyboard('{Escape}')
-    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
-
-    await userEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
     expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
+    expect(useStore.getState().shortcutsOpen).toBe(false)
+
+    act(() => useStore.getState().setShortcutsOpen(true))
+    expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
+  })
+
+  it('returns focus to what had it before "?" opened the reference', async () => {
+    render(
+      <>
+        <ShortcutsDialog />
+        <button type="button">Board</button>
+      </>,
+    )
+    const before = screen.getByRole('button', { name: 'Board' })
+    before.focus()
+
+    fireEvent.keyDown(before, { key: '?', shiftKey: true })
+    expect(await screen.findByRole('heading', { name: 'Keyboard shortcuts' })).toBeDefined()
+    await userEvent.keyboard('{Escape}')
+
+    expect(document.activeElement).toBe(before)
+  })
+
+  // Only the reference is mounted, so of the global keys only its own answers.
+  it("lists the keys that answer here and a run's keys, by scope", async () => {
+    render(<ShortcutsDialog />)
+    act(() => useStore.getState().setShortcutsOpen(true))
+
+    expect(await screen.findByRole('heading', { name: 'Everywhere' })).toBeDefined()
+    expect(screen.getByText('Open this reference')).toBeDefined()
+    expect(screen.queryByLabelText('g then b')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'In a run' })).toBeDefined()
+    expect(screen.getByText('Leave a run for the board')).toBeDefined()
   })
 
   it('ignores a "?" typed into a field', () => {
     render(
       <>
-        <Slot name="statusbar" />
+        <ShortcutsDialog />
         <input aria-label="task" />
       </>,
     )
 
-    fireEvent.keyDown(screen.getByLabelText('task'), {
-      key: '?',
-      shiftKey: true,
-    })
+    fireEvent.keyDown(screen.getByLabelText('task'), { key: '?', shiftKey: true })
 
-    expect(
-      screen.queryByRole('heading', { name: 'Keyboard shortcuts' }),
-    ).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
   })
 
-  // A key pressed inside an overlay belongs to that overlay, whatever the
-  // store thinks is open: this asks the event, not the store.
+  // Overlay ownership is read from the event, not the store.
   it.each(['dialog', 'menu'])('yields to an open %s', (role) => {
-    render(<Slot name="statusbar" />)
+    render(<ShortcutsDialog />)
     const overlay = document.createElement('div')
     overlay.setAttribute('role', role)
     document.body.append(overlay)
@@ -70,8 +73,6 @@ describe('shortcut reference', () => {
 
     fireEvent.keyDown(overlay, { key: '?', shiftKey: true })
 
-    expect(
-      screen.queryByRole('heading', { name: 'Keyboard shortcuts' }),
-    ).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
   })
 })

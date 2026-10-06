@@ -15,10 +15,12 @@ import {
   api,
   type LocalForwardStatusResult,
 } from '@/lib/api'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 export function ForwardDialog() {
+  const returnFocus = useReturnFocus()
   const target = useStore((s) => s.paletteForwardTarget)
   const close = useStore((s) => s.closePaletteDialog)
   const [port, setPort] = useState('1455')
@@ -52,7 +54,7 @@ export function ForwardDialog() {
       })
       .catch((err) => {
         if (!live) return
-        const detail = `Forward status failed: ${message(err)}`
+        const detail = `Forward status failed: ${errorSentence(err)}`
         setError(detail)
         toast.error(detail)
       })
@@ -80,7 +82,7 @@ export function ForwardDialog() {
       await refresh()
       toast.success('Port forwarding started')
     } catch (err) {
-      const detail = `Forward failed: ${message(err)}`
+      const detail = `Forward failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     } finally {
@@ -97,7 +99,7 @@ export function ForwardDialog() {
       await refresh()
       toast.success('Port forwarding stopped')
     } catch (err) {
-      const detail = `Stop failed: ${message(err)}`
+      const detail = `Stop failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     } finally {
@@ -107,7 +109,7 @@ export function ForwardDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+      <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>
             {target?.startsWith('run:')
@@ -141,42 +143,42 @@ export function ForwardDialog() {
               value={port}
               onChange={(event) => setPort(event.target.value)}
             />
-            <p id="forward-port-help" className="text-xs leading-4 text-muted-foreground">
+            <p id="forward-port-help" className="text-ui-sm leading-4 text-muted">
               Choose the port exposed by the agent. Localhost uses the same port.
             </p>
           </div>
           {error && (
-            <p role="alert" className="break-words text-xs text-state-failed">
+            <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
             </p>
           )}
           <div className="space-y-1.5" aria-label="Active forwards">
-            <p className="text-xs font-medium text-muted-foreground">Active forwards</p>
+            <p className="text-ui-sm font-medium text-muted">Active forwards</p>
             {loading ? (
-              <p className="text-[13px] text-muted-foreground">Loading forwards...</p>
+              <p className="text-ui text-muted">Loading forwards…</p>
             ) : forwards.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">No active forwards</p>
+              <p className="text-ui text-muted">No active forwards</p>
             ) : (
-              <div className="divide-y divide-border/70 border-y border-border/70">
+              <div className="divide-y divide-seam/70 border-y border-seam/70">
                 {forwards.map((forward) => (
                   <div
                     key={`${forward.target}:${forward.port}`}
                     className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-2 py-2"
                   >
-                    <span className="min-w-0 flex-1 break-words text-[13px]">
+                    <span className="min-w-0 flex-1 break-words text-ui">
                       <span className="font-medium">Port {forward.port}</span>{' '}
-                      <span className="text-muted-foreground">
+                      <span className="text-muted">
                         localhost:{forward.local_port} ({forward.conns} connections)
                       </span>
                     </span>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       onClick={() => void stop(forward.port)}
                       disabled={stopping !== null}
                     >
-                      {stopping === forward.port ? 'Stopping...' : 'Stop'}
+                      {stopping === forward.port ? 'Stopping…' : 'Stop'}
                     </Button>
                   </div>
                 ))}
@@ -185,7 +187,7 @@ export function ForwardDialog() {
           </div>
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
           <Button
@@ -193,7 +195,7 @@ export function ForwardDialog() {
             form="forward-port"
             disabled={starting || !target}
           >
-            {starting ? 'Starting...' : 'Start'}
+            {starting ? 'Starting…' : 'Start'}
           </Button>
         </DialogFooter>
       </DialogContent>

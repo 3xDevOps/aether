@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Toaster, toast } from 'sonner'
+import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
-import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
-import { TitleBar } from '@/components/shell/title-bar'
+import { WindowBar } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
+import { Toaster } from '@/components/ui/toast'
+import { useKeyboardInset } from '@/lib/keyboard-inset'
+import { bindRouteToUrl } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
-/** Clear of the status bar and of the home indicator below it. */
 const toastOffset = {
-  bottom: 'calc(var(--status-bar-height) + 8px + env(safe-area-inset-bottom))',
+  bottom: 'calc(8px + env(safe-area-inset-bottom))',
   right: 'calc(8px + env(safe-area-inset-right))',
 }
 
@@ -37,23 +38,20 @@ export function App() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [drafts, importPending])
   const theme = useStore((s) => s.theme)
-  // Bumping this remounts the connection effect, which is what a retry is:
-  // a fresh subscribe and hydrate, not a page reload that would lose the
-  // session token held in memory.
+  // A retry remounts the connection effect; a page reload would lose the
+  // in-memory session token.
   const [attempt, setAttempt] = useState(0)
+  useKeyboardInset()
 
   useEffect(() => connect(useStore), [attempt, epoch])
+  useEffect(() => bindRouteToUrl(useStore), [])
 
-  // Nothing has loaded and the failure is total: the page below says what
-  // broke and how to fix it, and there is no shell left to toast over. An
-  // in-app update makes the gateway exit and come back on purpose, so that
-  // is not this failure even when it briefly looks like one.
+  // An in-app update restarts the gateway on purpose, so it is not a total failure.
   const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
 
   useEffect(() => {
     if (!hydrationError || blocked) return
-    // A dead token is not an unreachable server; the recorded error already
-    // says what happened and how to recover.
+    // A dead token is not an unreachable server; its error already says how to recover.
     if (streamDead) toast.error(hydrationError)
     else toast.error(`Could not reach the server: ${hydrationError}`)
   }, [hydrationError, streamDead, blocked])
@@ -66,12 +64,10 @@ export function App() {
   return (
     <>
       <ThemeEffect />
-      <LaunchSplash />
-      {/* The desktop window is frameless, so the title bar has to outrank the
-          branch below it: without it the error page would leave an offline user
-          no way to move or close the window. */}
+      {/* Frameless desktop window: its bar stays outside the error branch so
+          an offline user can still move or close the window. */}
       <div className="flex min-w-0 h-full flex-col">
-        <TitleBar commandPaletteDisabled={blocked} />
+        <WindowBar />
         <div className="min-h-0 min-w-0 flex-1">
           {blocked ? (
             <ConnectionError
@@ -90,22 +86,9 @@ export function App() {
                 expand={false}
                 visibleToasts={4}
                 gap={4}
-                // Above the status bar, whatever height the pointer gives
-                // it, and clear of the home indicator; the inset is 0 on a
-                // device without one. Sonner swaps to `mobileOffset` under
-                // 600px and falls back to its own 16px default when none is
-                // given, which is inside the bar on a phone, so both take
-                // the same value.
+                // Sonner uses `mobileOffset` under 600px and its own default without one.
                 offset={toastOffset}
                 mobileOffset={toastOffset}
-                toastOptions={{
-                  className:
-                    'rounded-[4px] border border-border bg-popover px-3 py-2 text-[13px] text-popover-foreground shadow-overlay',
-                  classNames: {
-                    title: 'font-medium',
-                    description: 'text-muted-foreground',
-                  },
-                }}
               />
             </>
           )}

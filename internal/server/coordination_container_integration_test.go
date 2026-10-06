@@ -104,8 +104,8 @@ func TestIntegrationCoordinationInContainer(t *testing.T) {
 
 	// The round trip and final report are performed inside the real container,
 	// through the manually invoked MCP bridge and mounted CLI.
-	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
-	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
+	waitEvent(t, sub, &seen, "run A's coordination message", coordMessage(runA.ID, runB.ID))
+	waitEvent(t, sub, &seen, "run B's coordination message", coordMessage(runB.ID, runA.ID))
 	for _, att := range []*attachConn{attA, attB} {
 		assertNoAgentError(t, att)
 	}

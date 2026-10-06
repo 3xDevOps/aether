@@ -126,6 +126,18 @@ func (l *SQLiteLog) Get(ctx context.Context, id string) (Event, error) {
 
 // Read implements EventLog.
 func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int) ([]Event, error) {
+	return l.read(ctx, f, afterSeq, uptoSeq, limit, "ASC")
+}
+
+// ReadBefore implements EventLog.
+func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, beforeSeq uint64, limit int) ([]Event, error) {
+	if beforeSeq <= 1 {
+		return nil, nil
+	}
+	return l.read(ctx, f, 0, beforeSeq-1, limit, "DESC")
+}
+
+func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int, order string) ([]Event, error) {
 	var sb strings.Builder
 	sb.WriteString(`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
 		FROM events WHERE seq > ?`)
@@ -142,13 +154,25 @@ func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 		sb.WriteString(" AND run_id = ?")
 		args = append(args, string(f.Run))
 	}
+	if len(f.Runs) > 0 {
+		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
+		sb.WriteString(" AND (run_id IN " + set +
+			" OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))")
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+		args = append(args, string(TypeCoordMessage))
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+	}
 	if len(f.Types) > 0 {
 		sb.WriteString(" AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")")
 		for _, t := range f.Types {
 			args = append(args, string(t))
 		}
 	}
-	sb.WriteString(" ORDER BY seq LIMIT ?")
+	sb.WriteString(" ORDER BY seq " + order + " LIMIT ?")
 	args = append(args, limit)
 
 	rows, err := l.db.QueryContext(ctx, sb.String(), args...)

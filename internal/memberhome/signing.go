@@ -21,35 +21,28 @@ import (
 	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
-// Paths inside a member home. The container mounts the home as $HOME, so
-// the signing key is at ~/.ssh/aether_signing for git and gh alike.
+// The container mounts the home as $HOME, so git and gh find the key at
+// ~/.ssh/aether_signing.
 const (
 	sshDirName     = ".ssh"
 	signingKeyName = ".ssh/aether_signing"
 	signingPubName = ".ssh/aether_signing.pub"
 	gitConfigName  = ".gitconfig"
-	// stagedGitConfigPrefix names the temporary files ConfigureGit renames
-	// into place. Nothing in a home legitimately carries one.
+	// stagedGitConfigPrefix names ConfigureGit's temp files; nothing else in a home carries it.
 	stagedGitConfigPrefix = gitConfigName + ".aether-tmp"
 )
 
-// The most the server reads from a member home. Everything under it is
-// written from inside the member's containers, so a file there is
-// agent-chosen input: an ed25519 private key is under a kilobyte and a
-// hand-grown .gitconfig under a few, and reading a 2 GiB one planted in
-// their place would cost the server its memory.
+// Read limits for member-home files, which are agent-written input: a planted
+// 2 GiB file must not cost the server its memory.
 const (
 	maxSigningKeyBytes = 16 << 10
 	maxGitConfigBytes  = 256 << 10
 )
 
-// EnsureSigningKey returns the member's commit signing public key line,
-// generating the ed25519 pair on first call. The returned line is derived
-// from the private key rather than read back from the .pub file: the home
-// is writable from inside the member's containers, so only the private
-// key decides what the public half is. For the same reason every call
-// rewrites the .pub from the private key and puts the private key back to
-// 0600 - what the container left there is not what the next caller reads.
+// EnsureSigningKey returns the member's signing public key line, generating
+// the ed25519 pair on first call. The home is container-writable, so the line
+// is derived from the private key, and every call rewrites the .pub and
+// restores the key's 0600 mode.
 func (m *Manager) EnsureSigningKey(member domain.MemberID) (string, error) {
 	root, err := m.openHome(member)
 	if err != nil {
@@ -104,9 +97,7 @@ func (m *Manager) EnsureSigningKey(member domain.MemberID) (string, error) {
 	return line, nil
 }
 
-// installPublicKey writes line as the home's .pub, replacing whatever
-// occupies that path. A .pub the container wrote describes nothing: only
-// the private key decides what the public half is.
+// installPublicKey replaces whatever occupies the .pub path with line.
 func installPublicKey(root *os.Root, line string) error {
 	sshRoot, err := rootfs.OpenRoot(root, sshDirName)
 	if err != nil {
@@ -129,9 +120,8 @@ func installPublicKey(root *os.Root, line string) error {
 	return err
 }
 
-// restrictKey puts the private key back to 0600. The mode is changed
-// through the open descriptor so a symlink swapped in mid-call cannot
-// take the chmod somewhere else.
+// restrictKey chmods through the open descriptor so a symlink swapped in
+// mid-call cannot redirect it.
 func restrictKey(root *os.Root) error {
 	f, info, err := openRegular(root, signingKeyName)
 	if err != nil {
@@ -144,7 +134,6 @@ func restrictKey(root *os.Root) error {
 	return f.Chmod(0o600)
 }
 
-// HasSigningKey reports whether the member's home holds a signing key.
 func (m *Manager) HasSigningKey(member domain.MemberID) (bool, error) {
 	root, err := m.openHome(member)
 	if err != nil {
@@ -169,13 +158,9 @@ func (m *Manager) HasSigningKey(member domain.MemberID) (bool, error) {
 	return info.Mode().IsRegular() && !hasMultipleLinks(info), nil
 }
 
-// SigningKey returns the member's private signing key bytes, or nil when
-// they have none.
-//
-// A key the home holds but ssh cannot parse counts as none: the container
-// can overwrite its own member's key, and the caller signs commits with
-// what comes back. Handing git a corrupt key would fail the commit, so the
-// signature is what is dropped, with a line in the log naming the member.
+// SigningKey returns the member's private signing key, or nil when they have
+// none. A key ssh cannot parse also counts as none: the container can
+// overwrite it, and the commit should go unsigned rather than fail.
 func (m *Manager) SigningKey(member domain.MemberID) ([]byte, error) {
 	root, err := m.openHome(member)
 	if err != nil {
@@ -197,16 +182,10 @@ func (m *Manager) SigningKey(member domain.MemberID) ([]byte, error) {
 	return key, nil
 }
 
-// ConfigureGit writes the member's git identity and commit signing
-// settings into the home's .gitconfig. git edits a copy of the file, so
-// sections written by other tools - gh's credential helper - survive.
-//
-// git --file follows a symlink to wherever it points, and the home is
-// writable from inside the member's containers, so git never touches the
-// home's own path: the current .gitconfig is read through the root, edited
-// in a private temp file, and the result is renamed into place through the
-// root. A .gitconfig swapped for a symlink between those steps is replaced
-// by the rename, never written through.
+// ConfigureGit writes the member's git identity and signing settings into
+// .gitconfig, keeping sections other tools wrote. git --file follows
+// symlinks, so git edits a private temp copy and the result is renamed into
+// place through the root.
 func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, identity domain.GitIdentity) error {
 	root, err := m.openHome(member)
 	if err != nil {
@@ -266,8 +245,7 @@ func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, iden
 	return nil
 }
 
-// openHome opens the member's home as an os.Root. Every signing path is
-// reached through it, so a symlink planted from inside the member's
+// openHome opens the member's home as an os.Root so a symlink planted from a
 // container cannot lead a server-side read or write out of the home.
 func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 	if err := validateMemberID(string(member)); err != nil {
@@ -289,6 +267,18 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 		_ = roots.Close()
 		return nil, fmt.Errorf("memberhome: stat home for %q: %w", member, err)
 	}
+	_ = roots.Close()
+	return m.openExistingHome(member)
+}
+
+func (m *Manager) openExistingHome(member domain.MemberID) (*os.Root, error) {
+	if err := validateMemberID(string(member)); err != nil {
+		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
+	}
+	roots, err := os.OpenRoot(m.root)
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: open root: %w", err)
+	}
 	home, err := rootfs.OpenRoot(roots, string(member))
 	_ = roots.Close()
 	if err != nil {
@@ -297,10 +287,8 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 	return home, nil
 }
 
-// readRegularFile returns the contents of name, nil when it is absent, and an
-// error when the pinned descriptor is anything but a regular file or holds
-// more than limit bytes. rootfs pins every directory component and opens the
-// leaf without following a symlink; the size check precedes the bounded read.
+// readRegularFile returns name's contents, or nil when it is absent. It
+// refuses anything but a single-link regular file of at most limit bytes.
 func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
 	f, err := rootfs.Open(root, name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -429,12 +417,9 @@ func writeNew(root *os.Root, name string, data []byte, perm os.FileMode) error {
 	return f.Close()
 }
 
-// stageInHome writes data to a fresh file in the home and returns its
-// name, for the caller to rename over .gitconfig. The name is random and
-// created with O_EXCL, so whatever an agent plants there cannot be
-// written through; anything left over under the prefix - by a crashed
-// call or by the container - is removed first, since a directory in that
-// spot would otherwise block every later call.
+// stageInHome writes data to a fresh O_EXCL file for the caller to rename
+// over .gitconfig. Leftovers under the prefix are cleared first, since a
+// directory planted there would block every later call.
 func stageInHome(root *os.Root, data []byte) (string, error) {
 	if err := clearStaged(root); err != nil {
 		return "", err
@@ -452,7 +437,6 @@ func stageInHome(root *os.Root, data []byte) (string, error) {
 	return "", err
 }
 
-// clearStaged removes every leftover staged .gitconfig in the home.
 func clearStaged(root *os.Root) error {
 	dir, err := root.Open(".")
 	if err != nil {
@@ -480,8 +464,6 @@ func authorizedLine(key ssh.PublicKey, comment string) string {
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))) + " " + comment
 }
 
-// publicKeyLine derives the authorized-keys line of an existing private
-// key file.
 func publicKeyLine(privatePEM []byte, member domain.MemberID) (string, error) {
 	signer, err := ssh.ParsePrivateKey(privatePEM)
 	if err != nil {

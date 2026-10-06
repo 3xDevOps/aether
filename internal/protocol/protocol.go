@@ -1,14 +1,12 @@
-// Package protocol is the shared client/server wire surface: the JSON-RPC
-// 2.0 envelope, method names, param/result types, error codes, subsystem
-// names, and wire DTOs, framed as NDJSON (one JSON object per newline-
-// terminated line). It is pure data plus framing - the CLI imports it
-// unchanged - so it depends only on the standard library and
+// Package protocol is the client/server wire surface: JSON-RPC 2.0 framed as
+// NDJSON. The CLI imports it, so it depends only on the standard library and
 // internal/domain.
 package protocol
 
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const (
@@ -22,20 +20,14 @@ const (
 	SubsystemEvents = "aether-events"
 	// SubsystemAttach is the raw PTY attach channel.
 	SubsystemAttach = "aether-attach"
-	// SubsystemSync is the live file-overlay channel: one mutagen remote
-	// endpoint stream bridging a member's local directory to a run
+	// SubsystemSync carries one mutagen remote endpoint stream into a run
 	// worktree.
 	SubsystemSync = "aether-sync"
 	// SubsystemTerminal is the per-member terminal control and PTY channel.
 	SubsystemTerminal = "aether-terminal"
 
-	// WindowChangeRequest is the RFC 4254 channel request a client sends
-	// to resize its PTY. An attach or terminal channel also carries it the
-	// other way, from the server, to report that the session's PTY has
-	// been resized by someone else; see docs/local-gateway.md. It is a
-	// channel request rather than a frame in the stream because the stream
-	// is the terminal's own bytes, and it is not an event: nothing about
-	// it is durable or replayed.
+	// WindowChangeRequest is the RFC 4254 resize request. The server also
+	// sends it to report a resize by someone else; see docs/local-gateway.md.
 	WindowChangeRequest = "window-change"
 )
 
@@ -53,6 +45,7 @@ const (
 	MethodMemberInvite    = "member.invite"
 	MethodMemberRemove    = "member.remove"
 	MethodMemberColor     = "member.color"
+	MethodMemberRename    = "member.rename"
 	MethodMemberGit       = "member.git"
 	MethodMemberRole      = "member.role"
 	MethodAccountList     = "account.list"
@@ -98,9 +91,15 @@ const MethodTerminalHistory = "terminal.history"
 const (
 	MethodAgentRegister = "agent.register"
 	MethodAgentList     = "agent.list"
+	// MethodAgentInstall answers when the install command ends or
+	// AgentInstallTimeout passes, whichever is first.
+	MethodAgentInstall = "agent.install"
 )
 
-// Wave 3 permission-model methods.
+// AgentInstallTimeout bounds one agent.install.
+const AgentInstallTimeout = 10 * time.Minute
+
+// Permission-model methods.
 const (
 	// MethodWorkspaceSettings updates workspace settings (admin only).
 	MethodWorkspaceSettings = "workspace.settings"
@@ -108,15 +107,14 @@ const (
 	MethodWorkspaceOrigin = "workspace.origin"
 	// MethodRunProtect toggles a run's protected flag (owner or admin).
 	MethodRunProtect = "run.protect"
-	// MethodRunArchive hides a finished run from the board, or restores
-	// it; the run's data is untouched (same gate as run.delete: Kill).
+	// MethodRunArchive hides or restores a finished run; its data is
+	// untouched (same gate as run.delete: Kill).
 	MethodRunArchive = "run.archive"
 	// MethodRunSeen clears a run's outcome_unseen flag once its owner has
 	// opened it (owner only).
 	MethodRunSeen = "run.seen"
-	// MethodSyncConflict reports a live-overlay sync conflict so both
-	// affected members are notified via the event feed (Steer-gated,
-	// like the sync bridge itself).
+	// MethodSyncConflict notifies both affected members via the event feed
+	// (Steer-gated, like the sync bridge).
 	MethodSyncConflict = "sync.conflict"
 )
 
@@ -162,9 +160,8 @@ type Response struct {
 	Error   *Error          `json:"error,omitempty"`
 }
 
-// Error is the JSON-RPC error object. It implements error so clients can
-// surface it directly. Data is optional structured detail for callers that
-// need to act on a refusal without parsing the human-readable message.
+// Error is the JSON-RPC error object. Data lets callers act on a refusal
+// without parsing Message.
 type Error struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`

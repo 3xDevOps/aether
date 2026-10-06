@@ -81,6 +81,18 @@ type MissionQuestion struct {
 	AnsweredAt         *time.Time
 }
 
+type MissionChange string
+
+const (
+	MissionTaskProposed     MissionChange = "task_proposed"
+	MissionTaskAccepted     MissionChange = "task_accepted"
+	MissionTaskFinished     MissionChange = "task_finished"
+	MissionQuestionAsked    MissionChange = "question_asked"
+	MissionQuestionAnswered MissionChange = "question_answered"
+	MissionWorkerEnded      MissionChange = "worker_ended"
+	MissionPhaseChanged     MissionChange = "phase_changed"
+)
+
 type Mission struct {
 	ID                           MissionID
 	WorkspaceID                  WorkspaceID
@@ -107,9 +119,12 @@ type Mission struct {
 	// known to exist. Reconciliation relaunches a missing row only while it
 	// is unset, so a deleted integrator run stays deleted.
 	IntegratorRunLaunched bool
+	ChangeSeq             uint64
+	Changes               map[MissionChange]uint64
 	IdempotencyKey        string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	ArchivedAt            *time.Time
 }
 
 const (

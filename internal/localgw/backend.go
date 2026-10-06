@@ -16,10 +16,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
-// sshBackend proxies the Backend surface onto one SSH connection to the
-// linked server, dialed lazily on first use. Every call and stream opens
-// its own channel on that connection, so no request head-of-line blocks
-// another; the mutex guards only connection (re)establishment.
+// sshBackend proxies the Backend surface onto one lazily dialed SSH connection.
+// Each call and stream opens its own channel; mu guards only (re)dialing.
 type sshBackend struct {
 	cfg cli.Config
 
@@ -27,14 +25,12 @@ type sshBackend struct {
 	conn *cli.Conn
 }
 
-// NewSSHBackend returns a Backend that dials cfg lazily on first use and
-// redials once when the connection has gone away under a replay-safe call.
-// Imports and development/repository operations retain uncertain outcomes.
+// NewSSHBackend returns a Backend that redials once when the connection drops
+// under a replay-safe call.
 func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
 
-// Close releases the shared SSH connection, if it has been opened.
 func (b *sshBackend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -46,7 +42,6 @@ func (b *sshBackend) Close() error {
 	return conn.Close()
 }
 
-// Relink replaces the backend's config and live connection in place.
 func (b *sshBackend) Relink(cfg cli.Config, conn *cli.Conn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -57,9 +52,8 @@ func (b *sshBackend) Relink(cfg cli.Config, conn *cli.Conn) {
 	b.conn = conn
 }
 
-// live returns the shared connection, dialing when there is none yet. A
-// dial failure comes back already classified so every surface that dials
-// (Call, Events, Attach, Terminal, Sync) reports it identically.
+// live returns the shared connection, dialing if needed. Dial errors come back
+// classified so every surface reports them identically.
 func (b *sshBackend) live() (*cli.Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -74,10 +68,8 @@ func (b *sshBackend) live() (*cli.Conn, error) {
 	return conn, nil
 }
 
-// invalidate discards conn if it is still the shared one. The pointer
-// comparison means a concurrent redial is not repeated and a connection
-// that is no longer the cached one is never closed - other live streams
-// may still be riding on its replacement.
+// invalidate closes conn only if it is still the cached one: a replaced
+// connection may carry other live streams.
 func (b *sshBackend) invalidate(conn *cli.Conn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -87,14 +79,10 @@ func (b *sshBackend) invalidate(conn *cli.Conn) {
 	}
 }
 
-// unreachableError classifies a transport failure for the SPA, which
-// routes on the message prefix: "network unreachable" tells the user to
-// fix their own connection, "server unreachable" tells them to check the
-// server. Only unambiguous local failures (DNS, no route, interface down)
-// earn the first. A refused connection or a timeout cannot distinguish a
-// down server from a firewall or a dropped link, and a wrong guess sends
-// the user to fix the wrong thing, so ambiguity stays "server
-// unreachable". Both keep CodeUnavailable, which the API maps to 503.
+// unreachableError classifies a transport failure for the SPA, which routes on
+// the message prefix. Only unambiguous local failures (DNS, no route, interface
+// down) say "network unreachable"; a refused connection or a timeout could be
+// either side, so it stays "server unreachable".
 func unreachableError(err error) *protocol.Error {
 	prefix := "server unreachable: "
 	var dnsErr *net.DNSError
@@ -108,20 +96,22 @@ func unreachableError(err error) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeUnavailable, Message: prefix + err.Error()}
 }
 
-// callTimeout bounds one control round-trip end to end. A black-holed TCP
-// connection (laptop suspend/resume, network switch) never errors on its
-// own; the watchdog turns that silent wedge into a retryable
-// CodeUnavailable instead of pinning the caller until kernel TCP timeout.
+// callTimeout bounds one control round-trip. A black-holed TCP connection
+// (suspend/resume, network switch) never errors on its own.
 const callTimeout = 60 * time.Second
 
-// errWedged reports a control call that outlived the watchdog; the
-// connection it ran on is presumed dead.
+func callBound(method string) time.Duration {
+	if method == protocol.MethodAgentInstall {
+		return protocol.AgentInstallTimeout + callTimeout
+	}
+	return callTimeout
+}
+
+// errWedged marks a call that outlived the watchdog; its connection is presumed dead.
 var errWedged = errors.New("control call timed out")
 
-// roundTrip runs one call on a dedicated control channel, honoring ctx.
-// The round-trip runs in its own goroutine; cancellation and the watchdog
-// close the channel, which unblocks the blocked read, so the caller never
-// waits on unbounded I/O. The channel is always closed on return.
+// roundTrip runs one call on its own channel. Cancellation and the watchdog
+// close the channel to unblock the pending read.
 func roundTrip(ctx context.Context, client *protocol.Client, method string, params json.RawMessage) (json.RawMessage, error) {
 	var callParams any
 	if len(params) > 0 {
@@ -137,7 +127,7 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 		err := client.Call(method, callParams, &result)
 		done <- outcome{result: result, err: err}
 	}()
-	watchdog := time.NewTimer(callTimeout)
+	watchdog := time.NewTimer(callBound(method))
 	defer watchdog.Stop()
 	select {
 	case out := <-done:
@@ -152,9 +142,8 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 	}
 }
 
-// callOnce runs one call on a fresh control channel of the shared
-// connection. Transport failures and wedges drop the connection so the
-// next attempt redials; server refusals and cancellations leave it alone.
+// callOnce drops the connection on transport failures and wedges so the next
+// attempt redials; server refusals and cancellations leave it alone.
 func (b *sshBackend) callOnce(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	conn, err := b.live()
 	if err != nil {
@@ -171,25 +160,19 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 	}
 	var perr *protocol.Error
 	if errors.As(err, &perr) {
-		// The server answered and refused, or the caller cancelled;
-		// the connection is fine either way.
 		return nil, err
 	}
 	b.invalidate(conn)
 	if errors.Is(err, errWedged) {
-		// Coded so Call does not retry: a second 60s wait on a wedged
-		// path would double the worst case for nothing. A wedge is
-		// ambiguous, so it classifies as "server unreachable".
+		// Coded so Call does not retry: a second wait on a wedged path
+		// doubles the worst case.
 		return nil, unreachableError(err)
 	}
 	return nil, err
 }
 
-// Call performs one control call on its own channel. A server-reported
-// failure comes back as that *protocol.Error; a transport failure
-// triggers one redial and one retry before surfacing as CodeUnavailable,
-// except for imports and development/repository operations, which may have
-// already committed a mutation before the response was lost.
+// Call redials and retries once on a transport failure, except for methods
+// that may have committed a mutation before the response was lost.
 func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	result, err := b.callOnce(ctx, method, params)
 	if err == nil {
@@ -199,15 +182,12 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if errors.As(err, &perr) {
 		return nil, perr
 	}
-	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport ||
+	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
 		strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
-		// The response may have been lost after committing a mutation. Preserve
-		// that uncertainty; reconnect only on the next explicit request.
+		// A mutation may have committed before the response was lost;
+		// do not replay it.
 		return nil, unreachableError(err)
 	}
-	// Transport failure: the connection was stale (server restart,
-	// network drop) and callOnce already dropped it. Redial once and
-	// retry once.
 	result, err = b.callOnce(ctx, method, params)
 	if err == nil {
 		return result, nil
@@ -218,22 +198,16 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	return nil, unreachableError(err)
 }
 
-// alive probes the SSH connection with a keepalive request. It separates
-// "the server answered and refused" (connection fine, surface the
-// refusal) from "the connection is gone" (redial) - tearing down a
-// healthy connection would kill every live stream riding on it.
+// alive tells a refusal on a healthy connection from a dead one; tearing down
+// a healthy connection would kill every stream riding on it.
 func alive(conn *cli.Conn) bool {
 	_, _, err := conn.SSH().SendRequest("keepalive@openssh.com", true, nil)
 	return err == nil
 }
 
-// stream opens one subsystem channel on the shared connection, dialing
-// when needed. A failure the server answered - a *protocol.Error, or any
-// error on a connection that still answers a keepalive (attach/sync ack
-// refusals are untyped) - passes through untouched. Only a dead connection
-// is invalidated (a no-op when a concurrent caller already replaced it; a
-// conn that is no longer the cached one is never closed), then redialed once
-// and the open retried once.
+// stream opens one subsystem channel. Errors the server answered pass through
+// (attach/sync ack refusals are untyped, hence the keepalive probe); only a
+// dead connection is invalidated, redialed and retried once.
 func stream[T any](b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	conn, err := b.live()
 	if err != nil {
@@ -271,6 +245,21 @@ func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webg
 		return attachResult{term: term, ack: ack}, err
 	})
 	return out.term, out.ack, err
+}
+
+func (b *sshBackend) ACP(_ context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+	type acpResult struct {
+		stream io.ReadWriteCloser
+		ack    protocol.ACPStreamResponse
+	}
+	out, err := stream(b, func(c *cli.Conn) (acpResult, error) {
+		s, ack, err := c.ACPStream(req)
+		if s == nil {
+			return acpResult{ack: ack}, err
+		}
+		return acpResult{stream: s, ack: ack}, err
+	})
+	return out.stream, out.ack, err
 }
 
 func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
@@ -314,4 +303,7 @@ func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownl
 	return out.stream, out.artifact, err
 }
 
-var _ webgate.DevelopmentBackend = (*sshBackend)(nil)
+var (
+	_ webgate.DevelopmentBackend = (*sshBackend)(nil)
+	_ webgate.ACPBackend         = (*sshBackend)(nil)
+)

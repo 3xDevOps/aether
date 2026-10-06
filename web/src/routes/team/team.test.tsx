@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { StatusBar } from '@/components/shell/status-bar'
 import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
-import { TeamStatus, TeamStatusDetails } from '@/routes/team'
-import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
-import { BudgetStatus } from '@/routes/team/budget'
+import { useTeamRefresh } from '@/routes/team'
+import { ApprovalInbox } from '@/routes/team/approvals'
+import { TeamSummary } from '@/routes/team/budget'
+import { ServerSection } from '@/routes/settings/server'
+import type { Api } from '@/lib/api'
+import { pendingApprovals } from '@/store/approvals'
 import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
 import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -19,8 +21,6 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
-import { hintOn } from '@/test/tooltip'
-import { atViewport } from '@/test/viewport'
 import { fire } from '@/test/wake'
 
 const watching: PresenceEntry = {
@@ -29,6 +29,13 @@ const watching: PresenceEntry = {
   watching: ['run_1'],
   last_seen: '2026-08-14T10:04:00Z',
 }
+
+function TeamRefresh({ client }: { client: Api }) {
+  useTeamRefresh(client)
+  return null
+}
+
+const waiting = () => pendingApprovals(useStore.getState().inbox).length
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
@@ -42,7 +49,6 @@ function seed(extra: Partial<RootState> = {}) {
     presence: [],
     budgets: {},
     showDecided: false,
-    acked: {},
     pausedRuns: {},
     hydrated: true,
     hydrationError: null,
@@ -52,9 +58,8 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
-describe('team status bar', () => {
+describe('team refresh and summary', () => {
   it('reads the roster, the queue and the budget, and renders all three', async () => {
-    atViewport(390)
     const client = fakeApi({
       presenceRoster: vi.fn(async () => [watching]),
       approvalList: vi.fn(async () => [approval()]),
@@ -65,22 +70,17 @@ describe('team status bar', () => {
         }),
       ),
     })
-    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
-    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
+    seed({ route: { name: 'run', params: { runId: 'run_1' } } })
+    render(<><TeamRefresh client={client} /><TeamSummary /></>)
 
-    expect(await screen.findByText('1 waiting')).toBeDefined()
-    expect(screen.getByText('$0.50')).toBeDefined()
-    // A budget warns and reports being past its cap. It never stops a run,
-    // so nothing here may say that it did.
-    expect(screen.getByText('nearing the cap')).toBeDefined()
-    expect(screen.getByLabelText('Bob')).toBeDefined()
+    await vi.waitFor(() => expect(waiting()).toBe(1))
+    // A budget never stops a run, so nothing here may say that it did.
+    const line = await screen.findByText('1 online · $0.50 spent, nearing the cap')
+    expect(line.getAttribute('title')).toBe('Online: Bob')
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(workspace.id)
   })
 
-  // Workspaces are few and long-lived, and both of these readouts claim a
-  // whole-deployment fact - the worst budget state anywhere, and the size of
-  // the shared queue - so the refresh covers every workspace, including the
-  // ones with nothing running in them.
+  // Both readouts claim a whole-deployment fact, so idle workspaces count too.
   it('refreshes every workspace, not just the ones with live runs', async () => {
     const client = fakeApi()
     seed({
@@ -128,20 +128,18 @@ describe('team status bar', () => {
   })
 
   it('re-reads the queue and beats presence when the tab returns', async () => {
-    atViewport(390)
     const approvalList = vi.fn(async () => [approval()])
     const presenceHeartbeat = vi.fn(async () => 90)
-    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
-    render(<TeamStatus client={fakeApi({ approvalList, presenceHeartbeat })} />)
+    seed({ route: { name: 'run', params: { runId: 'run_1' } } })
+    render(<TeamRefresh client={fakeApi({ approvalList, presenceHeartbeat })} />)
 
-    expect(await screen.findByText('1 waiting')).toBeDefined()
+    await vi.waitFor(() => expect(waiting()).toBe(1))
     const reads = approvalList.mock.calls.length
     const beats = presenceHeartbeat.mock.calls.length
     const mounted = Date.now()
 
-    // Straight after a refresh the fan-out keeps its floor: flipping between
-    // two apps must not become a request per workspace each time. The
-    // heartbeat is one request and the reason the wake exists, so it goes.
+    // Within the floor, flipping between apps must not fan out a request per
+    // workspace; the single heartbeat still goes.
     await act(async () => {
       fire('visibilitychange')
     })
@@ -170,7 +168,6 @@ describe('team status bar', () => {
     expect(client.presenceHeartbeat).not.toHaveBeenCalled()
   })
 
-  // A workspace does not stop being over its cap when its last run finishes.
   it('keeps an over-cap workspace in the readout after its last run finishes', async () => {
     const client = fakeApi({
       budgetGet: vi.fn(async (id: string) =>
@@ -206,11 +203,10 @@ describe('team status bar', () => {
         ),
       },
     })
-    render(<><TeamStatus client={client} /><TeamStatusDetails /></>)
+    render(<><TeamRefresh client={client} /><TeamSummary /></>)
 
-    expect(await screen.findByText('past the cap')).toBeDefined()
     // $0.50 from the live workspace and $14 from the finished one.
-    expect(screen.getByText('$14.50')).toBeDefined()
+    expect(await screen.findByText('$14.50 spent, past the cap')).toBeDefined()
   })
 
   it('rolls spend up across workspaces, worst state and unmetered floor first', () => {
@@ -237,19 +233,32 @@ describe('team status bar', () => {
         }),
       },
     })
-    render(<BudgetStatus />)
+    render(<TeamSummary />)
 
-    // $0.50 + $1.00, and the trailing + because one run reported no usage
-    // at all: the total is a floor, not a measurement.
-    expect(screen.getByText('$1.50+')).toBeDefined()
-    expect(screen.getByText('past the cap')).toBeDefined()
+    // One run reported no usage, so the total is a floor.
+    expect(screen.getByText('at least $1.50 spent, past the cap')).toBeDefined()
+  })
+
+  it.each([
+    [0, 'no spend yet'],
+    [1, 'no spend reported'],
+  ])('words a zero spend with %i unmetered runs as "%s"', (unmetered, words) => {
+    seed({
+      budgets: {
+        [workspace.id]: budget(workspace.id, {
+          spend: { runs: unmetered, metered_runs: 0, unmetered_runs: unmetered, input_tokens: 0, output_tokens: 0, cost_usd: 0 },
+        }),
+      },
+    })
+    render(<TeamSummary />)
+
+    expect(screen.getByText(words)).toBeDefined()
   })
 
   it('lights the disk gauge from the read server.info cannot carry', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
     expect(screen.queryByLabelText('Disk usage')).toBeNull()
 
     await act(async () => {
@@ -257,60 +266,42 @@ describe('team status bar', () => {
     })
 
     expect(screen.getByLabelText('Disk usage').textContent).toContain(
-      '512 MB / 2.0 GB',
+      '512 MB of 2.0 GB used',
     )
   })
 
   it('breaks the disk gauge down into what an operator can reclaim', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    // The four directories that grow without bound; a bare filesystem
-    // total says the disk is filling but not what is filling it.
-    const detail = screen.getByLabelText('Disk usage').getAttribute('title')
+    const detail = screen.getByLabelText('Disk usage').textContent
     expect(detail).toContain('Worktrees 256 MB')
     expect(detail).toContain('Transcripts 128 MB')
     expect(detail).toContain('Database 64 MB')
-    expect(detail).toContain('Repos 512 MB')
+    expect(detail).toContain('Repositories 512 MB')
   })
 
-  // An upgraded server starts reporting a component while the filesystem
-  // totals sit unchanged. Comparing only the totals would keep the stored
-  // reading and leave the tooltip a component short until the disk moved.
+  // An upgraded server can add a component while the filesystem totals stay put.
   it('takes a new breakdown even when the totals have not moved', async () => {
     const client = fakeApi()
     const stale = await client.disk()
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
-    render(<StatusBar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
+    render(<ServerSection />)
     expect(
-      screen.getByLabelText('Disk usage').getAttribute('title'),
-    ).not.toContain('Repos')
+      screen.getByLabelText('Disk usage').textContent,
+    ).not.toContain('Repositories')
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    expect(screen.getByLabelText('Disk usage').getAttribute('title')).toContain(
-      'Repos 512 MB',
-    )
-  })
-
-  // The readout itself can only fit "queue unreadable"; the server's own
-  // refusal is what an operator needs, so the hint carries it verbatim.
-  it('keeps the server refusal on the queue readout', async () => {
-    atViewport(390)
-    seed({ inboxError: 'approval.list: database is locked' })
-    render(<ApprovalStatus />)
-
-    expect(await hintOn(screen.getByRole('button', { name: 'queue unreadable' }))).toBe(
-      'approval.list: database is locked',
+    expect(screen.getByLabelText('Disk usage').textContent).toContain(
+      'Repositories 512 MB',
     )
   })
 })
@@ -347,13 +338,11 @@ describe('approval inbox', () => {
     fireEvent.click(await screen.findByText('rewrite the checkout flow'))
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: 'run_1' },
     })
   })
 
-  // The row names the scope the request belongs to, so a shared queue says
-  // which workspace each decision is about.
   it('names the workspace each request came from', async () => {
     const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
     seed({ inbox: { [workspace.id]: [approval()] } })
@@ -363,8 +352,6 @@ describe('approval inbox', () => {
   })
 
   it('reports a failed read instead of saying nothing is waiting', async () => {
-    // A swallowed 403 used to render as an empty queue, which reads as "no
-    // agent is blocked" on the surface a member now watches for exactly that.
     const client = fakeApi({
       approvalList: vi.fn(async () => {
         throw new ApiError(403, 'approval.list: permission denied')
@@ -429,7 +416,6 @@ describe('approval inbox', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
 
     expect(await screen.findByText(/permission denied/)).toBeDefined()
-    // The request is still open, so the buttons are still there.
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
   })
 })

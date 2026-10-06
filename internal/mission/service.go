@@ -24,9 +24,8 @@ type Launcher interface {
 	LaunchMission(context.Context, MissionLaunchRequest) (*domain.Run, error)
 }
 
-// launchValidator is the optional seam that refuses, before anything is
-// persisted, an integrator the scheduler has no command for: a harness whose
-// definition the account no longer has, or one without an interactive command.
+// launchValidator refuses, before anything is persisted, an integrator the
+// scheduler has no interactive command for.
 type launchValidator interface {
 	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode) error
 }
@@ -100,6 +99,7 @@ type Config struct {
 	Runs                Launcher
 	Cancel              Canceller
 	Complete            Completer
+	Retire              RunRetirer
 	AuthorizationMu     *sync.Mutex
 	Cost                Budget
 	Evidence            EvidenceReader
@@ -109,9 +109,7 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
-	// Integration resolves the underlying candidate engine lazily. Mission
-	// policy owns the adapter while the engine remains the implementation.
-	Integration func() (sshd.IntegrationService, error)
+	Integration         func() (sshd.IntegrationService, error)
 }
 type Service struct {
 	cfg             Config
@@ -231,6 +229,13 @@ func (s *Service) reconcile(ctx context.Context) error {
 			return err
 		}
 		for _, m := range missions {
+			swept, sweepErr := s.sweepArchived(ctx, m)
+			if sweepErr != nil {
+				slog.Warn("mission: archive sweep", "mission", m.ID, "error", sweepErr)
+			}
+			if swept {
+				continue
+			}
 			if missionErr := s.reconcileMission(ctx, m); missionErr != nil {
 				slog.Warn("mission: reconcile mission", "mission", m.ID, "error", missionErr)
 			}
@@ -405,7 +410,7 @@ func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Att
 	if run.Reason == "killed" || attempt.CancelRequestedAt != nil {
 		target = domain.AttemptCancelled
 	}
-	if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
+	if err := s.cfg.Missions.EndObservedAttempt(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
 		return err
 	}
 	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
@@ -710,9 +715,9 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 	})
 }
 
-// Create persists the bounded human authorization and launches its
-// integrator through the reserved-run scheduler seam. The actor is always the
-// authenticated member; request fields cannot impersonate a different owner.
+// Create persists the human authorization and launches its integrator. The
+// actor is always the authenticated member; request fields cannot impersonate
+// another owner.
 func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.MissionCreateParams) (protocol.MissionCreateResult, error) {
 	if p.WorkspaceID == "" || strings.TrimSpace(p.Objective) == "" || p.IdempotencyKey == "" {
 		return protocol.MissionCreateResult{}, errors.New("workspace_id, objective, and idempotency_key are required")
@@ -808,10 +813,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 }
 
-// integratorLaunchFailure records why m's current integrator did not launch
-// and says what happens next. Reconciliation relaunches only a reserved run
-// with no row; a row the scheduler wrote before provisioning failed stays
-// failed.
+// integratorLaunchFailure records why m's integrator did not launch.
+// Reconciliation relaunches only a reserved run with no row; a row written
+// before provisioning failed stays failed.
 func (s *Service) integratorLaunchFailure(ctx context.Context, m *domain.Mission, err error) error {
 	_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
 	if recordErr := s.recordIntegratorLaunch(ctx, m, err.Error(), getErr == nil); recordErr != nil {
@@ -819,11 +823,11 @@ func (s *Service) integratorLaunchFailure(ctx context.Context, m *domain.Mission
 	}
 	switch {
 	case getErr == nil:
-		return fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace it with aether swarm replace-integrator %s --agent <harness> or from the Missions page, or read it with aether swarm show %s: %w", m.ID, m.CurrentIntegratorRunID, m.ID, m.ID, err)
+		return fmt.Errorf("swarm %s exists but its integrator run %s failed to start; replace it with aether swarm replace-integrator %s --agent <agent> or from its swarm page, or read it with aether swarm show %s: %w", m.ID, m.CurrentIntegratorRunID, m.ID, m.ID, err)
 	case errors.Is(getErr, store.ErrNotFound):
-		return fmt.Errorf("mission %s exists but its integrator run %s did not launch; the server retries the launch periodically, follow it with aether swarm show %s: %w", m.ID, m.CurrentIntegratorRunID, m.ID, err)
+		return fmt.Errorf("swarm %s exists but its integrator run %s did not launch; the server retries the launch periodically, follow it with aether swarm show %s: %w", m.ID, m.CurrentIntegratorRunID, m.ID, err)
 	default:
-		return fmt.Errorf("mission %s exists but its integrator run %s did not launch, follow it with aether swarm show %s: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, m.ID, err, getErr)
+		return fmt.Errorf("swarm %s exists but its integrator run %s did not launch, follow it with aether swarm show %s: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, m.ID, err, getErr)
 	}
 }
 
@@ -908,8 +912,6 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }
 
-// validateIntegratorLaunch resolves the integrator's command for its run
-// owner on the account the launch runs under, when the launcher can.
 func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account domain.MemberID, choice domain.MissionIntegrator) error {
 	v, ok := s.cfg.Runs.(launchValidator)
 	if !ok {
@@ -938,8 +940,8 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if in.AccountMemberID == "" || in.Harness == "" || !mode.Valid() {
 		return domain.MissionIntegrator{}, errors.New("integrator account_member_id, harness, and valid mode are required")
 	}
-	if mode != domain.LaunchTUI {
-		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told")
+	if !mode.Interactive() {
+		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told")
 	}
 	for _, c := range choices {
 		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode {

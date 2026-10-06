@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:  "protect",
-		short: "let only a run's owner and admins steer or kill it",
+		short: "let only a run's owner and admins message, control or kill it",
 		run:   func(args []string) error { return setProtected(args, true) },
 	})
 	register(command{
@@ -39,9 +39,9 @@ func setProtected(args []string, protect bool) error {
 			return err
 		}
 		if res.Run.Protected {
-			fmt.Printf("protected %s: only its owner and admins may steer or kill it\n", res.Run.ID)
+			fmt.Printf("protected %s: only its owner and admins may message, control or kill it\n", res.Run.ID)
 		} else {
-			fmt.Printf("unprotected %s: the workspace's steering policy applies again\n", res.Run.ID)
+			fmt.Printf("unprotected %s: the workspace's policy for other members' runs applies again\n", res.Run.ID)
 		}
 		return nil
 	})

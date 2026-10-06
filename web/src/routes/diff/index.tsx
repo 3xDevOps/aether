@@ -1,351 +1,151 @@
-import { RefreshCw, WrapText } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
-import { RunHeader } from '@/components/run-header'
-import { Button } from '@/components/ui/button'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { Chip, Tooltip } from '@/components/ui/heroui'
+import { Callout } from '@/components/ui/callout'
+import { EmptyState } from '@/components/ui/empty-state'
 import { api } from '@/lib/api'
-import { timeAgo } from '@/lib/format'
-import { belowMd, coarsePointer, useMediaQuery } from '@/lib/hooks'
-import { cn, focusRing } from '@/lib/utils'
-import { ConflictChips } from '@/routes/diff/conflict-chips'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
-import { parsePatch } from '@/routes/diff/parse'
-import { NativeChanges } from '@/routes/diff/native-changes'
-import { FilePatch } from '@/routes/diff/patch-view'
-import { ReviewCommands } from '@/routes/diff/review-commands'
-import { registerRoute, type RouteProps } from '@/routes/registry'
-import { runTabPanel } from '@/routes/terminal/tabs'
+import { parsePatch, type PatchFile } from '@/routes/diff/parse'
+import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
+import { hasTree, SummaryStrip } from '@/routes/diff/strip'
+import { isLiveRun } from '@/routes/files/sources'
+import { openInFiles } from '@/routes/files/open'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-import {
-  initialDiff,
-  intervalKey,
-  type DiffSnapshot,
-  type IntervalPatch,
-  type RunDiffState,
-} from '@/store/diff'
+import { initialDiff, intervalKey, type DiffSnapshot, type IntervalPatch } from '@/store/diff'
 
-/**
- * The run-detail Diff tab: the run's current diff against its fork point,
- * plus the times its files changed. The server records a git tree per
- * snapshot, so selecting one shows the diff between the tree before it and
- * the tree at it - what that interval alone changed, not a filter over the
- * current diff. A snapshot from a server that recorded no tree cannot be
- * shown that way, and is not selectable.
- */
-function DiffView({ params }: RouteProps) {
+const largePatch = 1500
+
+function collapsedByDefault(file: PatchFile): boolean {
+  return contentLines(file) > largeFile || file.status === 'binary' || file.status === 'deleted'
+}
+
+/** A snapshot shows the diff between its parent tree and its tree, not a filter
+ * over the current diff; a snapshot with no recorded tree is not selectable. */
+export function ChangesView({ runID }: { runID: string }) {
   const caps = useCapability()
-  const runID = params.runId
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
-  // Keyed on the snapshot's time, not its index: new snapshots are prepended,
-  // so an index would silently retarget whenever one arrived.
+  // Keyed on the snapshot's time, not its index: new snapshots are prepended.
   const [selected, setSelected] = useState<string | null>(null)
-  // Null until the member says otherwise, so the default follows the pointer;
-  // the choice itself lives on the UI slice, because only one run-detail
-  // route is mounted at a time and component state would forget it on every
-  // trip to the Terminal tab.
   const wrapping = useStore((s) => s.diffWrap)
   const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
-  // The timeline sits above the patch once the grid stacks, so below `md` it
-  // is a disclosure rather than 208px of chrome before the first line.
-  const stacked = useMediaQuery(belowMd)
   const wrap = wrapping ?? coarse
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [current, setCurrent] = useState<string | null>(null)
+  const ids = useId()
+  const [focusedFile, setFocusedFile] = useState<number | null>(null)
+  const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
-  const snapshot =
-    selected === null
-      ? null
-      : (state.snapshots.find((s) => s.time === selected) ?? null)
+  const snapshot = selected === null ? null : (state.snapshots.find((s) => s.time === selected) ?? null)
   const interval = useInterval(run ? runID : '', snapshot)
   const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
-
-  const shown = snapshot ? changed : cumulative
+  const files = snapshot ? changed : cumulative
+  const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
   const error = snapshot ? interval?.error : state.error
   const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
+  const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
-  const note = emptyNote(snapshot, interval, state)
-  // Beside the patch an empty list is worth its own notice: it is the only
-  // thing that says why there are no intervals. Above the patch that notice
-  // is two lines between the member and the first line of code, so there an
-  // empty list is nothing at all.
-  const hidden = stacked && state.snapshots.length === 0
 
-  if (!run) {
-    return <MissingRun />
-  }
+  const toggle = useCallback((path: string, next: boolean) => setCollapsed((all) => ({ ...all, [path]: next })), [])
+  const open = useCallback((path: string) => {
+    if (run) openInFiles(run, path)
+  }, [run])
+  const jump = useCallback((path: string) => {
+    setCurrent(path)
+    setCollapsed((all) => ({ ...all, [path]: false }))
+    const index = files.findIndex((file) => file.path === path)
+    requestAnimationFrame(() => {
+      if (virtual) list.current?.scrollToIndex(index, { align: 'start' })
+      else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
+    })
+  }, [files, virtual, ids])
 
+  if (!run) return <MissingRun />
+
+  const canOpen = caps.hasMethod('files.tree') && isLiveRun(run)
+  const openable = (file: PatchFile) =>
+    file.status !== 'deleted' && file.status !== 'binary' && cumulative.find((entry) => entry.path === file.path)?.status !== 'deleted'
+  const patchAt = (file: PatchFile, index: number) => (
+    <FilePatch
+      key={file.path}
+      id={`${ids}-${index}`}
+      file={file}
+      wrap={wrap}
+      lineNumbers
+      collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
+      onCollapsedChange={toggle}
+      onOpen={canOpen && openable(file) ? open : undefined}
+    />
+  )
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <RunHeader run={run} subtitle={run.branch} active="diff" />
-      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden')}>
-        <Land run={run} />
-        {caps.hasMethod('run.git.status') && <NativeChanges key={runID} run={run} wrap={wrap} />}
-
-        <div className="shrink-0 bg-sidebar">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-[12px] text-muted-foreground">
-            <div className="min-w-0 flex-[1_1_16rem]">
-              <p className="truncate font-medium text-foreground">
-                {snapshot ? 'Interval review' : 'Current diff'}
-              </p>
-              <p className="truncate">
-                {snapshot ? (
-                  <>What changed {timeAgo(snapshot.time)}</>
-                ) : (
-                  <>
-                    Against{' '}
-                    <code title={state.base} className="font-mono">
-                      {state.base.slice(0, 8) || 'the fork point'}
-                    </code>
-                  </>
-                )}
-              </p>
+    <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
+      <Land run={run} />
+      <SummaryStrip
+        run={run}
+        files={files}
+        snapshots={state.snapshots}
+        selected={snapshot}
+        onSelect={setSelected}
+        base={state.base}
+        wrap={wrap}
+        onWrap={setWrapping}
+        loading={state.status === 'loading'}
+        onRefresh={() => useStore.getState().refreshDiff(runID)}
+        onJump={jump}
+        onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
+        publishable={cumulative.length > 0}
+      />
+      {failed && (
+        <Callout tone="failed" role="alert" className="m-2 shrink-0">
+          {error ?? 'The diff could not be loaded.'}
+        </Callout>
+      )}
+      {truncated && (
+        <Callout tone="needs-you" className="m-2 shrink-0">
+          The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.
+        </Callout>
+      )}
+      <div className="flex min-h-0 flex-1">
+        {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+          {virtual ? (
+            <div onFocus={(event) => {
+              const id = (event.target as HTMLElement).closest('section')?.id ?? ''
+              if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
+            }}>
+              <Virtualizer ref={list} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
+                {patchAt}
+              </Virtualizer>
             </div>
-            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
-              <Chip color="default" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">
-                  {shown.length} file{shown.length === 1 ? '' : 's'}
-                </Chip.Label>
-              </Chip>
-              <Chip color="success" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">+{total(shown, 'additions')}</Chip.Label>
-              </Chip>
-              <Chip color="danger" variant="tertiary" size="sm">
-                <Chip.Label className="font-mono">-{total(shown, 'deletions')}</Chip.Label>
-              </Chip>
-              <ConflictChips run={run} />
-              {snapshot && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label="Show current diff"
-                  onClick={() => setSelected(null)}
-                >
-                  Current diff
-                </Button>
-              )}
-              <Button
-                variant={wrap ? 'secondary' : 'ghost'}
-                size="sm"
-                className="px-2"
-                aria-pressed={wrap}
-                onClick={() => setWrapping(!wrap)}
-              >
-                <WrapText className="size-3.5" aria-hidden />
-                Wrap lines
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="px-2"
-                onClick={() => useStore.getState().refreshDiff(runID)}
-              >
-                <RefreshCw
-                  className={cn('size-3.5', state.status === 'loading' && 'animate-spin')}
-                  aria-hidden
-                />
-                Refresh
-              </Button>
-            </div>
-          </div>
-          <ReviewCommands run={run} />
-        </div>
-
-        {failed && (
-          <p role="alert" className="shrink-0 border-b bg-destructive/10 px-3 py-1.5 text-[12px] text-destructive">
-            {error ?? 'The diff could not be loaded.'}
-          </p>
-        )}
-        {truncated && (
-          <p className="shrink-0 border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
-            The server returned an incomplete diff. Refresh it or fetch the run
-            branch to read the complete change.
-          </p>
-        )}
-        <div
-          className={cn(
-            'grid min-h-0 min-w-0 flex-none grid-cols-1 md:flex-1 md:overflow-hidden',
-            !hidden && 'md:grid-cols-[14rem_minmax(0,1fr)]',
+          ) : (
+            files.map(patchAt)
           )}
-        >
-          {!hidden && (
-            <Timeline
-              snapshots={state.snapshots}
-              selected={selected}
-              onSelect={(time) => setSelected(time === selected ? null : time)}
-              stacked={stacked}
-            />
-          )}
-          <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-background">
-            <div>
-              {shown.map((file) => (
-                <FilePatch key={file.path} file={file} wrap={wrap} />
-              ))}
-              {shown.length === 0 && note && (
-                <p className="border-b border-dashed p-4 text-[12px] text-muted-foreground">
-                  {note}
-                </p>
-              )}
-            </div>
-          </div>
+          {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} />}
         </div>
       </div>
     </div>
   )
 }
 
-/** What to say when there is nothing to render. A failed fetch says nothing
- * here: the banner above already carries the server's own message. */
-function emptyNote(
-  snapshot: DiffSnapshot | null,
-  interval: IntervalPatch | undefined,
-  state: RunDiffState,
-): string | null {
-  if (snapshot) {
-    if (!interval || interval.status === 'loading') return 'Loading what changed then...'
-    if (interval.status === 'error') return null
-    return 'That interval recorded no textual change.'
+function Empty({ snapshot, loading }: { snapshot: DiffSnapshot | null; loading: boolean }) {
+  if (loading) {
+    return <p className="p-4 text-ui text-muted">{snapshot ? 'Loading what changed then…' : 'Loading the diff…'}</p>
   }
-  if (state.status === 'loading') return 'Loading the diff...'
-  if (state.status === 'error') return null
-  return 'Nothing has changed against the fork point yet.'
+  if (snapshot) return <EmptyState title="No changes in this interval.">That interval recorded no textual change.</EmptyState>
+  return <EmptyState title="No changes yet.">Nothing differs from the fork point. Files the agent changes show up here.</EmptyState>
 }
 
-/** Why a snapshot cannot be opened. Shown on the row itself, since there is
- * nothing to select. */
-const noTree =
-  'This server did not record a tree for this snapshot, so what changed ' +
-  'then cannot be shown.'
-
-/** The trees bounding the interval a snapshot ended, or null when the server
- * that sent it recorded none. */
-function range(snapshot: DiffSnapshot): { from: string; to: string } | null {
-  if (!snapshot.tree || !snapshot.parentTree) return null
-  return { from: snapshot.parentTree, to: snapshot.tree }
-}
-
-/** When files changed: one entry per diff snapshot the server took. Selecting
- * one shows the diff of that interval. Beside the patch it is a list; above
- * it, where every row of chrome pushes the first line further down, it is a
- * disclosure that starts closed. */
-function Timeline({
-  snapshots,
-  selected,
-  onSelect,
-  stacked,
-}: {
-  snapshots: DiffSnapshot[]
-  selected: string | null
-  onSelect: (time: string) => void
-  stacked: boolean
-}) {
-  const rows = (
-    <ul className={cn('p-1', stacked && 'max-h-52 overflow-y-auto')}>
-      {snapshots.map((snap, i) => {
-        const shownable = range(snap) !== null
-        return (
-          <li key={snap.time + i}>
-            {/* Disabled rather than content-less on a row that opens: an
-                open tooltip with nothing in it still points the button's
-                `aria-describedby` at a missing element and still swallows
-                the first Escape. */}
-            <Tooltip isDisabled={shownable}>
-              <Tooltip.Trigger<'button'>
-                render={(triggerProps) => (
-                  <button
-                    {...triggerProps}
-                    type="button"
-                    aria-disabled={!shownable || undefined}
-                    onClick={() => {
-                      if (shownable) onSelect(snap.time)
-                    }}
-                    aria-pressed={selected === snap.time}
-                    className={cn(
-                      focusRing,
-                      'min-h-10 w-full border-l-2 border-transparent px-2 py-1.5 text-left text-[12px] hover:not-aria-disabled:bg-toolbar-hover',
-                      'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
-                      selected === snap.time && 'border-primary bg-selection text-selection-foreground',
-                    )}
-                  >
-                    <span className="block truncate font-medium">{timeAgo(snap.time)}</span>
-                    <span
-                      className={cn(
-                        'mt-0.5 block text-[11px] text-muted-foreground',
-                        selected === snap.time && 'text-selection-foreground/80',
-                      )}
-                    >
-                      {snap.files.length} file{snap.files.length === 1 ? '' : 's'}
-                      {' · '}
-                      <span className="font-mono text-success-foreground">
-                        +{total(snap.files, 'additions')}
-                      </span>{' '}
-                      <span className="font-mono text-destructive">
-                        -{total(snap.files, 'deletions')}
-                      </span>
-                    </span>
-                  </button>
-                )}
-              />
-              <Tooltip.Content>{noTree}</Tooltip.Content>
-            </Tooltip>
-          </li>
-        )
-      })}
-    </ul>
-  )
-
-  if (stacked) {
-    return (
-      <Collapsible asChild>
-        <aside className="min-h-0 border-b bg-sidebar">
-          <CollapsibleTrigger className="min-h-[35px] px-3 py-2 text-[12px] font-medium text-foreground">
-            Change intervals ({snapshots.length})
-          </CollapsibleTrigger>
-          <CollapsibleContent>{rows}</CollapsibleContent>
-        </aside>
-      </Collapsible>
-    )
-  }
-
-  return (
-    <aside className="min-h-0 overflow-y-auto border-r bg-sidebar">
-      <div className="sticky top-0 z-10 min-h-[35px] border-b bg-sidebar px-3 py-2">
-        <h2 className="text-[12px] font-medium text-foreground">Change intervals</h2>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {snapshots.length === 0
-            ? 'Nothing since you opened the dashboard.'
-            : 'Select an interval to review what changed.'}
-        </p>
-      </div>
-      {rows}
-    </aside>
-  )
-}
-
-function total<K extends string>(items: Record<K, number>[], key: K): number {
-  return items.reduce((sum, item) => sum + item[key], 0)
-}
-
-/**
- * Fetches the patch whenever the run's revision has moved past the one the
- * stored patch answers for. The store, not this component, holds the answer,
- * so leaving the tab and coming back re-renders what was already fetched.
- */
 function usePatch(runID: string): void {
   const revision = useStore((s) => s.diffs[runID]?.revision ?? 0)
   const fetched = useStore((s) => s.diffs[runID]?.fetched ?? -1)
-  // The run whose patch is in flight. A snapshot landing mid-request must
-  // neither cancel it nor start a second one: the response records the
-  // revision it answered for, and the re-render that follows asks again if a
-  // newer one arrived meanwhile.
+  // A snapshot landing mid-request must neither cancel it nor start a second one:
+  // the response records its revision and the next render asks again if needed.
   const inFlight = useRef<string | null>(null)
 
   useEffect(() => {
@@ -364,8 +164,7 @@ function usePatch(runID: string): void {
       })
       .catch((err: unknown) => {
         done()
-        // Recorded as answered so a failure cannot spin. The next snapshot
-        // and the Refresh button both ask again.
+        // Recorded as answered so a failure cannot spin.
         useStore.getState().setDiff(runID, {
           status: 'error',
           fetched: at,
@@ -375,32 +174,22 @@ function usePatch(runID: string): void {
   }, [runID, revision, fetched])
 }
 
-/**
- * The selected snapshot's interval patch, fetched the first time it is asked
- * for. The two trees name the answer, so an interval that loaded is never
- * refetched. Refresh drops the failed ones, which is what lets a fetch that
- * failed be tried again. The interval response's `base` is the `from` tree,
- * so it is deliberately not written into the run's `base`, which names the
- * fork point.
- */
-function useInterval(
-  runID: string,
-  snapshot: DiffSnapshot | null,
-): IntervalPatch | undefined {
-  const at = snapshot ? range(snapshot) : null
-  const from = at?.from ?? ''
-  const to = at?.to ?? ''
-  const key = at ? intervalKey(from, to) : ''
+/** The interval response's `base` is the `from` tree, so it must not be written
+ * into the run's `base`, which names the fork point. */
+function useInterval(runID: string, snapshot: DiffSnapshot | null): IntervalPatch | undefined {
+  const from = snapshot && hasTree(snapshot) ? snapshot.parentTree! : ''
+  const to = snapshot && hasTree(snapshot) ? snapshot.tree! : ''
+  const key = from ? intervalKey(from, to) : ''
   const entry = useStore((s) => (key ? s.diffs[runID]?.intervals[key] : undefined))
-  // Not the entry itself: only its presence decides whether to ask, and
-  // depending on the object would re-run the effect on every write to it.
+  // Only its presence decides whether to ask; depending on the object would
+  // re-run the effect on every write to it.
   const cached = entry !== undefined
 
   useEffect(() => {
     if (!runID || !key) return
     const store = useStore.getState()
-    // Read through the store rather than the rendered entry: the write below
-    // is what stops a second fetch, and only the store has it immediately.
+    // The store, not the rendered entry: the write below is what stops a
+    // second fetch, and only the store has it immediately.
     if (store.diffs[runID]?.intervals[key]) return
     store.setIntervalPatch(runID, key, { patch: '', truncated: false, status: 'loading' })
     api
@@ -424,5 +213,3 @@ function useInterval(
 
   return entry
 }
-
-registerRoute('diff', DiffView)

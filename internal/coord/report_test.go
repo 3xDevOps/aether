@@ -84,6 +84,29 @@ func TestRunReportRejectsInvalidStatesAndSanitizesReason(t *testing.T) {
 	}
 }
 
+// TestRunReportCarriesUsableSessionIDs: the agent's session id reaches the
+// scheduler, and one that could not go on a command line is dropped without
+// losing the state it came with.
+func TestRunReportCarriesUsableSessionIDs(t *testing.T) {
+	sink := &fakeSink{}
+	h := newHarness(t, 1, func(c *Config) { c.Reports = sink })
+	h.start()
+	run := h.run(0)
+	if _, err := h.svc.Provision(context.Background(), run, nil); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	client := h.dial(t, run)
+	for _, id := range []string{"01a0639b-9816-7281-bb09-629ac0c925be", "x; rm -rf /"} {
+		if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(agentstatus.Working), SessionID: id}, nil); err != nil {
+			t.Fatalf("run.report session %q: %v", id, err)
+		}
+	}
+	_, got := sink.reports()
+	if len(got) != 2 || got[0].SessionID != "01a0639b-9816-7281-bb09-629ac0c925be" || got[1].SessionID != "" || got[1].State != agentstatus.Working {
+		t.Fatalf("reports %+v", got)
+	}
+}
+
 // TestRunReportWithoutSink: a server with nothing behind run.report says
 // so rather than telling the agent's hook its state was recorded.
 func TestRunReportWithoutSink(t *testing.T) {

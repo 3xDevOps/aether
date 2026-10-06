@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
+import { Code, CodeBlock } from '@/components/ui/code'
+import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { shellQuote } from '@/lib/shell'
+import { cn } from '@/lib/utils'
 import type { Workspace } from '@/lib/types'
 import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository-dialog'
 import { useStore } from '@/store'
@@ -62,36 +65,41 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
     }
   }
 
-  return <section aria-label="Add workspace" className="space-y-3 border-y py-4">
-    <div className="space-y-1">
-      <h2 className="text-base font-semibold">Add a workspace</h2>
-      <p className="text-sm text-muted-foreground">A workspace shares one repository and base branch across its runs. Choose where its code comes from.</p>
-    </div>
+  const recommended = choice === null && (caps.hasLocal('link.repo') ? 'local' : 'remote')
+  const canImport = isAdmin && caps.hasMethod('workspace.import')
+  const canAdd = isAdmin && caps.hasMethod('workspace.add')
+  if (!canImport && !canAdd) return null
+
+  return <section aria-label="Add workspace" className="flex min-w-0 flex-col gap-3">
+    <h3 className="text-ui font-medium text-text">Add a workspace</h3>
     <div className="grid gap-3 sm:grid-cols-2">
-      <div className="space-y-2 border p-3">
-        <h3 className="text-sm font-semibold">Public or private remote repository</h3>
-        <p className="text-xs leading-5 text-muted-foreground">Import public HTTPS or a private repository with a read-only deploy key. No local clone is needed.</p>
-        {isAdmin && caps.hasMethod('workspace.import') ? <Button size="sm" variant="outline" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button> : <p className="text-xs text-muted-foreground">An administrator with repository import access must create the workspace.</p>}
+      <div className="flex flex-col items-start gap-2 rounded-panel border border-seam p-3">
+        <h4 className="text-ui font-medium text-text">Import a remote repository</h4>
+        <p className="flex-1 text-ui-sm text-muted">Public HTTPS, or private with a read-only deploy key. No local clone needed.</p>
+        {canImport
+          ? <Button size="sm" variant={recommended === 'remote' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
+          : <p className="text-ui-sm text-muted">This gateway cannot import repositories.</p>}
       </div>
-      <div className="space-y-2 border p-3">
-        <h3 className="text-sm font-semibold">Local clone</h3>
-        <p className="text-xs leading-5 text-muted-foreground">Create a workspace, link your existing Git clone, then push its base branch without rewriting history.</p>
-        {isAdmin && caps.hasMethod('workspace.add') ? <Button size="sm" variant="outline" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button> : <p className="text-xs text-muted-foreground">An administrator must create the workspace. You can link your clone to an existing workspace below.</p>}
+      <div className={cn('flex flex-col items-start gap-2 rounded-panel border p-3', choice === 'local' ? 'border-accent' : 'border-seam')}>
+        <h4 className="text-ui font-medium text-text">From a local clone</h4>
+        <p className="flex-1 text-ui-sm text-muted">Create the workspace, then link your clone and push its base branch. History is never rewritten.</p>
+        {canAdd
+          ? <Button size="sm" variant={recommended === 'local' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
+          : <p className="text-ui-sm text-muted">This gateway cannot create workspaces.</p>}
       </div>
     </div>
-    {choice === 'local' && (caps.hasLocal('link.repo') ? <form aria-label="Create workspace" className="space-y-3 border-t pt-3" onSubmit={(event) => { event.preventDefault(); void create() }}>
+    {choice === 'local' && (caps.hasLocal('link.repo') ? <form aria-label="Create workspace" className="flex flex-col gap-3 border-t border-seam pt-3" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <fieldset disabled={busy || uncertain} className="grid gap-3 sm:grid-cols-2">
-        <Label className="block space-y-1">Workspace name<Input value={name} onChange={(event) => setName(event.target.value)} required /></Label>
-        <Label className="block space-y-1">Base branch<Input value={base} onChange={(event) => setBase(event.target.value)} required /></Label>
+        <FormField label="Workspace name"><Input value={name} onChange={(event) => setName(event.target.value)} required /></FormField>
+        <FormField label="Base branch" help="The branch that already exists in your clone. Nothing is uploaded until you push it."><Input value={base} onChange={(event) => setBase(event.target.value)} required /></FormField>
       </fieldset>
-      <p className="text-xs text-muted-foreground">Use the branch that already exists in your clone. Creating the workspace does not upload code; the next screen links the clone and pushes this branch.</p>
-      {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-state-failed">{error}</p>}
-      {uncertain && <p role="alert" className="text-sm">Creation could not be confirmed. Inspect the refreshed workspace list before trying again; if it exists, open it and link your clone there.</p>}
-      <Button type="submit" size="sm" disabled={busy || uncertain || !name.trim() || !base.trim()}>{busy ? 'Creating...' : 'Create workspace'}</Button>
-    </form> : <div className="space-y-2 border-t pt-3 text-sm">
-      <p>This hosted gateway cannot access your clone. On the computer holding it, open the desktop app or run <code>aether gui</code>, connected to this server, then choose <strong>Create from local clone</strong>.</p>
-      <p className="text-xs text-muted-foreground">CLI alternative: replace <code>&lt;server-address-or-id&gt;</code> with this server's SSH address (including its SSH port) or server ID from your administrator, not this page's HTTP address. This hosted gateway does not expose that connection target. Replace the name, branch and absolute path below. Workspace creation requires an admin.</p>
-      <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link ${shellQuote('<server-address-or-id>')} &&\naether workspace add myproject --base main &&\naether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace myproject &&\ngit -C /absolute/path/to/clone push -u aether main`}</pre>
+      {error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout>}
+      {uncertain && <Callout tone="needs-you" role="alert">Creation could not be confirmed. Inspect the refreshed workspace list before trying again; if it exists, open it and link your clone there.</Callout>}
+      <div><Button type="submit" size="sm" disabled={busy || uncertain || !name.trim() || !base.trim()}>{busy ? 'Creating…' : 'Create workspace'}</Button></div>
+    </form> : <div className="flex flex-col gap-2 border-t border-seam pt-3 text-ui">
+      <p>This hosted gateway cannot reach your clone. On the computer holding it, open the desktop app or run <Code>aether gui</Code> connected to this server, then choose <strong>Create from local clone</strong>.</p>
+      <p className="text-ui-sm text-muted">From a terminal instead, replace <Code>&lt;server-address-or-id&gt;</Code> with this server&apos;s SSH address or server id from your administrator, and the name, branch and path below. Creating a workspace requires an admin.</p>
+      <CodeBlock className="whitespace-pre-wrap break-words">{`aether link ${shellQuote('<server-address-or-id>')} &&\naether workspace add myproject --base main &&\naether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace myproject &&\ngit -C /absolute/path/to/clone push -u aether main`}</CodeBlock>
     </div>)}
     {choice === 'remote' && <ImportRepositoryDialog client={client} onImported={(workspace) => { if (workspace) setImported(workspace); onRefresh() }} onClose={() => { setChoice(null); if (imported) onCreated(imported, 'remote') }} />}
   </section>

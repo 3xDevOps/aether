@@ -10,7 +10,6 @@ import { defaultTerminalFontSize } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
-import { hintOn } from '@/test/tooltip'
 
 function Probe({ onReady, serverOwnedResponder, onData }: {
   onReady: (terminal: Terminal) => void
@@ -550,7 +549,7 @@ describe('terminal replay surface', () => {
     await waitFor(() => expect(ready).not.toBeNull())
 
     const host = document.querySelector(
-      '.min-h-0.min-w-0.flex-1.overflow-x-auto.overflow-y-hidden.bg-background',
+      '.min-h-0.min-w-0.flex-1.overflow-x-auto.overflow-y-hidden.bg-canvas',
     ) as HTMLElement
     expect(host.style.visibility).toBe('hidden')
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
@@ -708,7 +707,7 @@ describe('terminal shortcuts', () => {
 })
 
 describe('the terminal toolbar', () => {
-  it('keeps a blocked button reachable, and its click inert', async () => {
+  it('lists a blocked tool and keeps its click inert', async () => {
     useStore.setState({ terminalFontSize: defaultTerminalFontSize })
     render(
       <TerminalPane
@@ -730,10 +729,10 @@ describe('the terminal toolbar', () => {
         }}
       />,
     )
-    const copy = screen.getByRole('button', { name: 'Copy terminal selection' })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Terminal tools' }), { key: 'Enter' })
+    const copy = screen.getByRole('menuitem', { name: 'Copy selection' })
     expect(copy.getAttribute('aria-disabled')).toBe('true')
-    expect(await hintOn(copy)).toBe('Copy terminal selection (Ctrl+Shift+C)')
-    fireEvent.click(screen.getByRole('button', { name: 'Decrease terminal text size' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Smaller text/ }))
     expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
   })
 })

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { message } from '@/lib/format'
+import { errorSentence } from '@/lib/format'
 import type { RoomPostResult } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,9 +15,11 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
+import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
-function deliveryLabel(result: RoomPostResult): string {
+export function deliveryLabel(result: RoomPostResult): string {
+  if (result.message.state === 'sent' && result.message.agent_delivery === 'queued') return 'queued'
   switch (result.receipt ?? result.message.state) {
     case 'queued':
       return 'queued'
@@ -33,6 +35,7 @@ function deliveryLabel(result: RoomPostResult): string {
 }
 
 export function InjectDialog() {
+  const returnFocus = useReturnFocus()
   const runID = useStore((s) => s.paletteRunID)
   const run = useStore((s) => (s.paletteRunID ? s.runs[s.paletteRunID] : undefined))
   const close = useStore((s) => s.closePaletteDialog)
@@ -61,7 +64,7 @@ export function InjectDialog() {
       }
     } catch (err) {
       setSending(false)
-      const detail = `Send failed: ${message(err)}`
+      const detail = `Send failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     }
@@ -69,7 +72,7 @@ export function InjectDialog() {
 
   return (
     <Dialog open onOpenChange={close}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+      <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Send a message to the agent</DialogTitle>
           <DialogDescription>
@@ -90,7 +93,7 @@ export function InjectDialog() {
             autoFocus
             rows={5}
             aria-describedby="inject-help"
-            placeholder="Steer the agent..."
+            placeholder="Message the agent…"
             value={text}
             onChange={(e) => {
               const nextText = e.target.value
@@ -98,21 +101,21 @@ export function InjectDialog() {
               setRequest((previous) => (previous && previous.payload !== nextText.trim() ? null : previous))
             }}
           />
-          <p id="inject-help" className="text-xs leading-4 text-muted-foreground">
+          <p id="inject-help" className="text-ui-sm leading-4 text-muted">
             This message is added to the run transcript and delivered to the agent.
           </p>
           {error && (
-            <p role="alert" className="break-words text-xs text-state-failed">
+            <p role="alert" className="break-words text-ui-sm text-state-failed">
               {error}
             </p>
           )}
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
           <Button type="submit" form="inject-message" disabled={sending || !text.trim()}>
-            {sending ? 'Sending...' : 'Send'}
+            {sending ? 'Sending…' : 'Send'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { WorkspacesRoute } from '@/routes/workspaces'
 import { useStore, type RootState } from '@/store'
 import { applyEvent } from '@/store/sync'
@@ -22,6 +23,18 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
+async function rowMenu(name: string): Promise<HTMLElement> {
+  const trigger = await screen.findByRole('button', { name: `More actions for ${name}` })
+  trigger.focus()
+  await userEvent.keyboard('{Enter}')
+  return screen.findByRole('menu')
+}
+
+async function deleteFrom(name: string) {
+  fireEvent.click(within(await rowMenu(name)).getByRole('menuitem', { name: 'Delete…' }))
+  return within(await screen.findByRole('alertdialog'))
+}
+
 // A legacy null capability set covers only the pre-capabilities allowlist,
 // so these tests advertise every method; a desktop gateway narrows this
 // via /capabilities.
@@ -38,6 +51,7 @@ describe('workspaces view', () => {
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
     await screen.findByRole('list', { name: 'Workspace list' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
     fireEvent.click(screen.getByRole('button', { name: 'Import repository' }))
     const dialog = within(await screen.findByRole('dialog'))
     fireEvent.change(dialog.getByLabelText('Workspace name'), { target: { value: 'private-project' } })
@@ -56,6 +70,7 @@ describe('workspaces view', () => {
     const client = fakeApi()
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create from local clone' }))
     expect(screen.queryByLabelText('Repository path')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Choose folder' })).toBeNull()
@@ -84,6 +99,7 @@ describe('workspaces view', () => {
       })
       const view = render(<WorkspacesRoute params={{}} client={client} />)
       await screen.findByRole('list', { name: 'Workspace list' })
+      fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }))
       fireEvent.click(screen.getByRole('button', { name: 'Create from local clone' }))
       fireEvent.change(screen.getByLabelText('Workspace name'), { target: { value: createdWorkspace.name } })
       fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
@@ -113,33 +129,42 @@ describe('workspaces view', () => {
     seed()
     render(<WorkspacesRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    fireEvent.click(await screen.findByRole('button', { name: `Open ${workspace.name}` }))
 
-    // Every other scoped surface follows activeWorkspace, so navigating
-    // without setting it would leave the sidebar pointed elsewhere.
     await waitFor(() => {
       expect(useStore.getState().activeWorkspace).toBe(workspace.id)
-      expect(useStore.getState().route).toEqual({
-        name: 'workspace',
-        params: { workspaceId: workspace.id },
-      })
+      expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
     })
+  })
+
+  it('reaches the repository page and the workspace settings from the row menu', async () => {
+    seed()
+    render(<WorkspacesRoute params={{}} client={fakeApi()} />)
+
+    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Settings…' }))
+    expect(await screen.findByRole('dialog', { name: /settings/i })).toBeDefined()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Repository' }))
+    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
   })
 
   it.each([bob, vera])('does not offer deletion to $role members', async (member) => {
     seed({ info: { ...serverInfo, member } })
     render(<WorkspacesRoute params={{}} client={fakeApi()} />)
 
-    await screen.findByText(otherWorkspace.name)
-    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+    const menu = within(await rowMenu(otherWorkspace.name))
+    expect(menu.queryByRole('menuitem', { name: 'Delete…' })).toBeNull()
+    expect(menu.queryByRole('menuitem', { name: 'Settings…' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add workspace' })).toBeNull()
   })
 
   it('does not offer deletion when the gateway lacks the method', async () => {
     seed({ capabilities: { gateway: 'remote', methods: ['workspace.list'], ws: [] } })
     render(<WorkspacesRoute params={{}} client={fakeApi()} />)
 
-    await screen.findByText(otherWorkspace.name)
-    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+    expect(within(await rowMenu(otherWorkspace.name)).queryByRole('menuitem', { name: 'Delete…' })).toBeNull()
   })
 
   it('cancels without deleting and reflects subsequent live workspace changes', async () => {
@@ -148,9 +173,7 @@ describe('workspaces view', () => {
     render(<WorkspacesRoute params={{}} client={client} />)
     await screen.findByText(otherWorkspace.name)
 
-    const row = screen.getByText(workspace.name).closest('li')!
-    fireEvent.click(within(row).getByRole('button', { name: 'Delete' }))
-    const dialog = within(await screen.findByRole('alertdialog'))
+    const dialog = await deleteFrom(workspace.name)
     expect(dialog.getByRole('heading', { name: `Delete ${workspace.name}?` })).toBeDefined()
     fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     expect(client.workspaceDelete).not.toHaveBeenCalled()
@@ -171,15 +194,14 @@ describe('workspaces view', () => {
     })
     seed({ activeWorkspace: workspace.id })
     render(<WorkspacesRoute params={{}} client={client} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
-    const dialog = within(await screen.findByRole('alertdialog'))
+    const dialog = await deleteFrom(workspace.name)
 
     fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
     expect((await dialog.findByRole('alert')).textContent).toBe(refusal)
     expect(useStore.getState().workspaces[workspace.id]).toEqual(workspace)
     fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
 
-    await screen.findByText('No workspaces yet.')
+    await screen.findByText(/No workspaces yet/)
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(useStore.getState().activeWorkspace).toBe('')
     expect(client.workspaceDelete).toHaveBeenNthCalledWith(2, workspace.id)
@@ -194,9 +216,7 @@ describe('workspaces view', () => {
     seed({ activeWorkspace: workspace.id })
     render(<WorkspacesRoute params={{}} client={client} />)
     await screen.findByText(otherWorkspace.name)
-    const row = screen.getByText(workspace.name).closest('li')!
-    fireEvent.click(within(row).getByRole('button', { name: 'Delete' }))
-    const dialog = within(await screen.findByRole('alertdialog'))
+    const dialog = await deleteFrom(workspace.name)
     expect(client.workspaceDelete).not.toHaveBeenCalled()
     fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
 
@@ -215,8 +235,7 @@ describe('workspaces view', () => {
     })
     seed({ activeWorkspace: workspace.id })
     render(<WorkspacesRoute params={{}} client={client} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
-    const dialog = within(await screen.findByRole('alertdialog'))
+    const dialog = await deleteFrom(workspace.name)
     fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain('workspace list unavailable')
@@ -239,8 +258,7 @@ describe('workspaces view', () => {
     })
     seed({ activeWorkspace: workspace.id })
     render(<WorkspacesRoute params={{}} client={client} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    const dialog = within(await screen.findByRole('alertdialog'))
+    const dialog = await deleteFrom(workspace.name)
     fireEvent.click(dialog.getByRole('button', { name: 'Delete workspace' }))
     await screen.findByText(otherWorkspace.name)
 
@@ -300,6 +318,6 @@ describe('workspaces view', () => {
     expect(useStore.getState().route).toEqual(expectedRoute)
     expect(screen.queryByText(workspace.name)).toBeNull()
     if (remaining.length) expect(screen.getByText(otherWorkspace.name)).toBeDefined()
-    else expect(screen.getByText('No workspaces yet.')).toBeDefined()
+    else expect(screen.getByText(/No workspaces yet/)).toBeDefined()
   })
 })

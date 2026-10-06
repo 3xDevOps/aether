@@ -7,6 +7,8 @@ export type LineKind = 'add' | 'del' | 'context' | 'hunk' | 'meta'
 export interface PatchLine {
   kind: LineKind
   text: string
+  old?: number
+  new?: number
 }
 
 export type FileStatus = 'added' | 'deleted' | 'modified' | 'binary'
@@ -20,6 +22,7 @@ export interface PatchFile {
 }
 
 const fileHeader = /^diff --git /
+const hunkStart = /^@@ -(\d+)(?:,\d+)? \+(\d+)/
 
 /**
  * Splits `git diff` output into one entry per file. Parsing is deliberately
@@ -33,6 +36,8 @@ export function parsePatch(text: string): PatchFile[] {
   // preamble has to be recognised there and only there: a deleted SQL
   // comment is "--- something" and is not a file marker.
   let inHunk = false
+  let oldLine = 0
+  let newLine = 0
 
   for (const line of text.split('\n')) {
     if (fileHeader.test(line)) {
@@ -45,6 +50,9 @@ export function parsePatch(text: string): PatchFile[] {
 
     if (line.startsWith('@@')) {
       inHunk = true
+      const start = hunkStart.exec(line)
+      oldLine = Number(start?.[1] ?? 0)
+      newLine = Number(start?.[2] ?? 0)
       file.lines.push({ kind: 'hunk', text: line })
       continue
     }
@@ -61,16 +69,17 @@ export function parsePatch(text: string): PatchFile[] {
       }
       continue
     }
+    if (line === '') continue
     if (line.startsWith('+')) {
       file.additions++
-      file.lines.push({ kind: 'add', text: line.slice(1) })
+      file.lines.push({ kind: 'add', text: line.slice(1), new: newLine++ })
     } else if (line.startsWith('-')) {
       file.deletions++
-      file.lines.push({ kind: 'del', text: line.slice(1) })
+      file.lines.push({ kind: 'del', text: line.slice(1), old: oldLine++ })
     } else if (line.startsWith('\\')) {
       file.lines.push({ kind: 'meta', text: line })
     } else {
-      file.lines.push({ kind: 'context', text: line.slice(1) })
+      file.lines.push({ kind: 'context', text: line.slice(1), old: oldLine++, new: newLine++ })
     }
   }
   return files

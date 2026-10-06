@@ -26,6 +26,7 @@ export interface MissionsSlice {
   missionError: string | null
   setMissions: (workspaceID: string, missions: Mission[], nextCursor?: string, append?: boolean) => void
   upsertMission: (mission: Mission) => void
+  removeMission: (missionID: string) => void
   setMissionDetail: (detail: MissionDetail) => void
   setMissionLoading: (loading: boolean) => void
   setMissionError: (error: string | null) => void
@@ -52,6 +53,12 @@ export const createMissionsSlice: SliceCreator<MissionsSlice> = (set) => ({
     })),
   upsertMission: (mission) =>
     set((state) => ({ missions: { ...state.missions, [mission.id]: mission } })),
+  removeMission: (missionID) =>
+    set((state) => {
+      const { [missionID]: _mission, ...missions } = state.missions
+      const { [missionID]: _detail, ...missionDetails } = state.missionDetails
+      return { missions, missionDetails }
+    }),
   setMissionDetail: (detail) =>
     set((state) => ({
       missions: { ...state.missions, [detail.mission.id]: detail.mission },

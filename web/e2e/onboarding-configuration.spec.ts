@@ -37,16 +37,16 @@ test('a directory exceeding request budgets imports completely and reports polic
   writeFileSync(join(source, 'extensions', 'large.bin'), largeAsset)
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  // The git identity is optional and this scenario is not about it.
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
 
-  const configuration = wizard.agents.configuration
+  // Optional, so it waits behind its own disclosure.
+  await expect(wizard.agent.section.getByRole('region', { name: 'Agent config files' })).toHaveCount(0)
+  const configuration = await wizard.agent.configuration()
   await configuration.chooseDirectory(source)
   await expect(configuration.preview()).toHaveCount(0)
   await expect(configuration.section).toContainText('claude-profile')

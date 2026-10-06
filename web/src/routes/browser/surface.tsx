@@ -41,6 +41,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const active = useRef(true)
   const inputEpoch = useRef(0)
   const sendInput = useRef<(input: BrowserInput) => void>(() => {})
+  const repaintParked = useRef(() => {})
   const composing = useRef(false)
   const compositionTarget = useRef<{ frame: DevBrowserFrameMetadata; control: DevControlFence } | null>(null)
   const pointers = useRef(new Map<number, PointerGesture>())
@@ -78,6 +79,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     let acknowledged = false
     let failed = false
     let latest: BrowserFrame | null = null
+    let parked: BrowserFrame | null = null
+    let painted = 0
     let decoding = false
     let sequence = 0
     const target = { run_id: props.runID, session_id: props.page.session_id, page_id: props.page.page_id, page_revision: props.page.page_revision }
@@ -111,8 +114,16 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
             const element = canvas.current
             const context = element?.getContext('2d')
             const observed = current.current.page
-            if (!element || !context || frame.metadata.page_revision < observed.page_revision ||
-              (frame.metadata.page_revision === observed.page_revision && frame.metadata.viewport_id !== observed.viewport_id)) continue
+            if (!element || !context || frame.metadata.page_revision < observed.page_revision) continue
+            // A frame can outrun the RPC that reports its new viewport, and the
+            // screencast sends nothing more for a still page.
+            if (frame.metadata.page_revision === observed.page_revision && frame.metadata.viewport_id !== observed.viewport_id) {
+              parked = frame
+              continue
+            }
+            if (frame.metadata.sequence <= painted) continue
+            parked = null
+            painted = frame.metadata.sequence
             element.width = frame.metadata.width
             element.height = frame.metadata.height
             context.drawImage(bitmap, 0, 0, element.width, element.height)
@@ -125,6 +136,12 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
         fail(`Browser image failed: ${message(cause)}`)
         socket.close()
       } finally { decoding = false }
+    }
+    repaintParked.current = () => {
+      if (!parked) return
+      if (!latest && parked.metadata.sequence > painted) latest = parked
+      parked = null
+      void paint()
     }
     socket.onopen = () => socket.send(JSON.stringify(target))
     socket.onmessage = (event: MessageEvent<unknown>) => {
@@ -153,6 +170,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       disposed = true
       active.current = false
       latest = null
+      parked = null
+      repaintParked.current = () => {}
       displayed.current = null
       clearInput()
       socket.close()
@@ -160,6 +179,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     // Revisions arrive in the stream; they are not new observation sessions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.runID, props.page.session_id, props.page.page_id, props.connection])
+  useEffect(() => repaintParked.current(), [props.page.page_revision, props.page.viewport_id])
 
   const send = (input: BrowserInput) => {
     const frame = displayed.current
@@ -232,7 +252,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   useEffect(() => {
     const element = keyboard.current
     if (!element) return
-    // React's text-input fallback does not deliver every mobile deletion;
+    // React's text-control fallback does not deliver every mobile deletion;
     // listen to the actual beforeinput event and keep a deletable sentinel.
     const beforeInput = (event: InputEvent) => {
       if (composing.current || event.isComposing) return
@@ -303,17 +323,17 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   }
 
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-ui-sm text-muted">
       <span role="status" className="min-w-0 break-words">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
       <div className="flex items-center gap-2">
-        <Button className="coarse:h-11" variant="outline" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
-        <Button className="coarse:h-11" variant="outline" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
+        <Button variant="secondary" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
+        <Button variant="secondary" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
       </div>
-      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only — restore browser controls to acquire control.' : 'Watch only — acquire control to interact.'}</span>
+      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only - restore the browser controls to take control.' : 'Watch only - take control to interact.'}</span>
     </div>
-    <div className="relative min-h-48 min-w-0 flex-1 overflow-hidden bg-black">
+    <div className="relative min-h-48 min-w-0 flex-1 overflow-hidden bg-chrome">
       <canvas ref={canvas} aria-label="Shared browser page" tabIndex={props.control ? 0 : -1}
-        className="h-full w-full touch-none object-contain outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="h-full w-full touch-none object-contain outline-none focus-visible:ring-2 focus-visible:ring-accent"
         onFocus={() => keyboard.current?.focus({ preventScroll: true })}
         onKeyDown={onKey} onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => onPointer(event, 'down')} onPointerMove={(event) => onPointer(event, 'move')}

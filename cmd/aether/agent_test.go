@@ -9,8 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// The list output must distinguish shipped profiles from member-registered
-// definitions so members can tell what agent add actually stored.
 func TestPrintAgents(t *testing.T) {
 	var b strings.Builder
 	err := printAgents(&b, []protocol.AgentInfo{
@@ -38,16 +36,20 @@ func TestPrintAgentsEmpty(t *testing.T) {
 
 func TestPrintAgentInstallGuidance(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		script string
-		want   string
+		name     string
+		script   string
+		enhanced string
+		want     string
 	}{
 		{name: "claude", script: "curl https://example.test/install | sh", want: "curl https://example.test/install | sh"},
+		{name: "codex", script: "npm install codex", enhanced: "npm install codex && npm install codex-acp", want: "npm install codex && npm install codex-acp"},
+		{name: "omp", script: "curl https://example.test/omp | sh", want: "curl https://example.test/omp | sh"},
 		{name: "myagent", want: "install myagent into ~/.local/bin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
-			if err := printAgentInstallGuidance(&out, protocol.AgentInfo{Name: tc.name, InstallScript: tc.script}); err != nil {
+			agent := protocol.AgentInfo{Name: tc.name, InstallScript: tc.script, EnhancedInstallScript: tc.enhanced}
+			if err := printAgentInstallGuidance(&out, agentInstallScript(agent, true)); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "aether terminal") || !strings.Contains(out.String(), tc.want) {
@@ -59,14 +61,14 @@ func TestPrintAgentInstallGuidance(t *testing.T) {
 
 func TestResolveAgentArgs(t *testing.T) {
 	tests := []struct {
-		name         string
-		agent        string
-		tuiFlag      string
-		headlessFlag string
-		shipped      bool
-		input        string
-		wantTUI      []string
-		wantHeadless []string
+		name           string
+		agent          string
+		standardFlag   string
+		backgroundFlag string
+		shipped        bool
+		input          string
+		wantStandard   []string
+		wantBackground []string
 	}{
 		{
 			name:    "shipped name sends no proposal even with input available",
@@ -75,40 +77,40 @@ func TestResolveAgentArgs(t *testing.T) {
 			input:   "ignored\nignored\n",
 		},
 		{
-			name:         "flags win without prompting",
-			agent:        "myagent",
-			tuiFlag:      "myagent --interactive {task}",
-			headlessFlag: "myagent run -p {task}",
-			wantTUI:      []string{"myagent", "--interactive", "{task}"},
-			wantHeadless: []string{"myagent", "run", "-p", "{task}"},
+			name:           "flags win without prompting",
+			agent:          "myagent",
+			standardFlag:   "myagent --interactive {task}",
+			backgroundFlag: "myagent run -p {task}",
+			wantStandard:   []string{"myagent", "--interactive", "{task}"},
+			wantBackground: []string{"myagent", "run", "-p", "{task}"},
 		},
 		{
-			name:         "empty prompt input accepts defaults",
-			agent:        "myagent",
-			input:        "\n\n",
-			wantTUI:      []string{"myagent", "{task}"},
-			wantHeadless: []string{"myagent", "-p", "{task}"},
+			name:           "empty prompt input accepts defaults",
+			agent:          "myagent",
+			input:          "\n\n",
+			wantStandard:   []string{"myagent", "{task}"},
+			wantBackground: []string{"myagent", "-p", "{task}"},
 		},
 		{
-			name:         "prompt input overrides defaults",
-			agent:        "myagent",
-			input:        "myagent go {task}\nmyagent quiet {task}\n",
-			wantTUI:      []string{"myagent", "go", "{task}"},
-			wantHeadless: []string{"myagent", "quiet", "{task}"},
+			name:           "prompt input overrides defaults",
+			agent:          "myagent",
+			input:          "myagent go {task}\nmyagent quiet {task}\n",
+			wantStandard:   []string{"myagent", "go", "{task}"},
+			wantBackground: []string{"myagent", "quiet", "{task}"},
 		},
 		{
-			name:         "only the missing flag is prompted",
-			agent:        "myagent",
-			tuiFlag:      "myagent tui {task}",
-			input:        "myagent hl {task}\n",
-			wantTUI:      []string{"myagent", "tui", "{task}"},
-			wantHeadless: []string{"myagent", "hl", "{task}"},
+			name:           "only the missing flag is prompted",
+			agent:          "myagent",
+			standardFlag:   "myagent std {task}",
+			input:          "myagent bg {task}\n",
+			wantStandard:   []string{"myagent", "std", "{task}"},
+			wantBackground: []string{"myagent", "bg", "{task}"},
 		},
 		{
-			name:         "nil reader takes defaults without prompting",
-			agent:        "myagent",
-			wantTUI:      []string{"myagent", "{task}"},
-			wantHeadless: []string{"myagent", "-p", "{task}"},
+			name:           "nil reader takes defaults without prompting",
+			agent:          "myagent",
+			wantStandard:   []string{"myagent", "{task}"},
+			wantBackground: []string{"myagent", "-p", "{task}"},
 		},
 	}
 	for _, tt := range tests {
@@ -117,26 +119,26 @@ func TestResolveAgentArgs(t *testing.T) {
 			if tt.input != "" {
 				in = strings.NewReader(tt.input)
 			}
-			tui, headless, err := resolveAgentArgs(tt.agent, tt.tuiFlag, tt.headlessFlag, tt.shipped, in)
+			standard, background, err := resolveAgentArgs(tt.agent, tt.standardFlag, tt.backgroundFlag, tt.shipped, in)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(tui, tt.wantTUI) {
-				t.Errorf("tui = %v, want %v", tui, tt.wantTUI)
+			if !reflect.DeepEqual(standard, tt.wantStandard) {
+				t.Errorf("standard = %v, want %v", standard, tt.wantStandard)
 			}
-			if !reflect.DeepEqual(headless, tt.wantHeadless) {
-				t.Errorf("headless = %v, want %v", headless, tt.wantHeadless)
+			if !reflect.DeepEqual(background, tt.wantBackground) {
+				t.Errorf("background = %v, want %v", background, tt.wantBackground)
 			}
 		})
 	}
 }
 
 func TestParseAgentAdd(t *testing.T) {
-	opts, err := parseAgentAdd([]string{"myagent", "--tui", "myagent {task}"})
+	opts, err := parseAgentAdd([]string{"myagent", "--standard", "myagent {task}"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.name != "myagent" || opts.tui != "myagent {task}" || opts.headless != "" {
+	if opts.name != "myagent" || opts.standard != "myagent {task}" || opts.background != "" {
 		t.Fatalf("opts = %+v", opts)
 	}
 	if _, err := parseAgentAdd(nil); err == nil || !strings.Contains(err.Error(), "usage: aether agent add") {

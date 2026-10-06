@@ -58,7 +58,7 @@ export interface RunShellDockState {
   hidden: string[]
   tabs: string[]
   activeTab: string | null
-  collapsed: boolean
+  shellShown: boolean
   refusedMessage: string | null
 }
 
@@ -67,9 +67,7 @@ export const initialRunShellDock: RunShellDockState = {
   hidden: [],
   tabs: [],
   activeTab: null,
-  // Collapsed on arrival: the run's own terminal owns the Terminal tab, and
-  // an open shell dock took a third of it before anyone asked for a shell.
-  collapsed: true,
+  shellShown: false,
   refusedMessage: null,
 }
 
@@ -172,7 +170,7 @@ export interface TerminalSlice {
   syncShellTerminals: (runID: string, terminals: DevTerminal[]) => void
   closeShellTab: (runID: string, tab: string) => void
   selectShellTab: (runID: string, tab: string) => void
-  setDockCollapsed: (runID: string, collapsed: boolean) => void
+  setShellShown: (runID: string, shown: boolean) => void
   setShellRefused: (runID: string, message: string | null) => void
 }
 
@@ -233,6 +231,7 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
             ...current, terminals, hidden, tabs,
             activeTab: current.activeTab && tabs.includes(current.activeTab)
               ? current.activeTab : tabs[0] ?? null,
+            shellShown: current.shellShown && tabs.length > 0,
           },
         },
       }
@@ -256,6 +255,7 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
               : current.hidden,
             activeTab:
               current.activeTab === tab ? (tabs[tabs.length - 1] ?? null) : current.activeTab,
+            shellShown: current.shellShown && tabs.length > 0,
             refusedMessage: tabs.length === 0 ? null : current.refusedMessage,
           },
         },
@@ -268,16 +268,16 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
       const terminal = current?.terminals.find((item) => item.terminal_id === tab)
       if (!current || !terminal) return s
       return { shellDocks: { ...s.shellDocks, [runID]: {
-        ...current, activeTab: tab, refusedMessage: null,
+        ...current, activeTab: tab, refusedMessage: null, shellShown: true,
         tabs: current.tabs.includes(tab) ? current.tabs : [...current.tabs, tab],
         hidden: current.hidden.filter((key) => key !== `${tab}:${terminal.incarnation}`),
       } } }
     }),
-  setDockCollapsed: (runID, collapsed) =>
+  setShellShown: (runID, shellShown) =>
     set((s) => ({
       shellDocks: {
         ...s.shellDocks,
-        [runID]: { ...dock(s.shellDocks, runID), collapsed },
+        [runID]: { ...dock(s.shellDocks, runID), shellShown },
       },
     })),
   setShellRefused: (runID, message) =>

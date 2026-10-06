@@ -21,14 +21,13 @@ request ([What an edge stores](#what-an-edge-stores)).
   storage. Nothing else the app writes is its own.
 - **The WebView's ordinary cache** of the dashboard's files, and the
   dashboard's own local record of how you use it. That record holds how the
-  dashboard looks (theme, sidebar width and whether it is collapsed, terminal
-  font size, dock heights, diff wrapping, Cards/Map layout); where you were
-  (the workspace you last opened, how the sidebar's run list is grouped, each
-  workspace map's pan and zoom, whether you take control of a terminal when
-  you open one); which harness you last launched for each of your agent
-  accounts; which update notices you dismissed, by version; and
-  the setup wizard's progress, which stays empty on a phone because that
-  wizard only runs in the desktop `aether gui`. The dashboard writes these
+  dashboard looks (theme, text size, sidebar width and whether it is
+  collapsed, whether a run's Details panel is open, the embedded
+  Environment terminal's height, terminal font size, line wrapping in
+  Changes, whether single-key shortcuts are on); where you were (the
+  workspace you last opened, whether the sidebar lists only your own runs);
+  the mode you last launched each agent in; which update notices you
+  dismissed, by version; and the onboarding wizard's progress. The dashboard writes these
   preferences in origin-local `aether.ui` storage: they are separate for each
   server origin, including its port. Nothing reads them but the dashboard,
   and they last until you uninstall the app. Both are private to the app.
@@ -46,7 +45,7 @@ again.
 
 - **To your server, and only there.** Every request the dashboard makes goes
   over HTTPS to the server whose name you typed, which you or your team run.
-  That includes what you type into a terminal, the instructions you send an
+  That includes what you type into a terminal, the messages you send an
   agent, an image you pick from the phone to paste into a terminal, the
   contents of files you edit in the dashboard, approvals, and the run controls
   you use. The server keeps them as part of each run's record, on its own disk
@@ -66,8 +65,9 @@ again.
   ([teams.md](teams.md#roles)). It is kept by your own server, not by the
   publisher, and lasts until an administrator removes it.
 - **Your teammates see when you are online and what you have open.** The
-  dashboard reports to the server, every few seconds, that you are there and
-  which run you are watching; the other members of that server see it
+  dashboard tells the server every 15 seconds that you are there and which
+  workspace you have open, and an open run terminal adds you to that run's
+  **Watching** list; the other members of that server see both
   ([teams.md](teams.md)). It is not kept as history.
 - **To nobody else.** The app has no analytics, no crash reporting, no
   advertising, and no third-party library that talks to a network. WebView
@@ -123,6 +123,16 @@ project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 
+An [enhanced run](enhanced-runs.md), and a background run over ACP, records its agent session on your server
+in `<data-dir>/transcripts/<run_id>.items.jsonl`: the prompts members send, the
+agent's messages and thoughts, tool call inputs, command output and diffs,
+permission requests and their answers. Whatever the agent or a tool prints,
+a secret included, can land there. Anyone with **View** on the run can read
+it through the dashboard; answering or messaging the agent needs the `steer`
+permission and the run's control lease. It is capped at 64 MiB per run and deleted with the run's
+terminal transcripts, when the run's checkout is reclaimed or the run is
+deleted. Standard runs keep only their terminal transcript.
+
 The shared app browser runs on your server, not in the phone's WebView.
 Browser input, app-terminal input, observations, frames, and explicit capture
 requests travel through your Aether server. A page opened there makes its
@@ -133,9 +143,9 @@ analytics or third-party reporting.
 
 An app session can contain test-account cookies, tokens, personal data, page
 URLs, or secrets printed by an app or terminal. Reading the live session,
-streaming it, or taking a transient capture requires **Steer** and access to
-the backing account, not merely permission to view a run. Deliberately retained
-evidence copies instead use the existing evidence **View** permission and
+streaming it, or taking a transient capture requires the `steer` permission
+and access to the backing account, not merely permission to view a run.
+Deliberately retained copies instead use capture access and
 expiry; review what you retain for that audience. Human members and the run
 agent have distinct
 per-surface control identities; taking over a shared app surface does not
@@ -154,7 +164,7 @@ Captures are explicit PNG files, not continuous recording. Each run can keep
 at most **64 captures**, **128 MiB of PNG bytes in total**, and **8 MiB per
 image**. Reaching either aggregate limit refuses a new capture with
 `run capture limit reached; delete captures before taking another`; it does
-not silently evict old evidence. Files and their metadata are stored below
+not silently evict old captures. Files and their metadata are stored below
 `<data-dir>/coord/<run-id>/captures/`, exposed read-only to the run as
 `/run/aether/captures/<random-id>.png`. Metadata identifies the run,
 terminal or page, session/revision, capture time, dimensions, and page URL
@@ -163,7 +173,7 @@ was actually observed at capture time; absent fields mean **unknown**, not a
 clean checkout or the packet's later retained revision.
 
 These captures remain transient run-owned files until explicit deletion or
-cleanup of that run's coordination mount. A retained TUI run
+cleanup of that run's coordination mount. A retained Standard run
 keeps its mount and captures until expiry or deletion. The live browser's
 frame stream is not automatically archived. Browser diagnostics are bounded
 observations, not a full traffic recording: the companion retains up to 100
@@ -171,27 +181,28 @@ console warning/error entries and 100 failed/error-response request entries
 per page.
 URLs and logged messages can still reveal sensitive information.
 
-To preserve a reviewed capture before cleanup, explicitly select it in the
-existing Evidence drawer, optionally enter verification notes, and choose
-**Retain selected captures**. An agent with the advertised capability uses
+To preserve a reviewed capture before cleanup, open **Captures…** from the
+run's **More** menu or a terminal's **Tools**, select it under **Select
+transient captures to retain**, optionally enter verification notes, and
+choose **Retain selected captures**. An agent with the advertised capability uses
 `aether-internal artifact retain` with selected `artifact_ids`, optional
 `verification_notes`, and an `idempotency_key`. This copies only the selected
-PNGs into the existing retained evidence packet storage and returns a
+PNGs into the existing retained packet storage and returns a
 `packet_id`; it does not verify the application or report an outcome.
 Agents can pass that packet ID to the existing report `--evidence-ref`.
 Retain before a success/failure report, capture deletion, or other cleanup
 can remove the transient originals. A capture handle or live frame alone is
-not durable evidence.
+not a durable record.
 
 Retained copies remain readable after development processes stop, subject
-to evidence access and expiry. Each run's retained copies are separately
+to capture access and expiry. Each run's retained copies are separately
 bounded to **64 captures**, **128 MiB total**, and **8 MiB per PNG** across
 packets; deleting transient captures does not reclaim retained-copy space.
 Verification notes are bounded to **4096 UTF-8 bytes**. Original source,
 capture time, session, geometry, URL and any observed Git boundary travel
 with the copy. The packet's later retained Git revision does not rewrite or
 attest to an earlier screenshot's Git boundary. Missing, truncated and
-expired evidence is not a successful verification result.
+expired captures are not a successful verification result.
 
 Nothing is retained automatically. Resetting the browser does not delete
 already-written PNGs, and retaining an image does not upload it to a public
@@ -201,6 +212,11 @@ cannot reliably redact secrets an app renders in pixels or text, or those
 you include in verification notes. A member who explicitly downloads,
 exports or publishes a capture creates a separate copy under that
 destination's access and retention rules.
+
+Messages one agent sends another stay on your server as workspace history
+until the sending or receiving run is deleted. Every member of the workspace
+can read their bodies, the same audience the **Activity** page has. Do not
+ask agents to pass credentials to each other.
 
 ## Permissions
 
@@ -214,8 +230,8 @@ which no other app can hold and which grants nothing.
 - At an edge: see [What an edge stores](#what-an-edge-stores).
 - On the server: the server's administrator owns the data directory and can
   delete a run, a member home, or the whole directory
-  ([install.md](install.md#uninstalling)). `aether member remove` destroys
-  your environment terminal, deletes your member record and erases your
+  ([install.md](install.md#uninstalling)). `aether member remove` removes
+  your environment container, deletes your member record and erases your
   member home. It refuses while anything still points at you - a run you
   launched, a schedule you own, or an agent profile you pushed - so an
   administrator deletes those first; what a run wrote stays in the data

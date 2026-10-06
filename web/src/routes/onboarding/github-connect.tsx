@@ -1,9 +1,5 @@
-// Connecting GitHub, as the Agents step's third section and its sub-screen.
-//
-// The half a server cannot do sits in the member's environment terminal:
-// `gh auth login` is a device flow that ends in a browser. Everything after
-// it is non-interactive, so the screen types the login command into the
-// terminal and then hands the rest to `github.connect`.
+// `gh auth login` is a device flow that ends in a browser, so the screen types
+// it into the environment terminal and hands the rest to `github.connect`.
 
 import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
@@ -12,20 +8,15 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { githubLoginCommand, typedLoginCommand } from '@/lib/github'
 import type { GitHubConnectResult, GitHubProbeResult } from '@/lib/types'
-import { TerminalDock } from '@/routes/board/terminal-dock'
-import { pane } from '@/routes/onboarding/steps'
+import { TerminalDock } from '@/routes/environment/terminal-dock'
+import { pane } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
-/**
- * The sub-screen name the Agents step opens this under. The step's other
- * sub-screens are named by harness, and `env.harnesses` reports only the
- * shipped registry names, none of which start with `@`.
- */
+/** Other sub-screens are named by harness, and no registry name starts with `@`. */
 export const githubSubStep = '@github'
 
-/** The closed section, between "Set up an agent" and the configuration
- * import. `connection` is set once this session's connect succeeded. */
+/** `connection` is set once this session's connect succeeded. */
 export function GitHubSection({
   connection,
   onOpen,
@@ -34,32 +25,19 @@ export function GitHubSection({
   onOpen: () => void
 }) {
   return (
-    <section
-      aria-label="Connect GitHub"
-      className="min-w-0 space-y-3 border-t border-border/70 py-3"
-    >
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold">Connect GitHub</h3>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Runs push branches and open pull requests from the server as you.
-          Commits are signed with a key kept in your environment home, which
-          never leaves the server.
-        </p>
-      </div>
-      {connection && (
-        <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
-          Connected in this session as {connection.login}
-        </p>
-      )}
-      <Button size="sm" variant="outline" onClick={onOpen}>
+    <section aria-label="Connect GitHub" className="flex min-w-0 flex-col items-start gap-2">
+      <p className="text-ui text-text">
+        Runs push branches and open pull requests from the server as you. Commits are signed with a key kept in your
+        environment, which never leaves the server.
+      </p>
+      {connection && <p role="status" className="text-ui text-state-done">Connected in this session as {connection.login}</p>}
+      <Button size="sm" variant="secondary" onClick={onOpen}>
         Connect GitHub
       </Button>
     </section>
   )
 }
 
-/** The open sub-screen: the login in the terminal, then the confirmation
- * that runs the non-interactive rest. */
 export function GitHubConnect({
   client,
   caps,
@@ -68,7 +46,6 @@ export function GitHubConnect({
 }: {
   client: Api
   caps: Capability
-  /** Reports the connection to the step, which shows it once closed. */
   onConnected: (connection: GitHubConnectResult) => void
   onClose: () => void
 }) {
@@ -82,11 +59,8 @@ export function GitHubConnect({
   const running = useStore((st) => st.envTerminal.status?.running ?? false)
   const terminalError = useStore((st) => st.envTerminal.statusError)
 
-  // The login command only works in an environment that has a gh able to
-  // run it, and environments from before the standard image shipped gh
-  // have none. The probe runs inside the container, so it waits for the
-  // dock to have one: opening it can take an image pull, which is longer
-  // than the gateway gives a control call.
+  // Older environments have no gh. The probe runs inside the container, so it
+  // waits for the dock: an image pull can outlast a gateway control call.
   useEffect(() => {
     // A new container is a new answer, and the standing one describes a
     // container that is gone; clear it before the wait, not after.
@@ -111,10 +85,8 @@ export function GitHubConnect({
 
   const ghUsable = probe?.status === 'ok'
   const ghUnusable = probe !== null && probe.status !== 'ok'
-  // Fail open, never silent, and never on the member's behalf: a check
-  // that could not run - or a dock that could not give it a terminal at
-  // all - puts the command back on screen without running it. A dock that
-  // has a terminal and merely refused a write is not that.
+  // Fail open, never silent, never on the member's behalf: a check that could
+  // not run shows the command without running it. A refused write is not that.
   const checkFailed = probeError !== null || (terminalError !== null && !running)
 
   const connect = async () => {
@@ -139,8 +111,8 @@ export function GitHubConnect({
         className="min-w-0 space-y-4 border-l-2 border-state-done/60 bg-state-done/5 px-3 py-3"
       >
         <div className="space-y-1">
-          <p className="text-base font-semibold text-state-done">GitHub connected</p>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-title text-state-done">GitHub connected</p>
+          <p className="text-ui leading-6 text-muted">
             Connected to GitHub as {connection.login}. Signing key{' '}
             {connection.fingerprint} is registered on your account.
           </p>
@@ -152,32 +124,30 @@ export function GitHubConnect({
     )
   }
 
-  // Without a terminal socket there is nothing to type the login into, so
-  // the whole flow - including the `github.connect` this screen would call -
-  // is the CLI's.
+  // Without a terminal socket the whole flow, `github.connect` included, is the CLI's.
   if (!hasTerminal) {
     return (
       <section
         aria-label="Connect GitHub"
-        className="min-w-0 max-w-2xl space-y-4 border-t border-border/70 py-3"
+        className="min-w-0 max-w-2xl space-y-4 border-t border-seam/70 py-3"
       >
         <div className="space-y-1">
-          <p className="text-base font-semibold">Connect GitHub</p>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-title">Connect GitHub</p>
+          <p className="text-ui leading-6 text-muted">
             Open your environment terminal and log in to GitHub there:
           </p>
         </div>
-        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
           aether terminal
         </code>
-        <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted p-3 font-mono text-xs">
+        <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap border border-seam/70 bg-chrome p-3 font-code text-ui-sm">
           {githubLoginCommand}
         </pre>
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-ui leading-6 text-muted">
           Finish the device login in your browser, then finish the
           connection from a terminal:
         </p>
-        <code className="block min-w-0 overflow-x-auto border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+        <code className="block min-w-0 overflow-x-auto border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
           aether github connect
         </code>
       </section>
@@ -187,11 +157,11 @@ export function GitHubConnect({
   return (
     <section
       aria-label="Connect GitHub"
-      className="min-w-0 space-y-4 border-t border-border/70 py-3"
+      className="min-w-0 space-y-4 border-t border-seam/70 py-3"
     >
       <div className="space-y-1">
-        <p className="text-base font-semibold">Connect GitHub</p>
-        <p className="text-sm leading-6 text-muted-foreground" role="status">
+        <p className="text-title">Connect GitHub</p>
+        <p className="text-ui leading-6 text-muted" role="status">
           {screenLine({ ghUsable, ghUnusable, checkFailed, running })}
         </p>
       </div>
@@ -202,7 +172,7 @@ export function GitHubConnect({
         </pre>
       )}
       {(ghUnusable || probeError !== null) && (
-        <Button type="button" size="sm" variant="outline" onClick={recheck}>
+        <Button type="button" size="sm" variant="secondary" onClick={recheck}>
           Check again
         </Button>
       )}
@@ -213,12 +183,12 @@ export function GitHubConnect({
       />
       {(ghUsable || checkFailed) && (
         <>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-ui leading-6 text-muted">
             {checkFailed
               ? 'This is the login the check would have made sure your terminal could run; nothing has been typed into it.'
               : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected inside a container: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
           </p>
-          <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-border/70 bg-muted px-3 py-2 font-mono text-xs">
+          <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
             {githubLoginCommand}
           </code>
         </>
@@ -234,17 +204,13 @@ export function GitHubConnect({
         onClick={() => void connect()}
         disabled={busy || ghUnusable}
       >
-        {busy ? 'Connecting GitHub...' : "I've logged in"}
+        {busy ? 'Connecting GitHub…' : "I've logged in"}
       </Button>
     </section>
   )
 }
 
-/**
- * What the screen is doing. Opening the container comes first and is the
- * long part, so the wait for it is named rather than folded into the
- * check that follows it.
- */
+/** The container wait is named on its own, because it is the long part. */
 function screenLine({
   ghUsable,
   ghUnusable,
@@ -256,49 +222,40 @@ function screenLine({
   checkFailed: boolean
   running: boolean
 }): string {
-  if (ghUnusable) return 'Your environment terminal cannot run the login yet:'
-  if (ghUsable) return 'The login command is ready in your environment terminal:'
-  if (checkFailed) return 'Could not check your environment terminal for gh:'
+  if (ghUnusable) return 'Your Environment cannot run the login yet:'
+  if (ghUsable) return 'The login command is ready in your Environment:'
+  if (checkFailed) return 'Could not check your Environment for gh:'
   return running
-    ? 'Checking your environment terminal for gh...'
-    : 'Waiting for your environment terminal to start...'
+    ? 'Checking your Environment for gh…'
+    : 'Waiting for your Environment to start…'
 }
 
-/**
- * The gh the probe found, as one sentence. Only ever called for a gh that
- * cannot do the login, which is why the last arm is the outdated one.
- */
+/** Only called for a gh that cannot log in, so the last arm is the outdated one. */
 function describeGitHubCli(probe: GitHubProbeResult): string {
   switch (probe.status) {
     case 'missing':
-      return 'There is no gh in your environment terminal: it predates the standard image that ships one.'
+      return 'There is no gh in your Environment: it predates the standard image that ships one.'
     case 'broken':
-      return 'gh is in your environment terminal but would not run.'
+      return 'gh is in your Environment but would not run.'
     default:
       // Only a version that was read can be judged old, so there is
       // always one to name here.
-      return `gh ${probe.version}${probe.path ? ` at ${probe.path}` : ''} in your environment terminal cannot answer the login check; ${probe.minimum} is the oldest that can.`
+      return `gh ${probe.version}${probe.path ? ` at ${probe.path}` : ''} in your Environment cannot answer the login check; ${probe.minimum} is the oldest that can.`
   }
 }
 
-/**
- * What to do about a gh that cannot log in: what is wrong, the exact
- * commands, and the container's own answer underneath.
- *
- * A container keeps the image it started from, so every remedy that is not
- * a reset ends in reopening the terminal - which is a button on the dock
- * right below this, as is the reset.
- */
+/** A container keeps the image it started from, so every remedy but a reset
+ * ends in reopening the terminal. */
 function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
   // A member with a saved image owns the whole way out; the server never
   // sends an admin command alongside one.
   const savedIsTheProblem = !!probe.saved_image
   return (
     <>
-      <p className="text-sm text-muted-foreground">{describeGitHubCli(probe)}</p>
+      <p className="text-ui text-muted">{describeGitHubCli(probe)}</p>
       {probe.admin_remedy && (
         <>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-ui text-muted">
             The image is the server's standard one, so a server admin gets
             the server a newer one:
           </p>
@@ -306,12 +263,12 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
         </>
       )}
       {probe.remedy && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-ui text-muted">
           {probe.path
-            ? `That file is in your own environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
+            ? `That file is in your own Environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
             : savedIsTheProblem
               ? `Install a current gh in the terminal below and press Save environment, or press Reset to standard - which removes your saved ${probe.saved_image}. From your own machine that reset is:`
-              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your environment terminal with Stop environment below and open it again, because a container keeps the image it started from. From your own machine that is:`}
+              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your Environment with Stop environment below and open it again, because a container keeps the image it started from. From your own machine that is:`}
         </p>
       )}
       {probe.remedy && <CopyableCommand command={probe.remedy} />}

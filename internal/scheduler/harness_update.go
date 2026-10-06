@@ -50,11 +50,9 @@ type harnessUpdateRun struct {
 	before string
 }
 
-// updateHarness starts an update of the shipped harness installed in the
-// run's member home when one is due, and waits a bounded time for the
-// update in flight. The update runs detached from the launch, so a dropped
-// request or a kill never stops an install halfway, and nothing it does can
-// fail the launch.
+// updateHarness waits a bounded time for the update, which runs detached from
+// the launch so a dropped request or kill never stops an install halfway and
+// nothing it does can fail the launch.
 func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *EnvironmentPlan, profile harness.Profile) {
 	if s.cfg.HarnessUpdateDisabled || profile.UpdateScript == "" || len(profile.TUIArgs) == 0 {
 		return
@@ -78,7 +76,8 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 		s.harnessUpdates[key] = state
 	}
 	update := state.running
-	if update == nil && !s.cfg.Now().Before(state.next) {
+	installing := slices.Contains(slices.Collect(maps.Values(s.agentInstalls)), home.HostPath)
+	if update == nil && !installing && !s.cfg.Now().Before(state.next) {
 		update = &harnessUpdateRun{done: make(chan struct{})}
 		state.running = update
 		// One name per home and harness: only one update per key runs at a
@@ -132,8 +131,6 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 	s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, msg+"while "+profile.Name+" updates")
 }
 
-// runHarnessUpdate runs one update to completion and reports its result on
-// the run that started it.
 func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessUpdateRun, workspace domain.WorkspaceID, runID domain.RunID, spec runtime.Spec, exe string, profile harness.Profile) {
 	timeout := s.cfg.harnessUpdateTimeout
 	if timeout <= 0 {
@@ -216,8 +213,7 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 		}
 		return before, "", fmt.Errorf("the updater exited %d", code)
 	}
-	// A script that succeeds near the deadline must still get its version
-	// read.
+	// A script that succeeds near the deadline must still get its version read.
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), harnessVersionTimeout)
 	defer cancel()
 	return before, s.harnessVersion(probeCtx, cid, exe, spec.WorkingDir), nil

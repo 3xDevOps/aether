@@ -60,12 +60,12 @@ async function attach(
 }
 
 /** Raw attach holders cannot answer a dialog, so exercise the real auto grant. */
-async function takeControlFromRawHolder(page: Page, room: Locator): Promise<void> {
-  const button = room.getByRole('button', { name: 'Take control', exact: true })
+async function takeControlFromRawHolder(page: Page, presence: Locator): Promise<void> {
+  const button = presence.getByRole('button', { name: 'Take control', exact: true })
   await expect(button).toHaveAttribute('aria-disabled', 'false')
   await button.scrollIntoViewIfNeeded()
   const box = await button.boundingBox()
-  if (!box) throw new Error('Run Room control button is missing')
+  if (!box) throw new Error('the Take control button is missing')
   const cdp = await page.context().newCDPSession(page)
   try {
     await cdp.send('Input.dispatchTouchEvent', {
@@ -79,7 +79,7 @@ async function takeControlFromRawHolder(page: Page, room: Locator): Promise<void
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
     // No holder browser can Accept: wait through the server's 7s decision window.
-    await expect(room.getByRole('button', { name: 'Release', exact: true }))
+    await expect(presence.getByRole('button', { name: 'Release', exact: true }))
       .toBeVisible({ timeout: 15_000 })
   } finally {
     await cdp.detach()
@@ -135,9 +135,9 @@ done`)
   desktop.sendInput('start\r')
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: /watched from a phone/ })
     .tap()
 
@@ -174,15 +174,11 @@ done`)
   await expect(prompt).toHaveCount(1)
   await expect.poll(promptVisible).toBe(true)
 
-  // The raw desktop attach still owns the controller lease. Hold through
-  // Run Room, then let its unanswered decision window grant the phone control.
-  const room = page.getByRole('dialog', { name: 'Run Room' })
-  await page.getByRole('button', { name: 'Open Run Room' }).tap()
-  await expect(room.getByText(/Controller: /)).toBeVisible()
-  await takeControlFromRawHolder(page, room)
-  await room.getByRole('button', { name: 'Close Run Room' }).tap()
-  await expect(room).toBeHidden()
-  await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
+  // The raw desktop attach still owns the controller lease. Hold Take control,
+  // then let its unanswered decision window grant the phone control.
+  const presence = page.getByRole('group', { name: 'Run presence' })
+  await expect(presence.getByText(/in another tab|controls/)).toBeVisible()
+  await takeControlFromRawHolder(page, presence)
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
   await expect(rows).toHaveCount(desktopRows)
@@ -374,8 +370,8 @@ done`)
 
   try {
     await page.goto(alice.url)
-    await page.getByRole('button', { name: 'Expand sidebar' }).tap()
-    await page.getByRole('dialog', { name: 'Runs' })
+    await page.getByRole('button', { name: /^Open sidebar/ }).tap()
+    await page.getByRole('dialog', { name: 'Aether' })
       .getByRole('button', { name: 'touch through phone history' }).tap()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live.locator(':scope > div')).toHaveCount(desktopRows)
@@ -385,15 +381,9 @@ done`)
     expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
 
     // Browsing while steering must not focus xterm's keyboard or emit input.
-    const room = page.getByRole('dialog', { name: 'Run Room' })
-    await page.getByRole('button', { name: 'Open Run Room' }).tap()
-    await expect(room.getByText(/Controller: /)).toBeVisible()
-    await takeControlFromRawHolder(page, room)
-    await room.getByRole('button', { name: 'Close Run Room' }).tap()
-    // CDP touch has no actionability check: the fading modal must stop covering
-    // the live screen before the first contact starts its continuous gesture.
-    await expect(room).toBeHidden()
-    await expect(page.locator('[data-slot="dialog-overlay"]')).toBeHidden()
+    const presence = page.getByRole('group', { name: 'Run presence' })
+    await expect(presence.getByText(/in another tab|controls/)).toBeVisible()
+    await takeControlFromRawHolder(page, presence)
     await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
     await page.evaluate(() => {
       document.documentElement.dataset.phoneHistoryInputFocus = ''

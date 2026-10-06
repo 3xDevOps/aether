@@ -6,7 +6,7 @@ import { expect, test } from './mobile'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a phone protects a run from More and reads its diff', async ({
+test('a phone protects a run from More and reads its changes', async ({
   page,
   aether,
 }) => {
@@ -24,9 +24,9 @@ test('a phone protects a run from More and reads its diff', async ({
 
   await page.goto(alice.url)
 
-  await page.getByRole('button', { name: 'Expand sidebar' }).tap()
+  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
-    .getByRole('dialog', { name: 'Runs' })
+    .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: /write the result file/ })
     .tap()
   await expect(
@@ -54,7 +54,8 @@ test('a phone protects a run from More and reads its diff', async ({
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
-  for (const name of ['Browser', 'Events', 'Diff']) {
+  await expect(page.getByRole('tab', { name: 'Browser', exact: true })).toHaveCount(0)
+  for (const name of ['Session', 'Changes']) {
     const tab = page.getByRole('tab', { name, exact: true })
     await tab.tap()
     await expect(tab).toHaveAttribute('aria-selected', 'true')
@@ -67,19 +68,18 @@ test('a phone protects a run from More and reads its diff', async ({
   const refresh = page.getByRole('button', { name: 'Refresh', exact: true })
   await expect(async () => {
     await refresh.tap()
-    await expect(page.getByText('result.txt')).toBeVisible({ timeout: 2000 })
+    await expect(page.getByRole('region', { name: 'result.txt' })).toBeVisible({ timeout: 2000 })
   }).toPass({ timeout: 60 * 1000 })
 
-  // Nothing stands between the header and the first line of the patch: with
-  // no snapshots there is no interval list below `md`.
-  await expect(page.getByText('result.txt')).toBeInViewport()
+  // Nothing stands between the strip and the first file: the file list and
+  // the intervals are menus in the strip on a phone.
+  await expect(page.getByRole('region', { name: 'result.txt' })).toBeInViewport()
   await expect(page.getByText('+hello-from-agent')).toBeVisible()
 
-  // The page itself can never scroll sideways - the patch column is
-  // `overflow-x-hidden` and each file section clips - so wrapping is only
-  // observable on the scroller inside the file section. The fixture commits
-  // one line far wider than the viewport for this.
-  const scroller = page.locator('section:has-text("result.txt") pre').locator('..')
+  // The page itself can never scroll sideways, so wrapping is only observable
+  // on the scroller inside the file section. The fixture commits one line far
+  // wider than the viewport for this.
+  const scroller = page.getByRole('region', { name: 'result.txt' }).locator('[data-slot=patch-lines]').locator('..')
   expect(await overflowOf(scroller)).toBe(0)
 
   await page.getByRole('button', { name: 'Wrap lines' }).tap()

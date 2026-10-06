@@ -93,7 +93,7 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 		next      string
 	}{
 		"no run row":     {next: "did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>"},
-		"failed run row": {writesRow: true, next: "failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <harness> or from the Missions page, or read it with aether swarm show <mission-id>"},
+		"failed run row": {writesRow: true, next: "failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <agent> or from its swarm page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -122,7 +122,7 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 			if getErr != nil || persisted.Phase != domain.MissionPhasePlanning {
 				t.Fatalf("persisted mission = %+v, %v; want planning", persisted, getErr)
 			}
-			want := "mission " + string(persisted.ID) + " exists but its integrator run " + string(persisted.CurrentIntegratorRunID) + " " + strings.ReplaceAll(tc.next, "<mission-id>", string(persisted.ID)) + ": " + cause.Error()
+			want := "swarm " + string(persisted.ID) + " exists but its integrator run " + string(persisted.CurrentIntegratorRunID) + " " + strings.ReplaceAll(tc.next, "<mission-id>", string(persisted.ID)) + ": " + cause.Error()
 			if err.Error() != want {
 				t.Fatalf("create error = %q, want %q", err, want)
 			}
@@ -136,9 +136,6 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 	}
 }
 
-// TestReconcileRecordsAndClearsTheIntegratorLaunchError: each failed relaunch
-// of a reserved integrator replaces the recorded error, and the first launch
-// that succeeds clears it.
 func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -202,9 +199,7 @@ func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	}
 }
 
-// TestReconcileLeavesADeletedIntegratorRunDeleted: once the current
-// integrator's row existed, a missing row means a human deleted the run, and
-// only replacing the integrator starts another.
+// Once the integrator's row existed, a missing row means a human deleted it.
 func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -248,12 +243,9 @@ func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
 	}
 }
 
-// TestHeadlessIntegratorIsRefused: a headless harness exits after one turn,
-// so it could never be asked a question or told of a decision. Workers keep
-// both modes.
-func TestHeadlessIntegratorIsRefused(t *testing.T) {
+func TestIntegratorModes(t *testing.T) {
+	const refused = "integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told"
 	ctx := context.Background()
-	const want = "integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told"
 	f := newMissionFixture(t)
 	headless := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)}
 	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
@@ -262,30 +254,40 @@ func TestHeadlessIntegratorIsRefused(t *testing.T) {
 		ExecutionChoices: []protocol.MissionExecutionChoice{headless},
 	})
 	var rpcErr *protocol.Error
-	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
-		t.Fatalf("create with a headless integrator = %v, want invalid params %q", err, want)
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != refused {
+		t.Fatalf("create with a headless integrator = %v, want invalid params %q", err, refused)
 	}
 	missions, err := f.db.ListMissions(ctx, f.workspace.ID)
 	if err != nil || len(missions) != 1 {
 		t.Fatalf("missions after a refused create = %d (err %v), want only the fixture's", len(missions), err)
 	}
-
 	_, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
 		MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration,
 		Integrator: protocol.MissionIntegrator(headless), IdempotencyKey: "replace-headless",
 	})
-	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
-		t.Fatalf("replace with a headless integrator = %v, want invalid params %q", err, want)
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != refused {
+		t.Fatalf("replace with a headless integrator = %v, want invalid params %q", err, refused)
 	}
 	if got := f.reloadMission(t).IntegratorGeneration; got != f.mission.IntegratorGeneration {
 		t.Fatalf("integrator generation after a refused replace = %d, want %d", got, f.mission.IntegratorGeneration)
 	}
+
+	enhanced := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchACP)}
+	created, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-enhanced",
+		Integrator:       protocol.MissionIntegrator(enhanced),
+		ExecutionChoices: []protocol.MissionExecutionChoice{enhanced},
+	})
+	if err != nil {
+		t.Fatalf("create with an enhanced integrator: %v", err)
+	}
+	if created.Mission.Integrator.Mode != string(domain.LaunchACP) {
+		t.Fatalf("integrator mode %q, want acp", created.Mission.Integrator.Mode)
+	}
 }
 
-// TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI: a mission created before
-// integrators had to be interactive may list only headless choices, and its
-// integrator is replaced by the same account and harness in tui. Create
-// keeps the exact tuple; see TestCreateNamesIntegratorChoiceMissingFromExecutionChoices.
+// Missions created before integrators had to be interactive may list only
+// headless choices.
 func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -323,9 +325,6 @@ func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 	}
 }
 
-// TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator: repeating
-// mission.create with the same key retries a launch that never happened, and
-// nothing else.
 func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 	for name, tc := range map[string]struct {
 		first  Launcher
@@ -382,8 +381,6 @@ func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 	}
 }
 
-// TestReplaceReplayLaunchesNothingForADeletedRun: a replacement's run that a
-// human deleted stays deleted when the replacement is replayed.
 func TestReplaceReplayLaunchesNothingForADeletedRun(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -424,15 +421,15 @@ func TestReplaceReplayLaunchesNothingForADeletedRun(t *testing.T) {
 	}
 }
 
-// TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch: a replacement starts
-// with no launch error, so a failed launch must record its own.
+// A replacement starts with no launch error, so a failed launch must record
+// its own.
 func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 	for name, tc := range map[string]struct {
 		writesRow bool
 		next      string
 	}{
 		"no run row":     {next: "did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>"},
-		"failed run row": {writesRow: true, next: "failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <harness> or from the Missions page, or read it with aether swarm show <mission-id>"},
+		"failed run row": {writesRow: true, next: "failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <agent> or from its swarm page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -447,7 +444,7 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 				MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration, IdempotencyKey: "replace-1",
 				Integrator: protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)},
 			})
-			want := "mission " + out.Mission.ID + " exists but its integrator run " + out.Mission.CurrentIntegratorRunID + " " + strings.ReplaceAll(tc.next, "<mission-id>", out.Mission.ID) + ": " + cause.Error()
+			want := "swarm " + out.Mission.ID + " exists but its integrator run " + out.Mission.CurrentIntegratorRunID + " " + strings.ReplaceAll(tc.next, "<mission-id>", out.Mission.ID) + ": " + cause.Error()
 			if err == nil || err.Error() != want {
 				t.Fatalf("replace error = %v, want %q", err, want)
 			}
@@ -460,9 +457,8 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 	}
 }
 
-// TestReconcileMarksAFailedRowLaunched: a relaunch whose provisioning failed
-// after the scheduler wrote the row leaves a run that exists, so the same
-// pass marks it launched and keeps the cause.
+// Provisioning that fails after the scheduler wrote the row still leaves a
+// run that exists.
 func TestReconcileMarksAFailedRowLaunched(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -505,7 +501,6 @@ type validatingLauncher struct {
 	// refuseAll stands for a harness definition removed after a request
 	// already succeeded.
 	refuseAll bool
-	// validated records each validation's run owner and account.
 	validated [][2]domain.MemberID
 }
 
@@ -523,9 +518,6 @@ func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, ac
 	return nil
 }
 
-// TestIntegratorTheSchedulerCannotLaunchIsRefused: an integrator the
-// scheduler could never start is refused before anything is persisted, and
-// worker dispatch never asks.
 func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	ctx := context.Background()
 	const want = `integrator harness legacy cannot launch in tui mode: scheduler: harness "legacy" has no command for mode "tui"`
@@ -576,9 +568,7 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	}
 }
 
-// TestLaunchValidationResolvesForTheRunOwner: an integrator on a shared
-// account is validated as its run owner's launch on that account, since a
-// launch resolves the harness in the run owner's context.
+// A launch resolves the harness in the run owner's context, not the account's.
 func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	ctx := context.Background()
 	f := newMissionFixture(t)
@@ -609,10 +599,8 @@ func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	}
 }
 
-// TestLaunchValidationDoesNotRefuseAReplay: a create or a replacement whose
-// response was lost is retried with the same key, and the retry returns the
-// stored result even though the harness can no longer launch. A new key is
-// still refused.
+// A retry after a lost response returns the stored result even though the
+// harness can no longer launch.
 func TestLaunchValidationDoesNotRefuseAReplay(t *testing.T) {
 	ctx := context.Background()
 	f := newMissionFixture(t)

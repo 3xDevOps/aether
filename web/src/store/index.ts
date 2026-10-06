@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { clampTerminalFontSize } from '@/lib/term-font'
+import { batched } from '@/store/batch'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
@@ -14,32 +15,36 @@ import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
 import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
+import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
+import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import {
   createUiSlice,
-  normalizeBoardMapViewports,
+  maxSidebarWidth,
+  minSidebarWidth,
   onboardingSteps,
   type OnboardingStep,
   type UiSlice,
 } from '@/store/ui'
 
 /**
- * Every version up to 2 persisted the onboarding resume point as an index
- * into the step list as it stood before "Git identity" was inserted at
- * position two. The names are what those stored numbers meant; typing them
- * as OnboardingStep keeps this list from drifting away from the wizard's
- * own.
+ * Versions up to 2 persisted the onboarding resume point as an index into the
+ * step list before "Git identity" was inserted at position two.
  */
-const v0OnboardingSteps: OnboardingStep[] = [
-  'Link',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-]
+const v0OnboardingSteps = ['Link', 'Workspace', 'Repository', 'Agents', 'First run']
+
+/** Before 8 the wizard had six steps; each maps to the step that absorbed it. */
+const v7OnboardingSteps: Record<string, OnboardingStep> = {
+  Link: 'Connect',
+  'Git identity': 'Connect',
+  Workspace: 'Repository',
+  Repository: 'Repository',
+  Agents: 'Agent',
+  'First run': 'First run',
+}
 
 export type RootState = ServerSlice &
   WorkspacesSlice &
@@ -58,22 +63,24 @@ export type RootState = ServerSlice &
   CollaborationSlice &
   LocalSlice &
   MissionsSlice &
+  MessagesSlice &
+  SessionsSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
 const persistedUi = (s: RootState) => ({
   theme: s.theme,
+  textSize: s.textSize,
   sidebarWidth: s.sidebarWidth,
   sidebarCollapsed: s.sidebarCollapsed,
   terminalDockHeight: s.terminalDockHeight,
-  runDockHeight: s.runDockHeight,
+  detailsOpen: s.detailsOpen,
   terminalFontSize: s.terminalFontSize,
+  singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
-  groupBy: s.groupBy,
-  lastHarnessByAccount: s.lastHarnessByAccount,
-  boardView: s.boardView,
-  boardMapViewports: s.boardMapViewports,
+  mineOnly: s.mineOnly,
+  launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
@@ -82,21 +89,15 @@ const persistedUi = (s: RootState) => ({
   onboardingSource: s.onboardingSource,
   onboardingRepo: s.onboardingRepo,
   onboardingFirstRun: s.onboardingFirstRun,
+  onboardingAgentSkipped: s.onboardingAgentSkipped,
 })
 
-/**
- * What survives a reload. Reading it back yields a partial: an older release
- * stored fewer keys, and a migration may drop one.
- */
+/** Partial: an older release stored fewer keys, and a migration may drop one. */
 type PersistedState = Partial<ReturnType<typeof persistedUi>>
 
-/**
- * The root store: one Zustand store composed of independent slices. A new
- * feature adds a slice file and one line here.
- */
 export function createRootStore() {
   return create<RootState>()(
-    persist(
+    batched(persist(
       (...a) => ({
         ...createServerSlice(...a),
         ...createWorkspacesSlice(...a),
@@ -115,62 +116,69 @@ export function createRootStore() {
         ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
         ...createMissionsSlice(...a),
+        ...createMessagesSlice(...a),
+        ...createSessionsSlice(...a),
         ...createUiSlice(...a),
       }),
       {
         name: 'aether.ui',
-        version: 4,
-        // Every version before 2 stored a Repository step record this build
-        // cannot use: version 0's push answer predates the comparison state
-        // the step renders, and version 1 has no link id to tell one
-        // connection from the next. Dropping it puts the step back on its
-        // push offer, which asks the gateway again. Every version before 3
-        // stored the resume point as an index, so the number is read back
-        // as the step it meant. Every version before 4 has no furthest step:
-        // the resume point is the only evidence of how far the member got,
-        // and without it the header would turn every later step inert.
+        version: 8,
+        // Before 2 the Repository step record is unusable and is dropped, so
+        // the step asks the gateway again. Before 3 the resume point is an
+        // index. Before 4 there is no furthest step, so the resume point
+        // stands in, or the header would turn every later step inert. Before 6
+        // the stored width sized the old run pane, not the sidebar. Before 8
+        // the step names are the six-step wizard's and the run dock height is
+        // still stored.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
             delete state.onboardingRepo
           }
           if (version < 3) {
-            // Read the step through a view of its own: intersecting it with
-            // PersistedState collapses the field back to the current name
-            // type, and the compiler then stops checking this conversion.
+            // Not via PersistedState: that collapses the field to the current
+            // name type and the compiler stops checking this conversion.
             const step = (persisted as { onboardingStep?: unknown } | null)
               ?.onboardingStep
-            state.onboardingStep =
+            ;(state as { onboardingStep?: string }).onboardingStep =
               typeof step === 'number' && v0OnboardingSteps[step]
                 ? v0OnboardingSteps[step]
-                : onboardingSteps[0]
+                : 'Link'
           }
           if (version < 4 && state.onboardingStep) {
             state.onboardingFurthest = state.onboardingStep
           }
+          if (version < 5) delete (state as { groupBy?: unknown }).groupBy
+          if (version < 6) delete state.sidebarWidth
+          if (version < 6) delete (state as { lastHarnessByAccount?: unknown }).lastHarnessByAccount
+          if (version < 7) {
+            delete (state as { boardView?: unknown }).boardView
+            delete (state as { boardMapViewports?: unknown }).boardMapViewports
+          }
+          if (version < 8) {
+            const walk = state as { onboardingStep?: string; onboardingFurthest?: string }
+            state.onboardingStep = v7OnboardingSteps[walk.onboardingStep ?? ''] ?? onboardingSteps[0]
+            state.onboardingFurthest = v7OnboardingSteps[walk.onboardingFurthest ?? ''] ?? state.onboardingStep
+            delete (state as { runDockHeight?: unknown }).runDockHeight
+          }
           return state
         },
-        // `migrate` only runs when the stored version differs, and xterm is
-        // the one consumer that does not validate `fontSize`, so a
-        // hand-edited or corrupted `terminalFontSize` would reach the
-        // terminal as-is and render nothing readable. The dock heights need
-        // no such guard; `clampDockHeight` runs at render.
+        // `migrate` only runs on a version change, and xterm does not validate
+        // `fontSize`, so a corrupted `terminalFontSize` is guarded here.
         merge: (persisted, current) => {
           const stored = (persisted ?? {}) as PersistedState
           return {
             ...current,
             ...stored,
+            sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
-            boardView: stored.boardView === 'map' ? 'map' : 'cards',
-            boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }
         },
-        // Only view preferences survive a reload; server data is re-hydrated.
         partialize: persistedUi,
       },
-    ),
+    )),
   )
 }
 

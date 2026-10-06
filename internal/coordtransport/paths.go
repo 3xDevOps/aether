@@ -16,5 +16,9 @@ const (
 	// CLIPath is the staged coordination CLI path.
 	CLIPath = "/usr/local/bin/aether-internal"
 	// SocketPath is the run's v3 coordination socket inside a container.
-	SocketPath = MountDir + "/" + SocketName
+	SocketPath      = MountDir + "/" + SocketName
+	NextCommandName = "next-command"
+	// EnhancedEnv is "1" in an enhanced run's container. The server wakes
+	// such an agent itself, so inbox hooks the agent loads stay silent.
+	EnhancedEnv = "AETHER_ENHANCED"
 )

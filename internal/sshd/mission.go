@@ -31,6 +31,9 @@ type MissionService interface {
 	ReplaceIntegrator(context.Context, domain.MemberID, protocol.MissionReplaceIntegratorParams) (protocol.MissionReplaceIntegratorResult, error)
 	AnswerQuestion(context.Context, domain.MemberID, protocol.MissionQuestionAnswerParams) (protocol.MissionQuestionResult, error)
 	Cancel(context.Context, domain.MemberID, protocol.MissionCancelParams) (protocol.MissionCancelResult, error)
+	Archive(context.Context, domain.MemberID, protocol.MissionIDParams) (protocol.MissionArchiveResult, error)
+	Unarchive(context.Context, domain.MemberID, protocol.MissionIDParams) (protocol.MissionArchiveResult, error)
+	Delete(context.Context, domain.MemberID, protocol.MissionIDParams) error
 }
 
 // AuthorizeLaunch resolves and checks every mutable fact required before a
@@ -116,6 +119,9 @@ func init() {
 	// mutex these handlers must not take.
 	registerGuarded(protocol.MethodMissionQuestionAnswer, permissions.Launch, nil, (*Server).missionQuestionAnswer)
 	registerGuarded(protocol.MethodMissionCancel, permissions.Launch, nil, (*Server).missionCancel)
+	registerGuarded(protocol.MethodMissionArchive, permissions.Launch, nil, (*Server).missionArchive)
+	registerGuarded(protocol.MethodMissionUnarchive, permissions.Launch, nil, (*Server).missionUnarchive)
+	registerGuarded(protocol.MethodMissionDelete, permissions.Launch, nil, (*Server).missionDelete)
 }
 
 func (s *Server) missions() (MissionService, *protocol.Error) {
@@ -302,6 +308,40 @@ func (s *Server) missionCancel(ctx context.Context, member domain.MemberID, raw 
 		return nil, perr
 	}
 	out, callErr := svc.Cancel(ctx, member, p)
+	if callErr != nil {
+		return nil, rpcError(callErr)
+	}
+	return out, nil
+}
+
+func (s *Server) missionArchive(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	return s.missionByID(raw, func(svc MissionService, p protocol.MissionIDParams) (any, error) {
+		return svc.Archive(ctx, member, p)
+	})
+}
+
+func (s *Server) missionUnarchive(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	return s.missionByID(raw, func(svc MissionService, p protocol.MissionIDParams) (any, error) {
+		return svc.Unarchive(ctx, member, p)
+	})
+}
+
+func (s *Server) missionDelete(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	return s.missionByID(raw, func(svc MissionService, p protocol.MissionIDParams) (any, error) {
+		return struct{}{}, svc.Delete(ctx, member, p)
+	})
+}
+
+func (s *Server) missionByID(raw json.RawMessage, call func(MissionService, protocol.MissionIDParams) (any, error)) (any, *protocol.Error) {
+	svc, err := s.missions()
+	if err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.MissionIDParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	out, callErr := call(svc, p)
 	if callErr != nil {
 		return nil, rpcError(callErr)
 	}

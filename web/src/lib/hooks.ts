@@ -6,11 +6,7 @@ import {
   useSyncExternalStore,
 } from 'react'
 
-/**
- * Styleguide rule: match in-flight feedback to perceived duration - a spinner
- * that flashes for 60ms is worse than none. True only once `active` has held
- * for `delayMs`.
- */
+/** True only once `active` has held for `delayMs`, so a fast operation never flashes a spinner. */
 export function useDelayed(active: boolean, delayMs = 200): boolean {
   const [shown, setShown] = useState(false)
   useEffect(() => {
@@ -24,11 +20,6 @@ export function useDelayed(active: boolean, delayMs = 200): boolean {
   return active && shown
 }
 
-/**
- * The viewport height, tracked. The dock derives its ceiling from it, and a
- * value read once at mount leaves both the clamp and the bound it announces
- * wrong after the window is resized.
- */
 export function useWindowHeight(): number {
   const [height, setHeight] = useState(() => window.innerHeight)
   useEffect(() => {
@@ -39,11 +30,7 @@ export function useWindowHeight(): number {
   return height
 }
 
-/**
- * Starts a pointer drag. Every listener the caller registers on the returned
- * signal is dropped when the drag ends or when the component goes away, which
- * a `pointerup` handler alone cannot promise.
- */
+/** Listeners registered on the returned signal are dropped when the drag ends or the component unmounts. */
 export function useDrag(): () => AbortController {
   const drag = useRef<AbortController | null>(null)
   useEffect(() => () => drag.current?.abort(), [])
@@ -54,26 +41,16 @@ export function useDrag(): () => AbortController {
   }, [])
 }
 
-/** The CSS variant of the same name, asked from JavaScript. */
 export const coarsePointer = '(pointer: coarse)'
 
-/**
- * Tailwind's own breakpoints, asked from JavaScript. `sm` starts at 640px
- * and `md` at 768px, so being below one is being a pixel short of it. Every
- * JavaScript branch reads the edge from here, so a layout that stacks in CSS
- * and a layout that stacks in JavaScript cannot disagree about where.
- */
 export const belowSm = '(max-width: 639px)'
-export const belowMd = '(max-width: 767px)'
+
+export const belowLg = '(max-width: 1023px)'
 
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`
 
-/**
- * Answers a media query, and keeps answering it. CSS is where a layout that
- * only changes size belongs; this is for the ones that mount different
- * elements for a finger than for a mouse, which a class cannot express.
- */
+/** For layouts that mount different elements for touch; size-only changes belong in CSS. */
 export function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {
@@ -88,4 +65,42 @@ export function useMediaQuery(query: string): boolean {
     subscribe,
     () => window.matchMedia?.(query).matches ?? false,
   )
+}
+
+let handedOver: HTMLElement | null = null
+
+/** For a dialog that closes as it opens another, like the palette opening New run: the next useReturnFocus dialog returns to `target`. */
+export function handOverFocus(target: HTMLElement | null) {
+  handedOver = target
+}
+
+function openerOf(active: Element | null): HTMLElement | null {
+  const menu = active?.closest('[role="menu"]')
+  // A menu item is gone once its dialog closes; its menu's trigger is still there.
+  const target = handedOver ?? (menu
+    ? [...document.querySelectorAll('[aria-controls]')].find((el) => el.getAttribute('aria-controls') === menu.id)
+    : active)
+  return target instanceof HTMLElement ? target : null
+}
+
+/** Focus handlers for a dialog that has no Radix trigger, so closing it returns focus to whatever opened it. */
+export function useReturnFocus() {
+  // Read while rendering: an autoFocus field inside the dialog takes focus
+  // before any effect runs, and Radix then skips onOpenAutoFocus.
+  const [atMount] = useState(() => (typeof document === 'undefined' ? null : openerOf(document.activeElement)))
+  const opener = useRef(atMount)
+  useEffect(() => {
+    handedOver = null
+  }, [])
+  return {
+    onOpenAutoFocus: () => {
+      opener.current = openerOf(document.activeElement)
+      handedOver = null
+    },
+    onCloseAutoFocus: (event: Event) => {
+      if (!opener.current?.isConnected) return
+      event.preventDefault()
+      opener.current.focus()
+    },
+  }
 }

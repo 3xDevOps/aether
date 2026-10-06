@@ -29,7 +29,7 @@ func TestClaudeCorrelatedInput(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := FromClaudeHook([]byte(tc.payload))
-			want := Report{State: tc.state, InputUpdates: []domain.RunInputUpdate{{
+			want := Report{State: tc.state, SessionID: "root", InputUpdates: []domain.RunInputUpdate{{
 				Operation: tc.operation, Kind: tc.kind, ID: tc.id, SessionID: tc.session,
 			}}}
 			if !ok || !reflect.DeepEqual(got, want) {
@@ -72,9 +72,9 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 }
 
 func TestCodexNotifyOnlyReportsIdle(t *testing.T) {
-	got, ok := FromCodexNotify(`{"type":"agent-turn-complete","last-assistant-message":"What is your password?"}`)
-	if !ok || got.State != Idle || len(got.InputUpdates) != 0 {
-		t.Fatalf("turn completion invented input: %+v", got)
+	got, ok := FromCodexNotify(`{"type":"agent-turn-complete","thread-id":"0199a1b2-c3d4","turn-id":"7","last-assistant-message":"What is your password?"}`)
+	if !ok || got.State != Idle || len(got.InputUpdates) != 0 || got.SessionID != "0199a1b2-c3d4" {
+		t.Fatalf("turn completion = %+v", got)
 	}
 	for _, payload := range []string{`{"type":"agent-turn-started"}`, `{}`, `invalid`} {
 		if _, mapped := FromCodexNotify(payload); mapped {
@@ -183,6 +183,9 @@ func TestExtensionExecutionLifetimes(t *testing.T) {
 			}
 			if !reflect.DeepEqual(states, tc.states) {
 				t.Fatalf("execution = %v, want %v", states, tc.states)
+			}
+			if tc.scenario == "turn" && reports[0].SessionID != "root" {
+				t.Fatalf("a turn's report without its session: %+v", reports[0])
 			}
 		})
 	}

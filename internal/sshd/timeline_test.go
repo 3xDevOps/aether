@@ -40,7 +40,7 @@ func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 
 	e := newTestEnv(t, func(c *Config) {
 		c.Bus = bus
-		c.Services.Timeline = timeline.NewReader(log)
+		c.Services.Timeline = timeline.NewReader(log, c.Store)
 	})
 	_, grace := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 
@@ -144,6 +144,25 @@ func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 	paged := readTimeline(t, ada, protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID), Limit: 1})
 	if !slices.Equal(eventSeqs(paged), eventSeqs(all)) {
 		t.Fatalf("paged timeline = %v, want %v", eventSeqs(paged), eventSeqs(all))
+	}
+
+	// Paging backward from the head one entry at a time reads the same
+	// history newest first, skipping the hidden diff on the way.
+	var backward []protocol.Event
+	params := protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID), Newest: true, Limit: 1}
+	for {
+		var res protocol.WorkspaceTimelineResult
+		if err = ada.Call(protocol.MethodWorkspaceTimeline, params, &res); err != nil {
+			t.Fatalf("workspace.timeline newest: %v", err)
+		}
+		backward = append(res.Events, backward...)
+		if !res.More {
+			break
+		}
+		params.BeforeSeq = res.OlderSeq
+	}
+	if !slices.Equal(eventSeqs(backward), eventSeqs(all)) {
+		t.Fatalf("backward timeline = %v, want %v", eventSeqs(backward), eventSeqs(all))
 	}
 
 	// JSONL export round-trips: one JSON event per line, parsed back into

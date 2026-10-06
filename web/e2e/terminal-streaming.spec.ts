@@ -178,7 +178,7 @@ done
   })
   await page.goto(alice.url)
   await page
-    .getByRole('complementary', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
     .getByRole('button', { name: /same socket control/ })
     .click()
   const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
@@ -373,7 +373,7 @@ test('scrolling reaches every retained page and prepends without moving visible 
   })
   try {
     await page.goto(alice.url)
-    await page.getByRole('complementary', { name: 'Runs' })
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
       .getByRole('button', { name: run.task }).click()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('LONG-CURRENT', { timeout: 30_000 })
@@ -493,9 +493,8 @@ test('scrolling reaches every retained page and prepends without moving visible 
       await page.mouse.up()
       const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
       expect(selected).toContain('EARLIEST-LONG')
-      const tools = page.getByRole('button', { name: 'Terminal tools', exact: true })
-      if (await tools.isVisible()) await tools.click()
-      await page.getByRole('button', { name: 'Copy terminal selection', exact: true }).click()
+      await page.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Copy selection', exact: true }).click()
       await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(selected)
 
       await clipboard.evaluate((native) => native.writeText('clipboard-sentinel'))
@@ -509,14 +508,9 @@ test('scrolling reaches every retained page and prepends without moving visible 
       })
       const screenText = (await visibleHistory(scroller)).rows.map((row) => row.text ?? '').join('\n')
       expect(screenText).toContain('EARLIEST-LONG')
-      if (await tools.isVisible() && await tools.getAttribute('aria-expanded') === 'false') {
-        await tools.click()
-      }
-      await page.getByRole('button', { name: 'Copy last screen', exact: true }).click()
+      await page.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Copy screen', exact: true }).click()
       await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(screenText)
-      if (await tools.isVisible() && await tools.getAttribute('aria-expanded') === 'true') {
-        await tools.click()
-      }
     } finally {
       await page.evaluate(() => { Reflect.deleteProperty(navigator, 'clipboard') })
       await clipboard.dispose()
@@ -594,7 +588,7 @@ test('switching live runs restores the same recorded rows and pixel offsets with
   })
   try {
     await page.goto(alice.url)
-    const sidebar = page.getByRole('complementary', { name: 'Runs' })
+    const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
     await sidebar.getByRole('button', { name: runA.task }).click()
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('RESTORE-A-CURRENT', { timeout: 30_000 })
@@ -671,7 +665,7 @@ test('switching live runs restores the same recorded rows and pixel offsets with
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png',
     })
-    await page.getByRole('tab', { name: 'Events', exact: true }).click()
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Board', exact: true }).click()
     await expect.poll(() => activeSockets.size).toBe(0)
   } finally {
     await releaseWriter(runA.writer, 1)

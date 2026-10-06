@@ -15,8 +15,8 @@ describe('terminal zoom', () => {
   })
 
   /** Rehydrates a fresh store from a payload this build's own version wrote. */
-  function rehydrate(state: Record<string, unknown>) {
-    window.localStorage.setItem('aether.ui', JSON.stringify({ state, version: 3 }))
+  function rehydrate(state: Record<string, unknown>, version = 8) {
+    window.localStorage.setItem('aether.ui', JSON.stringify({ state, version }))
     const hydrated = createRootStore().getState()
     window.localStorage.removeItem('aether.ui')
     return hydrated
@@ -57,6 +57,29 @@ describe('terminal zoom', () => {
     expect(hydrated.sidebarWidth).toBe(320)
     expect(hydrated.terminalFontSize).toBe(20)
   })
+
+  it('drops the old run pane width from before the sidebar', () => {
+    expect(rehydrate({ sidebarWidth: 320 }, 5).sidebarWidth).toBe(createRootStore().getState().sidebarWidth)
+  })
+
+  it('drops the per-account agent memory from a version 5 payload', () => {
+    const hydrated = rehydrate({ lastHarnessByAccount: { mem_1: 'claude' }, theme: 'dark' }, 5)
+    expect(hydrated).not.toHaveProperty('lastHarnessByAccount')
+    expect(hydrated.theme).toBe('dark')
+  })
+
+  it('drops the board map view from a version 6 payload', () => {
+    const hydrated = rehydrate({ boardView: 'map', boardMapViewports: { '': { x: 0, y: 0, zoom: 1 } }, theme: 'dark' }, 6)
+    expect(hydrated).not.toHaveProperty('boardView')
+    expect(hydrated).not.toHaveProperty('boardMapViewports')
+    expect(hydrated.theme).toBe('dark')
+  })
+
+  it('drops the run dock height from a version 7 payload', () => {
+    const hydrated = rehydrate({ runDockHeight: 240, theme: 'dark' }, 7)
+    expect(hydrated).not.toHaveProperty('runDockHeight')
+    expect(hydrated.theme).toBe('dark')
+  })
 })
 
 // The active workspace and the workspace route are two views of one thing:
@@ -80,11 +103,11 @@ describe('workspace scope and route stay in sync', () => {
   })
 
   it('leaves other routes alone when the scope switches', () => {
-    useStore.getState().navigate('events', { runId: 'run_1' })
+    useStore.getState().navigate('run', { runId: 'run_1' })
     useStore.getState().setActiveWorkspace('wsp_2')
 
     expect(useStore.getState().route).toEqual({
-      name: 'events',
+      name: 'run',
       params: { runId: 'run_1' },
     })
   })
@@ -93,11 +116,12 @@ describe('workspace scope and route stay in sync', () => {
     useStore.getState().navigate('workspace', { workspaceId: 'wsp_2' })
     expect(useStore.getState().activeWorkspace).toBe('wsp_2')
   })
-  it('marks onboarding complete and clears its state when navigating away', () => {
+  it('marks onboarding complete and keeps its progress when navigating away', () => {
     useStore.setState({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 'Agents',
+      onboardingStep: 'Repository',
+      onboardingFurthest: 'Agent',
       onboardingWorkspace: 'wsp_1',
       onboardingRepo: {
         link: 'lnk_1',
@@ -114,9 +138,9 @@ describe('workspace scope and route stay in sync', () => {
     expect(useStore.getState()).toMatchObject({
       route: { name: 'board', params: {} },
       onboarded: true,
-      onboardingStep: 'Link',
-      onboardingWorkspace: '',
-      onboardingRepo: null,
+      onboardingStep: 'Agent',
+      onboardingWorkspace: 'wsp_1',
+      onboardingRepo: { workspace: 'wsp_1' },
     })
   })
   it('keeps onboarding state when navigating to onboarding again', () => {
@@ -157,7 +181,7 @@ describe('update dismissals are per version', () => {
     expect(useStore.getState().dismissedUpdates.server).toBe('v1.3.0')
   })
 
-  it('clears every kind, which is what the status bar badge does', () => {
+  it('clears every kind at once', () => {
     useStore.getState().dismissUpdate('cli', 'v1.3.0')
     useStore.getState().dismissUpdate('server', 'v1.3.0')
     useStore.getState().dismissUpdate('shell', 'v1.3.0')
@@ -183,28 +207,32 @@ describe('update dismissals are per version', () => {
   })
 })
 
-describe('terminal dock heights', () => {
-  it('uses the defaults, clamps updates, and persists both preferences', () => {
+describe('terminal dock height', () => {
+  it('uses the default, clamps updates, and persists the preference', () => {
     const initial = useStore.getState()
     expect(initial.terminalDockHeight).toBe(280)
-    expect(initial.runDockHeight).toBe(240)
 
     initial.setTerminalDockHeight(0)
-    initial.setRunDockHeight(window.innerHeight)
 
     expect(useStore.getState().terminalDockHeight).toBe(120)
-    expect(useStore.getState().runDockHeight).toBe(
-      Math.max(120, window.innerHeight - 200),
-    )
-
     const stored = JSON.parse(
       window.localStorage.getItem('aether.ui') ?? '{}',
     ) as { state?: Record<string, unknown> }
-    expect(stored.state).toMatchObject({
-      terminalDockHeight: 120,
-      runDockHeight: Math.max(120, window.innerHeight - 200),
-    })
-    useStore.setState({ terminalDockHeight: 280, runDockHeight: 240 })
+    expect(stored.state).toMatchObject({ terminalDockHeight: 120 })
+    useStore.setState({ terminalDockHeight: 280 })
+  })
+})
+
+describe('run view memory', () => {
+  it('remembers the view a run was opened in for the rest of the visit', () => {
+    useStore.getState().navigate('run', { runId: 'run_1', view: 'changes' })
+    useStore.getState().navigate('board')
+    useStore.getState().navigate('run', { runId: 'run_1' })
+
+    expect(useStore.getState().runViewMemory).toEqual({ run_1: 'changes' })
+    const stored = JSON.parse(window.localStorage.getItem('aether.ui') ?? '{}') as { state?: Record<string, unknown> }
+    expect(stored.state).not.toHaveProperty('runViewMemory')
+    useStore.setState({ runViewMemory: {} })
   })
 })
 
@@ -277,7 +305,7 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingRepo).toBeNull()
     window.localStorage.removeItem('aether.ui')
   })
@@ -300,26 +328,36 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingRepo).toEqual(repo)
     window.localStorage.removeItem('aether.ui')
   })
 
-  it('maps every old index to the step it named', () => {
+  it('maps every old index to the step that absorbed the one it named', () => {
     for (const version of [0, 1, 2]) {
-      expect(resumeFrom(version, 0)).toBe('Link')
-      expect(resumeFrom(version, 1)).toBe('Workspace')
+      expect(resumeFrom(version, 0)).toBe('Connect')
+      expect(resumeFrom(version, 1)).toBe('Repository')
       expect(resumeFrom(version, 2)).toBe('Repository')
-      expect(resumeFrom(version, 3)).toBe('Agents')
+      expect(resumeFrom(version, 3)).toBe('Agent')
       expect(resumeFrom(version, 4)).toBe('First run')
     }
   })
 
   it('starts over on a value the wizard cannot place', () => {
-    expect(resumeFrom(0, 9)).toBe('Link')
-    expect(resumeFrom(0, -1)).toBe('Link')
-    expect(resumeFrom(0, 'Repository')).toBe('Link')
-    expect(resumeFrom(0, undefined)).toBe('Link')
+    expect(resumeFrom(0, 9)).toBe('Connect')
+    expect(resumeFrom(0, -1)).toBe('Connect')
+    expect(resumeFrom(0, 'Repository')).toBe('Connect')
+    expect(resumeFrom(0, undefined)).toBe('Connect')
+    expect(resumeFrom(7, 'Somewhere')).toBe('Connect')
+  })
+
+  it('maps each of the six old step names to the step that absorbed it', () => {
+    expect(resumeFrom(7, 'Link')).toBe('Connect')
+    expect(resumeFrom(7, 'Git identity')).toBe('Connect')
+    expect(resumeFrom(7, 'Workspace')).toBe('Repository')
+    expect(resumeFrom(7, 'Repository')).toBe('Repository')
+    expect(resumeFrom(7, 'Agents')).toBe('Agent')
+    expect(resumeFrom(7, 'First run')).toBe('First run')
   })
 
   it('runs the migrate on every version behind this one', () => {
@@ -327,9 +365,9 @@ describe('a persisted store from an older release', () => {
     // configured one, so a payload seeded at the current version proves
     // nothing about it. All three older versions stored an index, and each
     // has to come back as the step it named.
-    expect(resumeFrom(0, 3)).toBe('Agents')
-    expect(resumeFrom(1, 3)).toBe('Agents')
-    expect(resumeFrom(2, 3)).toBe('Agents')
+    expect(resumeFrom(0, 3)).toBe('Agent')
+    expect(resumeFrom(1, 3)).toBe('Agent')
+    expect(resumeFrom(2, 3)).toBe('Agent')
     window.localStorage.removeItem('aether.ui')
   })
 
@@ -343,8 +381,8 @@ describe('a persisted store from an older release', () => {
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
-    expect(migrated.onboardingFurthest).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
+    expect(migrated.onboardingFurthest).toBe('Agent')
     window.localStorage.removeItem('aether.ui')
   })
 
@@ -352,14 +390,14 @@ describe('a persisted store from an older release', () => {
     window.localStorage.setItem(
       'aether.ui',
       JSON.stringify({
-        state: { onboardingStep: 'Agents', onboardingFurthest: 'First run' },
-        version: 4,
+        state: { onboardingStep: 'Agent', onboardingFurthest: 'First run' },
+        version: 8,
       }),
     )
 
     const migrated = createRootStore().getState()
 
-    expect(migrated.onboardingStep).toBe('Agents')
+    expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingFurthest).toBe('First run')
     window.localStorage.removeItem('aether.ui')
   })

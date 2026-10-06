@@ -103,13 +103,13 @@ type serveOptions struct {
 	webPort              *int
 	standardImage        *string
 	browserImage         *string
-	harnessDefinitions   *string
+	agentDefinitions     *string
 	tailnetAutoJoin      *bool
 	tailnetRequireKey    *bool
 	edgeURL              *edgeURLValue
 	edgeAccess           *accessPolicyValue
 	conflictCoordination *bool
-	harnessUpdate        *bool
+	agentUpdate          *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
 	checkoutTTL          *time.Duration
@@ -136,8 +136,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	}
 	o.browserImage = fs.String("browser-image", browserImage,
 		"versioned browser companion image or digest (AETHER_BROWSER_IMAGE; never untagged or latest)")
-	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
-		`JSON object of administrator-owned generic harness definitions`)
+	o.agentDefinitions = fs.String("agent-definitions", os.Getenv("AETHER_AGENT_DEFINITIONS"),
+		`JSON object of administrator-owned agent definitions (AETHER_AGENT_DEFINITIONS)`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
 	o.edgeURL = new(edgeURLValue)
@@ -148,14 +148,14 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"who may reach this server through the edge: account (signing in with GitHub is enough) or approved-devices "+
 			"(each new device waits until a person approves it); changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
-	o.harnessUpdate = fs.Bool("harness-update", true, "update a shipped agent installed in the member home before launching it")
+	o.agentUpdate = fs.Bool("agent-update", true, "update a shipped agent installed in the member home before launching it")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
 	o.pollInterval = fs.Duration("poll-interval", 0, "how often stalls are checked (0 = 30s)")
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long closed or agent-finished TUI run containers and completed mission-run containers are retained (0 = 168h / 7 days, negative = no retention)")
+		"how long closed or agent-finished Standard and Enhanced run containers and completed swarm run containers are retained (0 = 168h / 7 days, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
 	return o
@@ -175,9 +175,9 @@ func serve(args []string) error {
 	}
 
 	var harnesses map[string]scheduler.HarnessSpec
-	if *o.harnessDefinitions != "" {
-		if err := json.Unmarshal([]byte(*o.harnessDefinitions), &harnesses); err != nil {
-			return fmt.Errorf("invalid --harness-definitions JSON: %w", err)
+	if *o.agentDefinitions != "" {
+		if err := json.Unmarshal([]byte(*o.agentDefinitions), &harnesses); err != nil {
+			return fmt.Errorf("invalid --agent-definitions JSON: %w", err)
 		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -197,7 +197,7 @@ func serve(args []string) error {
 
 		CoordinationDisabled: !*o.conflictCoordination,
 
-		HarnessUpdateDisabled: !*o.harnessUpdate,
+		HarnessUpdateDisabled: !*o.agentUpdate,
 
 		// The one place a process is granted the right to replace itself
 		// and to ask systemd for a restart. Nothing else supplies it, so

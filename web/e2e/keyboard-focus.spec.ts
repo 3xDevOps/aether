@@ -1,18 +1,9 @@
-// Browser-only shell claims that need painted focus or rendered geometry. The
-// tests below end on a state that proves the claim is not passing for the
-// wrong reason.
+// Escape: Radix dismisses dialogs from a capturing document listener without
+// stopping propagation, so the same Escape reaches the shell's window keydown.
+// jsdom does not reproduce that ordering.
 //
-// Escape: the shell leaves a run-detail route for the board from a `keydown`
-// on `window`, and Radix dismisses its dialogs from a capturing document
-// listener without stopping propagation, so that same Escape still reaches
-// the shell. Ordering is the whole problem, and jsdom does not reproduce it:
-// React commits the close in a microtask that runs first, so a guard asking
-// "is a dialog open?" finds none and the run is left behind with the dialog.
-//
-// Focus: every unit test in the suite asserts Tailwind class strings, which
-// say a class is on an element and nothing about what is painted. This reads
-// the computed outline, and resolves the outline and the background to real
-// pixels so a token that lands on the background colour fails here.
+// Focus: unit tests only assert class strings; this resolves the computed
+// outline and background to painted pixels.
 
 import type { Locator, Page } from '@playwright/test'
 
@@ -21,69 +12,58 @@ import { dockerReachable } from './harness/server'
 import { memberID } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
 
-/** What the installed `claude` shim runs: the seed repository's own script,
- * from the run checkout the scheduler mounts at /workspace. */
+/** The seed repository's own script, from the run checkout mounted at /workspace. */
 const agentShim = 'sh /workspace/agent.sh'
 
 const task = 'write the result file'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-/**
- * The wizard, up to the moment a run screen is on the page. The shell claims
- * below need the interactive run screen, and the helper waits for the fake
- * agent's marker before asserting that its supervised shell remains Working.
- */
 async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.push().click()
   await expect(wizard.repository.section).toContainText('Pushed main to aether')
   await wizard.repository.continue().click()
   aether.installAgent(await memberID(alice), 'claude', agentShim)
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', task)
 
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-  // The fake agent exits, but this interactive run keeps its supervised shell
-  // and remains usable until the member explicitly closes it.
+  // The fake agent exits, but the interactive run keeps its supervised shell.
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready')
-  await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
+  await expect(page.locator('header').filter({ hasText: task })).toContainText('Agent working')
 }
 
-/** Close the live TUI run through the same controls a member uses. */
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
-  await expect(header).toContainText('Working')
+  await expect(header).toContainText('Agent working')
   await header.getByRole('button', { name: 'More', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Close run...', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Close run…', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(header).toContainText('Done')
-  await expect(header).toContainText('closed; retained container')
+  await expect(header).toContainText('Merged')
+  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('Last reasonClosed')
   await expect(dialog).toHaveCount(0)
 }
 
 interface Indicator {
   outlineStyle: string
   outlineWidth: number
-  /** The outline colour and the colour behind it, as painted RGBA bytes. */
+  /** Painted RGBA bytes. */
   outline: number[]
   background: number[]
 }
 
-/** What the focused element actually shows: the computed outline, and the
- * first ancestor background that is not see-through. */
 async function indicator(el: Locator): Promise<Indicator> {
   return el.evaluate((node: HTMLElement) => {
     const paint = (color: string): number[] => {
@@ -127,12 +107,8 @@ function contrast(a: number[], b: number[]): number {
   return (light + 0.05) / (dark + 0.05)
 }
 
-/**
- * Asserts a rendered app focus indicator, not any indicator. Chromium's
- * fallback focus ring is `auto` at 1px in the foreground colour and would
- * satisfy anything looser than this, so deleting the app's indicator would
- * leave the assertion green while proving nothing.
- */
+// Chromium's fallback focus ring is `auto` at 1px, so anything looser than
+// this stays green with the app's indicator deleted.
 function expectVisibleFocus(what: string, seen: Indicator): void {
   expect(seen.outlineStyle, `${what}: outline-style`).toBe('solid')
   expect(seen.outlineWidth, `${what}: outline-width`).toBeGreaterThanOrEqual(2)
@@ -149,8 +125,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
 }) => {
   await openFirstRun(page, aether)
 
-  // The shortcut stands down inside the terminal, and the terminal takes the
-  // focus when it mounts. Clicking the title is how a reader gets out of it.
+  // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
   await page.keyboard.press('?')
 
@@ -160,10 +135,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await page.keyboard.press('Escape')
 
   await expect(dialog).toHaveCount(0)
-  // Still on the run the dialog was opened from: the strip and the title only
-  // exist on a run-detail route, and the Terminal tab is the one that was
-  // open before the dialog.
-  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  const tabs = page.getByRole('tablist', { name: 'Run views' })
   await expect(tabs).toBeVisible()
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
@@ -173,43 +145,33 @@ test('Escape closes a dialog on a run without leaving the run', async ({
 
   await closeFirstRun(page)
 
-  // The same key with nothing over the run does leave it. Without this the
-  // assertions above would also pass on a build where the shortcut never
-  // registered, which is not what they are meant to prove.
+  // Proves the shell shortcut registered at all.
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
   await expect(tabs).toHaveCount(0)
 })
 
-test('Escape closes the status popup without leaving the run', async ({
+test('Escape closes the footer menu without leaving the run', async ({
   page,
   aether,
 }) => {
-  // Wide enough for the expanded sidebar, narrow enough that the secondary
-  // readouts are behind the popup rather than inline in the bar.
-  await page.setViewportSize({ width: 1100, height: 700 })
   await openFirstRun(page, aether)
 
-  // The shortcut stands down inside the terminal, and the terminal takes the
-  // focus when it mounts. Clicking the title is how a reader gets out of it.
+  // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
 
-  const trigger = page.getByRole('button', { name: 'Show status details' })
-  await trigger.click()
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, Live$/ }).click()
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
 
   await page.keyboard.press('Escape')
 
-  // Escape dismisses the topmost thing and only that. The popup is a pair of
-  // window listeners rather than a Radix layer, so which one sees the key
-  // first is real ordering that jsdom cannot reproduce.
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await expect(menu).toHaveCount(0)
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   await closeFirstRun(page)
 
-  // The same key with nothing over the run does leave it, so the assertions
-  // above cannot pass on a build where the shell shortcut never registered.
+  // Proves the shell shortcut registered at all.
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
 })
@@ -220,22 +182,17 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
 }) => {
   await openFirstRun(page, aether)
 
-  // `:focus-visible` follows the last input the browser saw, and the wizard
-  // above is all mouse clicks: an `element.focus()` from script after one of
-  // those does not match in Chromium. Every focus below therefore ends on a
-  // real key press - an arrow along the run strip, which is the only way its
-  // roving tabindex moves focus at all, and a Tab into the next surface.
-  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  // `:focus-visible` follows the last input, and the wizard used the mouse, so
+  // a scripted focus() does not match in Chromium. Every focus ends on a key press.
+  const tabs = page.getByRole('tablist', { name: 'Run views' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
-  const events = tabs.getByRole('tab', { name: 'Events' })
+  const events = tabs.getByRole('tab', { name: 'Session' })
   await expect(events).toBeFocused()
-  expectVisibleFocus('the run tab', await indicator(events))
-  // Keep the live run on screen while checking its sidebar row. The Working
-  // group is expanded by default; closing first would move the row under the
-  // collapsed Done group and leave nothing for focus() to target.
+  expectVisibleFocus('the run view tab', await indicator(events))
+  // Closing the run first would move its row under the collapsed Finished group.
   const row = page
-    .getByRole('complementary', { name: 'Runs' })
+    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })
   await row.focus()
   await page.keyboard.press('Shift+Tab')
@@ -243,21 +200,18 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await expect(row).toBeFocused()
   expectVisibleFocus('the sidebar run row', await indicator(row))
 
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
   await board.focus()
   await page.keyboard.press('Tab')
-  const missions = surfaces.getByRole('button', { name: 'Missions', exact: true })
+  const missions = surfaces.getByRole('button', { name: 'Swarms', exact: true })
   await expect(missions).toBeFocused()
-  expectVisibleFocus('the Missions activity-rail button', await indicator(missions))
+  expectVisibleFocus('the Swarms sidebar row', await indicator(missions))
 
-  // Close only after the live run and all focus targets have been exercised.
   await closeFirstRun(page)
   await page.keyboard.press('Escape')
 
-  // The neighbouring control, reached by mouse instead: no outline. Without
-  // this the checks above would also pass on a control that is outlined all
-  // the time, which is a different bug and not the one they are proving.
+  // Mouse focus must not outline, or the checks above pass on an always-outlined control.
   await board.click()
   await expect(board).toBeFocused()
   expect((await indicator(board)).outlineStyle).toBe('none')
@@ -270,13 +224,11 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   await page.setViewportSize({ width: 1280, height: 720 })
   await openFirstRun(page, aether)
 
-  const sidebar = page.getByRole('complementary', { name: 'Runs' })
-  const rail = page.getByRole('navigation', { name: 'Surfaces' })
+  const sidebar = page.locator('#sidebar')
   const separator = page.getByRole('separator', { name: 'Resize sidebar' })
   const before = await sidebar.boundingBox()
-  const beforeRail = await rail.boundingBox()
   const handle = await separator.boundingBox()
-  if (!before || !beforeRail || !handle) {
+  if (!before || !handle) {
     throw new Error('sidebar splitter did not render')
   }
 
@@ -291,10 +243,8 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
   await page.mouse.up()
 
   const after = await sidebar.boundingBox()
-  const afterRail = await rail.boundingBox()
-  if (!after || !afterRail) throw new Error('sidebar disappeared after resize')
+  if (!after) throw new Error('sidebar disappeared after resize')
   expect(after.x).toBe(before.x)
-  expect(afterRail.width).toBe(beforeRail.width)
 
   await separator.focus()
   await page.keyboard.press('Home')
@@ -304,32 +254,17 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
     .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
     .toBe(minimumWidth)
 
-  const runs = sidebar.getByText('Runs', { exact: true })
-  const toolbar = runs.locator('..')
-  const firstGroup = sidebar.getByRole('heading').first()
-  const groupBy = sidebar.getByRole('group', { name: 'Group runs by' })
-  const member = groupBy.getByRole('button', { name: 'Member', exact: true })
-  await expect(member).toBeVisible()
-
-  const toolbarBox = await toolbar.boundingBox()
-  const firstGroupBox = await firstGroup.boundingBox()
-  const groupBox = await groupBy.boundingBox()
-  const memberBox = await member.boundingBox()
   const minimum = await sidebar.boundingBox()
-  if (
-    !toolbarBox ||
-    !firstGroupBox ||
-    !groupBox ||
-    !memberBox ||
-    !minimum
-  ) {
-    throw new Error('minimum-width sidebar controls did not render')
-  }
-
-  expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
-  for (const control of [groupBox, memberBox]) {
-    expect(control.x).toBeGreaterThanOrEqual(minimum.x)
-    expect(control.x + control.width).toBeLessThanOrEqual(minimum.x + minimum.width)
+  if (!minimum) throw new Error('minimum-width sidebar did not render')
+  for (const control of [
+    sidebar.getByRole('button', { name: 'Search', exact: true }),
+    sidebar.getByRole('button', { name: 'New run', exact: true }),
+    sidebar.getByRole('button', { name: 'Mine', exact: true }),
+  ]) {
+    const box = await control.boundingBox()
+    if (!box) throw new Error('a minimum-width sidebar control did not render')
+    expect(box.x).toBeGreaterThanOrEqual(minimum.x)
+    expect(box.x + box.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   }
   await closeFirstRun(page)
 })

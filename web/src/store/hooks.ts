@@ -1,65 +1,78 @@
-import { useMemo } from 'react'
-import { pendingApprovalKey } from '@/lib/status'
+import { useEffect, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import { useClock } from '@/lib/clock'
+import type { StateContext } from '@/lib/needs-you'
+import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
-import { approvalsForRun } from '@/store/approvals'
-import { isArchivable } from '@/store/runs'
+import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
 import {
+  listedRuns,
+  needsYouByWorkspace,
   sidebarGroups,
-  sidebarRuns,
+  stateContextOf,
+  type RunRow,
   type SidebarGroup,
-  type SidebarRun,
 } from '@/store/selectors'
 
-/**
- * The pending-approval run set, stable across inbox refetches that changed
- * nothing: the store subscription is on a string key, so an unchanged queue
- * neither re-renders subscribers nor invalidates downstream memos.
- */
-export function usePendingApprovalRuns(): Set<string> {
-  const key = useStore((s) => pendingApprovalKey(s.inbox))
-  return useMemo(() => new Set(key ? key.split('\n') : []), [key])
-}
-
-function useSidebarInput() {
-  const workspace = useStore((s) => s.activeWorkspace)
-  const runs = useStore((s) => s.runs)
-  const members = useStore((s) => s.members)
-  const groupBy = useStore((s) => s.groupBy)
-  return useMemo(
-    () => ({ workspace, runs, members, groupBy }),
-    [workspace, runs, members, groupBy],
-  )
+export function useStateContext(): StateContext {
+  const now = useClock()
+  const fields = useStore(useShallow((s) => stateContextOf(s, 0)))
+  return useMemo(() => ({ ...fields, now }), [fields, now])
 }
 
 export function useSidebarGroups(): SidebarGroup[] {
-  const input = useSidebarInput()
-  return useMemo(() => sidebarGroups(input), [input])
+  const ctx = useStateContext()
+  const workspace = useStore((s) => s.activeWorkspace)
+  const mineOnly = useStore((s) => s.mineOnly)
+  return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
 }
 
-/** Runs with a genuine unresolved request, independent of execution. */
-export function useAttentionCount(): number {
-  const input = useSidebarInput()
-  const pending = usePendingApprovalRuns()
-  const roomMessages = useStore((s) => s.roomMessages)
+export function useNeedsYouCount(workspace?: string): number {
+  const counts = useNeedsYouByWorkspace()
+  return workspace === undefined
+    ? Object.values(counts).reduce((total, n) => total + n, 0)
+    : counts[workspace] ?? 0
+}
+
+export function useNeedsYouByWorkspace(): Record<string, number> {
+  const ctx = useStateContext()
+  return useMemo(() => needsYouByWorkspace(ctx), [ctx])
+}
+
+export function useRunPresentation(run: RunRecord): RunPresentation {
+  const now = useClock()
+  const key = useStore((s) => {
+    const shown = presentRun(run, stateContextOf(s, now))
+    return JSON.stringify([shown.state, shown.reason])
+  })
   return useMemo(() => {
-    let count = 0
-    for (const run of Object.values(input.runs)) {
-      if (input.workspace && run.workspace_id !== input.workspace) continue
-      if (run.archived_at && isArchivable(run.status)) continue
-      const questions = run.unanswered_questions ??
-        unansweredQuestions(roomMessages[run.id] ?? []).length
-      if (pending.has(run.id) || (run.pending_inputs?.length ?? 0) > 0 || questions > 0) count++
-    }
-    return count
-  }, [input, pending, roomMessages])
+    const [state, reason] = JSON.parse(key) as [PresentationState, string]
+    return { state, reason }
+  }, [key])
+}
+
+/** One run's record; re-renders only when that run changes. */
+export function useRun(runID: string): RunRecord | undefined {
+  return useStore((s) => s.runs[runID])
+}
+
+/** The IDs of a workspace's runs, every run when it is empty; stable while that set is. */
+export function useRunIDs(workspace: string): string[] {
+  return useStore(
+    useShallow((s) =>
+      Object.values(s.runs)
+        .filter((run) => !workspace || run.workspace_id === workspace)
+        .map((run) => run.id),
+    ),
+  )
 }
 
 export function useRunInput(run: Run) {
-  const approvals = useStore((s) => approvalsForRun(s.inbox, run.id).length)
+  const approvals = useStore((s) => s.approvalsByRun[run.id]?.length ?? 0)
   const questions = useStore((s) => run.unanswered_questions ??
-    unansweredQuestions(s.roomMessages[run.id] ?? []).length)
+    unansweredQuestions(s.roomMessages[run.id] ?? []).filter((m) => m.actor_id !== run.member_id).length)
   const requests = run.pending_inputs ?? []
   const native = requests.length
   const parts: string[] = []
@@ -73,34 +86,28 @@ export function useRunInput(run: Run) {
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
   if (approvals > 0) parts.push(`${approvals} approval${approvals === 1 ? '' : 's'} in Approvals`)
-  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in Run Room`)
+  if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)
   return {
     count: native + approvals + questions,
     questions,
     summary: parts.join('; '),
-    destination: native === 0 && approvals > 0 ? 'approvals' : 'terminal',
+    destination: native === 0 && approvals > 0 ? 'approvals' : 'run',
   }
 }
 
-/** Every run in the active workspace, worst state and most recent change first. */
-export function useAttentionRuns(): SidebarRun[] {
-  const input = useSidebarInput()
-  return useMemo(() => sidebarRuns(input), [input])
+export function useListedRuns(workspace: string): RunRow[] {
+  const ctx = useStateContext()
+  return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])
 }
 
-/** What the connected gateway can do, queryable per method, verb and socket. */
 export interface Capability {
   hasMethod: (method: string) => boolean
   hasLocal: (verb: string) => boolean
   hasWS: (name: string) => boolean
 }
 
-/**
- * The fallback allowlist for a gateway whose /capabilities endpoint did not
- * answer. It is the read-and-steer set every gateway serves; the admin
- * surfaces stay hidden rather than rendering buttons that would fail, so an
- * unknown gateway degrades to monitoring instead of to "everything".
- */
+/** For a gateway whose /capabilities did not answer: the read-and-steer set
+ * every gateway serves, so an unknown gateway degrades to monitoring. */
 const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'server.info': true,
   'workspace.list': true,
@@ -127,13 +134,8 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'template.launch': true,
 }
 
-/**
- * Answers from a capabilities result. Null means a legacy remote monitor
- * that predates the endpoint: it serves exactly the pre-capabilities
- * allowlist and both gateway sockets; the admin methods behind the newer
- * surfaces would 403, and local verbs are a desktop-gateway feature it
- * cannot have. A "*" methods entry means every method.
- */
+/** Null means a legacy remote monitor that predates /capabilities: the
+ * fallback allowlist, both sockets, no local verbs. "*" means every method. */
 export function capability(caps: GatewayCapabilities | null): Capability {
   if (caps === null) {
     return {
@@ -155,20 +157,13 @@ export function useCapability(): Capability {
   return useMemo(() => capability(caps), [caps])
 }
 
-/**
- * The caller's own role, or null before hydration. The gateway capability
- * descriptor answers what the transport can carry; this answers what this
- * member may do. An admin affordance needs both, because the local gateway
- * advertises every method regardless of who is behind it.
- */
+/** Null before hydration. An admin affordance needs this as well as the
+ * gateway capability: the local gateway advertises every method to anyone. */
 export function useSelfRole(): Member['role'] | null {
   return useStore((s) => s.info?.member.role ?? null)
 }
 
-/**
- * The caller's own id and role in one object, which is what the permission
- * mirror in `lib/permissions.ts` asks for. Both are null before hydration.
- */
+/** Both null before hydration. */
 export function useSelf(): { id: string | null; role: Member['role'] | null } {
   const id = useStore((s) => s.info?.member.id ?? null)
   const role = useStore((s) => s.info?.member.role ?? null)
@@ -178,4 +173,10 @@ export function useSelf(): { id: string | null; role: Member['role'] | null } {
 /** Whether the caller holds the admin role. False until hydrated. */
 export function useIsAdmin(): boolean {
   return useStore((s) => s.info?.member.role === 'admin')
+}
+
+/** While `shown`, the phone top bar shrinks New run to an icon, so the page's own action stays the one filled button. */
+export function useHeaderPrimary(shown: boolean) {
+  const hold = useStore((s) => s.holdHeaderPrimary)
+  useEffect(() => (shown ? hold() : undefined), [shown, hold])
 }

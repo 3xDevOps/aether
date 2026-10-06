@@ -3,16 +3,16 @@
 Candidate integration is a server-owned workflow for assembling ordered evidence
 submissions, checking a frozen revision, and either landing or proposing that
 revision. The candidate engine runs with ordinary evidence packets; it cannot
-mark a task `Done` or change mission state. Of a mission it reads only the
+mark a task `Done` or change swarm state. Of a swarm it reads only the
 accountable human, the approver of its integrator's delivery requests. A
-mission-policy adapter owns the final handoff to authoritative
-mission/accepted-submission state.
+swarm-policy adapter owns the final handoff to authoritative
+swarm/accepted-submission state.
 
 ## Wire surface
 
 The service is reached through the existing authenticated gateway as
 `POST /api/v1/<method>`. The authenticated transport supplies the actor; no
-`actor`, run owner, mission generation, or permission assertion is accepted in
+`actor`, run owner, swarm generation, or permission assertion is accepted in
 JSON. See [local-gateway.md](local-gateway.md#candidate-integration-methods) for
 transport and status-code behavior.
 
@@ -94,7 +94,7 @@ records; each contains `candidate_id`, `workspace_id`, `state`,
 `candidate_revision`, `target_ref`, `expected_target_revision`,
 `delivery_request`, `delivery_receipt`, `created_at`, and `expires_at`. It
 omits source snapshots, verification output, and mutation history. An optional
-`mission_id` in the list params returns only that mission's candidates.
+`mission_id` in the list params returns only that swarm's candidates.
 `integration.show` returns the complete `Candidate`; the patch response is
 `{"patch":"...","truncated":false}`. The verify/request/decide/deliver results
 also include their newly changed verification, request, or receipt inside that
@@ -137,12 +137,12 @@ candidate-owned Git ref. The service validates every tuple, in the submitted
 order, against the authenticated workspace and durable evidence packet. It
 rejects a packet from another workspace/run, a revision that is not the
 packet's retained revision, and any missing, expired, unavailable, or truncated
-source required by `required_sources`. The mission-policy adapter must
+source required by `required_sources`. The swarm-policy adapter must
 additionally reject duplicate or reordered identities against its authoritative
 accepted submission list.
 A requested source is required, not advisory. The default source policy
 requires Git; the prepare call can request additional named sources.
-This completeness requirement is stricter than mission submission acceptance,
+This completeness requirement is stricter than swarm submission acceptance,
 which can accept a readable capped transcript as explicitly partial evidence.
 Accepting that submission does not bypass `required_sources` during preparation.
 
@@ -202,7 +202,7 @@ next resolution batch.
 Remaining index conflicts keep the candidate `conflicted`, so files can be
 resolved in separate batches.
 
-`integration.resolve` is a human method. A mission integrator recovers from a
+`integration.resolve` is a human method. A swarm integrator recovers from a
 conflict without it. `integration.prepare` takes an ordered subset of the
 accepted submissions, so the integrator delivers the ones that apply cleanly,
 revises the conflicting task so a new worker redoes it from the advanced
@@ -288,12 +288,12 @@ reviewed request: the human decision and subsequent delivery use the same
 exact value. Replacing or changing a request is not an adaptation; it creates
 a new request/version and invalidates the old one.
 
-A request starts `pending`, except one from a mission's current integrator: it
-is recorded `approved` with `decided_by` set to the mission's accountable human
-and `decided_at` set to the request time, so a verified mission candidate is
+A request starts `pending`, except one from a swarm's current integrator: it
+is recorded `approved` with `decided_by` set to the swarm's accountable human
+and `decided_at` set to the request time, so a verified swarm candidate is
 delivered with no human step. The request is refused, and nothing is recorded,
 if the accountable human is pending or lacks Push on the workspace. A human's
-request on a mission candidate still waits for a decision.
+request on a swarm candidate still waits for a decision.
 
 `integration.decide` is human-only: its actor must have no `RunID`. It takes
 `request_id`, the exact `request_version`, and `approve`; it decides a
@@ -339,7 +339,7 @@ git push upstream \
 The last command is a normal upstream push and may require the upstream's
 review/protection flow; it is not performed by `integration.deliver`.
 
-## Admission and mission-policy integration
+## Admission and swarm-policy integration
 
 The internal service is constructed with:
 
@@ -377,29 +377,29 @@ type AdmissionFunc func(context.Context, Admission) (release func(), err error)
 
 `AdmissionFunc` is server-controlled and runs for every mutation, including
 prepare with an omitted `mission_id`. The standalone default rejects run
-actors and non-empty mission IDs. The embedding server installs mission
+actors and non-empty swarm IDs. The embedding server installs swarm
 policy without weakening the engine's workspace/member permission checks.
 Authenticated transports supply `Actor`: SSH/gateway calls supply `MemberID`;
 the run socket supplies `RunID`. Clients cannot set either identity.
 
 Prepare passes a candidate pointer before its first durable write with
-`NewCandidate=true`. Policy freezes the mission-owned accepted-set version
+`NewCandidate=true`. Policy freezes the swarm-owned accepted-set version
 there. Replays receive the existing binding with `NewCandidate=false`.
 Published-candidate locks precede the shared authorization fence. Successful
 admission returns a release function held through the consequential action.
 Verification separately admits queueing, container creation, and start; it
 does not hold the authority fence while waiting for the command.
 
-The mission adapter resolves current assignments and every source run's
-mission association, even when `mission_id` is omitted. It rejects mixed
-mission/ordinary inputs, stale integrators, unaccepted revisions, and changed
+The swarm adapter resolves current assignments and every source run's
+swarm association, even when `mission_id` is omitted. It rejects mixed
+swarm/ordinary inputs, stale integrators, unaccepted revisions, and changed
 accepted-set bindings. Explicit sources may select an ordered subset. An
-integrator may change a candidate only while its mission is `active`: once the
-mission is cancelled or completed, prepare, verify, request-delivery, and
+integrator may change a candidate only while its swarm is `active`: once the
+swarm is cancelled or completed, prepare, verify, request-delivery, and
 deliver are refused with a conflict, so cancel is what stops an unattended
 delivery. Human operations retain existing member permissions; historical
 review and authorized cleanup remain available. The engine does not own
-mission state.
+swarm state.
 
 `PrepareRuntime` and `ReleaseRuntime` must be supplied together or both omitted.
 The server wires them to verified CLI staging keyed by the persisted runtime
@@ -420,9 +420,9 @@ remains recoverable. Candidate tombstone metadata
 is retained for at most 30 days; public proposal refs are never removed as
 candidate-private artifacts.
 
-The candidate schema is migration **32**; mission migrations **33–39** follow
+The candidate schema is migration **32**; swarm migrations **33–39** follow
 it in `internal/store/migrate.go`. Migration 39 adds the plan gate:
-`missions.phase` (defaulting to `active`, so existing missions keep
+`missions.phase` (defaulting to `active`, so existing swarms keep
 dispatching), `missions.plan_version`, the revision audit columns
 `mission_task_revisions.material`, `.accepted_by_member_id` and
 `.accepted_by_run_id`, `mission_questions`, `mission_plan_reviews` (including

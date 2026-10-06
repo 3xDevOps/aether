@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -26,26 +27,49 @@ import (
 // shows a pending blocked reason, and the first working report after that
 // park clears it.
 func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error {
+	newSession, err := s.applyAgentReport(ctx, run, report)
+	if newSession != nil {
+		s.recordAgentSession(ctx, newSession)
+	}
+	return err
+}
+
+// recordAgentSession stores the run's latest reported session. sessionMu
+// keeps a slower write of an older session from landing last.
+func (s *Scheduler) recordAgentSession(ctx context.Context, entry *supervised) {
+	entry.sessionMu.Lock()
+	defer entry.sessionMu.Unlock()
+	s.mu.Lock()
+	session := entry.agentSessionID
+	s.mu.Unlock()
+	if err := s.cfg.Store.SetRunAgentSession(ctx, entry.runID, session); err != nil {
+		slog.Warn("scheduler: record the agent's session", "run", entry.runID, "error", err)
+	}
+}
+
+// applyAgentReport returns the run's entry when its agent reported a new
+// session, for the caller to record outside the scheduler lock.
+func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, report agentstatus.Report) (*supervised, error) {
 	if report.State != agentstatus.Working && report.State != agentstatus.Idle &&
 		(report.State != "" || len(report.InputUpdates) == 0) {
-		return fmt.Errorf("scheduler: invalid agent execution state %q", report.State)
+		return nil, fmt.Errorf("scheduler: invalid agent execution state %q", report.State)
 	}
 	if err := domain.ValidateRunInputUpdates(report.InputUpdates); err != nil {
-		return err
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
 	if entry == nil {
-		return fmt.Errorf("scheduler: agent status report for %s: the run has no live container", run)
+		return nil, fmt.Errorf("scheduler: agent status report for %s: the run has no live container", run)
 	}
 	if (entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention) ||
 		entry.exitObserved || entry.finalizing || entry.retained || entry.destroyPending {
-		return fmt.Errorf("scheduler: agent status report for %s: the run is no longer active (%s)", run, entry.status)
+		return nil, fmt.Errorf("scheduler: agent status report for %s: the run is no longer active (%s)", run, entry.status)
 	}
 	pending, err := reduceRunInputs(entry.pendingInputs, report.InputUpdates)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	inputsChanged := len(report.InputUpdates) != 0 && !slices.Equal(pending, entry.pendingInputs)
 	execution := entry.agentReport
@@ -83,7 +107,7 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 			next.BlockedReason, next.BlockedShown = "", false
 		}
 		if err := s.writeSidecar(next); err != nil {
-			return fmt.Errorf("scheduler: persist agent report: %w", err)
+			return nil, fmt.Errorf("scheduler: persist agent report: %w", err)
 		}
 	}
 
@@ -104,7 +128,7 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 		if persist {
 			transitionErr = errors.Join(transitionErr, s.writeSidecar(oldSidecar))
 		}
-		return transitionErr
+		return nil, transitionErr
 	}
 	switch report.State {
 	case agentstatus.Working:
@@ -131,7 +155,25 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	if finishes {
 		s.startReportedFinishLocked(entry)
 	}
-	return s.publishPendingInputLocked(ctx, entry)
+	var newSession *supervised
+	if s.recordReportedSessionLocked(entry, report.SessionID) {
+		newSession = entry
+	}
+	return newSession, s.publishPendingInputLocked(ctx, entry)
+}
+
+// recordReportedSessionLocked keeps the latest session a Standard run's agent
+// reports and reports whether it is new. An enhanced run's session id comes
+// from its session host instead.
+func (s *Scheduler) recordReportedSessionLocked(entry *supervised, session string) bool {
+	if session == "" || entry.launchMode != domain.LaunchTUI || session == entry.agentSessionID {
+		return false
+	}
+	entry.agentSessionID = session
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: persist the agent's session", "run", entry.runID, "error", err)
+	}
+	return true
 }
 
 // publishPendingInputLocked repairs only an outstanding publication, never an

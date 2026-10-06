@@ -7,6 +7,7 @@ import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { configKey } from '@/store/files'
 import { capability } from '@/store/hooks'
+import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
@@ -197,17 +198,15 @@ describe('hydrate', () => {
       window.history.replaceState({}, '', '/')
     })
 
-    it('opens that run and leaves the address bar clean', async () => {
+    it('opens that run', async () => {
       window.history.replaceState({}, '', '/?run=run_1')
       const store = createRootStore()
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_1' },
       })
-      // Stripped, so a reload does not reopen a run the member left.
-      expect(window.location.search).toBe('')
     })
 
     it('stays on the board for a completed member requesting a run they cannot see', async () => {
@@ -217,7 +216,6 @@ describe('hydrate', () => {
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
-      expect(window.location.search).toBe('')
     })
 
     it('does not reopen the run when a reconnect re-hydrates', async () => {
@@ -244,9 +242,8 @@ describe('hydrate', () => {
       }))
 
       expect(store.getState().route).toEqual(requested === 'run_1'
-        ? { name: 'terminal', params: { runId: requested } }
+        ? { name: 'run', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
-      expect(window.location.search).toBe('')
     })
 
     it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
@@ -270,9 +267,8 @@ describe('hydrate', () => {
       await hydrate(store, client)
 
       expect(store.getState().route).toEqual(requested === 'run_1'
-        ? { name: 'terminal', params: { runId: requested } }
+        ? { name: 'run', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
-      expect(window.location.search).toBe('')
       if (requested === 'run_1') {
         store.getState().navigate('board')
         await hydrate(store, client)
@@ -472,23 +468,15 @@ describe('hydrate', () => {
       }),
     )
 
-    // No timeline event has arrived, yet the snapshot already knows.
+    // No timeline event has arrived; the snapshot alone carries the state.
     const s = store.getState()
     expect(s.pausedRuns).toEqual({ run_1: true, run_2: false })
     expect(s.pausedRuns.run_3).toBeUndefined()
 
-    // And the board card carries the badge straight from the snapshot.
-    const { columns } = board({
-      workspace: s.activeWorkspace,
-      workspaces: s.workspaces,
-      runs: s.runs,
-      members: s.members,
-      acked: s.acked,
-      pausedRuns: s.pausedRuns,
-    })
+    const { columns } = board({ workspace: s.activeWorkspace, mineOnly: false, ctx: stateContextOf(s, Date.now()) })
     const working = columns.find((c) => c.key === 'working')
-    expect(working?.cards.find((c) => c.run.id === 'run_1')?.paused).toBe(true)
-    expect(working?.cards.find((c) => c.run.id === 'run_2')?.paused).toBe(false)
+    expect(working?.cards.find((c) => c.run.id === 'run_1')?.state).toBe('paused')
+    expect(working?.cards.find((c) => c.run.id === 'run_2')?.state).toBe('working')
   })
 
   it('replaces the paused map wholesale on re-hydration', async () => {
@@ -850,6 +838,7 @@ describe('applyEvent', () => {
     expect(record.status).toBe('needs-attention')
     expect(record.reason).toBe('plan review')
     expect(record.stateChangedAt).toBe('2026-08-14T11:00:00Z')
+    expect(record.stateChangedAtEstimated).toBe(false)
     expect(store.getState().lastSeq).toBe(5)
   })
 
@@ -1317,7 +1306,7 @@ describe('applyEvent', () => {
   it('removes a remotely deleted workspace and leaves its open run', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
-    store.getState().navigate('terminal', { runId: 'run_1' })
+    store.getState().navigate('run', { runId: 'run_1', view: 'terminal' })
     const applied = await applyEvent(store, statusEvent({
       type: 'workspace.deleted', run_id: '', payload: {},
     }), fakeApi({
@@ -1416,6 +1405,32 @@ describe('applyEvent', () => {
 
     expect(store.getState().missionNextCursor).toBe('page-2')
     expect(store.getState().missionListWorkspace).toBe(workspace.id)
+  })
+
+  it('drops a deleted mission and leaves its page without re-reading it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [mission()] })) }))
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const client = fakeApi()
+    await applyEvent(store, statusEvent({ run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1', deleted: true } }), client)
+
+    expect(store.getState().missions.mission_1).toBeUndefined()
+    expect(store.getState().route).toEqual({ name: 'missions', params: {} })
+    expect(client.missionShow).not.toHaveBeenCalled()
+  })
+
+  it('reads a renamed member back, including the viewer', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const self = store.getState().info!.member
+    const renamed = { ...self, display_name: 'Renamed' }
+    const client = fakeApi({ memberList: vi.fn(async () => [renamed, bob]) })
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'member.changed', actor_id: self.id, payload: { member_id: self.id, display_name: 'Renamed' },
+    }), client)
+
+    expect(store.getState().members[self.id].display_name).toBe('Renamed')
+    expect(store.getState().info?.member.display_name).toBe('Renamed')
   })
 
   it('follows a server update and never moves it backwards', async () => {
@@ -1896,7 +1911,6 @@ describe('connect', () => {
     pending[0](run({ id: 'run_9', status: 'running' }))
 
     await vi.waitFor(() => expect(store.getState().lastSeq).toBe(12))
-    // The later transition won, and the fetch ran once for both of them.
     expect(store.getState().runs.run_9.status).toBe('running')
     expect(client.runGet).toHaveBeenCalledTimes(1)
     stop()
@@ -1963,9 +1977,8 @@ describe('connect', () => {
   })
 
   it('reports a rejected credential rather than an unreachable server', async () => {
-    // The gateway's own 401 body. A stale or missing token would be rejected
-    // the same way on the WebSocket upgrade, where the failure has no voice
-    // at all, so the probe is the only place that can say what went wrong.
+    // The WebSocket upgrade rejects a bad token with no body, so the probe is
+    // the only place that can say what went wrong.
     const denial = 'a valid gateway token is required; restart `aether gui` for a fresh URL'
     const store = createRootStore()
     const stop = connect(
@@ -1977,7 +1990,6 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(store.getState().streamDead).toBe(true))
     expect(store.getState().connection).toBe('offline')
-    // The gateway's words, not a guess about the network.
     expect(store.getState().hydrationError).toBe(denial)
     // Every reconnect would carry the same credential, so nothing is tried.
     await new Promise((resolve) => setTimeout(resolve, 700))
@@ -2001,9 +2013,8 @@ describe('connect', () => {
   })
 
   it('knows which gateway serves the page before the first hydration fails', async () => {
-    // Only the probe read the descriptor; hydration never got far enough to
-    // store it, and without it a phone would be told to restart a desktop
-    // app it does not have.
+    // Hydration never stored the descriptor; without it a phone would be told
+    // to restart a desktop app it does not have.
     const store = createRootStore()
     const stop = connect(
       store,
@@ -2069,10 +2080,8 @@ describe('connect', () => {
       const stop = connect(store, fakeApi({ serverInfo }))
 
       await subscribe()
-      // Three failures put the next retry seconds out. That timer is the one
-      // a frozen tab stops, and the reopened sockets cannot restart it: the
-      // stream goes live again with a cursor to replay from, so nothing else
-      // re-fetches.
+      // Three failures put the next retry seconds out, on the timer a frozen tab
+      // stops; a stream that goes live with a cursor re-fetches nothing else.
       await vi.waitFor(
         () => expect(serverInfo.mock.calls.length).toBeGreaterThanOrEqual(3),
         { timeout: 6_000 },

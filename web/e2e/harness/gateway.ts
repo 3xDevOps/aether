@@ -44,7 +44,7 @@ function gatewayEnv(home: string, configDir: string): NodeJS.ProcessEnv {
     // source so the host's global or system identity cannot leak in.
     GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'),
     GIT_CONFIG_NOSYSTEM: '1',
-    // env.harnesses widens PATH from the login shell before it reports which
+    // env.agents widens PATH from the login shell before it reports which
     // agents are installed on this machine. A fixed shell and PATH keep that
     // answer the same on a developer's laptop and on a CI runner.
     SHELL: '/bin/sh',

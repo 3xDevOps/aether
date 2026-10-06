@@ -88,16 +88,17 @@ func TestRunSnapshotCountsUnansweredQuestions(t *testing.T) {
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
 	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	teammate := mustCreateTeammate(t, db)
 
 	question := &RoomMessage{
-		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: teammate.ID,
 		Kind: RoomMessageQuestion, Body: "Can I proceed?", IdempotencyKey: "question-1",
 	}
 	if err := db.CreateRoomMessage(ctx, question); err != nil {
 		t.Fatalf("CreateRoomMessage question: %v", err)
 	}
 	replied := &RoomMessage{
-		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: teammate.ID,
 		Kind: RoomMessageQuestion, Body: "Already answered", IdempotencyKey: "question-2",
 	}
 	if err := db.CreateRoomMessage(ctx, replied); err != nil {
@@ -110,6 +111,14 @@ func TestRunSnapshotCountsUnansweredQuestions(t *testing.T) {
 	}
 	if err := db.CreateRoomMessage(ctx, reply); err != nil {
 		t.Fatalf("CreateRoomMessage reply: %v", err)
+	}
+	// The owner's own question is for teammates, not a question to the owner.
+	own := &RoomMessage{
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		Kind: RoomMessageQuestion, Body: "Anyone know the schema?", IdempotencyKey: "question-own",
+	}
+	if err := db.CreateRoomMessage(ctx, own); err != nil {
+		t.Fatalf("CreateRoomMessage own question: %v", err)
 	}
 
 	got, err := db.GetRun(ctx, run.ID)

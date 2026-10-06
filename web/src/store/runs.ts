@@ -1,21 +1,30 @@
 import type { Run, RunInputRequest, RunStatus } from '@/lib/types'
+import { nextActivity, type AgentPayload, type RunActivity } from '@/store/activity'
 import type { SliceCreator } from '@/store/slice'
 
 /** A run plus its last execution-status change time, for sorting and acknowledgments. */
 export type RunRecord = Run & {
   reason?: string
   stateChangedAt: string
+  /** The wire has no status-change time, so a snapshot falls back to the run's start. */
+  stateChangedAtEstimated: boolean
+  /** Client-side only: what the agent did last, from `run.agent` events. */
+  activity?: RunActivity
 }
 
 export function toRecord(run: Run, previous?: RunRecord): RunRecord {
   const carry = previous && previous.status === run.status
-  return {
+  const record: RunRecord = {
     ...run,
     reason: run.reason ?? (carry ? previous.reason : undefined),
     stateChangedAt: carry
       ? previous.stateChangedAt
       : (run.finished_at ?? run.started_at ?? run.created_at),
+    stateChangedAtEstimated: carry ? previous.stateChangedAtEstimated : !run.finished_at,
   }
+  // No snapshot carries activity, so a re-read must not erase it.
+  if (carry && previous.activity) record.activity = previous.activity
+  return record
 }
 
 /** `records` without the runs `keep` rejects; the same object when none is. */
@@ -48,8 +57,11 @@ export interface RunsSlice {
   /** Clears `outcome_unseen`: the owner has opened the run. */
   applyOutcomeSeen: (runID: string) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
+  applyAgentEvent: (runID: string, payload: AgentPayload, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
+  applyUnackedMessages: (runID: string, unread: Pick<Run, 'unacked_messages' | 'oldest_unacked_at'>) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
+  applyRunController: (runID: string, memberID: string) => void
   applyRunArchived: (
     runID: string,
     archivedAt: string | null,
@@ -97,8 +109,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         status: to,
         reason,
         stateChangedAt: time,
+        stateChangedAtEstimated: false,
         outcome_unseen: outcomeUnseen,
       }
+      if (to !== current.status) delete next.activity
       if (to === 'running' && !next.started_at) next.started_at = time
       if (isTerminal(to)) {
         next.finished_at = time
@@ -132,17 +146,38 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       }
     }),
 
+  applyAgentEvent: (runID, payload, time) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current) return {}
+      const activity = nextActivity(current.activity, payload, time)
+      if (activity === current.activity) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, activity } } }
+    }),
+
   applyRunTitle: (runID, title) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current || current.title === title) return {}
       return { runs: { ...s.runs, [runID]: { ...current, title } } }
     }),
+  applyUnackedMessages: (runID, { unacked_messages, oldest_unacked_at }) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || (current.unacked_messages === unacked_messages && current.oldest_unacked_at === oldest_unacked_at)) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, unacked_messages, oldest_unacked_at } } }
+    }),
   applyRunProtected: (runID, isProtected) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current || current.protected === isProtected) return {}
       return { runs: { ...s.runs, [runID]: { ...current, protected: isProtected } } }
+    }),
+  applyRunController: (runID, memberID) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.controller_member_id === memberID) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, controller_member_id: memberID } } }
     }),
   applyRunArchived: (runID, archivedAt, deletesAt) =>
     set((s) => {
@@ -161,12 +196,8 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
 })
 
 /**
- * Whether a run's disposition is final enough to archive: merged, abandoned,
- * failed or interrupted. A completed run still awaits a human disposition
- * (Close), so it stays off this list even though it has stopped. The archive
- * command gate and every hide guard (board selectors, sidebar selectors,
- * the attention count) share this one predicate - see "Archiving hides a
- * finished run" in docs/dashboard-frontend.md.
+ * A completed run still awaits Close, so it is not archivable. The archive gate
+ * and every hide guard share this predicate; see docs/dashboard-frontend.md.
  */
 export function isArchivable(status: RunStatus): boolean {
   return (
@@ -177,12 +208,7 @@ export function isArchivable(status: RunStatus): boolean {
   )
 }
 
-/**
- * Whether a run has stopped for good: every archivable status (above) plus
- * `completed`, which has also stopped but still awaits a human disposition
- * and so is not itself archivable. Used to freeze `finished_at` once a run's
- * outcome is settled - never for a hide guard, which wants `isArchivable`.
- */
+/** Freezes `finished_at`; never a hide guard, which wants `isArchivable`. */
 export function isTerminal(status: RunStatus): boolean {
   return status === 'completed' || isArchivable(status)
 }

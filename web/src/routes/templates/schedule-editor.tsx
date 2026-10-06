@@ -1,12 +1,9 @@
-// One template's cron rule. Cron is evaluated by the server (UTC), so the
-// next-fire preview is whatever schedule.save returned - this view never
-// computes cron client-side.
-
 import { useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { FormField } from '@/components/ui/form-field'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { api, type Api } from '@/lib/api'
 import type { Schedule } from '@/lib/types'
 
@@ -19,7 +16,6 @@ export function ScheduleEditor({
 }: {
   workspaceID: string
   template: string
-  /** The rule as the last schedule.list fetch saw it, if any. */
   schedule?: Schedule
   client?: Api
   onChanged: () => void
@@ -65,51 +61,39 @@ export function ScheduleEditor({
   }
 
   return (
-    <div className="min-w-0 space-y-2">
+    <div className="flex min-w-0 flex-col gap-2">
       <form
-        className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-end"
+        className="flex min-w-0 flex-col gap-2"
         aria-label={`Schedule for ${template}`}
         onSubmit={(e) => {
           e.preventDefault()
           void save()
         }}
       >
-        <Label className="min-w-0 flex-1 space-y-1">
-          <span>Schedule (UTC)</span>
-          <Input
-            aria-label="Cron schedule"
-            placeholder="0 3 * * * (UTC)"
-            value={cron}
-            onChange={(e) => setCron(e.target.value)}
-          />
-        </Label>
-        <div className="flex flex-wrap gap-2 sm:shrink-0">
-          <Button type="submit" size="sm" variant="outline" disabled={busy || !cron.trim()}>
-            Schedule
-          </Button>
+        <FormField label="Schedule (UTC)" help="Five-field cron or an @descriptor such as @daily. Leave it unscheduled for manual launches.">
+          <Input placeholder="0 3 * * *" value={cron} onChange={(e) => setCron(e.target.value)} className="font-code" />
+        </FormField>
+        {current?.next_fire_at && (
+          <p className="text-ui-sm text-muted">
+            Next launch <RelativeTime at={current.next_fire_at} /> ({new Date(current.next_fire_at).toUTCString()})
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="text-ui-sm text-state-failed">
+            {error}
+          </p>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
           {current && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => void remove()}
-            >
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => void remove()}>
               Unschedule
             </Button>
           )}
+          <Button type="submit" disabled={busy || !cron.trim()}>
+            {current ? 'Update schedule' : 'Schedule'}
+          </Button>
         </div>
       </form>
-      {current?.next_fire_at && (
-        <p className="text-xs text-muted-foreground">
-          Next fire {current.next_fire_at}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="text-xs text-state-failed">
-          {error}
-        </p>
-      )}
     </div>
   )
 }

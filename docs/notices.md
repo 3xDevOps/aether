@@ -29,20 +29,29 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard ships three fonts under the SIL Open Font License 1.1:
+The dashboard uses three fonts, each under the SIL Open Font License 1.1:
 
-- Saira for UI text
+- Inter for UI text
+  ([`web/public/fonts/LICENSE-inter.txt`](../web/public/fonts/LICENSE-inter.txt)).
+  Only the Latin variable WOFF2 from the
+  [`@fontsource-variable/inter`](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter)
+  package is bundled.
+- Saira for titles
   ([`web/public/fonts/LICENSE-saira.txt`](../web/public/fonts/LICENSE-saira.txt)).
-  The normal-width variable WOFF2 files cover weights 100–900 in Latin,
-  Latin extended and Vietnamese subsets, downloaded from
+  `web/public/fonts/saira-latin.woff2` is the normal-width variable font,
+  weights 100-900, Latin subset, downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
-- VT323 for the wordmark
-  ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
-- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for terminal
-  output and code
+- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for the
+  terminal (xterm) only
   ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
 
-The Play listing's feature graphic uses VT323 and JetBrainsMono NFM.
+`web/public/fonts/` also holds VT323 (`vt323-latin.woff2`, SIL OFL 1.1,
+[`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
+The dashboard never uses it: `scripts/make-icons.py` reads it to draw the
+wordmark on the Play listing's feature graphic,
+`android/listing/feature-graphic.png`, whose tagline is JetBrainsMono NFM.
+Because it sits in `web/public/`, the static export copies it into the
+dashboard bundle.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the
@@ -100,6 +109,13 @@ when redistributing an image. This inventory does not assert that every
 transitive component has been independently license-audited.
 
 ## Not distributed by the app
+
+Enhanced-mode adapters are not distributed with Aether. `agent.install` and
+`aether agent add --enhanced` install them from the npm registry into the
+member's home, each under its own licence, which
+`internal/harness/acpregistry.json` records: `@agentclientprotocol/claude-agent-acp`
+(proprietary), `@agentclientprotocol/codex-acp` (Apache-2.0), and `pi-acp`
+(MIT).
 
 The dashboard's JavaScript dependencies and the server's Go modules run on
 the member's own server, not on the phone: the APK carries none of them.

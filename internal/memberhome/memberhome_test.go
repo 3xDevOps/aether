@@ -10,7 +10,7 @@ import (
 
 func TestPathValidatesAndCreatesMemberHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root)
+	manager, err := New(root, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestPathValidatesAndCreatesMemberHome(t *testing.T) {
 
 func TestRemoveDeletesMemberHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root)
+	manager, err := New(root, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -53,13 +53,13 @@ func TestRemoveDeletesMemberHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "state"), []byte("ok"), 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	if err := manager.Remove("member-1"); err != nil {
+	if err := manager.Remove(t.Context(), "member-1"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
 		t.Fatalf("member home stat error = %v, want not exists", err)
 	}
-	if err := manager.Remove("member-1"); err != nil {
+	if err := manager.Remove(t.Context(), "member-1"); err != nil {
 		t.Fatalf("second Remove: %v", err)
 	}
 }

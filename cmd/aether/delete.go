@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:  "delete",
-		short: "delete a run, its transcript, and its evidence; a published branch stays",
+		short: "delete a run, its transcript, and its captures; a published branch stays",
 		run:   runDelete,
 	})
 }
@@ -22,7 +22,7 @@ func runDelete(args []string) error {
 		if err := c.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: args[0]}, nil); err != nil {
 			return fmt.Errorf("delete run %q: %w", args[0], err)
 		}
-		fmt.Printf("deleted %s: its checkout, transcript, evidence, and run records are gone; a published run branch stays in the workspace repo\n", args[0])
+		fmt.Printf("deleted %s: its checkout, transcript, captures, and run records are gone; a published run branch stays in the workspace repo\n", args[0])
 		return nil
 	})
 }

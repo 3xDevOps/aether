@@ -1,5 +1,4 @@
-// Wire types. These mirror internal/protocol/wire.go and internal/events;
-// field names are the JSON names the server sends.
+// Wire types mirroring internal/protocol/wire.go and internal/events.
 
 import type { DevArtifact } from '@/lib/development-types'
 export * from '@/lib/development-types'
@@ -36,6 +35,9 @@ export interface Run {
   title?: string
   harness: string
   mode: string
+  /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
+  acp?: boolean
+  switching?: 'tui' | 'acp'
   status: RunStatus
   branch: string
   last_commit?: string
@@ -51,12 +53,17 @@ export interface Run {
   profile_snapshot_id?: string
   /** Server-computed unanswered room questions; absent on older gateways. */
   unanswered_questions?: number
+  /** Agent mail addressed to the run that it has not acknowledged. */
+  unacked_messages?: number
+  oldest_unacked_at?: string
   /** Correlated native requests; independent of execution status. */
   pending_inputs?: RunInputRequest[]
   /** Last run.status reason, sanitized like the event payload. */
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** Holder of the run's control lease; '' means nobody, absent on older gateways. */
+  controller_member_id?: string
   /** An agent report finished the run and its owner has not opened it yet. */
   outcome_unseen?: boolean
   base_commit?: string
@@ -64,7 +71,6 @@ export interface Run {
   base_source?: string
   base_checked_at?: string | null
 }
-/** Release B mission orchestration wire objects. IDs and revisions are server authority. */
 /** Only `active` dispatches workers; `completed` and `cancelled` are final. */
 export type MissionPhase = 'planning' | 'active' | 'completed' | 'cancelled'
 export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
@@ -115,6 +121,7 @@ export interface Mission {
   integrator_run_launched?: boolean
   created_at: string
   updated_at: string
+  archived_at?: string
 }
 
 export interface MissionQuestion {
@@ -221,7 +228,6 @@ export interface MissionAttempt {
   takeover_active?: boolean
   takeover_member_id?: string
   takeover_generation?: number
-  /** Optional future-compatible field when the backend includes its hold. */
   orchestration_hold?: boolean
   cancel_requested_at?: string | null
   cancellation_actor_run_id?: string
@@ -388,7 +394,6 @@ export interface ServerInfo {
   member: Member
   tailnet_hostname?: string
   tailnet_identity_auth?: boolean
-  /** Data-directory usage, when the gateway reports it. */
   disk?: DiskUsage
 }
 
@@ -405,11 +410,8 @@ export interface DiskUsage {
   repo_bytes?: number
 }
 
-/**
- * GET /api/v1/capabilities - what this gateway can do. Legacy remote
- * monitors do not serve it; a null result means "assume the remote
- * allowlist" on the client.
- */
+/** GET /api/v1/capabilities. Legacy remote monitors do not serve it; null
+ * means "assume the remote allowlist". */
 export interface GatewayCapabilities {
   gateway: string
   methods: string[]
@@ -420,7 +422,6 @@ export interface GatewayCapabilities {
   commit?: string
 }
 
-/** The member's persistent environment terminal status. */
 export interface TerminalStatusResult {
   running: boolean
   image?: string
@@ -508,6 +509,7 @@ export interface RoomMessage {
   decided_by?: string
   decided_at?: string
   delivered_at?: string
+  agent_delivery?: 'queued' | 'delivered'
   failure?: RoomMessageFailure
   created_at: string
   updated_at: string
@@ -537,6 +539,8 @@ export interface RoomStatusResult {
 export interface RoomPostResult {
   message: RoomMessage
   receipt?: RoomDeliveryReceipt
+  /** What an enhanced run's agent did with a delivered steer. */
+  outcome?: 'sent' | 'queued' | 'injected'
 }
 
 export interface RoomDecideResult {
@@ -636,15 +640,55 @@ export interface RunTitlePayload {
 export interface RunProtectedPayload {
   protected: boolean
 }
+/** An empty member_id means nobody holds the control lease. */
+export interface RunControllerPayload {
+  member_id: string
+}
 /** Both null means the run was restored. */
 export interface RunArchivedPayload {
   archived_at: string | null
   deletes_at: string | null
 }
 
-// Team surfaces: the approval inbox, the presence roster, cost and budgets,
-// and the workspace timeline (internal/protocol approval.go, cost.go,
-// timeline.go).
+export type RunMessageKind = 'message' | 'question' | 'reply' | 'report'
+
+export interface RunMessage {
+  id: string
+  workspace_id: string
+  mission_id?: string
+  from_run_id: string
+  to_run_id: string
+  kind: RunMessageKind
+  correlation_id?: string
+  body: string
+  created_at: string
+  delivered_at?: string
+  acked_at?: string
+  outcome?: string
+  summary?: string
+  next_action?: string
+}
+
+export interface CoordMessagesListResult {
+  messages: RunMessage[]
+  next_before?: string
+}
+
+export interface CoordMessagePayload {
+  message_id: string
+  workspace_id: string
+  mission_id?: string
+  from_run_id: string
+  to_run_id: string
+  kind: RunMessageKind
+  correlation_id?: string
+}
+
+export interface CoordMessageAckedPayload {
+  message_id: string
+  to_run_id: string
+  acked_at: string
+}
 
 export type ApprovalDecision = 'requested' | 'approved' | 'denied'
 
@@ -668,10 +712,7 @@ export interface PresenceEntry {
   last_seen: string
 }
 
-/**
- * Aggregated usage. `unmetered_runs` counts runs whose usage was never
- * measured, so while it is non-zero every total here is a floor.
- */
+/** While `unmetered_runs` is non-zero every total here is a floor. */
 export interface CostRollup {
   runs: number
   metered_runs: number
@@ -692,7 +733,6 @@ export interface Budget {
 
 export type BudgetState = 'ok' | 'warn' | 'exceeded'
 
-/** A workspace's budget with its state and the spend behind it. */
 export interface BudgetReport {
   workspace_id: string
   budget?: Budget
@@ -701,19 +741,23 @@ export interface BudgetReport {
   advisory?: boolean
 }
 
-/** One page of workspace history, oldest first. */
+/** Oldest first. */
 export interface TimelinePage {
   events: Event[]
   next_seq: number
   more: boolean
+  older_seq?: number
 }
 
 export interface TimelineQuery {
   workspace_id: string
   run_id?: string
+  mission_id?: string
   member_id?: string
   types?: string[]
   after_seq?: number
+  newest?: boolean
+  before_seq?: number
   limit?: number
 }
 
@@ -728,11 +772,8 @@ export interface RunDiffPayload {
   files: FileDiffStat[]
   /** The git tree of the whole worktree at this snapshot. */
   tree?: string
-  /**
-   * The previous snapshot's tree, or the run's fork-point tree for the first
-   * snapshot. Diffing `parent_tree` to `tree` is what this interval changed.
-   * Both are absent on events from a server that predates per-snapshot trees.
-   */
+  /** The previous snapshot's tree, or the fork-point tree for the first one.
+   * Both trees are absent from servers that predate per-snapshot trees. */
   parent_tree?: string
 }
 
@@ -774,7 +815,6 @@ export interface FilesTreeResult {
   entries: FileTreeEntry[]
 }
 
-/** One files.read response. */
 export interface FileRead {
   content: string
   truncated: boolean
@@ -784,7 +824,6 @@ export interface FileRead {
   writable: boolean
 }
 
-/** One files.diff response. */
 export interface FileDiff {
   patch: string
   truncated: boolean
@@ -838,26 +877,50 @@ export interface WorkspaceSelector {
   name?: string
 }
 
+/** The wire names of Standard, Enhanced and Background. */
+export type LaunchMode = 'tui' | 'acp' | 'headless'
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {
   name: string
+  /** The vendor's product name for a shipped agent, the name otherwise. */
+  display_name?: string
+  /** The shipped agent's name, or 'custom' for a member's own definition. */
+  glyph?: string
   source: 'shipped' | 'member'
   /** Whether the caller's persistent environment contains the executable. */
   installed?: boolean
-  /** For a shared account: a launch on that account is refused because its
-   * owner has no login for this agent. */
+  /** How the agent serves the Agent Client Protocol an enhanced run uses. */
+  enhanced?: 'native' | 'adapter' | 'none'
+  /** Whether the adapter, or the native CLI, resolves for this launch. */
+  enhanced_installed?: boolean
+  /** Whether a login file exists in the home the launch signs in with. */
+  login_found?: boolean
+  /** The launch mode the agent starts in unless asked otherwise. */
+  default_mode?: 'tui' | 'acp'
+  /** Whether the agent prefers Enhanced, installed yet or not. */
+  enhanced_default?: boolean
+  /** Whether a running run can switch between Standard and Enhanced. */
+  switchable?: boolean
+  /** Shared account: refused because its owner has no login for this agent. */
   login_missing?: boolean
-  /** For a shared account: a launch on that account is refused because the
-   * agent is the caller's own definition, which runs only on their own
-   * account. */
+  /** Shared account: refused because the caller's own definition runs only on their account. */
   own_account_only?: boolean
-  /** For a shared account: the launch's own refusal when the owner's login
-   * exists but cannot be shared. At most one of login_missing,
-   * own_account_only and unavailable is set. */
+  /** Shared account: the owner's login exists but cannot be shared. At most
+   * one of login_missing, own_account_only and unavailable is set. */
   unavailable?: string
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string
+  /** install_script followed by the pinned enhanced-mode adapter's install. */
+  enhanced_install_script?: string
+}
+
+/** agent.install: a failed command is a result with `error`, not a refusal. */
+export interface AgentInstallResult {
+  log_tail: string
+  installed: boolean
+  enhanced_installed: boolean
+  error?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
@@ -866,6 +929,7 @@ export interface AgentDefinition {
   executable?: string
   tui_args?: string[]
   headless_args?: string[]
+  acp_args?: string[]
   profile_root?: string
   credential_paths?: string[]
   deny_names?: string[]
@@ -873,6 +937,7 @@ export interface AgentDefinition {
 
 export interface ConfigRoot {
   harness: string
+  display_name?: string
   path: string
   runtime_ignores: string[]
   credential_names: string[]
@@ -906,9 +971,8 @@ export interface ConfigImportResult {
   imported_paths?: string[]
 }
 
-// The local gateway's client-machine verbs, POST /local/v1/<verb>
-// (internal/localgw/local.go). Only a gateway with the user's repository
-// and SSH key serves these; useCapability's hasLocal gates every caller.
+// POST /local/v1/<verb> results (internal/localgw/local.go); only a gateway
+// with the user's repository and SSH key serves these.
 
 /** link.status: whether this gateway has a linked server and repository. */
 export interface LinkStatus {
@@ -1063,19 +1127,15 @@ export interface GitHubConnectResult {
  * older than the login check can read. */
 export type GitHubCLIStatus = 'ok' | 'missing' | 'broken' | 'outdated'
 
-/** github.probe: the gh in the member's environment terminal, before they
- * are told to log in with it. The two remedies are empty while gh is
- * usable; `admin_remedy` is set only when the server's own standard image
- * is the one without a usable gh. */
+/** github.probe. `admin_remedy` is set only when the server's own standard
+ * image lacks a usable gh. */
 export interface GitHubProbeResult {
   status: GitHubCLIStatus
   version?: string
   minimum: string
   /** What gh, or the container that could not run it, printed. */
   detail?: string
-  /** The image the terminal container runs, and the member's own saved
-   * one when they have it. They differ while a container outlives the
-   * image it should be on. */
+  /** Differs from saved_image while a container outlives the image it should be on. */
   image: string
   saved_image?: string
   /** Where gh resolved, present only when that is a file inside the
@@ -1198,12 +1258,7 @@ export interface DaemonStatusResult {
 }
 
 
-/**
- * update.check: one release-check answer for the CLI on this machine
- * (internal/selfupdate). `dev` and `disabled` both mean no release was
- * resolved - a local build, or AETHER_NO_UPDATE_CHECK set - and neither
- * ever reports an update.
- */
+/** update.check (internal/selfupdate). `dev` and `disabled` never report an update. */
 export interface UpdateCheck {
   /** The running version; "dev" for a local build. */
   version: string
@@ -1227,29 +1282,17 @@ export interface UpdateStatus {
   /** Empty when the server did not answer; server_error then says why. */
   server_version: string
   server_behind: boolean
-  /**
-   * Why the server half is unknown. The CLI half is about a binary on this
-   * machine, so it is answered in full even when the SSH hop is down.
-   */
+  /** The CLI half is still answered in full when the SSH hop is down. */
   server_error?: string
   /** The desktop shell spawned this gateway, so it can restart it. */
   supervised: boolean
-  /**
-   * The error from the last desktop-app rebuild that failed, persisted by
-   * the gateway to a file. Absent when the last rebuild succeeded or none
-   * has run.
-   */
+  /** The last failed desktop-app rebuild's error; absent after a success. */
   shell_build_error?: string
   /** The binary update.apply replaces, symlinks resolved. Absent when the
    * gateway could not probe it; install_method is absent with it. */
   cli_path?: string
-  /**
-   * How update.apply gets to write cli_path. `direct`: its directory is
-   * writable and the update just happens. `admin-prompt`: macOS shows its
-   * administrator password dialog first. `manual`: the gateway cannot
-   * replace it (a root-owned directory on Linux, or Windows), so the member
-   * runs `sudo aether update` in a terminal. Absent when the probe failed.
-   */
+  /** `admin-prompt`: macOS asks for the admin password first. `manual`: the
+   * member runs `sudo aether update`. Absent when the probe failed. */
   install_method?: 'direct' | 'admin-prompt' | 'manual'
 }
 
@@ -1261,20 +1304,13 @@ export interface UpdateApplyResult {
   /** True only under the desktop shell, which respawns the gateway. */
   restarting: boolean
   note?: string
-  /**
-   * Present when a co-located aether-server was replaced too: the running
-   * server keeps the old code until this command restarts its unit.
-   */
+  /** A co-located aether-server keeps the old code until this restarts its unit. */
   restart_command?: string
-  /**
-   * True when the gateway started a desktop-app rebuild in the background
-   * after swapping the CLI binary.
-   */
+  /** A desktop-app rebuild started in the background. */
   rebuilding: boolean
 }
 
-/** update.status: progress of a desktop-app rebuild running in this gateway
- * process. */
+/** update.status: progress of a desktop-app rebuild in this gateway process. */
 export interface UpdateBuildStatus {
   phase:
     | 'idle'
@@ -1291,15 +1327,11 @@ export interface UpdateBuildStatus {
   error?: string
 }
 
-// The server's own update, from internal/protocol/serverupdate.go and the
-// server.update event payload in internal/events/serverupdate.go. Calling
-// server.update is admin only; reading the status is not, so a member who
-// cannot press the button can still be told why the server is restarting.
+// server.update is admin only; reading its status is not.
 
 /** One update recorded and waiting for an idle server. */
 export interface PendingServerUpdate {
   version: string
-  /** The member id that asked for it. */
   requested_by: string
   requested_at: string
 }
@@ -1321,19 +1353,13 @@ export interface ServerUpdateAttempt {
   at: string
 }
 
-/**
- * server.update_status: whether this server can replace its own binaries,
- * and what update is in flight. `capable` is false on the documented
- * unprivileged install - the binary directory is not writable by the
- * service user - and `manual_commands` then carries what to run on the
- * server host instead.
- */
+/** server.update_status. On the unprivileged install `capable` is false and
+ * `manual_commands` says what to run on the server host. */
 export interface ServerUpdateStatus {
   server_version: string
   latest?: string
   update_available: boolean
   capable: boolean
-  /** Which reason the server cannot update itself. */
   incapable?: string
   pending?: PendingServerUpdate
   waiting?: ServerUpdateWaiting
@@ -1373,17 +1399,15 @@ export interface ServerUpdatePayload {
 }
 
 
-/** env.harnesses: one setup-capable harness's local availability. */
-export interface HarnessStatus {
+/** env.agents: one setup-capable agent's local availability. */
+export interface LocalAgentStatus {
   name: string
   installed: boolean
 }
 
-/** The env.harnesses verb result: the setup-capable harnesses plus, when
- * the saved link config knows exactly one repository folder, a prefill
- * suggestion for the wizard's from-repo input. */
-export interface EnvHarnessesResult {
-  harnesses: HarnessStatus[]
+/** env.agents. `repo_path` is set when the link config knows exactly one repository folder. */
+export interface EnvAgentsResult {
+  agents: LocalAgentStatus[]
   /** The folders the gateway looked in, so an empty result can say where. */
   searched: string[]
   /** Why the login shell could not be asked for its PATH; set only when

@@ -41,13 +41,13 @@ test('selected paths preserve unrelated staging, report index failure, and retai
     'git init --bare /tmp/published.git',
     'git remote add writable /tmp/published.git',
   ].join(' && ')])
-  await page.getByRole('tab', { name: 'Diff', exact: true }).click()
-  await page.getByText('Native changes & publish', { exact: true }).click()
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click()
+  await page.getByRole('button', { name: 'Publish…', exact: true }).click()
   await page.getByRole('checkbox', { name: 'Select selected.txt', exact: true }).check()
   await page.getByRole('button', { name: 'Review selected paths' }).click()
   await expect(page.getByRole('region', { name: 'Untracked contents: selected.txt' })).toContainText('selected first')
   await page.getByLabel('Commit message', { exact: true }).fill('Commit only selected path')
-  await page.getByRole('button', { name: 'Commit selected paths' }).click()
+  await page.getByRole('button', { name: 'Commit selected' }).click()
   const commit = page.getByRole('region', { name: 'Commit outcome' })
   await expect(commit).toContainText('Committed: yes')
   await expect(commit).toContainText('Index updated: yes')
@@ -60,11 +60,11 @@ test('selected paths preserve unrelated staging, report index failure, and retai
   // selected-path commit has published its ref. No response is mocked.
   await exec('docker', ['exec', '-w', '/workspace', container, 'sh', '-c', 'printf "selected second\\n" > selected.txt && touch .git/index.lock'])
   try {
-    await page.getByRole('button', { name: 'Refresh native status' }).click()
+    await page.getByRole('button', { name: 'Refresh status' }).click()
     await page.getByRole('checkbox', { name: 'Select selected.txt', exact: true }).check()
     await page.getByRole('button', { name: 'Review selected paths' }).click()
     await page.getByLabel('Commit message', { exact: true }).fill('Publish despite unrelated native index lock')
-    await page.getByRole('button', { name: 'Commit selected paths' }).click()
+    await page.getByRole('button', { name: 'Commit selected' }).click()
     await expect(commit).toContainText('Committed: yes')
     await expect(commit).toContainText('Index updated: no')
     await expect(commit).toContainText('index.lock')
@@ -74,8 +74,11 @@ test('selected paths preserve unrelated staging, report index failure, and retai
     await exec('docker', ['exec', '-w', '/workspace', container, 'rm', '-f', '.git/index.lock'])
   }
 
-  await page.getByRole('combobox', { name: 'Push remote', exact: true }).selectOption('writable')
-  await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).selectOption('/tmp/published.git')
+  await page.getByRole('tab', { name: '2 · Push and pull request' }).click()
+  await page.getByRole('combobox', { name: 'Push remote', exact: true }).click()
+  await page.getByRole('option', { name: 'writable', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).click()
+  await page.getByRole('option', { name: '/tmp/published.git', exact: true }).click()
   await page.getByLabel('Push head branch', { exact: true }).fill('reviewed-native')
   await page.getByRole('checkbox', { name: 'I reviewed the run account, branch, HEAD and exact push destination above.' }).check()
   await page.getByRole('button', { name: 'Push reviewed branch' }).click()

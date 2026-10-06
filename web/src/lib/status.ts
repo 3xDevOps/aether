@@ -1,61 +1,125 @@
-// Presentation states. These are UI-only: the domain run status enum is
-// unchanged, this is the two-layer status vocabulary from the GUI spec
-// (the harness glyph says who, the state dot says what).
+import {
+  isPaused,
+  memberName,
+  needsYou,
+  supervised,
+  unreadMail,
+  unreadReason,
+  waitingOn,
+  type NeedsYouCondition,
+  type StateContext,
+} from '@/lib/needs-you'
+import { isTerminal, type RunRecord } from '@/store/runs'
 
-import type { Approval, Run, RunStatus } from '@/lib/types'
-import { pendingApprovals } from '@/store/approvals'
+export type PresentationState = 'needs-you' | 'working' | 'paused' | 'done' | 'failed'
 
-export type PresentationState =
-  | 'needs-attention'
-  | 'failed'
-  | 'working'
-  | 'waiting'
-  | 'done'
-  | 'idle'
+export type RunGroup = 'needs-you' | 'working' | 'finished'
 
-/** Execution only. Outstanding requests are shown independently. */
-export function runState(status: RunStatus): PresentationState {
-  switch (status) {
-    case 'queued':
-    case 'provisioning':
-      return 'waiting'
-    case 'running':
-      return 'working'
-    case 'needs-attention':
-      return 'needs-attention'
-    case 'failed':
-    case 'interrupted':
-      return 'failed'
-    case 'completed':
+export interface RunPresentation {
+  state: PresentationState
+  reason: string
+  needsYou?: NeedsYouCondition
+  unread?: number
+}
+
+function workingReason(run: RunRecord, ctx: StateContext): string {
+  if (run.status === 'queued') return 'Queued'
+  if (run.status === 'provisioning') return 'Starting'
+  const waiter = waitingOn(run, ctx)
+  if (waiter !== undefined) return `Waiting for ${memberName(waiter, ctx)}`
+  if (supervised(run, ctx) && run.status === 'needs-attention') return 'Waiting for the integrator'
+  if (run.activity) return `${run.activity.verb} ${run.activity.target}`.trimEnd()
+  return run.status === 'needs-attention' ? 'Agent idle' : 'Agent working'
+}
+
+function finishedReason(run: RunRecord): string {
+  switch (run.status) {
     case 'merged':
+      return 'Merged'
     case 'abandoned':
-      return 'done'
+      return 'Closed without merging'
+    case 'completed':
+      return 'Finished'
+    case 'interrupted':
+      return run.reason ? `Interrupted: ${plainReason(run.reason)}` : 'Interrupted'
+    default:
+      return run.reason ? `Failed: ${plainReason(run.reason)}` : 'Failed'
   }
 }
 
-/**
- * An agent report finished the run and its owner has not opened it yet. The
- * run keeps its done or failed presentation state, so finished-run checks
- * still hold; only where it is listed changes (`waitsOnHuman`).
- */
-export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
-  return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
+const turnEnds: Record<string, string> = {
+  end_turn: 'The agent finished its turn',
+  max_tokens: 'The agent hit its output limit',
+  max_turn_requests: 'The agent hit its turn limit',
+  refusal: 'The agent refused to continue',
+  cancelled: 'The turn was cancelled',
 }
 
-/**
- * Whether a run is listed with the runs waiting on a human: the Idle bucket.
- * Separate from Needs input, which only structured requests raise.
- */
-export function waitsOnHuman(
-  run: Pick<Run, 'status' | 'outcome_unseen'>,
-  state: PresentationState,
-): boolean {
-  return state === 'needs-attention' || awaitingReview(run)
+const savedResults = "the worker's saved results"
+
+// Mirrors the reason strings internal/scheduler, internal/agentstatus and internal/coord write.
+const plainReasons: [RegExp, (...groups: string[]) => string][] = [
+  [/^(.*); retained container$/, (rest) => plainReason(rest)],
+  [/^agent reported success$/, () => 'Agent reported success'],
+  [/^agent reported failure$/, () => 'Agent reported failure'],
+  [/^agent exited; results committed$/, () => 'Agent exited and its changes were committed'],
+  [/^agent exited (-?\d+)(.*)$/s, (code, rest) => `Agent exited with code ${code}${rest}`],
+  [/^worker finished$/, () => 'Worker finished'],
+  [/^closed$/, () => 'Closed'],
+  [/^killed$/, () => 'Stopped'],
+  [/^retained container expired$/, () => 'Its container was removed when it expired'],
+  [/^retained container unavailable$/, () => 'Its container is no longer available'],
+  [/^agent idle$/, () => 'Agent idle'],
+  [/^agent resumed$/, () => 'Agent resumed'],
+  [/^agent failed$/, () => 'Agent failed'],
+  [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
+  [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
+  [/^the agent's turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
+  [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
+  [/^review retained evidence$/, () => `Review ${savedResults}`],
+  [/^resolve the blocker using the retained evidence$/, () => `Resolve the blocker using ${savedResults}`],
+  [/^retained evidence (?:is )?unavailable(.*)$/s, (rest) => `The worker's saved results are unavailable${rest}`],
+]
+
+export function plainReason(reason: string): string {
+  for (const [pattern, words] of plainReasons) {
+    const match = pattern.exec(reason)
+    if (match) return words(...match.slice(1))
+  }
+  return reason
+}
+
+export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
+  const condition = needsYou(run, ctx)
+  if (condition) return { state: 'needs-you', reason: condition.reason(run, ctx), needsYou: condition }
+  if (isTerminal(run.status)) {
+    return {
+      state: run.status === 'failed' || run.status === 'interrupted' ? 'failed' : 'done',
+      reason: finishedReason(run),
+    }
+  }
+  if (isPaused(run, ctx)) return { state: 'paused', reason: 'Paused' }
+  const unread = unreadMail(run, ctx.now)
+  if (unread > 0 && waitingOn(run, ctx) === undefined) {
+    return { state: 'working', reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
+  }
+  return { state: 'working', reason: workingReason(run, ctx) }
+}
+
+export function groupOf(state: PresentationState): RunGroup {
+  switch (state) {
+    case 'needs-you':
+      return 'needs-you'
+    case 'working':
+    case 'paused':
+      return 'working'
+    default:
+      return 'finished'
+  }
 }
 
 const fallbackLabelLength = 120
 
-/** A run's human title. An untitled run is named by its bounded first prompt line. */
 export function runLabel(run: { task: string; title?: string }): string {
   const title = run.title?.trim()
   if (title) return title
@@ -65,61 +129,19 @@ export function runLabel(run: { task: string; title?: string }): string {
   if (chars.length <= fallbackLabelLength) return line
   const cut = chars.slice(0, fallbackLabelLength).join('')
   const space = cut.search(/\s\S*$/)
-  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`
-}
-
-/** The runs an approval request is still waiting on, across every inbox. */
-export function pendingApprovalRuns(
-  inbox: Record<string, Approval[]>,
-): Set<string> {
-  return new Set(pendingApprovals(inbox).map((a) => a.run_id))
-}
-
-/**
- * The same set as one stable string. An inbox refetch that changed nothing
- * still builds fresh object identities; subscribing on this key lets memos
- * and store selectors see through that instead of rebuilding derived trees.
- */
-export function pendingApprovalKey(inbox: Record<string, Approval[]>): string {
-  return [...pendingApprovalRuns(inbox)].sort().join('\n')
-}
-
-// Worst-first. A run group shows the worst state of its runs.
-const severity: PresentationState[] = [
-  'needs-attention',
-  'failed',
-  'working',
-  'waiting',
-  'done',
-  'idle',
-]
-
-export function stateRank(s: PresentationState): number {
-  return severity.indexOf(s)
-}
-
-export function rollup(states: PresentationState[]): PresentationState {
-  return states.reduce<PresentationState>(
-    (worst, s) => (stateRank(s) < stateRank(worst) ? s : worst),
-    'idle',
-  )
+  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
 export const stateLabel: Record<PresentationState, string> = {
-  'needs-attention': 'Idle',
-  failed: 'Failed',
+  'needs-you': 'Needs you',
   working: 'Working',
-  waiting: 'Waiting',
+  paused: 'Paused',
   done: 'Done',
-  idle: 'Idle',
+  failed: 'Failed',
 }
 
-// Token classes only - no colour literals in components.
-export const stateDotClass: Record<PresentationState, string> = {
-  'needs-attention': 'bg-state-needs-attention',
-  failed: 'bg-state-failed',
-  working: 'bg-state-working',
-  waiting: 'bg-state-waiting',
-  done: 'bg-state-done',
-  idle: 'bg-state-idle',
+export const groupLabel: Record<RunGroup, string> = {
+  'needs-you': 'Needs you',
+  working: 'Working',
+  finished: 'Finished',
 }

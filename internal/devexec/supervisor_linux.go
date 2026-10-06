@@ -32,12 +32,14 @@ func (c controlCall) reply(state State) {
 	<-c.delivered
 }
 
-// Run owns exactly one child process group. The child inherits Docker's real
-// terminal and becomes its foreground process group, so terminal-generated
-// signals, job control and ioctl geometry all reach the actual application.
+// Run owns exactly one child process group. With tty, the child inherits
+// Docker's real terminal and becomes its foreground process group, so
+// terminal-generated signals, job control and ioctl geometry all reach the
+// actual application. Without tty, the child inherits the helper's stdio pipes
+// and has no controlling terminal.
 // This must run in a dedicated helper process: subreaping and signal handling
 // are process-wide properties, not appropriate for the Aether server itself.
-func Run(key, claim string, argv []string) (int, error) {
+func Run(key, claim string, tty bool, argv []string) (int, error) {
 	if key == "" || len(key) > 1024 || strings.ContainsRune(key, 0) || claim == "" || len(claim) > 1024 || len(argv) == 0 || argv[0] == "" {
 		return 125, errors.New("creation key, claim identity and command are required")
 	}
@@ -45,8 +47,10 @@ func Run(key, claim string, argv []string) (int, error) {
 	// process. Keep that thread alive until the owned children have ended.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	if _, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS); err != nil {
-		return 125, fmt.Errorf("owned command requires an inherited PTY: %w", err)
+	if tty {
+		if _, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS); err != nil {
+			return 125, fmt.Errorf("owned command requires an inherited PTY: %w", err)
+		}
 	}
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		return 125, fmt.Errorf("enable descendant reaping: %w", err)
@@ -148,9 +152,9 @@ func Run(key, claim string, argv []string) (int, error) {
 				state.ExecID = req.ExecID
 				child = exec.Command(argv[0], argv[1:]...)
 				child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-				child.SysProcAttr = &syscall.SysProcAttr{
-					Setpgid: true, Foreground: true, Ctty: int(os.Stdin.Fd()),
-					Pdeathsig: syscall.SIGKILL,
+				child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+				if tty {
+					child.SysProcAttr.Foreground, child.SysProcAttr.Ctty = true, int(os.Stdin.Fd())
 				}
 				if err := child.Start(); err != nil {
 					child = nil

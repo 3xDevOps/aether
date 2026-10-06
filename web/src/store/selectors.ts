@@ -1,143 +1,210 @@
-// Sidebar shape: the runs of the active workspace, grouped and sorted so the
-// things that need a human come first.
-
+import type { NeedsYouID, StateContext } from '@/lib/needs-you'
 import {
-  runState,
-  stateLabel,
-  stateRank,
-  waitsOnHuman,
+  groupLabel,
+  groupOf,
+  presentRun,
   type PresentationState,
+  type RunGroup,
 } from '@/lib/status'
 import type { Member } from '@/lib/types'
+import type { RootState } from '@/store'
 import { isArchivable, type RunRecord } from '@/store/runs'
-import type { GroupBy } from '@/store/ui'
 
-/**
- * The slice of the root state the sidebar derives from. Narrow on purpose:
- * components subscribe to exactly these fields and memoize, so a derived
- * array is never recomputed on unrelated store writes.
- *
- * An empty workspace shows every run: that is what the board falls back to
- * before hydration has named one.
- */
-export interface SidebarInput {
+/** An empty workspace scopes nothing, as before hydration names one. */
+export interface RunsInput {
   workspace: string
-  runs: Record<string, RunRecord>
-  members: Record<string, Member>
-  groupBy: GroupBy
+  mineOnly: boolean
+  ctx: StateContext
 }
 
-export interface SidebarRun {
+export interface RunRow {
   run: RunRecord
   state: PresentationState
-  /** Listed with the runs waiting on a human; see `waitsOnHuman`. */
-  waitsOnHuman: boolean
+  reason: string
+  needsYou?: NeedsYouID
+  unread?: number
+  group: RunGroup
+  waitingSince: string
   owner?: Member
+  workspaceName?: string
 }
 
-/** The state a run is ranked and grouped by: its own, or needs-attention while it waits on a human. */
-function standing(entry: SidebarRun): PresentationState {
-  return entry.waitsOnHuman ? 'needs-attention' : entry.state
+export interface SwarmSummary {
+  collapsed: boolean
+  counts: { working: number; needsYou: number; done: number; failed: number }
+  members: RunRow[]
 }
 
-export interface SidebarRunTree extends SidebarRun {
-  children: SidebarRun[]
+export interface RunTree extends RunRow {
+  children: RunRow[]
+  swarm?: SwarmSummary
+}
+
+export interface RunGroups {
+  'needs-you': RunTree[]
+  working: RunTree[]
+  finished: RunTree[]
 }
 
 export interface SidebarGroup {
-  key: string
+  key: RunGroup
   label: string
-  runs: SidebarRunTree[]
+  runs: RunTree[]
+  count: number
 }
 
-function byAttention(
-  a: { state: PresentationState; changedAt: string },
-  b: typeof a,
-): number {
-  const rank = stateRank(a.state) - stateRank(b.state)
-  return rank !== 0 ? rank : b.changedAt.localeCompare(a.changedAt)
+export function stateContextOf(s: RootState, now: number): StateContext {
+  return {
+    viewerID: s.info?.member.id ?? null,
+    viewerRole: s.info?.member.role ?? null,
+    members: s.members,
+    runs: s.runs,
+    workspaces: s.workspaces,
+    approvalsByRun: s.approvalsByRun,
+    roomMessages: s.roomMessages,
+    roomStatus: s.roomStatus,
+    missions: s.missions,
+    missionDetails: s.missionDetails,
+    pausedRuns: s.pausedRuns,
+    now,
+  }
 }
 
-/** Worst state first, then most recently changed. */
-export function sortRuns(runs: SidebarRun[]): SidebarRun[] {
-  return [...runs].sort((a, b) =>
-    byAttention(
-      { state: standing(a), changedAt: a.run.stateChangedAt },
-      { state: standing(b), changedAt: b.run.stateChangedAt },
-    ),
+export function runRows(ctx: StateContext): RunRow[] {
+  const rows: RunRow[] = []
+  for (const run of Object.values(ctx.runs)) {
+    // A live run can never be hidden.
+    if (run.archived_at && isArchivable(run.status)) continue
+    const shown = presentRun(run, ctx)
+    rows.push({
+      run,
+      state: shown.state,
+      reason: shown.reason,
+      needsYou: shown.needsYou?.id,
+      unread: shown.unread,
+      group: groupOf(shown.state),
+      waitingSince: shown.needsYou?.since(run, ctx) ?? run.stateChangedAt,
+      owner: ctx.members[run.member_id],
+    })
+  }
+  return rows
+}
+
+// Without a listed integrator the oldest worker stands in, so workers never list on their own.
+function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow {
+  const integrators = rows.filter((row) => row.run.mission_role === 'integrator')
+  const mission = ctx.missions[rows[0].run.mission_id ?? '']
+  return (
+    integrators.find((row) => row.run.id === mission?.current_integrator_run_id) ??
+    integrators.sort((a, b) => b.run.created_at.localeCompare(a.run.created_at))[0] ??
+    [...rows].sort((a, b) => a.run.created_at.localeCompare(b.run.created_at))[0]
   )
 }
 
-/** Every run in scope, worst state and most recent change first. */
-export function sidebarRuns(s: SidebarInput): SidebarRun[] {
-  const entries: SidebarRun[] = []
-  for (const run of Object.values(s.runs)) {
-    if (s.workspace && run.workspace_id !== s.workspace) continue
-    // A live run can never be hidden, so the archive check only applies
-    // once the run has actually stopped.
-    if (run.archived_at && isArchivable(run.status)) continue
-    const state = runState(run.status)
-    entries.push({
-      run,
-      state,
-      waitsOnHuman: waitsOnHuman(run, state),
-      owner: s.members[run.member_id],
+function swarmTree(root: RunRow, members: RunRow[]): RunTree {
+  const children = members.filter((row) => row.state === 'needs-you')
+  const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
+  for (const row of members) {
+    if (row.state === 'needs-you') counts.needsYou++
+    else if (row.group === 'working') counts.working++
+    else if (row.state === 'failed') counts.failed++
+    else counts.done++
+  }
+  const waits = [root, ...children].filter((row) => row.state === 'needs-you')
+  return {
+    ...root,
+    group: children.length > 0 ? 'needs-you' : root.group,
+    waitingSince: waits.map((row) => row.waitingSince).sort()[0] ?? root.waitingSince,
+    children,
+    swarm: { collapsed: children.length < members.length, counts, members },
+  }
+}
+
+export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
+  const swarms = new Map<string, RunRow[]>()
+  const trees: RunTree[] = []
+  for (const row of rows) {
+    const { mission_id: mission, mission_role: role, workspace_id: workspace } = row.run
+    if (!mission || !role) {
+      trees.push({ ...row, children: [] })
+      continue
+    }
+    const key = JSON.stringify([workspace, mission])
+    const swarm = swarms.get(key)
+    if (swarm) swarm.push(row)
+    else swarms.set(key, [row])
+  }
+  for (const members of swarms.values()) {
+    const root = swarmRoot(members, ctx)
+    trees.push(swarmTree(root, members.filter((row) => row !== root)))
+  }
+  return trees
+}
+
+const byWait = (a: RunRow, b: RunRow) =>
+  a.waitingSince.localeCompare(b.waitingSince) || a.run.id.localeCompare(b.run.id)
+const byChange = (a: RunRow, b: RunRow) =>
+  b.run.stateChangedAt.localeCompare(a.run.stateChangedAt) || a.run.id.localeCompare(b.run.id)
+const failedFirst = (a: RunRow, b: RunRow) =>
+  Number(b.state === 'failed') - Number(a.state === 'failed') || byChange(a, b)
+const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
+  'needs-you': byWait,
+  working: byChange,
+  finished: failedFirst,
+}
+const groupOrder: RunGroup[] = ['needs-you', 'working', 'finished']
+
+function located(row: RunRow, s: RunsInput): RunRow {
+  if (!s.workspace || row.run.workspace_id === s.workspace) return row
+  const workspace = s.ctx.workspaces[row.run.workspace_id]
+  return { ...row, workspaceName: workspace?.name ?? row.run.workspace_id }
+}
+
+export function runGroups(s: RunsInput): RunGroups {
+  const groups: RunGroups = { 'needs-you': [], working: [], finished: [] }
+  for (const tree of runTrees(runRows(s.ctx), s.ctx)) {
+    if (tree.group !== 'needs-you') {
+      if (s.workspace && tree.run.workspace_id !== s.workspace) continue
+      if (s.mineOnly && tree.run.member_id !== s.ctx.viewerID) continue
+    }
+    groups[tree.group].push({
+      ...(located(tree, s) as RunTree),
+      children: tree.children.map((row) => located(row, s)),
     })
   }
-  return sortRuns(entries)
+  for (const key of groupOrder) groups[key].sort(inGroup[key])
+  return groups
 }
 
-/** Swarms stay together, ordered by their most urgent run. */
-export function sidebarGroups(s: SidebarInput): SidebarGroup[] {
-  const groups = new Map<string, SidebarGroup>()
-  const entries = sidebarRuns(s)
-  const byID = new Map(entries.map((entry) => [entry.run.id, entry]))
-  const parents = new Map<string, SidebarRun>()
-  const children = new Map<string, SidebarRun[]>()
-  for (const entry of entries) {
-    const run = entry.run
-    if (run.mission_role !== 'worker' || !run.integrator_run_id) continue
-    const parent = byID.get(run.integrator_run_id)
-    if (
-      !parent ||
-      parent.run.mission_role !== 'integrator' ||
-      !run.mission_id ||
-      parent.run.mission_id !== run.mission_id ||
-      parent.run.workspace_id !== run.workspace_id
-    ) continue
-    parents.set(run.id, parent)
-    const siblings = children.get(parent.run.id)
-    if (siblings) siblings.push(entry)
-    else children.set(parent.run.id, [entry])
-  }
-  const listed = new Set<string>()
-
-  for (const entry of entries) {
-    const root = parents.get(entry.run.id) ?? entry
-    if (listed.has(root.run.id)) continue
-    listed.add(root.run.id)
-    const tree = { ...root, children: children.get(root.run.id) ?? [] }
-    const [key, label] =
-      s.groupBy === 'status'
-        ? [standing(entry), stateLabel[standing(entry)]]
-        : ownerOf(root)
-    const group = groups.get(key)
-    if (group) group.runs.push(tree)
-    else groups.set(key, { key, label, runs: [tree] })
-  }
-
-  const order = [...groups.values()]
-  if (s.groupBy === 'status') {
-    return order.sort(
-      (a, b) =>
-        stateRank(a.key as PresentationState) -
-        stateRank(b.key as PresentationState),
-    )
-  }
-  return order.sort((a, b) => a.label.localeCompare(b.label))
+export function listedRuns(workspace: string, ctx: StateContext): RunRow[] {
+  return runRows(ctx)
+    .filter((row) => !workspace || row.run.workspace_id === workspace)
+    .sort((a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group) || inGroup[a.group](a, b))
 }
 
-function ownerOf(entry: SidebarRun): [string, string] {
-  if (entry.owner) return [entry.owner.id, entry.owner.display_name]
-  return [entry.run.member_id, entry.run.member_id]
+export function sidebarGroups(s: RunsInput): SidebarGroup[] {
+  const groups = runGroups(s)
+  return groupOrder
+    .filter((key) => groups[key].length > 0)
+    .map((key) => ({
+      key,
+      label: groupLabel[key],
+      runs: groups[key],
+      count:
+        key === 'needs-you'
+          ? groups[key].reduce(
+              (n, tree) => n + Number(tree.state === 'needs-you') + tree.children.length,
+              0,
+            )
+          : groups[key].length,
+    }))
+}
+
+export function needsYouByWorkspace(ctx: StateContext): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const row of runRows(ctx)) {
+    if (row.state !== 'needs-you') continue
+    counts[row.run.workspace_id] = (counts[row.run.workspace_id] ?? 0) + 1
+  }
+  return counts
 }

@@ -47,8 +47,8 @@ describe('watchOutcomeSeen', () => {
     const client = fakeApi({ runSeen: vi.fn(() => answer.promise) })
     const stop = watchOutcomeSeen(store, client, fakeDocument())
 
-    store.getState().navigate('terminal', { runId: reported.id })
-    store.getState().navigate('diff', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id, view: 'changes' })
     store.getState().applyRunTitle(reported.id, 'a later write')
 
     expect(client.runSeen).toHaveBeenCalledTimes(1)
@@ -67,7 +67,7 @@ describe('watchOutcomeSeen', () => {
     const client = fakeApi()
     const stop = watchOutcomeSeen(store, client, fakeDocument())
 
-    store.getState().navigate('terminal', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
     await settle()
 
     expect(client.runSeen).not.toHaveBeenCalled()
@@ -81,7 +81,7 @@ describe('watchOutcomeSeen', () => {
     const doc = fakeDocument(true)
     const client = fakeApi()
     const stop = watchOutcomeSeen(store, client, doc)
-    store.getState().navigate('terminal', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
 
     store.getState().applyRunStatus(reported.id, 'completed', 'agent reported success', '2026-08-14T11:00:00Z', true)
     expect(client.runSeen).not.toHaveBeenCalled()
@@ -101,7 +101,7 @@ describe('watchOutcomeSeen', () => {
     })
     const stop = watchOutcomeSeen(store, client, fakeDocument())
 
-    store.getState().navigate('terminal', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
     await settle()
     store.getState().applyRunTitle(reported.id, 'a later write')
     await settle()
@@ -112,7 +112,7 @@ describe('watchOutcomeSeen', () => {
     expect(store.getState().runs[reported.id].outcome_unseen).toBe(true)
 
     store.getState().navigate('board')
-    store.getState().navigate('terminal', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
     expect(client.runSeen).toHaveBeenCalledTimes(2)
     stop()
   })
@@ -122,7 +122,7 @@ describe('watchOutcomeSeen', () => {
     const client = fakeApi()
     const stop = watchOutcomeSeen(store, client, fakeDocument())
 
-    store.getState().navigate('terminal', { runId: reported.id })
+    store.getState().navigate('run', { runId: reported.id })
 
     expect(client.runSeen).not.toHaveBeenCalled()
     stop()

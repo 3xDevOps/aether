@@ -1,65 +1,72 @@
+import type * as React from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+import { CodeBlock } from '@/components/ui/code'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
-/**
- * The "review it yourself" tail of the diff tab: what the last pull fetched,
- * and the two git commands that read the run branch in the linked repository,
- * ready to copy. Fetching the branch and closing the run are verbs, so they
- * live in the run action bar above with every other verb rather than a second
- * time down here - but the fetch output is an answer, not a verb, so it stays
- * where a member reviewing the branch will look for it.
- *
- * All of it is about a repository on this machine, so it is gated on the
- * same `pull` verb that fetches into one. A gateway without it - a phone on
- * the server's dashboard - has no repository to copy these into.
- */
+/** Needs the gateway's `pull` verb: the commands run in a repository on this machine. */
+export function useCanReviewLocally(run: RunRecord): boolean {
+  const pulled = useStore((s) => s.pulls[run.id])
+  const cap = useCapability()
+  return cap.hasLocal('pull') && Boolean(pulled || run.branch)
+}
+
+export function ReviewLocallyDialog({
+  run,
+  open,
+  onOpenChange,
+  returnFocus,
+}: {
+  run: RunRecord
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  returnFocus: React.RefObject<HTMLElement | null>
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          returnFocus.current?.focus()
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Review locally</DialogTitle>
+          <DialogDescription>Copy a command to inspect this branch in your repository.</DialogDescription>
+        </DialogHeader>
+        <ReviewCommands run={run} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function ReviewCommands({ run }: { run: RunRecord }) {
   const base = useStore((s) => s.diffs[run.id]?.base ?? '')
   const pulled = useStore((s) => s.pulls[run.id])
-  const cap = useCapability()
-
-  if (!cap.hasLocal('pull')) return null
-  if (!pulled && !run.branch) return null
+  if (!useCanReviewLocally(run)) return null
 
   return (
-    <section
-      aria-label="Review locally"
-      className="min-w-0 border-b px-3 py-2"
-    >
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <div className="min-w-0">
-          <h2 className="text-[12px] font-medium text-foreground">Review locally</h2>
-          <p className="text-[12px] text-muted-foreground">
-            Copy a command to inspect this branch in your repository.
-          </p>
-        </div>
-        {pulled && (
-          <Collapsible className="min-w-0 max-w-full">
-            <CollapsibleTrigger className="max-w-full truncate text-[12px] text-muted-foreground hover:text-foreground">
-              fetched {pulled.ref}
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <pre className="mt-2 max-h-48 max-w-full overflow-auto border bg-sidebar p-2 font-mono text-[12px] leading-5 whitespace-pre-wrap">
-                {pulled.output}
-              </pre>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-      </div>
+    <section aria-label="Review locally" className="grid min-w-0 gap-2">
       {run.branch && (
-        <div className="mt-2 grid min-w-0 gap-1.5 md:grid-cols-2">
+        <>
           <CopyableCommand command={`git log --oneline aether/${run.branch}`} />
-          <CopyableCommand
-            command={`git diff ${base.slice(0, 8) || 'main'}...aether/${run.branch}`}
-          />
-        </div>
+          <CopyableCommand command={`git diff ${base.slice(0, 8) || 'main'}...aether/${run.branch}`} />
+        </>
+      )}
+      {pulled && (
+        <Collapsible className="min-w-0">
+          <CollapsibleTrigger>
+            <span className="truncate text-muted">fetched {pulled.ref}</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-1 max-h-48 overflow-y-auto">
+              <CodeBlock className="whitespace-pre-wrap">{pulled.output}</CodeBlock>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </section>
   )

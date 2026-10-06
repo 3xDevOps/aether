@@ -88,9 +88,8 @@ export async function launchBrowserFixture(aether: Aether): Promise<BrowserFixtu
 }
 
 export async function openBrowserPane(page: Page, fixture: BrowserFixture): Promise<void> {
-  await page.goto(`${fixture.member.url}&run=${fixture.runID}`)
-  await page.getByRole('tab', { name: 'Browser', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Open browser', exact: true })).toBeEnabled()
+  await page.goto(`${fixture.member.url}&run=${fixture.runID}&view=browser`)
+  await expect(page.getByRole('button', { name: 'Open http://localhost:3000', exact: true })).toBeEnabled()
 }
 
 /** Fixture layout coordinates are CSS pixels in the actual remote viewport. */

@@ -29,3 +29,22 @@ func TestTimelineDetailIsPrintable(t *testing.T) {
 		t.Fatalf("detail lost its text: %q", got)
 	}
 }
+
+func TestTimelineDetailNamesAgentMail(t *testing.T) {
+	for _, tc := range []struct {
+		payload events.Payload
+		want    string
+	}{
+		{events.CoordMessagePayload{MessageID: "m1", FromRunID: "r1", ToRunID: "r2", Kind: "question"}, "r1 -> r2 · question"},
+		{events.CoordMessageAckedPayload{MessageID: "m1", ToRunID: "r2"}, "r2 acknowledged m1"},
+	} {
+		raw, err := json.Marshal(tc.payload)
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		ev := protocol.Event{Type: string(tc.payload.EventType()), Payload: raw}
+		if got := timelineDetail(ev, func(id string) string { return id }); got != tc.want {
+			t.Fatalf("detail = %q, want %q", got, tc.want)
+		}
+	}
+}

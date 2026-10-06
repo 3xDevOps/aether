@@ -64,11 +64,12 @@ test('a phone is served everything it needs to install the dashboard', async ({
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', apple)
   expect((await page.request.get(origin + apple)).status()).toBe(200)
 
-  // The shell draws its own title bar and status bar, so nothing is lost
-  // when the browser's chrome goes: everything stays reachable and nothing
-  // overflows.
-  await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
-  await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+  // The shell draws its own top bar, so nothing is lost when the browser's
+  // chrome goes: everything stays reachable and nothing overflows.
+  const bar = page.getByRole('banner')
+  await expect(bar).toBeInViewport({ ratio: 1 })
+  await expect(bar.getByRole('button', { name: /^Open sidebar/ })).toBeVisible()
+  await expect(bar.getByRole('button', { name: 'New run' })).toBeVisible()
   const overflow = await page.evaluate(() =>
     Math.max(
       document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -86,7 +87,7 @@ test('a phone is served everything it needs to install the dashboard', async ({
  */
 const statusBar = 59
 
-test('the title bar keeps its controls out from under a phone status bar', async ({
+test('the top bar keeps its controls out from under a phone status bar', async ({
   page,
   aether,
 }) => {
@@ -97,7 +98,7 @@ test('the title bar keeps its controls out from under a phone status bar', async
   await page.goto(alice.url)
   const bar = page.getByRole('banner')
   const bare = (await bar.boundingBox())?.height
-  if (!bare) throw new Error('the title bar did not render')
+  if (!bare) throw new Error('the top bar did not render')
 
   await page.addStyleTag({ content: `:root { --safe-top: ${statusBar}px }` })
 
@@ -106,7 +107,7 @@ test('the title bar keeps its controls out from under a phone status bar', async
   await expect
     .poll(async () => (await bar.boundingBox())?.height)
     .toBe(bare + statusBar)
-  const trigger = page.getByRole('button', { name: 'Search runs and commands' })
+  const trigger = page.getByRole('button', { name: 'Search', exact: true })
   expect((await trigger.boundingBox())?.y ?? -1).toBeGreaterThanOrEqual(statusBar)
 
   // Everything that hangs from the bar drops with it.

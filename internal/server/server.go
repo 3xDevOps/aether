@@ -170,6 +170,10 @@ type Server struct {
 	tailnet  servergw.Tailnet
 	services []namedService
 
+	// controllerMu orders run.controller publishes: each reads the holder
+	// under it, so the last one published names the current holder.
+	controllerMu sync.Mutex
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -257,11 +261,13 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		}
 		s.rt = s.docker
 	}
+	removeAgentFiles := runtime.Remover(s.rt, cfg.StandardImage)
 
 	if s.git, err = gitengine.New(gitengine.Config{
-		ReposDir:     filepath.Join(cfg.DataDir, "repos"),
-		CheckoutsDir: filepath.Join(cfg.DataDir, "checkouts"),
-		Bus:          s.bus,
+		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
+		CheckoutsDir:   filepath.Join(cfg.DataDir, "checkouts"),
+		Bus:            s.bus,
+		RemoveCheckout: removeAgentFiles,
 		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
 			if s.sched == nil {
 				return
@@ -290,7 +296,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, perr
 	}
 	homesRoot := filepath.Join(cfg.DataDir, "homes")
-	homes, herr := memberhome.New(homesRoot)
+	homes, herr := memberhome.New(homesRoot, removeAgentFiles)
 	if herr != nil {
 		return nil, fmt.Errorf("server: create member homes: %w", herr)
 	}
@@ -317,7 +323,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
-	s.control = control.New(control.Config{})
+	s.control = control.New(control.Config{OnHolderChange: s.publishController})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,

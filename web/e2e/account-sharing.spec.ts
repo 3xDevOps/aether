@@ -1,4 +1,4 @@
-// Account sharing through the dashboard: the owner shares on Members, the
+// Account sharing through the dashboard: the owner shares in Profile, the
 // recipient's launch dialog offers the owner's account only after that, lists
 // the agents installed in either home for it, and the run launches in the
 // recipient's environment with the owner's login mounted and, since the
@@ -14,6 +14,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { Locator } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -54,36 +55,42 @@ test('a member shares their agent account and a teammate launches on it', async 
   const bobPage = await bobContext.newPage()
   try {
     const openLaunch = async () => {
-      await bobPage.getByRole('banner', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
-      const dialog = bobPage.getByRole('dialog', { name: 'Launch a run' })
+      await bobPage.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
+      const dialog = bobPage.getByRole('dialog', { name: 'New run' })
       await expect(dialog).toBeVisible()
       return dialog
     }
+    const chooseAliceAccount = async (dialog: Locator) => {
+      await dialog.getByRole('button', { name: /^Options/ }).click()
+      await dialog.getByRole('combobox', { name: 'Account', exact: true }).click()
+      await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
+    }
 
-    // Before the share, Bob's Account picker offers only his own account.
+    // Before the share, Bob has only his own account, so there is no
+    // account to choose.
     await bobPage.goto(bob.url)
     let dialog = await openLaunch()
-    await dialog.getByRole('combobox', { name: 'Account', exact: true }).click()
-    await expect(bobPage.getByRole('option', { name: `${bobName} (you)` })).toBeVisible()
-    await expect(bobPage.getByRole('option', { name: `${aliceName} (shared)` })).toHaveCount(0)
-    await bobPage.keyboard.press('Escape')
+    await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^Options/ })).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
 
     // Alice's environment terminal is running when she first shares, so
-    // Members offers to stop it.
+    // Profile offers to stop it.
     await page.goto(alice.url)
-    const dock = page.getByRole('region', { name: 'Terminal dock' })
-    await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+    await page.getByRole('navigation', { name: 'Aether' })
+      .getByRole('button', { name: 'Environment', exact: true }).click()
+    const dock = page.getByRole('region', { name: 'Environment terminal' })
     await dock.getByRole('button', { name: 'Open', exact: true }).click()
-    await expect(dock.getByRole('button', { name: 'Save environment' })).toBeVisible({
+    await expect(page.getByRole('button', { name: 'Save environment' })).toBeVisible({
       timeout: 60_000,
     })
 
-    await page.getByRole('navigation', { name: 'Surfaces' })
-      .getByRole('button', { name: /^Admin(?:,|$)/ }).click()
-    await page.getByRole('menuitem', { name: 'Members', exact: true }).click()
-    const sharing = page.getByRole('region', { name: 'Account sharing' })
+    await page.getByRole('navigation', { name: 'Aether' })
+      .getByRole('button', { name: /, (Live|Reconnecting|Offline)$/ }).click()
+    await page.getByRole('menuitem', { name: 'Profile' }).click()
+    const profile = page.getByRole('dialog', { name: 'Profile' })
+    const sharing = profile.getByRole('region', { name: 'Account sharing' })
     await sharing
       .getByRole('listitem')
       .filter({ hasText: bobName })
@@ -92,43 +99,41 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(sharing.getByRole('button', { name: 'Revoke access' })).toBeVisible()
     const notice = sharing.getByRole('status')
     await expect(notice).toContainText(
-      `Your environment terminal was started before you shared, so a Claude Code login written there will not reach ${bobName}'s runs`,
+      `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s runs`,
     )
     await notice.getByRole('button', { name: 'Stop environment' }).click()
     const confirm = page.getByRole('alertdialog', { name: 'Stop your environment?' })
     await confirm.getByRole('button', { name: 'Stop environment' }).click()
     await expect(confirm).toBeHidden()
     await expect(notice).toBeHidden()
+    await page.keyboard.press('Escape')
+    await expect(profile).toBeHidden()
 
     // After the share, Alice's account is offered with the agents installed
     // in her home, both refused until Alice has a login.
     dialog = await openLaunch()
-    const account = dialog.getByRole('combobox', { name: 'Account', exact: true })
-    await account.click()
-    await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
+    await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to claude, codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+      `${aliceName} is not logged in to Claude Code, Codex, so they cannot launch on this account. ${aliceName} logs in from their own Environment terminal; then open this dialog again.`,
     )
-    await dialog.getByRole('combobox', { name: 'Agent', exact: true }).click()
-    for (const agent of ['claude', 'codex']) {
-      await expect(bobPage.getByRole('option', { name: `${agent} (not logged in)` })).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      )
+    for (const agent of [/^Claude Code/, /^Codex/]) {
+      await expect(dialog.getByRole('radio', { name: agent })).toBeDisabled()
     }
-    await bobPage.keyboard.press('Escape')
 
     // The login a vendor flow would leave in Alice's home.
     const login = path.join(aether.server.memberHome(aliceID), '.claude', '.credentials.json')
     mkdirSync(path.dirname(login), { recursive: true })
     writeFileSync(login, `${ownerLogin}\n`, { mode: 0o600 })
 
-    await dialog.getByRole('button', { name: 'Refresh agents' }).click()
-    await expect(dialog.getByRole('combobox', { name: 'Agent', exact: true })).toHaveText('claude')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+    dialog = await openLaunch()
+    await chooseAliceAccount(dialog)
+    await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+      `${aliceName} is not logged in to Codex, so it cannot launch on this account. ${aliceName} logs in from their own Environment terminal; then open this dialog again.`,
     )
-    await dialog.getByLabel(/^Task/).fill(task)
+    await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
 
     await expect(bobPage.getByRole('heading', { name: task, exact: true })).toBeVisible()
@@ -136,12 +141,9 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(terminal).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
     await expect(terminal).toContainText(`login-seen:${ownerLogin}`)
 
-    await bobPage.getByText('Task and details', { exact: true }).click()
-    const metadata = bobPage.getByRole('group').filter({
-      has: bobPage.getByText('Task and details', { exact: true }),
-    })
+    const facts = bobPage.getByRole('complementary', { name: 'Run details' }).getByRole('region', { name: 'Details' })
     const row = (term: string) =>
-      metadata
+      facts
         .getByRole('term')
         .filter({ hasText: new RegExp(`^${term}$`) })
         .locator('..')

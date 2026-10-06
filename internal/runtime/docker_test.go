@@ -195,8 +195,9 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	if cfg.WorkingDir != "/workspace" {
 		t.Errorf("WorkingDir = %q, want /workspace", cfg.WorkingDir)
 	}
-	if !slices.Equal(cfg.Env, []string{"FOO=bar"}) {
-		t.Errorf("Env = %v, want [FOO=bar]", cfg.Env)
+	wantEnv := []string{"FOO=bar", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=/workspace"}
+	if !slices.Equal(cfg.Env, wantEnv) {
+		t.Errorf("Env = %v, want %v", cfg.Env, wantEnv)
 	}
 	if !cfg.OpenStdin || cfg.StdinOnce {
 		t.Errorf("OpenStdin/StdinOnce = %v/%v, want true/false (detach must not close stdin)", cfg.OpenStdin, cfg.StdinOnce)
@@ -285,6 +286,18 @@ func TestContainerConfigNoMountNoLimits(t *testing.T) {
 	}
 	if cfg.Env != nil {
 		t.Errorf("Env = %v, want nil", cfg.Env)
+	}
+}
+
+func TestTrustCheckoutKeepsWorkspaceGitConfig(t *testing.T) {
+	env := map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.editor", "GIT_CONFIG_VALUE_0": "vi"}
+	got := dockerEnv(trustCheckout(env, "/workspace"))
+	want := []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=core.editor", "GIT_CONFIG_KEY_1=safe.directory", "GIT_CONFIG_VALUE_0=vi", "GIT_CONFIG_VALUE_1=/workspace"}
+	if !slices.Equal(got, want) {
+		t.Errorf("env = %v, want %v", got, want)
+	}
+	if env["GIT_CONFIG_COUNT"] != "1" {
+		t.Errorf("spec env mutated: %v", env)
 	}
 }
 

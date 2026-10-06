@@ -44,7 +44,9 @@ Type=simple
 #      buys nothing.
 #   2. Environment images whose configured user is non-root make the server
 #      chown run checkouts and credential homes to that UID, which needs
-#      CAP_CHOWN. A non-root server can only serve root images.
+#      CAP_CHOWN. A non-root server can only serve root images; git in those
+#      runs works, because every run container trusts /workspace as git's
+#      safe.directory.
 # To run unprivileged anyway: add User=aether and SupplementaryGroups=docker,
 # keep every environment image on a root user, and give the user read access to
 # the tailscaled socket (tailscale set --operator=aether) if you want tailnet

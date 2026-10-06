@@ -61,3 +61,17 @@ export async function removeMemberImages(memberIDs: string[]): Promise<void> {
     }
   }
 }
+
+/**
+ * Hands `dir` back to this process's uid. An unprivileged server's root run
+ * containers leave root-owned files in checkouts and member homes, which only
+ * root can remove; `image` is one the scenario already ran.
+ */
+export async function reclaimOwnership(dir: string, image: string): Promise<void> {
+  const owner = `${process.getuid?.()}:${process.getgid?.()}`
+  await run(
+    'docker',
+    ['run', '--rm', '--network', 'none', '--user', '0:0', '--entrypoint', 'chown', '-v', `${dir}:/reclaim`, image, '-R', owner, '/reclaim'],
+    { timeout: 120_000 },
+  )
+}

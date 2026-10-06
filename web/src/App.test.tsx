@@ -30,9 +30,9 @@ async function mount() {
   })
 }
 
-/** The sidebar landmark; the board repeats every run task the tree shows. */
+/** The sidebar's run list; the board repeats every run task it shows. */
 function sidebar() {
-  return within(screen.getByRole('complementary', { name: 'Runs' }))
+  return within(within(screen.getByRole('navigation', { name: 'Aether' })).getByRole('region', { name: 'Runs' }))
 }
 
 describe('App', () => {
@@ -45,20 +45,15 @@ describe('App', () => {
     await vi.waitFor(() =>
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
     )
-    expect(screen.getByRole('combobox', { name: 'Workspace' }).textContent).toBe('main-repo')
+    expect(screen.getByRole('button', { name: 'Workspace: main-repo' })).toBeDefined()
     // Completed members keep the default board route. By role: the sidebar
     // nav entry carries the same words.
     expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeDefined()
-    // Status bar, from server.info.
-    fireEvent.click(screen.getByRole('button', { name: 'Show status details' }))
-    expect(screen.getByText('aether 1.2.3')).toBeDefined()
-    expect(
-      screen.getByLabelText('Disk usage')
-        .textContent,
-    ).toContain('512 MB / 2.0 GB')
+    // The footer, from server.info.
+    expect(screen.getByRole('button', { name: /^Alice, / })).toBeDefined()
   })
 
-  it('shows the terminal tab a sidebar row lands on', async () => {
+  it('opens a sidebar row on the run\'s Terminal view', async () => {
     await mount()
     await vi.waitFor(() =>
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
@@ -68,7 +63,7 @@ describe('App', () => {
     fireEvent.click(row)
 
     expect(row.getAttribute('aria-current')).toBe('page')
-    const strip = await screen.findByRole('tablist', { name: 'Run tabs' })
+    const strip = await screen.findByRole('tablist', { name: 'Run views' })
     await vi.waitFor(() =>
       expect(
         within(strip).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected'),
@@ -79,14 +74,14 @@ describe('App', () => {
   // The launch form is hosted by the shell, not by the palette: a button on
   // any surface opens the real dialog. Asserting the store alone would pass
   // even if nothing were mounted to answer it.
-  it('opens the launch form from the title bar, with no palette involved', async () => {
+  it('opens the launch form from the sidebar, with no palette involved', async () => {
     await mount()
-    const titleBar = await screen.findByRole('banner', { name: 'Aether' })
-    const launch = await within(titleBar).findByRole('button', { name: 'New run' })
+    const nav = await screen.findByRole('navigation', { name: 'Aether' })
+    const launch = await within(nav).findByRole('button', { name: 'New run' })
 
     fireEvent.click(launch)
 
-    expect(await screen.findByText('Launch a run')).toBeDefined()
+    expect(await screen.findByRole('dialog', { name: 'New run' })).toBeDefined()
     expect(await screen.findByLabelText('Target workspace')).toBeDefined()
     expect(useStore.getState().paletteOpen).toBe(false)
   })

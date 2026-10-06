@@ -189,6 +189,10 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 			detail += ": " + firstLine(v.Message)
 		}
 		return detail
+	case events.CoordMessagePayload:
+		return fmt.Sprintf("%s -> %s · %s", v.FromRunID, v.ToRunID, v.Kind)
+	case events.CoordMessageAckedPayload:
+		return fmt.Sprintf("%s acknowledged %s", v.ToRunID, v.MessageID)
 	case events.ApprovalPayload:
 		return string(v.Decision) + " " + v.Action
 	case events.PresencePayload:

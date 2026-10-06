@@ -13,39 +13,36 @@ test('back walks the steps without losing what they settled', async ({
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
 
-  // The inserted step is between Link and Workspace in both directions.
-  await wizard.expectStep('Git identity')
-  await wizard.back().click()
-  await wizard.expectStep('Link')
-
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.expectStep('Workspace')
-  await wizard.back().click()
-  await wizard.expectStep('Git identity')
-
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
   await wizard.expectStep('Repository')
   await wizard.back().click()
-  await wizard.expectStep('Workspace')
-  await expect(wizard.workspace.use('project')).toBeVisible()
+  await wizard.expectStep('Connect')
+  await expect(wizard.connect.section).toContainText('Linked to')
 
-  await wizard.workspace.use('project').click()
-  await wizard.repository.localClone().click()
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
   await wizard.back().click()
   await wizard.expectStep('Repository')
   await expect(wizard.repository.section).toContainText(`Connected ${repo}`)
 
+  // The workspace list is one click away, and picking the same workspace
+  // again keeps its clone.
+  await wizard.repository.change().click()
+  await wizard.repository.use('project').click()
+  await expect(wizard.repository.section).toContainText(`Connected ${repo}`)
+
   await wizard.repository.continue().click()
-  await wizard.agents.skip().click()
+  await wizard.agent.skip().click()
   await wizard.expectStep('First run')
   await wizard.back().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
+
+  // A step already reached is one click away in the header.
+  await page.getByRole('list', { name: 'Steps' }).getByRole('button', { name: /Repository, visited/ }).click()
+  await wizard.expectStep('Repository')
 })

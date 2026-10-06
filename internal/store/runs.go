@@ -96,12 +96,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
-		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -117,18 +117,20 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		lastCommitAt          *int64
 		baseCheckedAt         *int64
 		archivedAt            *int64
+		oldestUnacked         *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.HomeMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID); err != nil {
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.ACP, &r.UnansweredQuestions,
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
 	r.StartedAt = decodeTimePtr(startedAt)
 	r.FinishedAt = decodeTimePtr(finishedAt)
+	r.OldestUnackedAt = decodeTimePtr(oldestUnacked)
 	if lastCommitAt != nil {
 		r.LastCommitAt = decodeTime(*lastCommitAt)
 	}
@@ -142,7 +144,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at, runs.outcome_unseen`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.acp`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -154,7 +156,9 @@ func runSnapshotQuery(where string) string {
 		COALESCE(integrator.id, worker_mission.id, ''),
 		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
-		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, '')
+		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
+		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
+		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
 		FROM runs
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (
@@ -165,6 +169,7 @@ func runSnapshotQuery(where string) string {
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'
+			AND question.actor_id <> runs.member_id
 			AND question.state NOT IN ('denied', 'cancelled')
 			AND NOT EXISTS (
 				SELECT 1 FROM room_messages reply
@@ -232,15 +237,16 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 // ListRunsArchivedBefore returns runs whose archived_at is set and at or
 // before cutoff, for the retention sweep. It does not filter by status: a
 // run restored or otherwise no longer eligible is caught by the sweep's
-// own re-read. One query, no index: the sweep runs hourly and the table
-// is small.
+// own re-read. A run a swarm submission references waits for the swarm's
+// sweep. One query, no index: the sweep runs hourly and the table is small.
 func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*domain.Run, error) {
 	ts, err := encodeTime(cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs archived before: %w", err)
 	}
 	rows, err := d.db.QueryContext(ctx,
-		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?`)+` ORDER BY runs.created_at, runs.rowid`, ts)
+		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?
+			AND NOT EXISTS (SELECT 1 FROM mission_submissions WHERE mission_submissions.run_id = runs.id)`)+` ORDER BY runs.created_at, runs.rowid`, ts)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs archived before: %w", err)
 	}
@@ -339,6 +345,16 @@ func (d *DB) UpdateRunCommit(ctx context.Context, id domain.RunID, commit string
 	return err
 }
 
+// SetRunAgentSession updates only the run's harness_session_id.
+func (d *DB) SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET harness_session_id = ? WHERE id = ?`, session, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run agent session: %w", err)
+	}
+	return err
+}
+
 // SetRunTitle updates only the run's title, leaving all other columns
 // untouched.
 func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) error {
@@ -398,6 +414,16 @@ func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberI
 		`UPDATE runs SET member_id = ? WHERE id = ?`, to, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+	}
+	return err
+}
+
+// SetRunMode updates only the run's launch mode and whether it runs over ACP.
+func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.LaunchMode, acp bool) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET mode = ?, acp = ? WHERE id = ?`, mode, acp, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run mode: %w", err)
 	}
 	return err
 }
@@ -473,7 +499,16 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		return fmt.Errorf("store: delete run: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := deleteRunRows(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete run: commit: %w", err)
+	}
+	return nil
+}
 
+func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 	deletes := []struct {
 		query string
 		args  []any
@@ -483,14 +518,6 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		// the row it came from is gone; see foldDeletedRunCostSQL.
 		{foldDeletedRunCostSQL, []any{id}},
 		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
-		// Published audit rows are reconciliation cache and may be removed
-		// with retired mailbox rows. Pending and quarantined rows retain their
-		// immutable event projection after the run is gone.
-		{`DELETE FROM coord_audit_publications
-			WHERE publication_state = ?
-			  AND message_id IN (
-				SELECT id FROM run_messages WHERE from_run = ? OR to_run = ?
-			  )`, []any{CoordAuditPublicationPublished, id, id}},
 		{`DELETE FROM run_messages WHERE from_run = ? OR to_run = ?`, []any{id, id}},
 		{`DELETE FROM run_steerers WHERE run_id = ?`, []any{id}},
 	}
@@ -510,9 +537,6 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 	}
 	if affected == 0 {
 		return fmt.Errorf("store: delete run: %w", ErrNotFound)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: delete run: commit: %w", err)
 	}
 	return nil
 }

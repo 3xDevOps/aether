@@ -4,12 +4,14 @@
 // Every test gets its own server, its own loopback ports and its own scratch
 // directory, so the suite has no shared state to order tests around.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { test as base } from '@playwright/test'
 
 import { GatewayClient, type InviteResult } from './harness/client'
 import {
+  reclaimOwnership,
   removeContainers,
   removeMemberImages,
   runContainer,
@@ -17,8 +19,8 @@ import {
 } from './harness/docker'
 import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
-import { scratchDir } from './harness/paths'
-import { dockerReachable, type Server, type ServerOptions, startServer } from './harness/server'
+import { repoRoot, scratchDir } from './harness/paths'
+import { dockerReachable, type Server, type ServerOptions, standardImage, startServer } from './harness/server'
 
 export interface Member {
   name: string
@@ -57,6 +59,37 @@ export interface Aether {
    * under test here; what the connect path does around it is.
    */
   installStubGh: (memberID: string) => void
+  /**
+   * Puts a stub `npm` in a member's environment home, so `agent.install`
+   * runs the real install command for codex and its adapter without a
+   * registry. It records each call and writes the executable the package
+   * would link.
+   */
+  installStubNpm: (memberID: string) => void
+  /** Writes the file agent.list reads as a member's codex login. */
+  giveCodexLogin: (memberID: string) => void
+  /**
+   * Builds the acpmock agent (internal/acphost/acpmock/agent) and registers
+   * it as the member agent `mock`, whose Enhanced mode runs it in the run
+   * container. Prompts it understands: `demo`, `ask permission`, `ask
+   * form`, `wait`, `refuse`.
+   */
+  installACPMock: (member: Member, memberID: string) => Promise<void>
+}
+
+let acpMock: string | undefined
+
+/** Static, so it runs in the busybox image; built once per worker. */
+function buildACPMock(): string {
+  if (!acpMock) {
+    acpMock = path.join(scratchDir(), 'acp-mock')
+    execFileSync('go', ['build', '-o', acpMock, './internal/acphost/acpmock/agent'], {
+      cwd: repoRoot,
+      env: { ...process.env, CGO_ENABLED: '0' },
+      stdio: 'inherit',
+    })
+  }
+  return acpMock
 }
 
 /**
@@ -100,6 +133,25 @@ case "$1 $2" in
 	exit 1
 	;;
 esac
+`
+
+/** busybox `sh`; fails loudly on a package it does not know. */
+const stubNpm = `#!/bin/sh
+echo "$*" >> "$HOME/npm-calls.log"
+for a; do
+	case "$a" in
+	@openai/codex) bin=codex ;;
+	@agentclientprotocol/codex-acp@*) bin=codex-acp ;;
+	esac
+done
+if [ -z "$bin" ]; then
+	echo "npm: unsupported install: $*" >&2
+	exit 1
+fi
+mkdir -p "$HOME/.local/bin"
+printf '#!/bin/sh\\n' > "$HOME/.local/bin/$bin"
+chmod +x "$HOME/.local/bin/$bin"
+echo "added 1 package ($bin)"
 `
 
 /**
@@ -173,6 +225,24 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
         mkdirSync(bin, { recursive: true })
         writeFileSync(path.join(bin, 'gh'), stubGh, { mode: 0o755 })
       },
+      installStubNpm: (memberID) => {
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        writeFileSync(path.join(bin, 'npm'), stubNpm, { mode: 0o755 })
+      },
+      installACPMock: async (member, memberID) => {
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        copyFileSync(buildACPMock(), path.join(bin, 'acp-mock'))
+        await member.api.rpc('agent.register', {
+          definition: { name: 'mock', executable: 'acp-mock', tui_args: ['acp-mock'], headless_args: ['acp-mock'], acp_args: ['acp-mock'] },
+        })
+      },
+      giveCodexLogin: (memberID) => {
+        const dir = path.join(server.memberHome(memberID), '.codex')
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(path.join(dir, 'auth.json'), '{}\n')
+      },
     })
 
     const { containers, memberIDs } = await leftovers(gateways)
@@ -186,7 +256,13 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
     }
     // A failed test keeps its data directory, server log and repositories.
     if (testInfo.status === testInfo.expectedStatus) {
-      rmSync(dir, { recursive: true, force: true })
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EACCES') throw err
+        await reclaimOwnership(dir, serverOptions.standardImage ?? standardImage)
+        rmSync(dir, { recursive: true, force: true })
+      }
     } else {
       await testInfo.attach('aether-server output', { body: server.output() })
     }

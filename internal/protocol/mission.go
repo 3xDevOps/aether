@@ -14,6 +14,9 @@ const (
 	MethodMissionPlanShow       = "mission.plan.show"
 	MethodMissionStart          = "mission.start"
 	MethodMissionCancel         = "mission.cancel"
+	MethodMissionArchive        = "mission.archive"
+	MethodMissionUnarchive      = "mission.unarchive"
+	MethodMissionDelete         = "mission.delete"
 
 	MethodTaskShow             = "task.show"
 	MethodTaskList             = "task.list"
@@ -59,8 +62,10 @@ type Mission struct {
 	IntegratorLaunchError        string                   `json:"integrator_launch_error,omitempty"`
 	IntegratorLaunchErrorAt      string                   `json:"integrator_launch_error_at,omitempty"`
 	IntegratorRunLaunched        bool                     `json:"integrator_run_launched"`
+	ChangeSeq                    uint64                   `json:"change_seq"`
 	CreatedAt                    string                   `json:"created_at"`
 	UpdatedAt                    string                   `json:"updated_at"`
+	ArchivedAt                   *string                  `json:"archived_at,omitempty"`
 }
 
 // MissionQuestion is one clarifying question the integrator asked the
@@ -318,6 +323,14 @@ type MissionCancelResult struct {
 	Mission Mission `json:"mission"`
 }
 
+type MissionIDParams struct {
+	MissionID string `json:"mission_id"`
+}
+
+type MissionArchiveResult struct {
+	Mission Mission `json:"mission"`
+}
+
 type MissionReplaceIntegratorParams struct {
 	MissionID          string            `json:"mission_id"`
 	ExpectedGeneration uint64            `json:"expected_generation"`
@@ -435,10 +448,11 @@ type WorkerMutationResult struct {
 }
 
 func MissionFromDomain(m *domain.Mission) Mission {
-	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
+	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, ChangeSeq: m.ChangeSeq, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
 	if m.IntegratorLaunchErrorAt != nil {
 		out.IntegratorLaunchErrorAt = rfc3339(*m.IntegratorLaunchErrorAt)
 	}
+	out.ArchivedAt = rfc3339Ptr(m.ArchivedAt)
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
 		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode)}

@@ -128,6 +128,9 @@ func (d *DB) InsertMissionQuestion(ctx context.Context, missionID domain.Mission
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
 	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionQuestionAsked, askedBy); changeErr != nil {
+		return nil, changeErr
+	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, fmt.Errorf("store: ask mission question: commit: %w", commitErr)
 	}
@@ -192,6 +195,9 @@ func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.Missio
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionQuestionAnswered, ""); changeErr != nil {
+		return nil, changeErr
 	}
 	q, err := scanMissionQuestion(tx.QueryRowContext(ctx, `SELECT `+missionQuestionColumns+` FROM mission_questions WHERE id=?`, questionID))
 	if err != nil {
@@ -316,6 +322,9 @@ func (d *DB) StartMission(ctx context.Context, missionID domain.MissionID, run d
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
 	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionPhaseChanged, run); changeErr != nil {
+		return nil, changeErr
+	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, fmt.Errorf("store: start mission: commit: %w", commitErr)
 	}
@@ -358,6 +367,9 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionPhaseChanged, run); changeErr != nil {
+		return nil, changeErr
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, fmt.Errorf("store: complete mission: commit: %w", commitErr)
@@ -418,6 +430,9 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
 		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionPhaseChanged, ""); changeErr != nil {
+		return nil, changeErr
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, fmt.Errorf("store: cancel mission: commit: %w", commitErr)

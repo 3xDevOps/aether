@@ -106,10 +106,7 @@ function mountWithPendingFonts(ui = <PaneProbe />) {
   const { promise, resolve } = Promise.withResolvers<void>()
   Object.defineProperty(document, 'fonts', {
     configurable: true,
-    value: {
-      check: () => false,
-      load: () => promise,
-    },
+    value: Object.assign([], { load: () => promise }),
   })
   return { resolveFonts: resolve, fontsReady: promise, view: render(ui) }
 }
@@ -133,12 +130,17 @@ afterEach(() => {
   else Reflect.deleteProperty(document, 'fonts')
 })
 
+function openFind() {
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Terminal tools' }), { key: 'Enter' })
+  fireEvent.click(screen.getByRole('menuitem', { name: /^Find/ }))
+}
+
 describe('deferred terminal focus', () => {
   it('focuses the terminal input after Find closes before terminal readiness', async () => {
     const { resolveFonts, fontsReady } = mountWithPendingFonts()
 
     expect(screen.queryByRole('textbox', { name: 'Terminal input' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open terminal search' }))
+    openFind()
     const findInput = screen.getByLabelText('Find in terminal')
     expect(document.activeElement).toBe(findInput)
 
@@ -154,7 +156,7 @@ describe('deferred terminal focus', () => {
     const { resolveFonts, fontsReady } = mountWithPendingFonts(<PaneWithExternalControl />)
     const external = screen.getByRole('button', { name: 'External control' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open terminal search' }))
+    openFind()
     const findInput = screen.getByLabelText('Find in terminal')
     fireEvent.keyDown(findInput, { key: 'Escape' })
 

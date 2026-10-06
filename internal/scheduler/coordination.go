@@ -38,7 +38,10 @@ var bridgePrefixes = []string{bridgePrefix, legacyBridgePrefix}
 type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
+	WriteFiles(run domain.RunID, files map[string][]byte) error
 	Release(run domain.RunID) error
+	WakeIdle(run domain.RunID)
+	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls
@@ -330,50 +333,66 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 	return s.provisionCoordination(ctx, c, entry, run, profile, native, digest, bin, cliMount)
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
-	files := make(map[string][]byte)
-	maps.Copy(files, native.Files)
+type coordinationLaunch struct {
+	files    map[string][]byte
+	args     []string
+	env      map[string]string
+	reporter harness.Reporter
+}
+
+func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profile, native harness.NativeLaunch) (coordinationLaunch, error) {
+	l := coordinationLaunch{files: make(map[string][]byte), reporter: harness.ReporterNone}
+	maps.Copy(l.files, native.Files)
 	// Lifecycle reporting follows conflict policy; taskless discovery only needs
 	// the run transport. User-supplied MCP configuration is never rewritten.
-	reporter := harness.ReporterNone
-	if c.enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone && !native.ReplacesStatus {
-		maps.Copy(files, profile.StatusFiles)
-		launchArgs = append(launchArgs, profile.StatusLaunchArgs(coordtransport.MountDir)...)
-		launchEnv = profile.StatusLaunchEnv(coordtransport.MountDir)
-		reporter = profile.Reporter
+	if enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone && !native.ReplacesStatus {
+		maps.Copy(l.files, profile.StatusFiles)
+		l.args = append(l.args, profile.StatusLaunchArgs(coordtransport.MountDir)...)
+		l.env = profile.StatusLaunchEnv(coordtransport.MountDir)
+		l.reporter = profile.Reporter
 	}
 	if native.ReplacesStatus {
-		reporter = native.Reporter
+		l.reporter = native.Reporter
 	}
 	if run.Mode == domain.LaunchTUI && run.Task == "" {
-		if launchEnv == nil && len(profile.DiscoveryEnv) > 0 {
-			launchEnv = make(map[string]string, len(profile.DiscoveryEnv))
+		if l.env == nil && len(profile.DiscoveryEnv) > 0 {
+			l.env = make(map[string]string, len(profile.DiscoveryEnv))
 		}
-		maps.Copy(files, profile.DiscoveryFiles)
-		launchArgs = append(launchArgs, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
+		maps.Copy(l.files, profile.DiscoveryFiles)
+		l.args = append(l.args, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
 		for key, value := range profile.DiscoveryLaunchEnv(coordtransport.MountDir) {
-			if key == "OPENCODE_CONFIG_CONTENT" && launchEnv[key] != "" {
+			if key == "OPENCODE_CONFIG_CONTENT" && l.env[key] != "" {
 				// OpenCode has one inline config variable. Preserve the reporter
 				// only when it was actually provisioned above, rather than making
 				// discovery reference an absent plugin with conflict policy off.
 				var statusConfig, discoveryConfig map[string]json.RawMessage
-				if err = json.Unmarshal([]byte(launchEnv[key]), &statusConfig); err != nil {
-					return nil, nil, nil, fmt.Errorf("decode harness status config: %w", err)
+				if err := json.Unmarshal([]byte(l.env[key]), &statusConfig); err != nil {
+					return coordinationLaunch{}, fmt.Errorf("decode harness status config: %w", err)
 				}
-				if err = json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
-					return nil, nil, nil, fmt.Errorf("decode harness discovery config: %w", err)
+				if err := json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
+					return coordinationLaunch{}, fmt.Errorf("decode harness discovery config: %w", err)
 				}
 				maps.Copy(statusConfig, discoveryConfig)
-				combined, marshalErr := json.Marshal(statusConfig)
-				if marshalErr != nil {
-					return nil, nil, nil, fmt.Errorf("combine harness config: %w", marshalErr)
+				combined, err := json.Marshal(statusConfig)
+				if err != nil {
+					return coordinationLaunch{}, fmt.Errorf("combine harness config: %w", err)
 				}
 				value = string(combined)
 			}
-			launchEnv[key] = value
+			l.env[key] = value
 		}
 	}
-	dir, err := c.svc.Provision(ctx, run.ID, files)
+	return l, nil
+}
+
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
+	launch, err := newCoordinationLaunch(c.enabled, run, profile, native)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	reporter := launch.reporter
+	launchArgs, launchEnv = launch.args, launch.env
+	dir, err := c.svc.Provision(ctx, run.ID, launch.files)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("provision coordination directory: %w", err)
 	}

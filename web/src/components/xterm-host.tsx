@@ -271,7 +271,7 @@ function oklchRgba(color: string): string | undefined {
 
 function primarySelectionBackground(): string | undefined {
   const root = document.documentElement
-  const raw = getComputedStyle(root).getPropertyValue('--primary').trim()
+  const raw = getComputedStyle(root).getPropertyValue('--accent-fill').trim()
   if (!raw) return undefined
 
   const probe = document.createElement('span')

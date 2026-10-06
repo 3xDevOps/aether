@@ -16,13 +16,13 @@ func TestDispatchHelp(t *testing.T) {
 		t.Fatalf("bare aether: %v", err)
 	}
 	help := helpText()
-	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
+	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "message", "close", "reopen", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
 		if !strings.Contains(help, name) {
 			t.Errorf("help missing %q:\n%s", name, help)
 		}
 	}
-	if !strings.Contains(help, "reopen a retained Done run") {
-		t.Errorf("relaunch help = %q, want retained Done-run wording", help)
+	if !strings.Contains(help, "reopen a finished run that still keeps its container") {
+		t.Errorf("relaunch help = %q, want the kept-container wording", help)
 	}
 }
 
@@ -97,11 +97,11 @@ func TestSteerUsage(t *testing.T) {
 		{[]string{"unarchive"}, "usage: aether unarchive <run-id>"},
 		{[]string{"pause"}, "usage: aether pause <run-id>"},
 		{[]string{"resume"}, "usage: aether resume <run-id>"},
-		{[]string{"inject"}, "usage: aether inject <run-id> <message...>"},
-		{[]string{"inject", "run-1"}, "usage: aether inject <run-id> <message...>"},
+		{[]string{"message"}, "usage: aether message <run-id> <message...>"},
+		{[]string{"message", "run-1"}, "usage: aether message <run-id> <message...>"},
 		{[]string{"close"}, "usage: aether close <run-id> --outcome merged|abandoned"},
 		{[]string{"close", "run-1"}, "usage: aether close <run-id> --outcome merged|abandoned"},
-		{[]string{"relaunch"}, "usage: aether relaunch <run-id>"},
+		{[]string{"reopen"}, "usage: aether reopen <run-id>"},
 		{[]string{"env"}, "usage: aether env save|reset"},
 		{[]string{"env", "save", "extra"}, "usage: aether env save|reset"},
 		{[]string{"env", "reset", "extra"}, "usage: aether env save|reset"},

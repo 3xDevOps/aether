@@ -10,7 +10,7 @@ import (
 func init() {
 	register(command{
 		name:  "close",
-		short: "close a needs-attention run",
+		short: "close a run as merged or abandoned",
 		run:   runClose,
 	})
 }

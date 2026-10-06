@@ -1,6 +1,7 @@
 import { bareVersion } from '@/lib/format'
 import type { ConnectionState } from '@/lib/stream'
 import type {
+  AgentInfo,
   GatewayCapabilities,
   ServerInfo,
   ServerUpdatePayload,
@@ -114,6 +115,8 @@ export interface ServerSlice {
   /** How far the running self-update has got, from the server.update feed
    * and the RPC results. Session-scoped: a reload re-reads the status. */
   serverUpdateProgress: ServerUpdatePayload | null
+  agentList: { identity: string | null; agents: AgentInfo[] } | null
+  setAgentList: (identity: string | null, agents: AgentInfo[]) => void
   setInfo: (info: ServerInfo) => void
   setIdentityKey: (identityKey: string) => void
   setCapabilities: (capabilities: GatewayCapabilities | null) => void
@@ -158,6 +161,8 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     serverUpdate: null,
     serverUpdateError: null,
     serverUpdateProgress: null,
+    agentList: null,
+    setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
     setIdentityKey: (identityKey) => set({ identityKey }),
     setCapabilities: (capabilities) => set({ capabilities }),
@@ -168,6 +173,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       set((s) => ({
         lastSeq: 0,
         terminalCacheEpoch: s.terminalCacheEpoch + 1,
+        sessionLogs: {},
       })),
     setHydrated: (hydrated, error = null) =>
       set({ hydrated, hydrationError: error }),

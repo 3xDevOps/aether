@@ -33,15 +33,7 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return ''
 }
 
-/**
- * "deleted today" / "deleted in 1 day" / "deleted in N days" for an archived
- * run's `deletes_at`, computed fresh each render rather than off a stored
- * window. Whole hours floor into days, so this undercounts rather than
- * overstates the time left on a destructive countdown: under 24h - a date
- * already past included, a sweep due any moment - reads "today", 24h up to
- * 48h reads "in 1 day". An unparseable value returns "" so the caller can
- * render no badge at all.
- */
+/** Floors to whole days so a destructive countdown never overstates the time left. */
 export function deletesInLabel(iso: string, now = Date.now()): string {
   const deletesAt = new Date(iso).getTime()
   if (!Number.isFinite(deletesAt)) return ''
@@ -52,34 +44,33 @@ export function deletesInLabel(iso: string, now = Date.now()): string {
   return `deleted in ${days} days`
 }
 
-/**
- * A version with its release-tag prefix off. Release tags are "v1.2.3", the
- * desktop shell records "1.2.3", and the two have to compare equal.
- */
+/** Release tags are "v1.2.3" but the desktop shell records "1.2.3". */
 export function bareVersion(version: string): string {
   return version.replace(/^v/, '')
 }
 
-/** The host of an edge URL, as the client's own errors name it. */
 export function edgeHost(edge: string): string {
   return new URL(edge).host
 }
 
-/**
- * What a local link points at: its SSH address, or for a link through an
- * edge with none, the server id and the edge.
- */
+/** The SSH address, or for an edge link without one, the server id and edge. */
 export function linkTarget(link: Pick<LinkStatus, 'addr' | 'server_id' | 'edge_url'>): string {
   if (link.addr || !link.server_id || !link.edge_url) return link.addr
   return `${link.server_id} through ${edgeHost(link.edge_url)}`
 }
 
-/** An error's text, whatever the throw site handed us. */
-/** The name people know an edge sign-in provider by. */
 export const providerName: Record<string, string> = { github: 'GitHub' }
 
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+const sourcePrefix = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*: (?=\S)/
+
+export function errorSentence(err: unknown): string {
+  let text = message(err)
+  for (let next = text.replace(sourcePrefix, ''); next !== text; next = next.replace(sourcePrefix, '')) text = next
+  return text
 }
 
 export const money = new Intl.NumberFormat(undefined, {
@@ -87,17 +78,9 @@ export const money = new Intl.NumberFormat(undefined, {
   currency: 'USD',
 })
 
-/** What a budget state is called wherever it is shown. */
 export const budgetStateLabel: Record<BudgetState, string> = {
   ok: 'within budget',
   warn: 'nearing the cap',
   exceeded: 'past the cap',
 }
 
-/** Display names for the harnesses whose CLI is not called what Aether
- * calls it. Anything absent is shown by its registry name. */
-export const friendly: Record<string, string> = {
-  claude: 'Claude Code',
-  codex: 'Codex',
-  omp: 'oh-my-pi',
-}

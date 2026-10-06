@@ -8,14 +8,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
 /** The step labels the wizard's header lists, in order. */
-export const stepNames = [
-  'Link',
-  'Git identity',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-] as const
+export const stepNames = ['Connect', 'Repository', 'Agent', 'First run'] as const
 
 export type StepName = (typeof stepNames)[number]
 
@@ -36,20 +29,24 @@ class Step {
   button(name: string | RegExp): Locator {
     return this.section.getByRole('button', { name, exact: true })
   }
+
+  async expand(caption: string): Promise<void> {
+    const trigger = this.section.getByRole('button', { name: new RegExp(`^${caption}`) })
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click()
+  }
 }
 
-export class LinkStep extends Step {
+export class ConnectStep extends Step {
   constructor(page: Page) {
-    super(page, 'Link')
+    super(page, 'Connect')
   }
 
-  /** Swaps the edge sign-in for the address form. */
   byAddress(): Locator {
-    return this.button('Link by address')
+    return this.section.getByRole('button', { name: /^Link by address/ })
   }
 
   async link(addr: string, options: { invite?: string; name?: string } = {}): Promise<void> {
-    await this.byAddress().click()
+    await this.expand('Link by address')
     await this.section.getByLabel('Server address').fill(addr)
     if (options.invite) await this.section.getByLabel('Invite code').fill(options.invite)
     if (options.name) await this.section.getByLabel('Your name').fill(options.name)
@@ -59,29 +56,30 @@ export class LinkStep extends Step {
   continue(): Locator {
     return this.button('Continue')
   }
+
+  get identity(): GitIdentity {
+    return new GitIdentity(this.section)
+  }
 }
 
-export class GitIdentityStep extends Step {
-  constructor(page: Page) {
-    super(page, 'Git identity')
+export class GitIdentity {
+  constructor(private readonly scope: Locator) {}
+
+  get form(): Locator {
+    return this.scope.getByRole('form', { name: 'Git identity' })
   }
 
-  /** Fills the identity in and saves it, which also moves the wizard on. */
   async save(name: string, email: string): Promise<void> {
-    await this.section.getByLabel('Name', { exact: true }).fill(name)
-    await this.section.getByLabel('Email', { exact: true }).fill(email)
-    await this.button('Save').click()
-  }
-
-  /** Moves on without one, leaving the server's fallback in place. */
-  skip(): Locator {
-    return this.button('Skip')
+    await this.form.getByLabel('Name', { exact: true }).fill(name)
+    await this.form.getByLabel('Email', { exact: true }).fill(email)
+    await this.form.getByRole('button', { name: 'Save identity' }).click()
+    await expect(this.form.getByRole('status')).toHaveText('Saved')
   }
 }
 
-export class WorkspaceStep extends Step {
+export class RepositoryStep extends Step {
   constructor(page: Page) {
-    super(page, 'Workspace')
+    super(page, 'Repository')
   }
 
   async createFromClone(name: string, baseBranch = 'main'): Promise<void> {
@@ -95,15 +93,9 @@ export class WorkspaceStep extends Step {
   use(name: string): Locator {
     return this.section.getByRole('button', { name: `Use ${name}`, exact: true })
   }
-}
 
-export class RepositoryStep extends Step {
-  constructor(page: Page) {
-    super(page, 'Repository')
-  }
-
-  override get section(): Locator {
-    return this.page.getByRole('region', { name: 'Workspace repository', exact: true })
+  change(): Locator {
+    return this.button('Choose another workspace')
   }
 
   localClone(): Locator {
@@ -131,38 +123,69 @@ export class RepositoryStep extends Step {
   continue(): Locator {
     return this.button('Continue')
   }
-}
 
-export class AgentsStep extends Step {
-  constructor(page: Page) {
-    super(page, 'Agents')
+  continueToAgent(): Locator {
+    return this.button('Continue to Agent')
   }
 
-  /** Opens a harness's setup screen. `label` is the name the list shows. */
+  get identity(): GitIdentity {
+    return new GitIdentity(this.section)
+  }
+}
+
+export class AgentStep extends Step {
+  constructor(page: Page) {
+    super(page, 'Agent')
+  }
+
   setUp(label: string): Locator {
     return this.section.getByRole('button', { name: `Set up ${label}`, exact: true })
   }
 
-  /** The setup screen's confirmation, which also saves the environment. */
-  confirmInstalled(): Locator {
-    return this.button("I've installed and logged in")
+  row(label: string): Locator {
+    return this.section.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: label })
+  }
+
+  mode(name: 'Standard' | 'Enhanced'): Locator {
+    return this.section.getByRole('radio', { name, exact: true })
+  }
+
+  install(label: string): Locator {
+    return this.button(`Install ${label}`)
+  }
+
+  status(label: string): Locator {
+    return this.section.getByRole('list', { name: `${label} status` })
+  }
+
+  check(): Locator {
+    return this.section.getByRole('button', { name: /^Check( again)?$/ })
+  }
+
+  done(): Locator {
+    return this.button('Done')
   }
 
   /** The terminal dock's overlay while the environment container starts. */
   containerStarting(): Locator {
-    return this.section.getByRole('status')
+    return this.section.getByRole('status').filter({ hasText: 'Starting your environment container' })
   }
 
-  /** Opens the Connect GitHub sub-screen. */
-  connectGitHub(): Locator {
-    return this.button('Connect GitHub')
+  async connectGitHub(): Promise<void> {
+    await this.expand('GitHub')
+    await this.button('Connect GitHub').click()
+  }
+
+  continue(): Locator {
+    return this.button('Continue')
   }
 
   skip(): Locator {
     return this.button('Skip for now')
   }
 
-  get configuration(): ConfigurationImport {
+  async configuration(): Promise<ConfigurationImport> {
+    await this.expand('Agent config files')
     return new ConfigurationImport(this.page)
   }
 
@@ -172,7 +195,7 @@ export class AgentsStep extends Step {
 }
 
 /**
- * The Agents step's GitHub part, closed and open: both states carry the
+ * The Agent step's GitHub part, closed and open: both states carry the
  * same `<section aria-label>` and never render together, so one object
  * covers them.
  */
@@ -199,16 +222,16 @@ export class GitHubConnect {
 }
 
 /**
- * The Agents step's second half: one explicit browser directory import. The
- * input is scoped to its section so another file picker in the page cannot be
- * mistaken for the configuration source.
+ * One explicit browser directory import. The input is scoped to its section
+ * so another file picker in the page cannot be mistaken for the
+ * configuration source.
  */
 export class ConfigurationImport {
   constructor(private readonly page: Page) {}
 
   get section(): Locator {
     return this.page.getByRole('region', {
-      name: 'Bring your configuration',
+      name: 'Agent config files',
       exact: true,
     })
   }
@@ -243,61 +266,50 @@ export class FirstRunStep extends Step {
   }
 
   /**
-   * Launches the run. The picker offers only the agents this account has
-   * installed, so a scenario installs one before it gets here.
+   * Launches the run from the launch dialog's own form. Only agents this
+   * account has installed can be picked, so a scenario installs one first.
    */
   async launch(agent: string, task: string): Promise<void> {
-    await this.section.getByRole('combobox', { name: 'Agent' }).click()
-    // The list is portalled to the end of the document, so it is off the
-    // step's own subtree.
-    await this.page.getByRole('option', { name: agent, exact: true }).click()
+    await this.section.getByRole('radio', { name: new RegExp(`^${agent}`, 'i') }).click()
     await this.section.getByRole('textbox', { name: 'Task' }).fill(task)
     await this.button('Launch').click()
   }
 
-  /** The way out when no agent is installed: back to the Agents step. */
   setUpAgent(): Locator {
     return this.button('Set up an agent')
   }
 }
 
 export class OnboardingWizard {
-  readonly link: LinkStep
-  readonly gitIdentity: GitIdentityStep
-  readonly workspace: WorkspaceStep
+  readonly connect: ConnectStep
   readonly repository: RepositoryStep
-  readonly agents: AgentsStep
+  readonly agent: AgentStep
   readonly firstRun: FirstRunStep
 
   constructor(readonly page: Page) {
-    this.link = new LinkStep(page)
-    this.gitIdentity = new GitIdentityStep(page)
-    this.workspace = new WorkspaceStep(page)
+    this.connect = new ConnectStep(page)
     this.repository = new RepositoryStep(page)
-    this.agents = new AgentsStep(page)
+    this.agent = new AgentStep(page)
     this.firstRun = new FirstRunStep(page)
   }
 
   /**
    * Opens the dashboard on the member's tokened URL. An unlinked gateway
    * routes itself to the wizard; a linked one is already past it, so the
-   * Admin menu is the way back in.
+   * command palette is the way back in.
    */
   static async open(page: Page, url: string): Promise<OnboardingWizard> {
     const wizard = new OnboardingWizard(page)
     await page.goto(url)
     const heading = page.getByRole('heading', { name: 'Onboarding', exact: true })
-    const live = page.getByRole('contentinfo').getByText('Live', { exact: true })
-    await expect(heading.or(live).first()).toBeVisible()
-    if (!(await heading.isVisible())) {
-      const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
-      if (!(await surfaces.isVisible())) {
-        await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
-      }
-      await surfaces.getByRole('button', { name: /^Admin(?:,|$)/ }).click()
-      await page.getByRole('menuitem', { name: 'Onboarding', exact: true }).click()
+    const live = page.getByRole('button', { name: /, Live$/ })
+    await expect(heading.or(live).first()).toBeAttached()
+    if (!(await heading.count())) {
+      await page.getByRole('button', { name: 'Search', exact: true }).first().click()
+      await page.getByRole('combobox').fill('Onboarding')
+      await page.getByRole('option', { name: 'Onboarding', exact: true }).click()
     }
-    await expect(heading).toBeVisible()
+    await expect(heading).toBeAttached()
     return wizard
   }
 
@@ -310,9 +322,7 @@ export class OnboardingWizard {
     const current = this.currentStep()
     await expect(current).toHaveCount(1)
     await expect(current.getByText(name, { exact: true })).toBeVisible()
-    await expect(
-      name === 'Repository' ? this.repository.section : this.page.getByRole('region', { name, exact: true }),
-    ).toBeVisible()
+    await expect(this.page.getByRole('region', { name, exact: true })).toBeVisible()
   }
 
   /** Closes an open sub-screen, and only then leaves the step. */

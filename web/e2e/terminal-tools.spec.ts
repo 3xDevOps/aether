@@ -1,7 +1,8 @@
-// The terminal dock's own tools, against a real environment container: the
-// dock is closed until asked for, the font zoom holds across a reload, and
+// The environment terminal's own tools, against a real environment container:
+// nothing starts until asked for, the font zoom holds across a reload, and
 // the find bar searches what the shell actually printed.
 
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { OnboardingWizard } from './pages/wizard'
@@ -10,35 +11,36 @@ test.skip(!dockerReachable(), 'the environment terminal needs a reachable Docker
 
 test.use({ viewport: { width: 1600, height: 1000 }, hasTouch: false })
 
-test('the terminal dock opens on request, zooms and finds', async ({ page, browser, aether }) => {
+test('the environment terminal opens on request, zooms and finds', async ({ page, browser, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
 
   const wizard = await OnboardingWizard.open(page, alice.url)
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
-  await wizard.link.continue().click()
-  await wizard.gitIdentity.skip().click()
-  await wizard.workspace.createFromClone('project')
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
+  await wizard.connect.continue().click()
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
-  await wizard.agents.skip().click()
-  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  await wizard.agent.skip().click()
+  const nav = (target: Page) => target.getByRole('navigation', { name: 'Aether' })
+  await nav(page).getByRole('button', { name: 'Board', exact: true }).click()
+  const dock = page.getByRole('region', { name: 'Environment terminal' })
+  await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
+  await expect(dock).toHaveCount(0)
 
-  // Closed on arrival: the board keeps the window until a terminal is asked
-  // for, and the header strip is the only thing the dock spends it on.
-  const dock = page.getByRole('region', { name: 'Terminal dock' })
-  await expect(dock.getByRole('button', { name: 'Expand terminal dock' })).toBeVisible()
-  await expect(dock.getByText('Your environment starts on first open')).toBeHidden()
-
-  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+  await nav(page).getByRole('button', { name: 'Environment', exact: true }).click()
+  await expect(dock.getByText('Your environment starts on first open')).toBeVisible()
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
 
-  const tools = dock.getByRole('toolbar', { name: 'Terminal controls' })
-  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
-  await expect(dock.getByRole('button', { name: 'Terminal tools', exact: true })).toBeHidden()
+  const tools = dock.getByRole('button', { name: 'Terminal tools', exact: true })
+  await tools.click()
+  const menu = page.getByRole('menu')
+  for (const name of [/^Find/, 'Copy selection', 'Copy screen', 'Paste', 'Upload image…']) {
+    await expect(menu.getByRole('menuitem', { name })).toBeVisible()
+  }
+  await page.keyboard.press('Escape')
+  await expect(tools).toBeFocused()
 
   const screen = dock.locator('.xterm-screen')
   await screen.click()
@@ -72,7 +74,7 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, brows
   await expect.poll(fontSize).toBe('14px')
 
   await page.reload()
-  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+  await nav(page).getByRole('button', { name: 'Environment', exact: true }).click()
   // The reattach's spinner has not necessarily mounted yet, so wait for the
   // rows the size is read off rather than for the spinner to go.
   await expect(dock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
@@ -94,24 +96,19 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, brows
   await find.press('Escape')
   await expect(dock.getByLabel('Find in terminal')).toBeHidden()
 
-  // A narrow pane uses the same tools through a keyboard-accessible popover.
+  // A narrow pane reaches the same tools from the keyboard.
   await page.setViewportSize({ width: 640, height: 800 })
-  const compactTools = dock.getByRole('button', { name: 'Terminal tools', exact: true })
-  await expect(compactTools).toBeVisible()
-  await expect(dock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
-  await compactTools.focus()
+  await tools.focus()
   await page.keyboard.press('Enter')
-  const compactControls = page.getByRole('toolbar', { name: 'Terminal controls' })
-  await expect(compactControls.getByRole('button', { name: 'Copy last screen' })).toBeVisible()
-  await compactControls.getByRole('button', { name: 'Open terminal search' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Copy screen' })).toBeVisible()
+  await page.getByRole('menuitem', { name: /^Find/ }).click()
   await find.fill('aether-found-me')
   await find.press('Enter')
   await expect(dock.locator('.xterm-selection div').first()).toBeVisible()
   await find.press('Escape')
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
 
-  // Touch keeps the compact menu even when the viewport is wide.
+  // Touch uses the same menu, with touch-sized rows.
   const touchContext = await browser.newContext({
     hasTouch: true,
     viewport: { width: 1600, height: 1000 },
@@ -120,15 +117,15 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, brows
   try {
     const touchPage = await touchContext.newPage()
     await touchPage.goto(alice.url)
-    const touchDock = touchPage.getByRole('region', { name: 'Terminal dock' })
-    await touchDock.getByRole('button', { name: 'Expand terminal dock' }).click()
+    const touchDock = touchPage.getByRole('region', { name: 'Environment terminal' })
+    await nav(touchPage).getByRole('button', { name: 'Environment', exact: true }).click()
     await expect(touchDock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
-    await expect(touchDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
     await touchDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
-    const touchControls = touchPage.getByRole('toolbar', { name: 'Terminal controls' })
-    await expect(touchControls.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
-    await expect(touchControls.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
-    await touchControls.getByRole('button', { name: 'Open terminal search' }).click()
+    const copy = touchPage.getByRole('menuitem', { name: 'Copy selection' })
+    await expect(copy).toBeVisible()
+    // Polled: the menu opens scaled to 0.98, so an early box is about 43px.
+    await expect.poll(async () => Math.round((await copy.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44)
+    await touchPage.getByRole('menuitem', { name: /^Find/ }).click()
     const touchFind = touchDock.getByLabel('Find in terminal')
     await touchFind.fill('aether-found-me')
     await touchFind.press('Enter')
@@ -138,8 +135,9 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, brows
     await touchContext.close()
   }
 
-  await dock.getByRole('button', { name: 'Collapse terminal dock' }).click()
-  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
+  await nav(page).getByRole('button', { name: 'Board', exact: true }).click()
+  await expect(dock).toHaveCount(0)
+  await nav(page).getByRole('button', { name: 'Environment', exact: true }).click()
   await expect(dock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
   await dock.locator('.xterm-screen').click()
   // Require new shell output rather than matching the echoed command.

@@ -63,6 +63,8 @@ type Config struct {
 	// mirrors. Production leaves it nil to use the system resolver; tests
 	// provide this narrow seam to avoid external DNS.
 	MirrorResolve MirrorResolveFunc
+	// RemoveCheckout deletes a run checkout tree; nil uses os.RemoveAll.
+	RemoveCheckout func(ctx context.Context, path string) error
 }
 
 // runInfo is a watch-registry entry. Entries are created by StartDiffWatch
@@ -114,6 +116,9 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.MaxInterval <= 0 {
 		cfg.MaxInterval = 60 * time.Second
+	}
+	if cfg.RemoveCheckout == nil {
+		cfg.RemoveCheckout = func(_ context.Context, path string) error { return os.RemoveAll(path) }
 	}
 	for _, dir := range []string{cfg.ReposDir, cfg.CheckoutsDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

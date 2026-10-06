@@ -20,10 +20,22 @@ import (
 
 var _ ManagedExecRuntime = (*Docker)(nil)
 
-// StartExecTTY runs the staged helper as the container's configured user,
-// environment and working directory. The helper waits for a claim before
-// launching the command: losing/cancelling ExecAttach cannot orphan a command.
-func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ ManagedExec, resultErr error) {
+// StartExecTTY runs the staged helper, which waits for a claim before
+// launching the command, so losing ExecAttach cannot orphan the command.
+func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (ManagedExec, error) {
+	if spec.Cols == 0 || spec.Rows == 0 || spec.Cols > 65535 || spec.Rows > 65535 {
+		return nil, errors.New("runtime: execution terminal dimensions must be between 1 and 65535")
+	}
+	return d.startManagedExec(ctx, id, spec, true)
+}
+
+// StartExecPipe is StartExecTTY without a terminal. Closing the attachment
+// closes the command's stdin.
+func (d *Docker) StartExecPipe(ctx context.Context, id ID, spec ExecSpec) (ManagedExec, error) {
+	return d.startManagedExec(ctx, id, spec, false)
+}
+
+func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty bool) (_ ManagedExec, resultErr error) {
 	if spec.CreationKey == "" || len(spec.CreationKey) > 1024 || strings.ContainsRune(spec.CreationKey, 0) {
 		return nil, errors.New("runtime: valid single-use execution creation key is required")
 	}
@@ -38,9 +50,6 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 	if spec.WorkingDir != "" && !path.IsAbs(spec.WorkingDir) {
 		return nil, errors.New("runtime: execution working directory must be absolute")
 	}
-	if spec.Cols == 0 || spec.Rows == 0 || spec.Cols > 65535 || spec.Rows > 65535 {
-		return nil, errors.New("runtime: execution terminal dimensions must be between 1 and 65535")
-	}
 	container, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: inspect managed execution container: %w", err)
@@ -50,16 +59,19 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 		return nil, fmt.Errorf("runtime: create execution claim: %w", err)
 	}
 	claim := hex.EncodeToString(token[:])
-	argv := append([]string{coordtransport.CLIPath, devexec.Command, "run", spec.CreationKey, claim}, spec.Argv...)
+	helper, size := "run-pipe", client.ConsoleSize{}
+	if tty {
+		helper, size = "run", client.ConsoleSize{Width: spec.Cols, Height: spec.Rows}
+	}
+	argv := append([]string{coordtransport.CLIPath, devexec.Command, helper, spec.CreationKey, claim}, spec.Argv...)
 	created, err := d.cli.ExecCreate(ctx, container.Container.ID, client.ExecCreateOptions{
-		TTY: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-		Cmd: argv, WorkingDir: spec.WorkingDir,
-		ConsoleSize: client.ConsoleSize{Width: spec.Cols, Height: spec.Rows},
+		TTY: tty, AttachStdin: true, AttachStdout: true, AttachStderr: true,
+		Cmd: argv, Env: spec.Env, WorkingDir: spec.WorkingDir, ConsoleSize: size,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: create managed execution: %w", err)
 	}
-	execution := &dockerManagedExec{docker: d, identity: ExecIdentity{
+	execution := &dockerManagedExec{docker: d, tty: tty, identity: ExecIdentity{
 		ContainerID: ID(container.Container.ID), ExecID: created.ID, CreationKey: spec.CreationKey,
 		ClaimToken: claim,
 	}}
@@ -81,13 +93,11 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 			resultErr = errors.Join(resultErr, fmt.Errorf("runtime: cancelled execution cleanup: %w", stopErr))
 		}
 	}()
-	attached, err := d.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{
-		TTY: true, ConsoleSize: client.ConsoleSize{Width: spec.Cols, Height: spec.Rows},
-	})
+	attached, err := d.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{TTY: tty, ConsoleSize: size})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: attach managed execution: %w", err)
 	}
-	execution.attachment = newExecAttachment(d.cli, created.ID, attached.HijackedResponse)
+	execution.attachment = newExecAttachment(d.cli, created.ID, tty, attached.HijackedResponse)
 	if _, err := execution.control(ctx, "start", 0); err != nil {
 		return nil, err
 	}
@@ -98,9 +108,9 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 	return execution, nil
 }
 
-// RecoverExec proves both Docker's immutable execution/container association
-// and the helper's claim identity. It cannot restore an exec's stdio: consumers
-// must expose the unavailable terminal, not launch a replacement implicitly.
+// RecoverExec proves the exec's container association and the helper's
+// claim identity. It cannot restore stdio: callers must surface the terminal
+// as unavailable, not launch a replacement.
 func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (ManagedExec, error) {
 	if identity.ContainerID == "" || identity.ExecID == "" || identity.CreationKey == "" || identity.ClaimToken == "" {
 		return nil, fmt.Errorf("%w: incomplete identity", ErrExecUnavailable)
@@ -117,6 +127,7 @@ func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (Manage
 
 type dockerManagedExec struct {
 	docker     *Docker
+	tty        bool
 	identity   ExecIdentity
 	mu         sync.Mutex
 	attachment *execAttachment
@@ -127,8 +138,7 @@ func (e *dockerManagedExec) Identity() ExecIdentity { return e.identity }
 func (e *dockerManagedExec) Attachment() Attachment {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	// EOF still leaves buffered output for the initial consumer to drain.
-	// Transport availability is reported separately by Status.
+	// An attachment at EOF may still hold buffered output to drain.
 	if e.attachment == nil {
 		return nil
 	}
@@ -181,7 +191,7 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 	e.mu.Unlock()
 	state := ExecState{Running: info.Running, Attached: attached}
 	if !state.Attached {
-		state.UnavailableReason = "PTY attachment is unavailable; Docker exec terminals cannot be reattached"
+		state.UnavailableReason = "attachment is unavailable; Docker cannot reattach an exec's streams"
 	}
 	if info.Running {
 		return state, nil
@@ -244,6 +254,9 @@ func (e *dockerManagedExec) Resize(ctx context.Context, cols, rows uint) error {
 	e.mu.Unlock()
 	if !attached {
 		return fmt.Errorf("%w: cannot resize an unavailable PTY", ErrExecUnavailable)
+	}
+	if !e.tty {
+		return errors.New("runtime: resize: execution has no terminal")
 	}
 	_, err := e.docker.cli.ExecResize(ctx, e.identity.ExecID, client.ExecResizeOptions{Width: cols, Height: rows})
 	return err

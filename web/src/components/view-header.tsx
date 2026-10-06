@@ -1,46 +1,48 @@
 import type { ReactNode } from 'react'
+import { ConnectionLine, useConnectionProblem } from '@/components/shell/connection'
+import { PaneHeader } from '@/components/ui/pane-header'
+import { useIsMobile } from '@/lib/breakpoints'
+import { useStore } from '@/store'
 
+/**
+ * The header every non-run view draws: a `PaneHeader` that carries the
+ * connection problem on desktop and the sidebar opener while it is hidden.
+ * On a phone the top bar already shows the title, so the heading is kept
+ * for screen readers and focus only.
+ */
 export function ViewHeader({
   title,
-  titleTooltip,
   titleAdornment,
   subtitle,
   actions,
 }: {
   title: string
-  titleTooltip?: string
   titleAdornment?: ReactNode
-  subtitle?: string
+  subtitle?: ReactNode
   actions?: ReactNode
 }) {
+  const mobile = useIsMobile()
+  const collapsed = useStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  const problem = useConnectionProblem()
+  if (mobile && !titleAdornment && !actions) {
+    return (
+      <h1 tabIndex={-1} className="sr-only">
+        {title}
+      </h1>
+    )
+  }
+  const stateLine = !mobile && problem
+    ? <ConnectionLine />
+    : !mobile && (typeof subtitle === 'string' ? <span className="truncate text-ui-sm text-muted">{subtitle}</span> : subtitle)
   return (
-    <header className="@container/header flex min-h-[35px] shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b bg-sidebar/40 px-3 py-1 sm:px-4">
-      <div className="flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-2 gap-y-0.5">
-        <h1
-          className="min-w-0 break-words text-[15px] font-semibold leading-5"
-          title={titleTooltip ?? title}
-        >
-          {title}
-        </h1>
-        {titleAdornment}
-        {subtitle && (
-          <span
-            className="min-w-0 basis-full break-words text-xs leading-4 text-muted-foreground @sm/header:basis-auto @sm/header:flex-1"
-            title={subtitle}
-          >
-            {subtitle}
-          </span>
-        )}
-      </div>
-      {actions && (
-        <div
-          role="toolbar"
-          aria-label={`${title} actions`}
-          className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1"
-        >
-          {actions}
-        </div>
-      )}
-    </header>
+    <PaneHeader
+      title={mobile ? <span className="sr-only">{title}</span> : title}
+      stateLine={stateLine || undefined}
+      viewSwitch={titleAdornment}
+      actions={actions}
+      actionsLabel={`${title} actions`}
+      onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
+    />
   )
 }

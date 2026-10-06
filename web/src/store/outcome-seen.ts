@@ -1,17 +1,12 @@
 import { toast } from 'sonner'
 import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
-import { awaitingReview } from '@/lib/status'
+import { errorSentence } from '@/lib/format'
+import { awaitingReview } from '@/lib/needs-you'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
 
-/**
- * Calls `run.seen` when the run's owner reveals a run awaiting review, or is
- * already viewing it in a visible tab when the outcome arrives. Only the
- * server's answer clears the flag, never this tab's ack. One call per
- * reveal: a refusal is reported, not retried, until the owner opens the run
- * again.
- */
+/** Only the server's answer clears the flag, never this tab's ack. A refusal
+ * is reported, not retried, until the owner opens the run again. */
 export function watchOutcomeSeen(
   store: RootStore,
   client: Api,
@@ -39,7 +34,7 @@ export function watchOutcomeSeen(
         if (!seen.outcome_unseen) store.getState().applyOutcomeSeen(seen.id)
       })
       .catch((err: unknown) => {
-        toast.error(`Could not mark the run seen: ${message(err)}`)
+        toast.error(`Could not mark the run seen: ${errorSentence(err)}`)
       })
       .finally(() => inFlight.delete(run.id))
   }

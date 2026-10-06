@@ -1,6 +1,6 @@
-import { ChevronRightIcon } from 'lucide-react'
 import { Collapsible as CollapsiblePrimitive } from 'radix-ui'
 import type * as React from 'react'
+import { ChevronRight } from '@/components/icons'
 import { cn, focusRing } from '@/lib/utils'
 
 export function Collapsible({
@@ -9,8 +9,7 @@ export function Collapsible({
   return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
 }
 
-/** Carries the marker a native disclosure used to draw for itself: without
- * one, the caption reads as a heading nobody thinks to click. */
+/** Draws its own disclosure marker: without one the caption reads as a heading, not a control. */
 export function CollapsibleTrigger({
   className,
   children,
@@ -21,12 +20,12 @@ export function CollapsibleTrigger({
       data-slot="collapsible-trigger"
       className={cn(
         focusRing,
-        'flex min-h-[22px] coarse:min-h-11 w-full cursor-pointer items-center gap-1 px-1 text-left text-[13px] leading-5 hover:bg-toolbar-hover [&[data-state=open]>svg]:rotate-90',
+        'flex min-h-7 w-full cursor-pointer items-center gap-1 rounded-control px-1 text-left text-ui hover:bg-hover-chrome coarse:min-h-11 [&[data-state=open]>svg]:rotate-90',
         className,
       )}
       {...props}
     >
-      <ChevronRightIcon className="size-3 shrink-0" />
+      <ChevronRight className="size-3 shrink-0 text-muted" />
       {children}
     </CollapsiblePrimitive.Trigger>
   )

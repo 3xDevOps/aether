@@ -143,6 +143,23 @@ func TestHookLeavesMailUntilAgentAcknowledges(t *testing.T) {
 	}
 }
 
+func TestEnhancedRunHooksStaySilent(t *testing.T) {
+	_, _, socket, _ := hookMailbox(t)
+	t.Setenv(coordtransport.EnhancedEnv, "1")
+	for _, tc := range []struct{ harness, event string }{{"claude", "Stop"}, {"claude", "PostToolBatch"}, {"codex", "PostToolUse"}, {"pi", "context"}} {
+		var out bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", tc.harness, tc.event}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out})
+		if err != nil || code != ExitOK || out.Len() != 0 {
+			t.Fatalf("%s %s in an enhanced run = %d, %v, %q; want silent success", tc.harness, tc.event, code, err, out.String())
+		}
+	}
+	var out bytes.Buffer
+	code, err := Run(t.Context(), []string{"hook", "omp", "wake"}, Config{Socket: socket, In: strings.NewReader(`{"seen_message_ids":[]}`), Out: &out})
+	if code != ExitUsage || err == nil || !strings.Contains(err.Error(), "enhanced run") {
+		t.Fatalf("wake receiver in an enhanced run = %d, %v; want a usage error that stops it", code, err)
+	}
+}
+
 func TestHookDoesNotContinueAbortedOrRepeatedStops(t *testing.T) {
 	_, db, socket, run := hookMailbox(t)
 	for _, tc := range []struct{ harness, event, input string }{

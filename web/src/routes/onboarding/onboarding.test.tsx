@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import type { AetherDesktop } from '@/components/shell/title-bar'
+import type { AetherDesktop } from '@/components/shell/window-bar'
 import type { Api } from '@/lib/api'
 import type {
   AgentInfo,
@@ -16,10 +16,8 @@ import type {
   RepoPushState,
 } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
-import { FirstRunStep } from '@/routes/onboarding/steps'
+import { FirstRunStep } from '@/routes/onboarding/first-run-step'
 import { useStore, type RootState } from '@/store'
-import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
-import { openSelect, pickOption } from '@/test/select'
 import {
   agentInfo,
   alice,
@@ -114,10 +112,11 @@ function seed(extra: Partial<RootState> = {}) {
     linkStatus: { server_configured: true, linked: true, addr: 'host:2222', user: 'alice', repo: '/src/repo' },
     hydrated: true,
     hydrationError: null,
+    agentList: null,
     route: { name: 'onboarding', params: {} },
     onboarded: false,
-    onboardingStep: 'Link',
-    onboardingFurthest: 'Link',
+    onboardingStep: 'Connect',
+    onboardingFurthest: 'Connect',
     onboardingWorkspace: '',
     onboardingSource: 'local',
     onboardingRepo: null,
@@ -126,18 +125,17 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
-/** Walks the wizard from mount past the link step. */
-async function toGitIdentityStep() {
+/** Waits for the Connect step's identity form to take this machine's name. */
+async function machineIdentity() {
+  await waitFor(() => {
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Alice Local')
+  })
+}
+
+async function toWorkspaceStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
-/** Walks on past the git identity step, which is optional. */
-async function toWorkspaceStep() {
-  await toGitIdentityStep()
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
-}
-
-/** Walks on to the repo step by picking the fixture workspace. */
 async function toRepoStep() {
   await toWorkspaceStep()
   fireEvent.click(
@@ -147,7 +145,6 @@ async function toRepoStep() {
   if (local) fireEvent.click(local)
 }
 
-/** Walks on to the Agents step, through a repo link. */
 async function toAgentsStep() {
   await toRepoStep()
   fireEvent.change(await screen.findByLabelText('Repository path'), {
@@ -157,21 +154,42 @@ async function toAgentsStep() {
   fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 }
 
-/** Walks all the way to the first-run step, skipping the agent setup and
- * the configuration import - both are optional. */
 async function toFirstRunStep() {
   await toAgentsStep()
-  fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' }))
+  await screen.findByRole('region', { name: 'Agent' })
+  fireEvent.click(await screen.findByRole('button', { name: /^(Continue|Skip for now)$/ }))
+}
+
+function currentStep() {
+  return screen.getByRole('listitem', { current: 'step' }).textContent
 }
 
 describe('onboarding wizard', () => {
-  it('onboards a hosted member without probing the local machine', async () => {
+  it('shows four steps, one header, and no step counter', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+
+    const steps = within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
+    expect(steps.map((step) => step.textContent)).toEqual(['1Connect', '2Repository', '3Agent', '4First run'])
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    expect(screen.queryByText(/Step \d of \d/)).toBeNull()
+    expect(await screen.findByRole('region', { name: 'Connect' })).toBeDefined()
+  })
+
+  it('starts a hosted member at Repository with the git identity on top, without probing the local machine', async () => {
     const client = fakeApi()
     seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] } })
     render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(currentStep()).toContain('Repository')
+    expect(screen.queryByText('Connect')).toBeNull()
+    const repository = await screen.findByRole('region', { name: 'Repository' })
+    const identity = within(repository).getByRole('form', { name: 'Git identity' })
+    expect(identity.compareDocumentPosition(within(repository).getByRole('button', { name: 'Import repository' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Hosted member' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'member@example.test' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
+    expect(await screen.findByText('Saved')).toBeDefined()
     fireEvent.click(await screen.findByRole('button', { name: 'Import repository' }))
     expect(await screen.findByRole('dialog')).toBeDefined()
     expect(client.localLinkStatus).not.toHaveBeenCalled()
@@ -179,26 +197,23 @@ describe('onboarding wizard', () => {
     expect(useStore.getState().info?.member.git_email).toBe('member@example.test')
   })
 
-  it('checks link status on mount and steps to the workspace picker', async () => {
+  it('checks link status on mount and steps to the repository choice', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    // Linked: the summary carries the address and user from link.status,
-    // and the store mirror is updated for the status bar.
     expect(await screen.findByText('host:2222')).toBeDefined()
-    expect(screen.getByText('alice')).toBeDefined()
+    expect(screen.getByText(/as alice/)).toBeDefined()
     expect(client.localLinkStatus).toHaveBeenCalledTimes(1)
     expect(useStore.getState().linkStatus?.linked).toBe(true)
 
     await toWorkspaceStep()
-    expect(
-      await screen.findByRole('region', { name: 'Workspace' }),
-    ).toBeDefined()
+    const repository = await screen.findByRole('region', { name: 'Repository' })
+    expect(repository.textContent).toContain('A workspace is one repository and base branch, and the runs started from it.')
     expect(client.workspaceListFull).toHaveBeenCalled()
   })
 
-  it('links an unlinked gateway in the app and steps to the workspace picker', async () => {
+  it('links an unlinked gateway in the app and steps to Repository', async () => {
     const client = fakeApi({
       localLinkStatus: vi
         .fn()
@@ -226,7 +241,8 @@ describe('onboarding wizard', () => {
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Link by address' }))
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: /^Link by address/ }))
     fireEvent.change(screen.getByLabelText('Server address'), {
       target: { value: 'host:2222' },
     })
@@ -244,17 +260,13 @@ describe('onboarding wizard', () => {
       name: 'Alice',
     })
     const summary = await screen.findByText(/^Linked to/)
-    expect(summary.textContent).toBe('Linked to host:2222 as Alice (admin).')
-    expect(screen.getByText(/^Created SSH key/).textContent).toBe(
-      'Created SSH key /home/alice/.ssh/id_ed25519.',
-    )
+    expect(summary.textContent).toBe('Linked to host:2222 as Alice (admin). Created SSH key /home/alice/.ssh/id_ed25519.')
     expect(useStore.getState().connectionEpoch).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      'Git identity',
-    )
+    expect(currentStep()).toContain('Repository')
   })
-  it('shows a configured server without a repository and opens the workspace picker', async () => {
+
+  it('shows a configured server without a repository and opens the repository choice', async () => {
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => ({
         server_configured: true,
@@ -268,49 +280,45 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     expect(await screen.findByText('host:2222')).toBeDefined()
-    expect(screen.getByText('alice')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
 
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
     expect(screen.queryByLabelText('Repository path')).toBeNull()
   })
-  it('returns to the workspace step when a persisted repo step has no workspace', async () => {
+
+  it('opens Repository on the workspace choice when the persisted step has no workspace', async () => {
     seed({ onboardingStep: 'Repository', onboardingWorkspace: '' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
-    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      'Workspace',
-    )
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(currentStep()).toContain('Repository')
+    expect(await screen.findByRole('button', { name: `Use ${workspace.name}` })).toBeDefined()
   })
-  it('returns to the workspace step from every step past Repository', async () => {
-    // Repository is where the workspace first becomes load-bearing, so the
-    // guard covers it and everything after it, whatever their positions.
-    for (const step of onboardingSteps.slice(
-      onboardingStepIndex('Repository'),
-    )) {
-      seed({ onboardingStep: step, onboardingWorkspace: '' })
-      const view = render(<OnboardingRoute params={{}} client={fakeApi()} />)
-      expect(
-        await view.findByRole('region', { name: 'Workspace' }),
-      ).toBeDefined()
-      view.unmount()
-    }
-  })
-  it('resumes where it left off on the steps before Repository', async () => {
-    // Nothing before Repository needs a workspace, so a missing one must
-    // not drag the wizard forward or back.
-    seed({ onboardingStep: 'Git identity', onboardingWorkspace: '' })
-    render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
-    expect(
-      await screen.findByRole('region', { name: 'Git identity' }),
-    ).toBeDefined()
-    expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain(
-      'Git identity',
-    )
+  it('lets a member reach Agent without a workspace, but not launch', async () => {
+    seed({ onboardingStep: 'Agent', onboardingFurthest: 'Agent', onboardingWorkspace: '' })
+    const view = render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    expect(await view.findByRole('region', { name: 'Agent' })).toBeDefined()
+    view.unmount()
+
+    seed({ onboardingStep: 'First run', onboardingFurthest: 'First run', onboardingWorkspace: '' })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    const firstRun = await screen.findByRole('region', { name: 'First run' })
+    expect(firstRun.textContent).toContain('choose a workspace first')
+    fireEvent.click(within(firstRun).getByRole('button', { name: 'Choose a repository' }))
+    expect(currentStep()).toContain('Repository')
   })
+
+  it('gives a member who cannot add a workspace an Ask an admin state and a way on to Agent', async () => {
+    seed({ info: { ...serverInfo, member: { ...alice, role: 'collaborator' } }, members: { [alice.id]: { ...alice, role: 'collaborator' } } })
+    render(<OnboardingRoute params={{}} client={fakeApi({ workspaceListFull: vi.fn(async () => []) })} />)
+    await toWorkspaceStep()
+
+    expect(await screen.findByText('Ask an admin to add a workspace')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Create from local clone' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Agent' }))
+    expect(currentStep()).toContain('Agent')
+  })
+
   it('rechecks link status when the window regains focus', async () => {
     let status = {
       server_configured: false,
@@ -324,7 +332,7 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    expect(await screen.findByRole('button', { name: 'Link by address' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: /^Link by address/ })).toBeDefined()
 
     status = {
       server_configured: true,
@@ -339,34 +347,26 @@ describe('onboarding wizard', () => {
     expect(client.localLinkStatus).toHaveBeenCalledTimes(2)
   })
 
-  it('prefills the git identity from this machine and saves it', async () => {
+  it('prefills the git identity at the bottom of Connect from this machine and saves it', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
 
-    expect(await screen.findByRole('region', { name: 'Git identity' })).toBeDefined()
-    await waitFor(() => {
-      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
-        'Alice Local',
-      )
-    })
-    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
-      'alice@example.invalid',
-    )
+    const connect = await screen.findByRole('region', { name: 'Connect' })
+    expect(await within(connect).findByRole('region', { name: 'Git identity' })).toBeDefined()
+    await machineIdentity()
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('alice@example.invalid')
 
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Ada Lovelace' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
 
     await waitFor(() => {
-      expect(client.memberGit).toHaveBeenCalledWith(
-        'Ada Lovelace',
-        'alice@example.invalid',
-      )
+      expect(client.memberGit).toHaveBeenCalledWith('Ada Lovelace', 'alice@example.invalid')
     })
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(await screen.findByText('Saved')).toBeDefined()
+    expect(currentStep()).toContain('Connect')
   })
 
   it('keeps the identity the member already saved over the machine one', async () => {
@@ -375,9 +375,7 @@ describe('onboarding wizard', () => {
       info: { ...serverInfo, member: { ...alice, git_name: 'Ada Server' } },
     })
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
 
-    await screen.findByRole('region', { name: 'Git identity' })
     // The machine's address landing in the empty email is what says the
     // probe finished; the saved name is asserted after that, not before.
     await waitFor(() => {
@@ -388,7 +386,7 @@ describe('onboarding wizard', () => {
     expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('Ada Server')
   })
 
-  it('shows the refusal verbatim and stays on the git identity step', async () => {
+  it('shows the refusal verbatim', async () => {
     const client = fakeApi({
       memberGit: vi.fn(async () => {
         throw new Error('git email must contain @')
@@ -396,28 +394,21 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
-    await waitFor(() => {
-      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
-        'Alice Local',
-      )
-    })
+    await machineIdentity()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
 
     expect(await screen.findByText('git email must contain @')).toBeDefined()
-    expect(screen.queryByRole('region', { name: 'Workspace' })).toBeNull()
+    expect(screen.queryByText('Saved')).toBeNull()
   })
 
-  it('skips the git identity step without saving one', async () => {
+  it('moves on without saving an identity', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
+    await toWorkspaceStep()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Skip' }))
-
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
     expect(client.memberGit).not.toHaveBeenCalled()
   })
 
@@ -433,17 +424,12 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
-    await waitFor(() => {
-      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
-        'Alice Local',
-      )
-    })
+    await machineIdentity()
 
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Ada Lovelace' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
     await waitFor(() => expect(client.memberGit).toHaveBeenCalled())
 
     // What a disk-usage refresh does: write the whole info back with its
@@ -455,35 +441,32 @@ describe('onboarding wizard', () => {
     )
     land()
 
-    await screen.findByRole('region', { name: 'Workspace' })
+    await screen.findByText('Saved')
     expect(useStore.getState().info?.member.git_name).toBe('Ada Lovelace')
     expect(useStore.getState().info?.tailnet_hostname).toBe(
       'gateway.tailnet.ts.net',
     )
   })
 
-  it('shows the saved identity when the user walks back into the step', async () => {
+  it('shows the saved identity when the user walks back into Connect', async () => {
     const client = fakeApi()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
-    await waitFor(() => {
-      expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe(
-        'Alice Local',
-      )
-    })
+    await machineIdentity()
 
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Ada Lovelace' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await screen.findByRole('region', { name: 'Workspace' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
+    await screen.findByText('Saved')
+    await toWorkspaceStep()
+    await screen.findByRole('region', { name: 'Repository' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     // What the server answered, not the machine's git config: the save
     // refreshed the stored member, so the re-run probe has nothing to fill.
-    await screen.findByRole('region', { name: 'Git identity' })
+    await screen.findByRole('region', { name: 'Connect' })
     await waitFor(() => {
       expect(client.localGitIdentity).toHaveBeenCalledTimes(2)
     })
@@ -503,7 +486,6 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
 
     expect(await screen.findByText('git config: no user.name set')).toBeDefined()
     fireEvent.change(screen.getByLabelText('Name'), {
@@ -512,7 +494,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'ada@example.invalid' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
 
     await waitFor(() => {
       expect(client.memberGit).toHaveBeenCalledWith(
@@ -520,14 +502,12 @@ describe('onboarding wizard', () => {
         'ada@example.invalid',
       )
     })
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
   })
 
   it('asks a gateway without the git.identity verb for nothing', async () => {
     const client = fakeApi()
     seed({ capabilities: olderCaps })
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
 
     expect(await screen.findByRole('region', { name: 'Git identity' })).toBeDefined()
     expect(client.localGitIdentity).not.toHaveBeenCalled()
@@ -537,7 +517,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'ada@example.invalid' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
 
     await waitFor(() => {
       expect(client.memberGit).toHaveBeenCalledWith(
@@ -565,7 +545,6 @@ describe('onboarding wizard', () => {
     const { client, settle } = deferredIdentity()
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
     await screen.findByRole('region', { name: 'Git identity' })
 
     fireEvent.change(screen.getByLabelText('Name'), {
@@ -594,7 +573,6 @@ describe('onboarding wizard', () => {
       },
     })
     render(<OnboardingRoute params={{}} client={client} />)
-    await toGitIdentityStep()
     await screen.findByRole('region', { name: 'Git identity' })
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: '' } })
@@ -611,9 +589,8 @@ describe('onboarding wizard', () => {
   it('will not save half an identity', async () => {
     seed({ capabilities: olderCaps })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
-    await toGitIdentityStep()
 
-    const save = await screen.findByRole('button', { name: 'Save' })
+    const save = await screen.findByRole('button', { name: 'Save identity' })
     expect(save).toHaveProperty('disabled', true)
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Ada Lovelace' },
@@ -1013,7 +990,7 @@ describe('onboarding wizard', () => {
     expect(await screen.findByText(/Pushed/)).toBeDefined()
     expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
   })
 
   it('lets a collaborator link and continue on a mirrored workspace without offering a base push', async () => {
@@ -1039,7 +1016,7 @@ describe('onboarding wizard', () => {
     expect(client.localRepoPush).not.toHaveBeenCalled()
     expect(client.workspaceMirrorConfigure).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
   })
 
   it('keeps source mirror setup behind its capability', async () => {
@@ -1112,7 +1089,7 @@ describe('onboarding wizard', () => {
     // The answer outlives the step: walking back shows it settled rather
     // than offering the button a second time.
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(await screen.findByText(/Fast-forwarded/)).toBeDefined()
     expect(client.localRepoFastForward).toHaveBeenCalledTimes(1)
@@ -1193,7 +1170,7 @@ describe('onboarding wizard', () => {
     await screen.findByText(/Pushed/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(await screen.findByRole('region', { name: 'Agents' })).toBeDefined()
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     // The connected state, not the blank form: the remote is already
@@ -1295,14 +1272,14 @@ describe('onboarding wizard', () => {
     })
     const review = vi.fn()
     seed({ info: { ...serverInfo, member: { ...alice, role } }, onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' } })
-    render(<FirstRunStep client={client} workspace={workspace} onBackToAgents={vi.fn()} onBackToRepository={review} />)
+    render(<FirstRunStep client={client} workspace={workspace} onBackToAgent={vi.fn()} onBackToRepository={review} />)
     await screen.findByText('source key is not installed')
     expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
     expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id)
     expect(client.runLaunch).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Review repository setup' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review repository' }))
     expect(review).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Check source again' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(useStore.getState().route.params.runId).toBe('run_1'))
@@ -1317,7 +1294,7 @@ describe('onboarding wizard', () => {
       info: { ...serverInfo, member: { ...alice, role: 'collaborator' } },
       onboardingFirstRun: { harness: 'claude', task: 'Inspect the repository' },
     })
-    render(<FirstRunStep client={client} workspace={workspace} onBackToAgents={vi.fn()} />)
+    render(<FirstRunStep client={client} workspace={workspace} onBackToAgent={vi.fn()} onBackToRepository={vi.fn()} />)
 
     await waitFor(() => expect(client.workspaceMirrorStatus).toHaveBeenCalledWith(workspace.id))
     expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
@@ -1325,7 +1302,7 @@ describe('onboarding wizard', () => {
     await screen.findByText('source status unavailable')
     expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', true)
     expect(client.runLaunch).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Check source again' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(client.runLaunch).toHaveBeenCalledWith({
@@ -1436,12 +1413,7 @@ describe('onboarding wizard', () => {
     ).toHaveProperty('disabled', false)
   })
 
-  it('resumes on Repository with its clone connected and walks back to Workspace', async () => {
-    // What an older release left behind: its resume point was an index and
-    // its repository answer already carried the comparison states. Migrated,
-    // the two have to fit together - the wizard opens on Repository with the
-    // clone still connected, and Back reaches Workspace rather than the step
-    // inserted in front of it.
+  it('resumes on Repository with its clone connected and goes back to the workspace choice', async () => {
     const client = fakeApi()
     seed({
       onboardingStep: 'Repository',
@@ -1457,11 +1429,9 @@ describe('onboarding wizard', () => {
     expect(screen.queryByLabelText('Repository path')).toBeNull()
     expect(client.localLinkRepo).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
-
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another workspace' }))
     fireEvent.click(
-      screen.getByRole('button', { name: `Use ${workspace.name}` }),
+      await screen.findByRole('button', { name: `Use ${workspace.name}` }),
     )
     expect(
       await screen.findByRole('region', { name: 'Repository' }),
@@ -1469,15 +1439,12 @@ describe('onboarding wizard', () => {
     expect(screen.getByText('/home/alice/code/myproject')).toBeDefined()
   })
 
-  it('keeps the connected clone while the identity step is walked through', async () => {
-    // Forward from the start: the Git identity step sits between Link and
-    // Workspace, and passing it must not disturb the answer Repository
-    // already holds.
+  it('keeps the connected clone while Connect is walked through', async () => {
     const client = fakeApi()
     seed({ onboardingWorkspace: workspace.id, onboardingRepo: connectedRepo })
     render(<OnboardingRoute params={{}} client={client} />)
 
-    await toRepoStep()
+    await toWorkspaceStep()
 
     expect(
       await screen.findByRole('region', { name: 'Repository' }),
@@ -1494,7 +1461,7 @@ describe('onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Push now' }))
     await screen.findByText(/Pushed/)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another workspace' }))
     fireEvent.click(
       await screen.findByRole('button', { name: `Use ${otherWorkspace.name}` }),
     )
@@ -1544,74 +1511,92 @@ describe('onboarding wizard', () => {
     ).toBe('git push -u aether trunk')
   })
 
-  it('launches the first run in the chosen workspace and navigates to it', async () => {
+  it('launches the first run with the launch form in the chosen workspace and navigates to it', async () => {
     const client = fakeApi()
     seed({ runs: {} })
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
-    // The workspace was settled two steps back, so nothing here asks for a
-    // scope again.
-    expect(screen.queryByLabelText('Workspace')).toBeNull()
-
-    await pickOption(screen.getByLabelText('Agent'), 'claude')
+    const step = await screen.findByRole('region', { name: 'First run' })
+    expect(step.textContent).toContain('A run is one agent working on its own branch in its own container')
+    // The launch dialog's own fields, not a copy.
+    expect(within(step).getByRole('radiogroup', { name: 'Agent' })).toBeDefined()
+    fireEvent.click(within(step).getByRole('radio', { name: /^Claude Code/ }))
+    expect(within(step).getByRole('radiogroup', { name: 'Mode' })).toBeDefined()
+    expect(step.textContent).toContain('about 5 s in Enhanced')
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
-    expect(client.runLaunch).toHaveBeenCalledWith({
-      workspace_id: workspace.id,
-      task: 'write a result file',
-      harness: 'claude',
+    await waitFor(() => {
+      expect(client.runLaunch).toHaveBeenCalledWith({
+        workspace_id: workspace.id,
+        task: 'write a result file',
+        harness: 'claude',
+      })
     })
-    // runLaunch resolves to the fixture run; the wizard hands off to the
-    // run view rather than holding a done screen, with the run already in
-    // the store so the terminal tab does not call it deleted.
+    // The wizard hands off to the run view rather than holding a done
+    // screen, with the run already in the store so the terminal tab does not
+    // call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_1' },
       })
       expect(useStore.getState().runs.run_1).toBeDefined()
     })
+    expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
   })
+
+  it('launches Enhanced when the setup chose it', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', enhanced_installed: true })]),
+    })
+    seed({ runs: {}, launchDefaults: { claude: { mode: 'acp', at: 1 } } })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await toFirstRunStep()
+
+    await screen.findByRole('radiogroup', { name: 'Mode' })
+    expect(screen.getByRole('radio', { name: 'Enhanced' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    await waitFor(() => {
+      expect(client.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' })
+    })
+  })
+
   it('finishes onboarding by going to the board', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
     await toFirstRunStep()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Go to board' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Go to board' }))
 
     expect(useStore.getState()).toMatchObject({
       onboarded: true,
-      onboardingStep: 'Link',
+      onboardingStep: 'Connect',
       onboardingWorkspace: '',
       route: { name: 'board', params: {} },
     })
   })
 
   it('offers only the agents installed in this account', async () => {
-    // agent.list always carries every shipped name; only the installed ones
-    // can actually launch, so only they are offered.
     const client = fakeApi({
       agentList: vi.fn(async () => [
-        agentInfo(),
-        agentInfo({ name: 'codex', installed: false }),
+        agentInfo({ display_name: 'Claude Code' }),
+        agentInfo({ name: 'codex', display_name: 'Codex', installed: false }),
       ]),
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    const list = await openSelect(await screen.findByLabelText('Agent'))
-    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'claude',
-    ])
+    await screen.findByRole('radiogroup', { name: 'Agent' })
+    expect(screen.getByRole('radio', { name: /^Claude Code/ })).toHaveProperty('disabled', false)
+    expect(screen.getByRole('radio', { name: /^Codex/ })).toHaveProperty('disabled', true)
   })
 
-  it('sends the reader back to Agents when nothing is installed', async () => {
+  it('sends the reader back to Agent when nothing is installed', async () => {
     const client = fakeApi({
       agentList: vi.fn(async () => [agentInfo({ installed: false })]),
     })
@@ -1619,20 +1604,14 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    expect(
-      await screen.findByText(/no agent is installed in your environment yet/i),
-    ).toBeDefined()
-    expect(screen.queryByLabelText('Agent')).toBeNull()
+    expect(await screen.findByText('No agent is installed yet')).toBeDefined()
+    expect(screen.queryByRole('radiogroup', { name: 'Agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up an agent' }))
 
-    expect(
-      await screen.findByRole('region', { name: 'Agents' }),
-    ).toBeDefined()
-    expect(
-      screen.getByRole('listitem', { current: 'step' }).textContent,
-    ).toContain('Agents')
+    expect(await screen.findByRole('region', { name: 'Agent' })).toBeDefined()
+    expect(currentStep()).toContain('Agent')
   })
 
   it('keeps a failed agent.list on screen rather than calling it empty', async () => {
@@ -1646,40 +1625,10 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     expect(
-      await screen.findByText('agent.list: environment home unreadable'),
+      await within(await screen.findByRole('region', { name: 'First run' })).findByText('agent.list: environment home unreadable'),
     ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined()
-  })
-
-  it('waits rather than claiming an empty account while a retry is in flight', async () => {
-    let answer: (agents: AgentInfo[]) => void = () => {}
-    // The Agents step asks first, so the failure is the standing answer until
-    // the retry, which is left hanging.
-    let hang = false
-    const client = fakeApi({
-      agentList: vi.fn(() =>
-        hang
-          ? new Promise<AgentInfo[]>((resolve) => {
-              answer = resolve
-            })
-          : Promise.reject(new Error('agent.list: environment home unreadable')),
-      ),
-    })
-    seed()
-    render(<OnboardingRoute params={{}} client={client} />)
-    await toFirstRunStep()
-
-    hang = true
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
-
-    // The gateway has said nothing yet, so neither does the step.
-    expect(screen.queryByText(/no agent is installed/i)).toBeNull()
-    expect(
-      screen.queryByText('agent.list: environment home unreadable'),
-    ).toBeNull()
-
-    await act(async () => answer([agentInfo()]))
-    expect(screen.getByLabelText('Agent')).toBeDefined()
+    expect(screen.queryByText('No agent is installed yet')).toBeNull()
   })
 
   it('jumps between the steps it has reached from the header', async () => {
@@ -1688,10 +1637,10 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     const steps = screen.getByLabelText('Steps')
-    fireEvent.click(within(steps).getByRole('button', { name: /Workspace/ }))
+    fireEvent.click(within(steps).getByRole('button', { name: /Repository, visited/ }))
 
-    expect(await screen.findByRole('region', { name: 'Workspace' })).toBeDefined()
-    expect(useStore.getState().onboardingStep).toBe('Workspace')
+    expect(await screen.findByRole('region', { name: 'Repository' })).toBeDefined()
+    expect(useStore.getState().onboardingStep).toBe('Repository')
     // Everything already reached stays reachable, or a jump backwards would
     // strand the member on a step whose own Back is gone.
     expect(useStore.getState().onboardingFurthest).toBe('First run')
@@ -1699,15 +1648,16 @@ describe('onboarding wizard', () => {
     expect(await screen.findByRole('region', { name: 'First run' })).toBeDefined()
   })
 
-  it('leaves a step it has never reached inert in the header', () => {
-    seed({ onboardingStep: 'Git identity', onboardingFurthest: 'Workspace' })
+  it('leaves a step it has never reached inert in the header', async () => {
+    seed({ onboardingStep: 'Connect', onboardingFurthest: 'Repository' })
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
 
     const steps = screen.getByLabelText('Steps')
     expect(within(steps).queryByRole('button', { name: /First run/ })).toBeNull()
+    expect(within(steps).getByRole('button', { name: /Repository, visited/ })).toBeDefined()
     fireEvent.click(within(steps).getByText('First run'))
-    expect(useStore.getState().onboardingStep).toBe('Git identity')
-    expect(screen.getByRole('region', { name: 'Git identity' })).toBeDefined()
+    expect(useStore.getState().onboardingStep).toBe('Connect')
+    expect(await screen.findByRole('region', { name: 'Connect' })).toBeDefined()
   })
 
   it('drops a draft agent this account no longer has installed', async () => {
@@ -1723,13 +1673,9 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     await waitFor(() => {
-      // Nothing is picked, so the trigger still prints its placeholder.
-      expect(screen.getByLabelText('Agent').textContent).toBe('Choose an agent')
+      expect(screen.getByRole('radio', { name: /^codex/ }).getAttribute('aria-checked')).toBe('true')
     })
-    expect(useStore.getState().onboardingFirstRun.harness).toBe('')
-    expect(
-      screen.getByRole('button', { name: 'Launch' }),
-    ).toHaveProperty('disabled', true)
+    expect(useStore.getState().onboardingFirstRun.harness).toBe('codex')
   })
 
   it('keeps launch blocked until the agent list has answered', async () => {
@@ -1747,19 +1693,22 @@ describe('onboarding wizard', () => {
     ).toHaveProperty('disabled', true)
   })
 
-  it('keeps the agent the member picked over the one Agents set up', async () => {
-    seed({ onboardingFirstRun: { harness: 'myagent', task: 'write a file' } })
+  it('keeps the agent the member picked over the one the Agent step set up', async () => {
+    seed({
+      onboardingFirstRun: { harness: 'myagent', task: 'write a file' },
+      launchDefaults: { claude: { mode: 'tui', at: 2 } },
+    })
     render(
       <FirstRunStep
         client={fakeApi()}
         workspace={workspace}
-        defaultHarness="claude"
-        onBackToAgents={() => {}}
+        onBackToAgent={() => {}}
+        onBackToRepository={() => {}}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Agent').textContent).toBe('myagent')
+      expect(screen.getByRole('radio', { name: /^myagent/ }).getAttribute('aria-checked')).toBe('true')
     })
   })
 
@@ -1774,10 +1723,10 @@ describe('onboarding wizard', () => {
     const steps = screen.getByLabelText('Steps')
     fireEvent.click(
       within(steps).getByRole('button', {
-        name: /Workspace, .*go to this step/,
+        name: /Repository, .*go to this step/,
       }),
     )
-    await screen.findByRole('region', { name: 'Workspace' })
+    await screen.findByRole('region', { name: 'Repository' })
     fireEvent.click(
       within(steps).getByRole('button', {
         name: /First run, .*go to this step/,
@@ -1789,7 +1738,6 @@ describe('onboarding wizard', () => {
     ).toBe('add a health check endpoint')
   })
 
-
   it('renders a launch refusal verbatim and lets the user retry', async () => {
     const runLaunch = vi
       .fn()
@@ -1800,7 +1748,7 @@ describe('onboarding wizard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
     await toFirstRunStep()
 
-    await pickOption(await screen.findByLabelText('Agent'), 'claude')
+    fireEvent.click(await screen.findByRole('radio', { name: /^Claude Code/ }))
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })

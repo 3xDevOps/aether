@@ -12,6 +12,7 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
+	teammate := mustCreateTeammate(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
 	createRun := func(id domain.RunID, status domain.RunStatus) *domain.Run {
@@ -48,7 +49,7 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 	worker := createRun(retry.RunID, domain.RunRunning)
 	for _, key := range []string{"question-one", "question-two"} {
 		if createErr := db.CreateRoomMessage(ctx, &RoomMessage{
-			WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: member.ID,
+			WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: teammate.ID,
 			Kind: RoomMessageQuestion, Body: "Can I proceed?", IdempotencyKey: key,
 		}); createErr != nil {
 			t.Fatalf("create worker question: %v", createErr)
@@ -134,6 +135,7 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
+	teammate := mustCreateTeammate(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "shared run")
 	worker := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
@@ -151,7 +153,7 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 	reserve(mission, task, "first")
 	reserve(mission, task, "second")
 	if err := db.CreateRoomMessage(ctx, &RoomMessage{
-		WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: member.ID,
+		WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: teammate.ID,
 		Kind: RoomMessageQuestion, Body: "Proceed?", IdempotencyKey: "question",
 	}); err != nil {
 		t.Fatal(err)

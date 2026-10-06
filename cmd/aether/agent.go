@@ -48,8 +48,6 @@ func agentList(args []string) error {
 	})
 }
 
-// printAgents emits one "agent <name> <source>" line per agent so members can
-// tell shipped profiles from their own registered definitions.
 func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 	if len(agents) == 0 {
 		_, err := fmt.Fprintln(w, "no agents")
@@ -64,28 +62,32 @@ func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 }
 
 type agentAddOptions struct {
-	name     string
-	tui      string
-	headless string
+	name       string
+	standard   string
+	background string
+	acp        string
+	enhanced   bool
 }
 
 func parseAgentAdd(args []string) (agentAddOptions, error) {
 	fs := flag.NewFlagSet("agent add", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	tui := fs.String("tui", "", "interactive command template")
-	headless := fs.String("headless", "", "headless command template")
+	standard := fs.String("standard", "", "Standard mode command template")
+	background := fs.String("background", "", "Background mode command template")
+	acp := fs.String("acp", "", "Agent Client Protocol server command")
+	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--tui <argv>] [--headless <argv>]")
+		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>]")
 	}
-	return agentAddOptions{name: name, tui: *tui, headless: *headless}, nil
+	return agentAddOptions{name: name, standard: *standard, background: *background, acp: *acp, enhanced: *enhanced}, nil
 }
 
 // resolveAgentArgs turns flag values into argv templates. Shipped names send
 // no proposal; the server already knows their argv. For custom names a missing
 // flag prompts on promptInput with the default shown, and a nil promptInput
 // (no terminal) takes the default silently.
-func resolveAgentArgs(name, tuiFlag, headlessFlag string, shipped bool, promptInput io.Reader) (tui, headless []string, err error) {
+func resolveAgentArgs(name, standardFlag, backgroundFlag string, shipped bool, promptInput io.Reader) (standard, background []string, err error) {
 	if shipped {
 		return nil, nil, nil
 	}
@@ -109,13 +111,13 @@ func resolveAgentArgs(name, tuiFlag, headlessFlag string, shipped bool, promptIn
 		}
 		return strings.Fields(def), nil
 	}
-	if tui, err = resolve(tuiFlag, "TUI", name+" {task}"); err != nil {
+	if standard, err = resolve(standardFlag, "Standard", name+" {task}"); err != nil {
 		return nil, nil, err
 	}
-	if headless, err = resolve(headlessFlag, "Headless", name+" -p {task}"); err != nil {
+	if background, err = resolve(backgroundFlag, "Background", name+" -p {task}"); err != nil {
 		return nil, nil, err
 	}
-	return tui, headless, nil
+	return standard, background, nil
 }
 
 func agentAdd(args []string) error {
@@ -141,13 +143,22 @@ func agentAdd(args []string) error {
 		return listErr
 	}
 	if found && selected.Source == "shipped" {
-		return runShippedAgentInstall(selected)
+		if opts.acp != "" {
+			return fmt.Errorf("agent %s is shipped; its ACP server is fixed, so --acp applies only to your own agent", opts.name)
+		}
+		if opts.enhanced && selected.Enhanced == "none" {
+			return fmt.Errorf("agent %s has no enhanced mode", opts.name)
+		}
+		return runShippedAgentInstall(selected, opts.enhanced)
+	}
+	if opts.enhanced {
+		return fmt.Errorf("--enhanced installs a shipped agent's adapter; name your agent's ACP server command with --acp")
 	}
 	var promptInput io.Reader
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		promptInput = os.Stdin
 	}
-	tuiArgs, headlessArgs, err := resolveAgentArgs(opts.name, opts.tui, opts.headless, false, promptInput)
+	standardArgs, backgroundArgs, err := resolveAgentArgs(opts.name, opts.standard, opts.background, false, promptInput)
 	if err != nil {
 		return err
 	}
@@ -157,8 +168,9 @@ func agentAdd(args []string) error {
 			Definition: protocol.AgentDefinition{
 				Name:         opts.name,
 				Executable:   opts.name,
-				TUIArgs:      tuiArgs,
-				HeadlessArgs: headlessArgs,
+				TUIArgs:      standardArgs,
+				HeadlessArgs: backgroundArgs,
+				ACPArgs:      strings.Fields(opts.acp),
 			},
 		}, &result); err != nil {
 			return err
@@ -167,14 +179,15 @@ func agentAdd(args []string) error {
 	})
 }
 
-func runShippedAgentInstall(agent protocol.AgentInfo) error {
+func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
+	script := agentInstallScript(agent, enhanced)
 	cfg, err := cli.Load()
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	conn, err := cli.Dial(cfg)
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -184,14 +197,10 @@ func runShippedAgentInstall(agent protocol.AgentInfo) error {
 		Rows: rows,
 	})
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, agent)
+		return printAgentInstallGuidance(os.Stdout, script)
 	}
 	defer func() { _ = stream.Close() }()
 
-	script := agent.InstallScript
-	if script == "" {
-		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
-	}
 	if _, err := io.WriteString(stream, script+"\n"); err != nil {
 		return err
 	}
@@ -200,11 +209,17 @@ func runShippedAgentInstall(agent protocol.AgentInfo) error {
 	return describeTerminalEnd(copyRaw(stream, 0))
 }
 
-func printAgentInstallGuidance(w io.Writer, agent protocol.AgentInfo) error {
-	script := agent.InstallScript
-	if script == "" {
-		script = fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+func agentInstallScript(agent protocol.AgentInfo, enhanced bool) string {
+	switch {
+	case enhanced && agent.EnhancedInstallScript != "":
+		return agent.EnhancedInstallScript
+	case agent.InstallScript != "":
+		return agent.InstallScript
 	}
+	return fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
+}
+
+func printAgentInstallGuidance(w io.Writer, script string) error {
 	_, err := fmt.Fprintf(w, "Run `aether terminal`, then paste:\n%s\n", script)
 	return err
 }

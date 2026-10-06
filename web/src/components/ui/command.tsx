@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
-import { SearchIcon } from "lucide-react"
+import { Search } from '@/components/icons'
 
 import { cn, focusRing } from "@/lib/utils"
 import {
@@ -21,7 +21,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        'flex min-h-0 h-auto w-full flex-col overflow-hidden rounded-[4px] bg-popover text-popover-foreground',
+        'flex min-h-0 h-auto w-full flex-col overflow-hidden rounded-[4px] bg-raised text-text',
         className,
       )}
       {...props}
@@ -31,13 +31,12 @@ function Command({
 
 function CommandDialog({
   title = "Command Palette",
-  description = "Search for a command to run...",
+  description = "Search for a command to run…",
   children,
   className,
   showCloseButton = true,
   onOpenAutoFocus,
   onCloseAutoFocus,
-  filter,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
@@ -46,7 +45,6 @@ function CommandDialog({
   showCloseButton?: boolean
   onOpenAutoFocus?: React.ComponentProps<typeof DialogContent>['onOpenAutoFocus']
   onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>['onCloseAutoFocus']
-  filter?: React.ComponentProps<typeof CommandPrimitive>['filter']
 }) {
   return (
     <Dialog {...props}>
@@ -55,8 +53,7 @@ function CommandDialog({
         onOpenAutoFocus={(event) => {
           onOpenAutoFocus?.(event)
           if (event.defaultPrevented) return
-          // The known input is the modal's initial focus target. Avoid Radix's
-          // generic walk through every option; its focus trap remains active.
+          // Skip Radix's walk through every option; its focus trap stays active.
           const input = (event.target as HTMLElement).querySelector<HTMLInputElement>('[cmdk-input]')
           if (input) {
             input.focus({ preventScroll: true })
@@ -65,10 +62,7 @@ function CommandDialog({
         }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          // The palette hangs from under the title bar, so its drop measures
-          // from the bar's full height - the token plus the inset the bar
-          // grew by - and its cap gives back both.
-          'top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--title-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
+          'top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-seam/90 bg-raised p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -78,7 +72,7 @@ function CommandDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Command filter={filter} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
+        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
           {children}
         </Command>
       </DialogContent>
@@ -93,14 +87,14 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-[var(--title-bar-height)] items-center gap-2 border-b px-2"
+      className="flex h-[var(--top-bar-height)] items-center gap-2 border-b px-2"
     >
-      <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+      <Search className="size-4 shrink-0 text-muted" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
           focusRing,
-          'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-[13px] leading-6 placeholder:text-muted-foreground coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-ui leading-6 placeholder:text-muted coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}
@@ -117,7 +111,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        'max-h-[min(520px,calc(100dvh_-_2_*_var(--title-bar-height)_-_8px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
+        'max-h-[min(520px,calc(100dvh_-_2_*_var(--top-bar-height)_-_8px))] scroll-py-1 overflow-x-hidden overflow-y-auto',
         className,
       )}
       {...props}
@@ -131,7 +125,7 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className="py-4 text-center text-[13px] text-muted-foreground"
+      className="py-4 text-center text-ui text-muted"
       {...props}
     />
   )
@@ -145,7 +139,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        'overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground',
+        'overflow-hidden p-1 text-text [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted',
         className,
       )}
       {...props}
@@ -160,7 +154,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn('-mx-1 h-px bg-border', className)}
+      className={cn('-mx-1 h-px bg-seam', className)}
       {...props}
       aria-hidden="true"
     />
@@ -175,7 +169,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        'relative flex min-h-[22px] coarse:min-h-11 cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-[13px] leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-selection-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted-foreground',
+        'relative flex min-h-[22px] coarse:min-h-11 cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-ui leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-text [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted',
         className,
       )}
       {...props}
@@ -191,7 +185,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        'ml-auto text-[12px] tracking-wide text-muted-foreground',
+        'ml-auto text-ui-sm tracking-wide text-muted',
         className,
       )}
       {...props}

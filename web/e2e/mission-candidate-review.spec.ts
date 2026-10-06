@@ -3,38 +3,12 @@
 // explicitly not a vendor-harness or credentialed-agent demonstration.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import path from 'node:path'
 import { expect, test } from './fixtures'
+import { runCoordCLI, waitForCoordCLI } from './harness/coord'
 import { runContainer } from './harness/docker'
 import { memberID, seedWorkspace } from './harness/setup'
 
 const terminalTimeout = 3 * 60 * 1000
-
-// The coordination CLI is mounted in every real run container. Keeping this
-// helper narrow makes the fixture exercise the same socket and admission path
-// as an installed integrator/worker skill, without pretending to be one.
-function runCoordCLI<T>(runID: string, args: string[], input?: string): T {
-  const output = execFileSync(
-    'docker',
-    ['exec', '-i', runContainer(runID), 'aether-internal', ...args],
-    { input, encoding: 'utf8', timeout: 60_000 },
-  )
-  const envelope = JSON.parse(output) as { ok?: boolean; result?: T; error?: { message?: string } }
-  if (!envelope.ok || envelope.result === undefined) {
-    throw new Error(envelope.error?.message || `aether-internal ${args.join(' ')} failed`)
-  }
-  return envelope.result
-}
-
-async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
-  await expect
-    .poll(() => existsSync(path.join(dataDir, 'coord', runID, 'coord3.sock')), {
-      timeout: 30_000,
-      intervals: [100, 250, 500],
-    })
-    .toBeTruthy()
-}
 
 test('launches a mission, controls a worker, and shows its candidate without a human gate', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
@@ -48,19 +22,17 @@ test('launches a mission, controls a worker, and shows its candidate without a h
 
   const missionObjective = 'mission candidate browser fixture'
   await page.goto(alice.url)
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('button', { name: 'Create swarm', exact: true }).click()
-  const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
+  const surfaces = page.getByRole('navigation', { name: 'Aether' })
+  await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
+  await page.getByRole('button', { name: 'New swarm', exact: true }).click()
+  const launch = page.getByRole('dialog', { name: 'New swarm' })
   await expect(launch).toBeVisible()
-  await launch.getByPlaceholder('What outcome should the integrator coordinate?').fill(missionObjective)
-  // The integrator is always interactive; the worker the fixture starts
-  // below needs its own headless choice.
-  await expect(launch.getByText(/^Integrator · .* · claude · tui$/)).toBeVisible()
-  const workerChoice = launch.locator('label').filter({ hasText: '· claude' })
-  await workerChoice.getByRole('checkbox').check()
-  await workerChoice.getByRole('combobox').click()
-  await page.getByRole('option', { name: 'headless', exact: true }).click()
+  await launch.getByLabel('Objective').fill(missionObjective)
+  await expect(launch.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
+  // The worker the fixture starts below needs a Background choice, the
+  // default worker mode.
+  await expect(launch.getByRole('radiogroup', { name: 'Worker mode' }).getByRole('radio', { name: 'Background' })).toBeChecked()
+  await launch.getByRole('checkbox', { name: /Claude Code/ }).check()
   await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
   await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()
   const { missions } = await alice.api.rpc<{
@@ -79,11 +51,13 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   const answerBox = page.getByLabel('Answer question 1', { exact: true })
   await expect(answerBox).toBeVisible({ timeout: terminalTimeout })
   await answerBox.fill('the guest checkout flow')
-  await page.getByRole('button', { name: 'Answer', exact: true }).click()
-  // The stored answer renders under an attribution line once the refetch
-  // lands; the member's display name is whatever the fixture registered.
-  await expect(page.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('the guest checkout flow', { exact: true })).toBeVisible()
+  await page.getByRole('region', { name: 'Questions for you' }).getByRole('button', { name: 'Answer', exact: true }).click()
+  // The answered question folds to one line once the refetch lands; the
+  // member's display name is whatever the fixture registered.
+  const questions = page.getByRole('region', { name: 'Questions from the integrator' })
+  await expect(questions.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
+  await questions.getByRole('button', { name: /which checkout flow\?/ }).click()
+  await expect(questions.getByText('the guest checkout flow', { exact: true })).toBeVisible()
 
   type TaskMutation = { task: { id: string; current_revision: number } }
   const proposed = runCoordCLI<TaskMutation>(
@@ -105,7 +79,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
     '--idempotency-key', 'mission-candidate-start',
   ])
   expect(startedMission.plan.phase).toBe('active')
-  await expect(page.getByRole('region', { name: 'Mission tasks' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('region', { name: 'Tasks' })).toContainText('scripted worker candidate', { timeout: 30_000 })
   for (const name of ['Approve', 'Request changes', 'Reject']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
   }
@@ -136,15 +110,10 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   const workerURL = new URL(alice.url)
   workerURL.searchParams.set('run', started.attempt.run_id)
   await page.goto(workerURL.toString())
-  await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeVisible({ timeout: terminalTimeout })
-  await page.getByRole('button', { name: 'Open Run Room' }).click()
-  const room = page.getByRole('complementary', { name: 'Run Room' })
-  await expect(room).toBeVisible()
-  await expect(page.getByRole('group', { name: 'Run viewers', exact: true }).getByRole('img')).toHaveCount(1, { timeout: terminalTimeout })
+  const controls = page.getByRole('group', { name: 'Run presence', exact: true })
+  await expect(controls.getByText('Nobody controls', { exact: true })).toBeVisible({ timeout: terminalTimeout })
   const viewing = await inspectWorker()
   expect(viewing.takeover_active ?? false).toBe(false)
-  const controls = page.getByRole('group', { name: 'Terminal attachment controls', exact: true })
-  await expect(controls.getByText('Nobody', { exact: true })).toBeVisible()
   await controls.getByRole('button', { name: 'Take control', exact: true }).click()
   await expect(controls.getByRole('button', { name: 'Release', exact: true })).toBeVisible({ timeout: 30_000 })
   const controlled = await inspectWorker()
@@ -152,9 +121,9 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   expect(controlled.takeover_member_id).toBe(aliceID)
 
   await page.goto(alice.url)
-  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
+  await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
-  const missionView = page.getByRole('region', { name: 'Mission tasks' })
+  const missionView = page.getByRole('region', { name: 'Tasks' })
   await expect(missionView).toBeVisible()
   await expect(missionView).toContainText('Working')
   await page.getByRole('button', { name: 'Release control', exact: true }).click()
@@ -163,6 +132,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   expect(released.takeover_active ?? false).toBe(false)
   // The mission page stays open from here on: candidate progress must follow
   // the integrator without a reload.
+  await page.getByRole('button', { name: 'Integration', exact: true }).click()
   const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
   await expect(candidateReview).toContainText('No candidate has been prepared yet.', { timeout: terminalTimeout })
 
@@ -178,6 +148,8 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   runCoordCLI<{ report_id: string }>(started.attempt.run_id, [
     'report', '--outcome', 'success', '--summary', 'scripted fixture completed', '--idempotency-key', 'mission-candidate-report',
   ])
+  // The report is also mail to the integrator; the swarm page lists it live.
+  await expect(page.getByRole('region', { name: 'Agent messages' })).toContainText('scripted fixture completed', { timeout: 30_000 })
   type Submission = { id: string; state: string; ref: { evidence_ref: string; retained_revision: string; run_id: string } }
   let submission: Submission | undefined
   await expect

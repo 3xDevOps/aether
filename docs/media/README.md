@@ -16,7 +16,7 @@ is that the work happens somewhere else and comes back as a branch.
 2. **Watch** (~15s) - `aether gui`, then the dashboard: the run card moving
    through the board, the live terminal mirror with the agent actually working,
    the diff timeline picking up changed files.
-3. **Steer** (~5s) - optional but the best moment if it fits: `aether inject`
+3. **Message** (~5s) - optional but the best moment if it fits: `aether message`
    from the terminal and the colored banner appearing in the dashboard's
    terminal view a second later.
 4. **Pull** (~8s) - back in the terminal, `aether pull <run>` and then

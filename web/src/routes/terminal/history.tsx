@@ -561,7 +561,7 @@ export function TerminalHistory({
   if (restoring) {
     if (restoreError) {
       return (
-        <div role="alert" aria-label="Saved terminal view unavailable" className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+        <div role="alert" aria-label="Saved terminal view unavailable" className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-canvas text-ui text-muted">
           {restoreError}
           <Button size="sm" variant="ghost" onClick={() => {
             setRestoreError(null)
@@ -570,7 +570,7 @@ export function TerminalHistory({
         </div>
       )
     }
-    return <div role="status" aria-label="Restoring saved terminal view" className="absolute inset-0 z-10 flex items-center justify-center bg-background text-sm text-muted-foreground">Restoring saved terminal view</div>
+    return <div role="status" aria-label="Restoring saved terminal view" className="absolute inset-0 z-10 flex items-center justify-center bg-canvas text-ui text-muted">Restoring saved terminal view</div>
   }
   if (!frozen) return null
 
@@ -589,7 +589,7 @@ export function TerminalHistory({
       aria-label="Terminal scrollback"
       data-terminal-history=""
       tabIndex={0}
-      className="absolute inset-0 z-10 overflow-auto bg-background text-foreground outline-none"
+      className="absolute inset-0 z-10 overflow-auto bg-canvas text-text outline-none"
       style={{ top: padding, bottom: padding, overflowAnchor: 'none', overscrollBehavior: 'contain', touchAction: 'pan-x pan-y' }}
       onScroll={(event) => {
         const element = event.currentTarget
@@ -661,26 +661,26 @@ export function TerminalHistory({
       <div style={{ position: 'relative', height: totalHeight, minHeight: '100%', width, minWidth: '100%', fontFamily: frozen.fontFamily, fontSize, letterSpacing: frozen.letterSpacing * scale, lineHeight: `${cellHeight}px` }}>
         {rows.filter((row) => row.index >= archiveStart && row.index < archiveEnd).map(({ index, line }) => (
           <div key={index} data-history-row={index} data-history-cursor={line.cursor}
-            className={match === index ? 'bg-accent' : undefined}
+            className={match === index ? 'bg-selection' : undefined}
             style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: lineTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}>
             {line.text}
           </div>
         ))}
         {startLine <= 0 && endLine > 0 && (
-          <div role="separator" aria-label="Recorded output and live screen boundary" className="absolute border-t border-border text-muted-foreground" style={{ top: lineTop(0, origin, cellHeight), left: padding, right: padding, height: lineTop(1, origin, cellHeight) - lineTop(0, origin, cellHeight), fontSize: Math.min(fontSize, 11), whiteSpace: 'nowrap' }}>
+          <div role="separator" aria-label="Recorded output and live screen boundary" className="absolute border-t border-seam text-muted" style={{ top: lineTop(0, origin, cellHeight), left: padding, right: padding, height: lineTop(1, origin, cellHeight) - lineTop(0, origin, cellHeight), fontSize: Math.min(fontSize, 11), whiteSpace: 'nowrap' }}>
             {frozen.rows.length ? 'Recorded output above · captured terminal screen below' : 'Recorded output above · live terminal below'}
           </div>
         )}
         {frozen.rows.slice(frozenStart, frozenEnd).map((html, offset) => {
           const index = frozenStart + offset
           return <div key={index} data-history-row={index}
-            className={match === index ? 'bg-accent' : undefined}
+            className={match === index ? 'bg-selection' : undefined}
             style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: rowTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}
             dangerouslySetInnerHTML={{ __html: html }} />
         })}
       </div>
       {(snapshot.loading || snapshot.error || readError) && (
-        <div role="status" className="sticky left-0 -mt-6 h-6 w-fit max-w-full bg-background/95 px-2 text-xs text-muted-foreground" style={{ bottom: 0 }}>
+        <div role="status" className="sticky left-0 -mt-6 h-6 w-fit max-w-full bg-canvas/95 px-2 text-ui-sm text-muted" style={{ bottom: 0 }}>
           {snapshot.error ?? readError ?? 'Loading older recorded output…'}
           {(snapshot.error || readError) && <Button size="sm" variant="ghost" onClick={() => {
             if (!episodeReady) startArchive()

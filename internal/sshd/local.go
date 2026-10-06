@@ -16,25 +16,21 @@ import (
 )
 
 // Local is an in-process client of one member's control channel and
-// subsystems: the transport behind the server-hosted dashboard. Each
-// stream runs the handler an SSH session channel would run, over an
-// in-memory pipe that speaks the same header, ack, bytes and exit-status
-// contract, so replay, revocation and steer checks have one
-// implementation. The member is whoever the caller identified; Local
-// trusts it the way handleConn trusts a completed handshake.
+// subsystems, behind the server-hosted dashboard. Each stream runs the same
+// handler an SSH channel would over an in-memory pipe, so replay, revocation
+// and steer checks have one implementation. Local trusts the member it is
+// given the way handleConn trusts a completed handshake.
 type Local struct {
 	s      *Server
 	member domain.MemberID
 }
 
-// Local returns the in-process client acting as member.
 func (s *Server) Local(member domain.MemberID) *Local {
 	return &Local{s: s, member: member}
 }
 
-// Call performs one control-channel method call. The in-process path has no
-// framing reader, so apply the same request payload budget as the SSH
-// control channel before dispatching it.
+// Call applies the SSH control channel's request payload budget, which the
+// in-process path has no framing reader to enforce.
 func (l *Local) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	if len(params) > protocol.MaxLineBytes {
 		return nil, &protocol.Error{
@@ -45,10 +41,8 @@ func (l *Local) Call(ctx context.Context, method string, params json.RawMessage)
 	return l.s.dispatch(ctx, l.member, method, params)
 }
 
-// Events opens the events subsystem: the returned reader carries one
-// event line per protocol.Event once the subscription is acknowledged. A
-// refused subscription comes back as *protocol.Error with the server's
-// code.
+// Events returns one event line per protocol.Event after the subscription is
+// acknowledged; a refusal comes back as *protocol.Error.
 func (l *Local) Events(ctx context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
 	var ack protocol.SubscribeResponse
 	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
@@ -64,11 +58,8 @@ func (l *Local) Events(ctx context.Context, req protocol.SubscribeRequest) (io.R
 	return stream, nil
 }
 
-// Attach opens the attach subsystem for req and returns the resizable
-// terminal alongside the server's ack. A refused ack is returned with the
-// error so callers can forward its code. The requested geometry stands in
-// for the pty-req an SSH client sends, so a header without one attaches
-// exactly as the CLI does.
+// Attach returns the terminal and the server's ack, including a refused ack
+// alongside its error. The requested geometry stands in for an SSH pty-req.
 func (l *Local) Attach(ctx context.Context, req protocol.AttachRequest) (*LocalTerminal, protocol.AttachResponse, error) {
 	var ack protocol.AttachResponse
 	st := &sessionState{resize: make(chan [2]uint, 16)}
@@ -84,6 +75,24 @@ func (l *Local) Attach(ctx context.Context, req protocol.AttachRequest) (*LocalT
 		return nil, ack, fmt.Errorf("sshd: attach: %s", ack.Error)
 	}
 	return &LocalTerminal{localStream: stream, st: st}, ack, nil
+}
+
+// ACP opens an enhanced run's session stream: one protocol.ACPFrame or
+// control frame per line after the ack; control frames written to it go to
+// the server. A refused ack is returned with the error.
+func (l *Local) ACP(ctx context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+	var ack protocol.ACPStreamResponse
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
+		l.s.serveACP(ctx, l.member, ch)
+	})
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = stream.Close()
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+	}
+	return stream, ack, nil
 }
 
 // Terminal opens the member's persistent environment terminal. Framed
@@ -105,10 +114,9 @@ func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*Lo
 	return &LocalTerminal{localStream: stream, st: st}, ack, nil
 }
 
-// open starts serve on the server end of a fresh pipe, writes the header
-// line, and reads the ack line into ack; the returned stream carries the
-// bytes after it. The handler is tracked like a channel handler: the
-// server's Close ends it by closing its end of the pipe and waits for it.
+// open runs serve on a fresh pipe, writes the header and reads the ack; the
+// returned stream carries the bytes after it. Server Close ends and waits for
+// the handler like a channel handler.
 func (l *Local) open(ctx context.Context, header, ack any, serve func(context.Context, subsystemConn)) (*localStream, error) {
 	line, err := json.Marshal(header)
 	if err != nil {
@@ -189,14 +197,12 @@ func (t *localStream) Close() error {
 	return nil
 }
 
-// LocalTerminal is an in-process PTY attach; Resize adjusts the server-side
-// PTY geometry.
+// LocalTerminal is an in-process PTY attach.
 type LocalTerminal struct {
 	*localStream
 	st *sessionState
 }
 
-// Resize adjusts the PTY to cols by rows.
 func (t *LocalTerminal) Resize(cols, rows uint) error {
 	t.st.setPTY(cols, rows)
 	select {

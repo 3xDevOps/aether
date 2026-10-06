@@ -145,6 +145,16 @@ func TestDevelopmentRunCloseRequiresExplicitReopen(t *testing.T) {
 		t.Fatalf("paused observation: %v", err)
 	}
 }
+func TestDevelopmentOnAFinishedRunSaysTheEnvironmentIsGone(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) { c.Control = control.New(control.Config{}) })
+	run, c := e.launchFake(t, "finish")
+	c.exitNow(0)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	_, err := e.sched.CallDevelopment(t.Context(), run.ID, control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}, protocol.MethodDevBrowserStatus, json.RawMessage(`{"run_id":"`+string(run.ID)+`"}`), func() error { return nil })
+	if !errors.Is(err, ErrNoLiveEnvironment) || err.Error() != "scheduler: the run has no live environment: the run is completed and its container is gone" {
+		t.Fatalf("browser status on a finished run: %v", err)
+	}
+}
 func TestDevelopmentCapturesAreBoundedAndRunScoped(t *testing.T) {
 	e, run := developmentFixture(t)
 	first := captureFixture(t, e.sched, run.ID)

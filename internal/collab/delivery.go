@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error) (Result, error) {
+const agentDeliveryTimeout = 10 * time.Second
+
+func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, force bool, approver domain.MemberID, deliveryProof *control.Snapshot, claimAdmission func(func() error) error, steer bool) (Result, error) {
 	var (
 		claimed bool
 		stored  *store.RoomMessage
@@ -46,11 +51,11 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// Do not publish the uncertain claim before attempting PTY delivery. A
 	// publication outage must never turn an otherwise unattempted steer into
 	// a durable "uncertain" result.
-	receipt, deliveryErr := s.deliver(ctx, msg, actor, run, deliveryProof)
+	receipt, outcome, deliveryErr := s.deliver(ctx, msg, actor, run, deliveryProof, steer)
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
-	if err := s.settleRoomMessage(ctx, msg, receipt); err != nil {
+	if err := s.settleRoomMessage(ctx, msg, receipt, outcome == acphost.OutcomeQueued); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			var getErr error
 			stored, getErr = s.cfg.Store.GetRoomMessage(ctx, msg.ID)
@@ -65,15 +70,16 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Message: stored, Receipt: receipt}, nil
+	return Result{Message: stored, Receipt: receipt, Outcome: outcome}, nil
 }
 
 // deliver rechecks mutable membership and workspace policy while holding the
 // same run admission lock used by controller takeover and fencing. An
 // immediate delivery also proves the exact member, session, and generation
 // that made it eligible. The callback must not call back into Control.
-func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, deliveryProof *control.Snapshot) (Receipt, error) {
+func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, deliveryProof *control.Snapshot, steer bool) (Receipt, string, error) {
 	var attempted, revoked bool
+	var outcome string
 	accept := func() error {
 		freshRun, freshActor, ws, err := s.scope(ctx, msg.WorkspaceID, msg.RunID, msg.ActorID)
 		if err != nil {
@@ -87,9 +93,9 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 			revoked = true
 			return nil
 		}
-		if err := permissions.Check(permissions.Steer,
+		if permissions.Check(permissions.Steer,
 			permissions.Actor{ID: freshActor.ID, Role: freshActor.Role},
-			permissions.Target{Workspace: ws.ID, Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}); err != nil {
+			permissions.Target{Workspace: ws.ID, Owner: freshRun.MemberID, Protected: freshRun.Protected, SteerOthers: ws.SteerOthers}) != nil {
 			revoked = true
 			return nil
 		}
@@ -97,7 +103,8 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		// production canonical injection receives the freshly authorized actor.
 		actor, run = freshActor, freshRun
 		attempted = true
-		return s.inject(ctx, msg, actor, run)
+		outcome, err = s.inject(ctx, msg, actor, run, steer)
+		return err
 	}
 	var err error
 	if s.cfg.Control != nil {
@@ -110,26 +117,67 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		err = accept()
 	}
 	if revoked {
-		return ReceiptNotSent, nil
+		return ReceiptNotSent, "", nil
 	}
 	if err != nil {
 		if deliveryProof != nil && errors.Is(err, control.ErrStale) {
-			return ReceiptNotSent, nil
+			return ReceiptNotSent, "", nil
 		}
 		if !attempted {
-			return "", err
+			return "", "", err
 		}
-		return ClassifyReceipt(err), nil
+		return ClassifyReceipt(err), "", nil
 	}
-	return ReceiptSent, nil
+	return ReceiptSent, outcome, nil
 }
 
-func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run) error {
+func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, steer bool) (string, error) {
 	message := serializeAgentMessage(msg.Body, msg.Attachments)
 	if s.cfg.Inject == nil {
-		return ErrNoInjector
+		return "", ErrNoInjector
 	}
-	return s.cfg.Inject(ctx, run.ID, actor.ID, message)
+	return s.cfg.Inject(ctx, run.ID, actor.ID, message, steer, func(err error) {
+		s.agentDelivered(context.WithoutCancel(ctx), msg.ID, err)
+	})
+}
+
+func (s *Service) agentDelivered(ctx context.Context, id string, deliveryErr error) {
+	ctx, cancel := context.WithTimeout(ctx, agentDeliveryTimeout)
+	defer cancel()
+	var failure *store.RoomMessageFailure
+	switch {
+	case errors.Is(deliveryErr, acphost.ErrClosed):
+		failure = &store.RoomMessageFailure{Code: "agent_disconnected", Message: deliveryErr.Error()}
+	case deliveryErr != nil:
+		failure = &store.RoomMessageFailure{Code: "agent_refused", Message: deliveryErr.Error()}
+	}
+	changed, err := s.cfg.Store.SettleRoomMessageAgentDelivery(ctx, id, failure)
+	if err == nil && changed {
+		var stored *store.RoomMessage
+		if stored, err = s.cfg.Store.GetRoomMessage(ctx, id); err == nil {
+			err = s.publishMessage(ctx, stored)
+		}
+	}
+	if err != nil {
+		slog.Warn("collab: record the agent's delivery of a queued message", "message", id, "error", err)
+	}
+}
+
+func (s *Service) dropAgentQueued(ctx context.Context) error {
+	ids, err := s.cfg.Store.DropAgentQueuedRoomMessages(ctx, &store.RoomMessageFailure{Code: "agent_disconnected", Message: acphost.ErrClosed.Error()})
+	if err != nil {
+		return fmt.Errorf("collab: settle messages queued before the restart: %w", err)
+	}
+	for _, id := range ids {
+		msg, err := s.cfg.Store.GetRoomMessage(ctx, id)
+		if err != nil {
+			return fmt.Errorf("collab: read dropped message %s: %w", id, err)
+		}
+		if err := s.publishMessage(ctx, msg); err != nil {
+			return fmt.Errorf("collab: publish dropped message %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // serializeAgentMessage keeps the body and validated container-visible
@@ -194,7 +242,7 @@ func (s *Service) DeliverDue(ctx context.Context, limit int) (int, error) {
 					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue run %q for message %q: %w", msg.RunID, msg.ID, err))
 					continue
 				}
-				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil); err != nil {
+				if _, err := s.deliverResult(ctx, msg, nil, run, false, "", nil, nil, false); err != nil {
 					sweepErrs = append(sweepErrs, fmt.Errorf("deliver overdue message %q: %w", msg.ID, err))
 					continue
 				}

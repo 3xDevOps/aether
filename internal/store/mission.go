@@ -55,6 +55,7 @@ type MissionStore interface {
 	BindAttemptRun(context.Context, domain.AttemptID, domain.RunID, uint64, uint64) error
 	RequestAttemptCancellation(context.Context, domain.AttemptID, domain.RunID, uint64, string) (*domain.Attempt, bool, error)
 	UpdateAttemptState(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
+	EndObservedAttempt(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
 	SubmitAttempt(context.Context, domain.AttemptID, uint64, uint64, domain.SubmissionRef, []domain.SubmissionEvidence, []string) (*domain.Submission, error)
 	GetSubmission(context.Context, domain.SubmissionID) (*domain.Submission, error)
 	ListSubmissions(context.Context, domain.MissionID, domain.TaskID) ([]*domain.Submission, error)
@@ -69,6 +70,8 @@ type MissionStore interface {
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
+	DeleteMission(context.Context, domain.MissionID, []domain.RunID) error
+	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
 	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)
 	IntegratorReplacementRecorded(context.Context, domain.MissionID, string) (bool, error)
@@ -159,25 +162,29 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
-	integrator_launch_error, integrator_launch_error_at, integrator_run_launched`
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at, change_seq, change_kinds`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
-	var choices string
+	var choices, changes string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
-	var launchErrorAt sql.NullInt64
+	var launchErrorAt, archivedAt sql.NullInt64
 	var mode, phase string
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
-		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt, &m.ChangeSeq, &changes); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
 		at := decodeTime(launchErrorAt.Int64)
 		m.IntegratorLaunchErrorAt = &at
+	}
+	if archivedAt.Valid {
+		at := decodeTime(archivedAt.Int64)
+		m.ArchivedAt = &at
 	}
 	m.Integrator.Mode, m.Phase = domain.LaunchMode(mode), domain.MissionPhase(phase)
 	if runID.Valid {
@@ -191,6 +198,9 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	}
 	if err := json.Unmarshal([]byte(choices), &m.ExecutionChoices); err != nil {
 		return nil, fmt.Errorf("store: decode mission execution choices: %w", err)
+	}
+	if err := json.Unmarshal([]byte(changes), &m.Changes); err != nil {
+		return nil, fmt.Errorf("store: decode mission changes: %w", err)
 	}
 	m.CreatedAt, m.UpdatedAt = decodeTime(created), decodeTime(updated)
 	return &m, nil
@@ -258,7 +268,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}')`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, runID,
@@ -299,6 +309,19 @@ func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.M
 		return nil, ErrNotFound
 	}
 	return m, err
+}
+
+// change_kinds keeps, per kind, the change_seq of the latest change the
+// mission's current integrator run did not make itself.
+func recordMissionChange(ctx context.Context, tx *sql.Tx, id domain.MissionID, kind domain.MissionChange, by domain.RunID) error {
+	_, err := tx.ExecContext(ctx, `UPDATE missions SET change_seq = change_seq + 1,
+		change_kinds = CASE WHEN ? <> '' AND current_integrator_run_id = ? THEN change_kinds
+			ELSE json_set(change_kinds, '$.' || ?, change_seq + 1) END
+		WHERE id = ?`, by, by, kind, id)
+	if err != nil {
+		return fmt.Errorf("store: record mission %s %s: %w", id, kind, err)
+	}
+	return nil
 }
 
 func (d *DB) GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error) {
@@ -764,4 +787,32 @@ func (d *DB) CheckIntegratorInput(ctx context.Context, integratorRun, workerRun 
 		return ErrMissionTakeover
 	}
 	return nil
+}
+
+// ListMissionRunIDs returns every run that has served the mission: its
+// integrators, current and replaced, and every worker attempt's run.
+func (d *DB) ListMissionRunIDs(ctx context.Context, id domain.MissionID) ([]domain.RunID, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT current_integrator_run_id FROM missions WHERE id = ?1 AND current_integrator_run_id IS NOT NULL
+		UNION SELECT initial_run_id FROM mission_create_receipts WHERE mission_id = ?1
+		UNION SELECT run_id FROM mission_integrator_replacements WHERE mission_id = ?1
+		UNION SELECT run_id FROM mission_attempts WHERE mission_id = ?1 AND run_id IS NOT NULL`, id)
+	if err != nil {
+		return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only rows
+	var out []domain.RunID
+	for rows.Next() {
+		var run domain.RunID
+		if err := rows.Scan(&run); err != nil {
+			return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+		}
+		if run != "" {
+			out = append(out, run)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list mission %s runs: %w", id, err)
+	}
+	return out, nil
 }

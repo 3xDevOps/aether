@@ -96,7 +96,7 @@ func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
 func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
-	homes, err := memberhome.New(homesRoot)
+	homes, err := memberhome.New(homesRoot, nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 func TestMemberGitLeavesAHomeWithoutASigningKeyAlone(t *testing.T) {
 	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
-	homes, err := memberhome.New(homesRoot)
+	homes, err := memberhome.New(homesRoot, nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}

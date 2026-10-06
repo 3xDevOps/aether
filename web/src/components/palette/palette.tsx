@@ -1,6 +1,6 @@
-import { FolderGit2 } from 'lucide-react'
-import { useRef } from 'react'
-import { StateDot } from '@/components/state-dot'
+import { useRef, useState } from 'react'
+import { FolderGit2 } from '@/components/icons'
+import { StatusDot } from '@/components/ui/status-dot'
 import {
   CommandEmpty,
   CommandGroup,
@@ -18,10 +18,12 @@ import {
 } from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
-import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
+import { useCapability, useListedRuns, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+
+// Browsing shows the most urgent runs; a search reaches every run.
+const browseRunLimit = 50
 
 const destinationCommandIDs: Record<string, true> = {
   board: true,
@@ -34,12 +36,7 @@ const destinationCommandIDs: Record<string, true> = {
   close: true,
 }
 
-/**
- * Everything the palette can do. The verbs themselves live in
- * `src/lib/commands.ts` so the visible buttons offer exactly the same list;
- * jumping is local to the palette. Rendered inside CommandDialog, which
- * supplies the cmdk root.
- */
+/** Rendered inside CommandDialog, which supplies the cmdk root. */
 export function PaletteBody({
   onDone,
   onTemplates,
@@ -51,7 +48,7 @@ export function PaletteBody({
   onTemplates: () => void
   onConfirm: (run: RunRecord, command: Command & { confirm: NonNullable<Command['confirm']> }) => void
 }) {
-  const runs = useAttentionRuns()
+  const runs = useListedRuns(useStore((s) => s.activeWorkspace))
   const runMap = useStore((s) => s.runs)
   const workspaces = useStore((s) => s.workspaces)
   const members = useStore((s) => s.members)
@@ -60,9 +57,7 @@ export function PaletteBody({
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
   const self = useSelf()
-  const { columns, archivedCards } = useBoard()
-  const doneCandidates = columns.find((c) => c.key === 'done')?.cards ?? []
-  const releaseCandidates = [...columns.flatMap((column) => column.cards), ...archivedCards]
+  const [search, setSearch] = useState('')
   const selected = useRef<Command | null>(null)
   const complete = () => {
     const command = selected.current
@@ -71,25 +66,23 @@ export function PaletteBody({
   }
   const perform = useCommandRunner({ onDone: complete, onTemplates })
 
-  // Steering acts on the run the centre view is showing, whichever of the run
-  // detail routes is showing it - the terminal tab is exactly where a human
-  // decides to steer. From the board no run is in view: reveal one first.
-  // Resolved from the run map rather than the attention list: an archived
-  // run's own page still needs its commands (Restore among them), and
-  // attention excludes archived runs once they are also final.
+  // The run map, not the run list: the list drops archived final runs, whose
+  // own page still needs its commands (Restore among them).
   const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
-  const goTo = surfaces(cap).map((surface) => ({
+  const goTo = surfaces(cap).filter((surface) => surface.name !== 'board' && surface.place !== 'link').map((surface) => ({
     ...surface,
-    value: `${surface.label} ${surface.name}`,
+    value: `${surface.label} ${surface.name} ${surface.keywords ?? ''}`,
   }))
-  const board = boardCommands({ cap, self, doneCandidates, releaseCandidates })
+  const board = boardCommands({ cap, self })
   const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')
   const boardActions = board.filter((command) => command.id !== 'board' && command.id !== 'overview')
-  const runItems = runs.map(({ run, state }) => ({
+  // The value is what cmdk scores: the label the row shows, never the full
+  // task text. The id keeps two otherwise identical rows distinct.
+  const runItems = (search ? runs : runs.slice(0, browseRunLimit)).map(({ run, state }) => ({
     run,
     state,
-    value: `${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}${run.title ? ` ${run.title}` : ''}`,
+    value: `${runLabel(run)} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`,
   }))
   const workspaceItems = Object.values(workspaces).map((workspace) => ({
     workspace,
@@ -118,7 +111,7 @@ export function PaletteBody({
       <command.Icon />
       <span className="min-w-0 flex-1 truncate">{command.label}</span>
       {command.disabled && (
-        <span className="shrink-0 text-xs text-muted-foreground">Unavailable</span>
+        <span className="shrink-0 text-ui-sm text-muted">Unavailable</span>
       )}
     </CommandItem>
   )
@@ -145,7 +138,11 @@ export function PaletteBody({
 
   return (
     <>
-      <CommandInput placeholder="Search commands, runs, workspaces..." />
+      <CommandInput
+        value={search}
+        onValueChange={setSearch}
+        placeholder="Search commands, runs, workspaces…"
+      />
       <CommandList browseOrder={browseOrder} className="min-h-0 px-1 pb-1">
         <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>
 
@@ -168,17 +165,17 @@ export function PaletteBody({
             <CommandItem
               key={run.id}
               value={value}
-              onSelect={() => go('terminal', { runId: run.id })}
+              onSelect={() => go('run', { runId: run.id })}
               className="items-start py-1"
             >
-              <StateDot state={state} decorative className="mx-1 mt-1 shrink-0" />
+              <StatusDot tone={state} className="mx-1 mt-1 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{runLabel(run)}</span>
-                <span className="block truncate text-xs text-muted-foreground">
+                <span className="block truncate text-ui-sm text-muted">
                   {workspaces[run.workspace_id]?.name ?? 'Workspace'} · {run.branch || 'No branch'}
                 </span>
               </span>
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              <span className="shrink-0 text-ui-sm font-medium text-muted">
                 {stateLabel[state]}
               </span>
             </CommandItem>
@@ -194,7 +191,7 @@ export function PaletteBody({
             >
               <FolderGit2 />
               <span className="min-w-0 flex-1 truncate">{w.name}</span>
-              <span className="max-w-32 truncate text-xs text-muted-foreground">{w.base_branch}</span>
+              <span className="max-w-32 truncate text-ui-sm text-muted">{w.base_branch}</span>
             </CommandItem>
           ))}
         </CommandGroup>

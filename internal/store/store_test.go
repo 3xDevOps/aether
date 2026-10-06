@@ -140,6 +140,20 @@ func mustCreateMember(t *testing.T, db *DB) *domain.Member {
 	return m
 }
 
+func mustCreateTeammate(t *testing.T, db *DB) *domain.Member {
+	t.Helper()
+	m := &domain.Member{
+		DisplayName: "Bob",
+		PublicKey:   testKey(t, "bob@laptop"),
+		Color:       "#3cb44b",
+		Role:        domain.RoleCollaborator,
+	}
+	if err := db.CreateMember(context.Background(), m); err != nil {
+		t.Fatalf("CreateMember: %v", err)
+	}
+	return m
+}
+
 func mustCreateRun(t *testing.T, db *DB, wid domain.WorkspaceID, mid domain.MemberID, status domain.RunStatus) *domain.Run {
 	t.Helper()
 	r := &domain.Run{

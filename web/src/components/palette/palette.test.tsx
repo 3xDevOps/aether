@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect, useRef } from 'react'
-import { CommandPalette, CommandPaletteTrigger } from '@/components/palette'
+import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
-import { openSelect, pickOption } from '@/test/select'
+import { pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -23,15 +23,13 @@ beforeEach(() => {
     activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     runs: { [active.id]: toRecord(active) },
-    acked: {},
     pausedRuns: {},
     paletteOpen: false,
     paletteDialog: null,
     paletteRunID: null,
     route: { name: 'board', params: {} },
     hydrated: true,
-    // Null is the legacy remote monitor: the pre-capabilities allowlist
-    // (steering, launch, templates), no admin methods, no local verbs.
+    // Null is the legacy remote monitor: the pre-capabilities allowlist only.
     capabilities: null,
   })
   vi.clearAllMocks()
@@ -43,26 +41,21 @@ beforeEach(() => {
 })
 
 function open() {
-  // The launch and inject forms are the shell's, not the palette's; render
-  // the host beside it the way AppShell does.
+  // The launch and inject forms are the shell's; host them as AppShell does.
   render(
     <>
       <CommandPalette />
       <PaletteDialogs />
     </>,
   )
-  fireEvent.keyDown(window, { key: 'k', metaKey: true })
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
 }
 
-/** The agent field, once its roster has landed: until then it is disabled and
- * still reads its placeholder, so no list can be dropped from it. */
-async function agentField(): Promise<HTMLElement> {
-  const agent = await screen.findByLabelText('Agent')
-  await waitFor(() => expect(agent.textContent).not.toBe('Choose an agent'))
-  return agent
+/** Until its roster lands nothing is launchable. */
+async function launchReady(): Promise<void> {
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false))
 }
 
-/** Appends markup the guard has to notice, removed however the test ends. */
 function overlay(markup: string): void {
   const host = document.createElement('div')
   host.setAttribute('data-probe', '')
@@ -71,18 +64,20 @@ function overlay(markup: string): void {
   onTestFinished(() => host.remove())
 }
 
+function SearchButton() {
+  return <button type="button" onClick={() => useStore.getState().togglePalette(true)}>Search</button>
+}
+
 describe('command palette', () => {
-  // Every way into a run lands on the Terminal tab, the terminal takes the
-  // focus when it mounts, and xterm swallows Tab. This shortcut is the way
-  // out, so a terminal has no claim on it; a modal does.
+  // xterm swallows Tab, so this shortcut is the way out of a terminal; a modal
+  // still claims it.
   it.each([
     ['a terminal', '<div class="xterm"><span></span></div>', true],
     ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
     ['a confirm', '<div role="alertdialog"><button type="button">ok</button></div>', false],
-    // A select list is portalled out of the dialog that hosts it, so there is
-    // no dialog above it to stand the chord down. It says it is open, which is
-    // what tells it apart from cmdk's own list inside the palette.
+    // A select list is portalled out of its dialog; data-state="open" tells it
+    // apart from cmdk's own list.
     [
       'an open list',
       '<div role="listbox" data-state="open"><div role="option">claude</div></div>',
@@ -129,10 +124,8 @@ describe('command palette', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
-  // A control that disables itself mid-flight - the Send button on the form
-  // this key would stack over - drops the keyboard on the body without a
-  // focusout, and Radix's focus scope watches children rather than attributes,
-  // so it does not take it back.
+  // A control that disables itself mid-flight drops focus on the body without
+  // a focusout, and Radix's focus scope does not watch attributes to take it back.
   it.each([
     ['a dialog', '<div role="dialog"><button type="button" disabled>ok</button></div>'],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
@@ -154,8 +147,7 @@ describe('command palette', () => {
     expect(standDown).toBe(false)
   })
 
-  // The forms this component hosts are store state, so they are asked of the
-  // store: they may be mid-render, or have dropped the keyboard entirely.
+  // Hosted forms are read from the store: they may be mid-render or have dropped focus.
   it('stays shut while it is hosting a form of its own', () => {
     useStore.setState({ paletteDialog: 'launch' })
     render(<CommandPalette />)
@@ -177,11 +169,11 @@ describe('command palette', () => {
   it('returns focus to the opener when Escape dismisses the palette', async () => {
     render(
       <>
-        <CommandPaletteTrigger />
+        <SearchButton />
         <CommandPalette />
       </>,
     )
-    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
+    const trigger = screen.getByRole('button', { name: 'Search' })
     trigger.focus()
     fireEvent.click(trigger)
     await screen.findByRole('dialog')
@@ -207,7 +199,7 @@ describe('command palette', () => {
   })
 
   it('starts with navigation rather than a focused destructive command', async () => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
     const search = await screen.findByRole('combobox')
     await waitFor(() => expect(screen.getByRole('option', { name: 'Open the board' }).getAttribute('aria-selected')).toBe('true'))
@@ -222,12 +214,12 @@ describe('command palette', () => {
       const route = useStore((state) => state.route)
       const input = useRef<HTMLInputElement>(null)
       useEffect(() => {
-        if (route.name === 'terminal') input.current?.focus()
+        if (route.name === 'run') input.current?.focus()
       }, [route])
-      return route.name === 'terminal' ? <input ref={input} aria-label="Destination terminal" /> : null
+      return route.name === 'run' ? <input ref={input} aria-label="Destination terminal" /> : null
     }
-    render(<><CommandPaletteTrigger /><CommandPalette /><Destination /></>)
-    const trigger = screen.getByRole('button', { name: 'Search runs and commands' })
+    render(<><SearchButton /><CommandPalette /><Destination /></>)
+    const trigger = screen.getByRole('button', { name: 'Search' })
     trigger.focus()
     fireEvent.click(trigger)
     fireEvent.click(await screen.findByText(active.task))
@@ -237,7 +229,7 @@ describe('command palette', () => {
   })
 
   it.each(['Kill run', 'Delete run'])('requires explicit confirmation before %s calls the gateway', async (label) => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
     fireEvent.click(await screen.findByRole('option', { name: label }))
     const confirmation = await screen.findByRole('alertdialog')
@@ -252,7 +244,7 @@ describe('command palette', () => {
   })
 
   it.each(['Cancel', 'Escape'])('cancels a destructive command with %s and returns to the terminal', async (dismiss) => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     render(<CommandPalette />)
     overlay('<div class="xterm"><textarea aria-label="Terminal input"></textarea></div>')
     const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
@@ -274,7 +266,7 @@ describe('command palette', () => {
   it.each(['Kill run', 'Delete run'])(
     'discards a pending %s handoff when the identity changes',
     async (label) => {
-      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
       render(<CommandPalette />)
       overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
       const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
@@ -320,7 +312,7 @@ describe('command palette', () => {
   ] as const)(
     'invalidates a visible %s confirmation on identity change (confirm before render: %s)',
     async (label, confirmBeforeRender) => {
-      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
       render(<CommandPalette />)
       overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
       const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
@@ -384,7 +376,7 @@ describe('command palette', () => {
     act(() => useStore.getState().applyRunTitle(active.id, 'quasar migration'))
     await waitFor(() => expect(screen.getByRole('option', { name: /quasar migration/ }).getAttribute('aria-selected')).toBe('true'))
     fireEvent.keyDown(search, { key: 'Enter' })
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: active.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: active.id } })
   })
 
   it('drops archived results and selects the remaining match as live status changes arrive', async () => {
@@ -407,7 +399,7 @@ describe('command palette', () => {
 
   it('does not execute a disabled match, then follows its live enablement', async () => {
     useStore.setState({
-      route: { name: 'terminal', params: { runId: active.id } },
+      route: { name: 'run', params: { runId: active.id } },
       capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['pull'] },
     })
     open()
@@ -422,14 +414,19 @@ describe('command palette', () => {
     await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(active.id))
   })
 
-  it('keeps long-task tails and later results reachable by keyboard without a result cap', async () => {
+  it('browses the 50 most urgent runs and searches every run by its label, not its task text', async () => {
     const runs = Array.from({ length: 120 }, (_, index) => run({
       id: `run_${index}`,
-      task: `${'Preserve the current behavior. '.repeat(40)}quasar ${String(index).padStart(3, '0')}`,
+      title: `quasar ${String(index).padStart(3, '0')}`,
+      task: `${'Preserve the current behavior. '.repeat(40)}nebula`,
     }))
     useStore.setState({ runs: Object.fromEntries(runs.map((value) => [value.id, toRecord(value)])) })
     open()
     const search = await screen.findByRole('combobox')
+    expect(screen.getAllByText(/^quasar \d+$/)).toHaveLength(50)
+    await userEvent.type(search, 'nebula')
+    await waitFor(() => expect(screen.queryAllByText(/^quasar \d+$/)).toHaveLength(0))
+    await userEvent.clear(search)
     await userEvent.type(search, 'quasar 119')
     await waitFor(() => expect(screen.getByRole('option', { selected: true }).getAttribute('data-value')).toContain('run_119'))
     fireEvent.keyDown(search, { key: 'Enter' })
@@ -453,15 +450,10 @@ describe('command palette', () => {
     fireEvent.click(item)
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: 'run_1' },
     })
     expect(useStore.getState().paletteOpen).toBe(false)
-    // Revealing a run acknowledges it, here as everywhere else.
-    expect(useStore.getState().acked[active.id]).toEqual({
-      status: active.status,
-      at: active.started_at,
-    })
   })
 
 
@@ -470,8 +462,7 @@ describe('command palette', () => {
 
     fireEvent.click(await screen.findByText(otherWorkspace.name))
 
-    // Scope and view move together: everything else in the app follows the
-    // active id, not the route.
+    // The rest of the app follows the active id, not the route.
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
     expect(useStore.getState().route).toEqual({
       name: 'workspace',
@@ -480,9 +471,8 @@ describe('command palette', () => {
   })
 
   it('steers the run the centre view is showing, on any of its tabs', async () => {
-    // The terminal tab is a route of its own; it carries the same runId.
     useStore.setState({
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       pausedRuns: { run_1: false },
     })
     open()
@@ -493,10 +483,9 @@ describe('command palette', () => {
   })
 
   it('offers neither pause nor resume while the paused state is unknown', async () => {
-    // Hydration seeds pausedRuns from the run list's `paused` field, but a
-    // legacy gateway sends none: with no entry the client cannot tell which
-    // verb the server would accept, so it offers neither.
-    useStore.setState({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    // A legacy gateway sends no `paused` field, so the client cannot tell which
+    // verb the server would accept.
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     open()
 
     await screen.findByText('Kill run')
@@ -513,14 +502,12 @@ describe('command palette', () => {
   it('launches a run into the active workspace', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
-    // Where it lands is stated, not asked: there is no workspace picker.
+    fireEvent.click(await screen.findByText('New run…'))
     const target = await screen.findByLabelText('Target workspace')
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
 
-    // Nothing is launchable until the roster names the harness it will send.
-    await agentField()
+    await launchReady()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
@@ -529,26 +516,25 @@ describe('command palette', () => {
         harness: 'claude',
       })),
     )
-    // A launch drops the user straight into the agent terminal.
-    await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+    await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   })
 
-  it('opens the launch dialog on Swarm from Create swarm', async () => {
+  it('opens the launch dialog on Swarm from New swarm', async () => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     open()
 
-    fireEvent.click(await screen.findByText('Create swarm...'))
-    expect(await screen.findByRole('dialog', { name: 'Launch a swarm' })).toBeDefined()
-    expect(screen.getByLabelText(/^Objective/)).toBeDefined()
+    fireEvent.click(await screen.findByText('New swarm…'))
+    expect(await screen.findByRole('dialog', { name: 'New swarm' })).toBeDefined()
+    expect(screen.getByLabelText('Objective')).toBeDefined()
   })
 
-  it('offers Create swarm only where the gateway carries mission.create', async () => {
+  it('offers New swarm only where the gateway carries mission.create', async () => {
     open()
-    await screen.findByText('Launch a run...')
-    expect(screen.queryByText('Create swarm...')).toBeNull()
+    await screen.findByText('New run…')
+    expect(screen.queryByText('New swarm…')).toBeNull()
   })
 
-  it('hides Create swarm from a role that cannot launch', async () => {
+  it('hides New swarm from a role that cannot launch', async () => {
     useStore.setState({
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
       info: { ...serverInfo, member: vera },
@@ -558,21 +544,17 @@ describe('command palette', () => {
     })
     open()
     await screen.findByText('Open the board')
-    expect(screen.queryByText('Create swarm...')).toBeNull()
+    expect(screen.queryByText('New swarm…')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
-    // agent.list is the source of truth for who this server can run, so a
-    // member's registered harness must be selectable here, not just the
-    // shipped names.
-    await openSelect(await agentField())
-    await screen.findByRole('option', { name: 'myagent' })
+    fireEvent.click(await screen.findByText('New run…'))
+    // agent.list is the source of truth, not the shipped names.
+    expect(await screen.findByRole('radio', { name: /^myagent/ })).toBeDefined()
     expect(api.agentList).toHaveBeenCalled()
-    // The deployment escape hatch stays reachable alongside the roster.
-    expect(screen.getByRole('option', { name: 'custom' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: /^custom/ })).toBeDefined()
   })
 
   it('launches with the selected shared account and its agent roster', async () => {
@@ -587,14 +569,12 @@ describe('command palette', () => {
     )
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
-    await pickOption(await screen.findByLabelText('Account'), 'Bob (shared)')
-    const agent = await agentField()
-    await openSelect(agent)
-    await screen.findByRole('option', { name: 'bob-agent' })
-    // Radix hides the rest of the document while a list is open.
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(agent.textContent).toBe('bob-agent'))
+    fireEvent.click(await screen.findByText('New run…'))
+    const options = await screen.findByRole('button', { name: /^Options/ })
+    if (options.getAttribute('aria-expanded') === 'false') await userEvent.click(options)
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await waitFor(() => expect(screen.getByRole('radio', { name: /^bob-agent/ }).getAttribute('aria-checked')).toBe('true'))
+    await launchReady()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
@@ -610,8 +590,7 @@ describe('command palette', () => {
   it('launches a templated run into the active workspace', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch from a template...'))
-    // The workspace's templates arrive from template.list.
+    fireEvent.click(await screen.findByText('Launch from a template…'))
     const template = await screen.findByLabelText('Template')
     await waitFor(() => expect(template.textContent).toBe('nightly triage'))
     expect(api.templateList).toHaveBeenCalledWith(workspace.id)
@@ -623,7 +602,7 @@ describe('command palette', () => {
     )
     await waitFor(() =>
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_tpl' },
       }),
     )
@@ -648,9 +627,7 @@ describe('command palette', () => {
   })
 
   it('keeps the roster reachable behind the remote allowlist', async () => {
-    // A remote gateway advertises its allowlist; the admin verbs are not on
-    // it, but member.list is, and the roster is worth reading, so the one
-    // Go-to entry that survives is Members.
+    // The remote allowlist omits the admin verbs but keeps member.list.
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -662,8 +639,6 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
-    // The gate lives in the shared list, so a palette that stopped using it
-    // would start offering these again.
     expect(screen.queryByText('Approvals')).toBeNull()
     expect(screen.queryByText('Activity')).toBeNull()
     expect(screen.queryByText('Files')).toBeNull()
@@ -672,12 +647,12 @@ describe('command palette', () => {
   })
 
   it.each(['local', 'remote'] as const)(
-    'finds configuration and remote files with config-only capabilities on a %s gateway',
+    'finds agent config files under Agents, and remote files, on a %s gateway',
     async (gateway) => {
       useStore.setState({
         capabilities: {
           gateway,
-          methods: ['config.roots', 'config.import', 'config.tree', 'config.read'],
+          methods: ['agent.list', 'config.roots', 'config.import', 'config.tree', 'config.read'],
           ws: [],
         },
         workspaces: {},
@@ -688,9 +663,9 @@ describe('command palette', () => {
       open()
 
       const search = await screen.findByRole('combobox')
-      await userEvent.type(search, 'config')
-      fireEvent.click(await screen.findByText('Configuration'))
-      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
+      await userEvent.type(search, 'config files')
+      fireEvent.click(await screen.findByText('Agents'))
+      expect(useStore.getState().route).toEqual({ name: 'agents', params: {} })
       expect(useStore.getState().paletteOpen).toBe(false)
 
       act(() => useStore.setState({ paletteOpen: true }))
@@ -702,28 +677,8 @@ describe('command palette', () => {
     },
   )
 
-  it.each(['config.roots', 'config.import'])(
-    'hides configuration when %s is not advertised',
-    async (missing) => {
-      useStore.setState({
-        capabilities: {
-          gateway: 'remote',
-          methods: ['config.roots', 'config.import'].filter(
-            (method) => method !== missing,
-          ),
-          ws: [],
-        },
-      })
-      open()
-      await screen.findByRole('combobox')
-      expect(screen.queryByText('Configuration')).toBeNull()
-    },
-  )
-
   it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
-    // capabilities stays null (the beforeEach default): the endpoint 404ed,
-    // so only the pre-capabilities allowlist may render. member.list is on
-    // it; the methods behind the other entries would all answer 403.
+    // capabilities null: only the pre-capabilities allowlist, which has member.list.
     open()
 
     await screen.findByText('rewrite the checkout flow')
@@ -732,10 +687,7 @@ describe('command palette', () => {
     expect(screen.queryByText('Agents')).toBeNull()
   })
 
-  it('jumps to the approval inbox, the activity feed and the files tree', async () => {
-    // The three surfaces that were reachable only from an 11px status-bar
-    // button or the sidebar nav. The palette renders the same gated list the
-    // nav does, so they arrive together.
+  it('jumps to the activity feed and the files tree, and leaves retired pages out', async () => {
     useStore.setState({
       capabilities: {
         gateway: 'local',
@@ -747,13 +699,14 @@ describe('command palette', () => {
     open()
     await screen.findByText('rewrite the checkout flow')
 
+    expect(screen.queryByText('Approvals')).toBeNull()
+    expect(screen.queryByText('Onboarding')).toBeNull()
+    expect(screen.getByText('Members › Devices')).toBeDefined()
     for (const [label, route] of [
-      ['Approvals', 'approvals'],
       ['Activity', 'timeline'],
       ['Files', 'files'],
     ]) {
-      // Selecting an item closes the palette; reopen it for the next one
-      // rather than mounting a second copy of it.
+      // Selecting closes the palette; reopen it rather than mount a second copy.
       act(() => useStore.setState({ paletteOpen: true }))
       fireEvent.click(await screen.findByText(label))
       expect(useStore.getState().route).toEqual({ name: route, params: {} })
@@ -763,7 +716,7 @@ describe('command palette', () => {
   it('pulls the focused run branch through the local gateway', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ last_commit: 'abc1234' })) },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -779,11 +732,10 @@ describe('command palette', () => {
   })
 
   it('offers handoff targets who can own a run, never a viewer', async () => {
-    // The run belongs to alice; bob may take it, vera may not, because the
-    // server refuses to hand a run to someone who cannot own one.
+    // The server refuses to hand a run to someone who cannot own one.
     useStore.setState({
       members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
     })
     open()
 
@@ -796,9 +748,7 @@ describe('command palette', () => {
   })
 
   it('offers restore on an archived run, reached from its own page', async () => {
-    // useAttentionRuns excludes an archived, final run entirely, so the
-    // palette must resolve the focused run from the run map instead - the
-    // only way to reach Restore is from the run's own page.
+    // Run lists exclude an archived final run, so it resolves from the run map.
     useStore.setState({
       runs: {
         [active.id]: toRecord(
@@ -809,7 +759,7 @@ describe('command palette', () => {
           }),
         ),
       },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -836,7 +786,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Archive closed runs...'))
+    fireEvent.click(await screen.findByText('Archive closed runs…'))
 
     expect(api.runArchive).not.toHaveBeenCalled()
 
@@ -845,7 +795,7 @@ describe('command palette', () => {
     await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(done.id, true))
   })
 
-  it('offers relaunch only on a retained TUI Done run', async () => {
+  it('offers Reopen only on a retained TUI Done run', async () => {
     useStore.setState({
       runs: {
         [active.id]: toRecord(
@@ -856,7 +806,7 @@ describe('command palette', () => {
           }),
         ),
       },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -866,7 +816,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Relaunch run'))
+    fireEvent.click(await screen.findByText('Reopen run'))
 
     await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith('run_1'))
   })
@@ -880,9 +830,9 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Release finished resources...'))
+    fireEvent.click(await screen.findByText('Free retained containers…'))
     expect(api.runRelease).not.toHaveBeenCalled()
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Release 1' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(archived.id))
     expect(useStore.getState().runs[archived.id]?.archived_at).toBeDefined()
   })
@@ -890,14 +840,14 @@ describe('command palette', () => {
   it('confirms focused release before calling the gateway', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ ...active, status: 'merged', reason: 'closed; retained container' })) },
-      route: { name: 'terminal', params: { runId: active.id } },
+      route: { name: 'run', params: { runId: active.id } },
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Release resources...'))
+    fireEvent.click(await screen.findByText('Free container…'))
     const dialog = within(await screen.findByRole('alertdialog'))
     expect(api.runRelease).not.toHaveBeenCalled()
-    fireEvent.click(dialog.getByRole('button', { name: 'Release resources' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Free container' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(active.id))
   })
 })

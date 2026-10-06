@@ -1,4 +1,4 @@
-// The Run Room on a real phone viewport is a sheet over the live terminal,
+// Run details on a real phone viewport is a sheet over the live terminal,
 // not a second narrow column. Opening and closing it must leave the PTY on the
 // desktop viewer's grid.
 
@@ -7,7 +7,7 @@ import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
 
-const task = 'mobile release A run room'
+const task = 'mobile release A run details'
 const desktopCols = 132
 const desktopRows = 43
 const desktopSessionID = 'run-room-mobile-desktop'
@@ -51,7 +51,7 @@ async function attach(
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a phone opens Run Room as a full sheet without resizing the run PTY', async ({
+test('a phone opens Run details as a sheet without resizing the run PTY', async ({
   page,
   aether,
 }, testInfo) => {
@@ -94,52 +94,39 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     const viewport = page.viewportSize()
     expect(viewport).not.toBeNull()
     const beforeOpen = await sessionGeometry()
-    // The room makes the background inaccessible while its modal is open.
-    const titlebar = await page.getByRole('banner', { name: 'Aether' }).boundingBox()
-    expect(titlebar).not.toBeNull()
-    await page.getByRole('button', { name: 'Open Run Room' }).tap()
-    const room = page.getByRole('dialog', { name: 'Run Room' })
-    await expect(room).toBeVisible()
-    const box = await room.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box?.y).toBe((titlebar?.y ?? 0) + (titlebar?.height ?? 0))
-    expect(box?.x).toBe(0)
-    expect(box?.y).toBeGreaterThan(0)
-    expect(box?.width).toBe(viewport?.width)
-    expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(viewport?.height)
-    // The terminal remains underneath the sheet, and opening the room did not
-    // make this phone's width a new PTY geometry proposal.
+    const opener = page.getByRole('button', { name: 'Show details', exact: true })
+    await opener.tap()
+    const details = page.getByRole('dialog', { name: 'Run details' })
+    await expect(details).toBeVisible()
+    await expect.poll(async () => {
+      const box = await details.boundingBox()
+      return box && { x: box.x, width: box.width, bottom: Math.round(box.y + box.height) }
+    }).toEqual({ x: 0, width: viewport!.width, bottom: viewport!.height })
+    expect((await details.boundingBox())?.y).toBeGreaterThan(0)
+    // The terminal remains underneath the sheet, and opening it did not make
+    // this phone's width a new PTY geometry proposal.
     await expect(page.locator('.xterm:not([data-aether-frozen-view] *)')).toBeVisible()
     await expect(rows).toHaveCount(desktopRows)
     expect(await sessionGeometry()).toEqual(beforeOpen)
-    await testInfo.attach('phone-run-room', {
+    await testInfo.attach('phone-run-details', {
       body: await page.screenshot(),
       contentType: 'image/png',
     })
-
-    const composer = room.getByRole('textbox', { name: 'Run Room message' })
-    await composer.fill('Keep this phone draft')
-    for (let step = 0; step < 12; step++) {
-      await page.keyboard.press(step === 11 ? 'Shift+Tab' : 'Tab')
-      await expect.poll(() => room.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    for (let step = 0; step < 6; step++) {
+      await page.keyboard.press(step === 5 ? 'Shift+Tab' : 'Tab')
+      await expect.poll(() => details.evaluate((element) => element.contains(document.activeElement))).toBe(true)
     }
     await page.keyboard.press('Escape')
-    await expect(room).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeFocused()
-    await page.getByRole('button', { name: 'Open Run Room' }).tap()
-    await expect(composer).toHaveValue('Keep this phone draft')
+    await expect(details).toBeHidden()
+    await expect(opener).toBeFocused()
 
     // A tap cannot displace the same member's desktop session or open a
     // requester-side confirmation. A takeover requires a continuous hold.
-    await expect(room.getByText(/Controller: /)).toBeVisible()
-    await room.getByRole('button', { name: 'Take control' }).tap()
+    const presence = page.getByRole('group', { name: 'Run presence' })
+    await expect(presence.getByText('You control in another tab')).toBeVisible()
+    await presence.getByRole('button', { name: 'Take control' }).tap()
     await expect(page.getByRole('alertdialog')).toBeHidden()
-    await expect(room.getByRole('button', { name: 'Take control' })).toBeVisible()
-    expect(await sessionGeometry()).toEqual(beforeOpen)
-
-    await page.getByRole('button', { name: 'Close Run Room' }).tap()
-    await expect(room).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeVisible()
+    await expect(presence.getByRole('button', { name: 'Take control' })).toBeVisible()
     await expect(rows).toHaveCount(desktopRows)
     expect(await sessionGeometry()).toEqual(beforeOpen)
   } finally {
@@ -147,7 +134,7 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
   }
 })
 
-test('a phone reads retained evidence in a full-width surface', async ({
+test('a phone reads its captures in a full-width sheet', async ({
   page,
   aether,
 }, testInfo) => {
@@ -182,9 +169,10 @@ test('a phone reads retained evidence in a full-width surface', async ({
     .toBeGreaterThan(0)
 
   await page.goto(`${alice.url}&run=${run.id}`)
-  await page.getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).tap()
-  const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
-  const closeEvidence = evidence.getByRole('button', { name: 'Close evidence', exact: true })
+  await page.getByRole('button', { name: 'More', exact: true }).tap()
+  await page.getByRole('menuitem', { name: 'Captures…' }).tap()
+  const evidence = page.getByRole('dialog', { name: 'Captures', exact: true })
+  const closeEvidence = evidence.getByRole('button', { name: 'Close', exact: true })
   await expect(evidence).toBeVisible()
 
   const viewport = page.viewportSize()
@@ -194,9 +182,8 @@ test('a phone reads retained evidence in a full-width surface', async ({
     return box && { x: box.x, width: box.width, bottom: Math.round(box.y + box.height) }
   }).toEqual({ x: 0, width: viewport!.width, bottom: viewport!.height })
   expect((await evidence.boundingBox())?.y).toBeGreaterThan(0)
-  await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible()
-  await expect(evidence.getByRole('heading', { name: 'Retained evidence' })).toBeVisible()
-  await testInfo.attach('phone-retained-evidence', {
+  await expect(evidence.getByRole('button', { name: 'Open finish capture' })).toBeVisible()
+  await testInfo.attach('phone-captures', {
     body: await page.screenshot(),
     contentType: 'image/png',
   })
@@ -204,14 +191,13 @@ test('a phone reads retained evidence in a full-width surface', async ({
   await expect(evidence).toBeHidden()
 })
 
-test('incoming control decisions stay usable over responsive Room and Evidence', async ({
+test('incoming control decisions stay usable over Run details and Captures', async ({
   page,
   aether,
 }, testInfo) => {
   const alice = await aether.member('Alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
-  const { member: aliceMember } = await alice.api.rpc<{ member: { display_name: string } }>('server.info')
   aether.installAgent(await memberID(alice), 'claude', 'sleep 600')
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
@@ -228,26 +214,29 @@ test('incoming control decisions stay usable over responsive Room and Evidence',
   const requester = await page.context().newPage()
   try {
     await requester.goto(`${alice.url}&run=${run.id}`)
-    await requester.getByRole('button', { name: 'Open Run Room' }).tap()
-    const requestRoom = requester.getByRole('dialog', { name: 'Run Room' })
-    await expect(requestRoom.getByText(`Controller: ${aliceMember.display_name}`, { exact: true })).toBeVisible()
-    const takeControl = requestRoom.getByRole('button', { name: 'Take control', exact: true })
+    const requestPresence = requester.getByRole('group', { name: 'Run presence' })
+    await expect(requestPresence.getByText(/^You control in another tab/)).toBeVisible()
+    const takeControl = requestPresence.getByRole('button', { name: 'Take control', exact: true })
     const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
     const deny = takeover.getByRole('button', { name: 'Deny', exact: true })
 
     for (const { surface, width } of [
-      { surface: 'Room', width: 390 },
-      { surface: 'Evidence', width: 390 },
-      { surface: 'Evidence', width: 700 },
+      { surface: 'Details', width: 390 },
+      { surface: 'Captures', width: 390 },
+      { surface: 'Captures', width: 700 },
     ] as const) {
       await page.setViewportSize({ width, height: 844 })
       await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
-      const room = surface === 'Room'
-      await page.getByRole('button', { name: room ? 'Open Run Room' : /^Evidence(?: \(\d+\))?$/ }).tap()
-      const panel = page.getByRole('dialog', { name: room ? 'Run Room' : 'Retained evidence', exact: true })
+      const room = surface === 'Details'
+      if (room) await page.getByRole('button', { name: 'Show details', exact: true }).tap()
+      else {
+        await page.getByRole('button', { name: 'More', exact: true }).tap()
+        await page.getByRole('menuitem', { name: 'Captures…' }).tap()
+      }
+      const panel = page.getByRole('dialog', { name: room ? 'Run details' : 'Captures', exact: true })
       await expect(panel).toBeVisible()
-      if (room) await panel.getByRole('textbox', { name: 'Run Room message' }).fill('Keep this interrupted draft')
-      else await panel.getByRole('button', { name: 'Close evidence', exact: true }).focus()
+      if (room) await panel.getByRole('textbox', { name: 'Add a note' }).fill('Keep this interrupted draft')
+      else await panel.getByRole('button', { name: 'Close', exact: true }).focus()
 
       await expect(takeControl).toHaveAttribute('aria-disabled', 'false')
       await takeControl.focus()
@@ -282,16 +271,16 @@ test('incoming control decisions stay usable over responsive Room and Evidence',
       await deny.click()
       await expect(takeover).toBeHidden()
       await expect(takeControl).toBeVisible()
-      await expect(requestRoom.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
+      await expect(requestPresence.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
 
       if (room) {
-        const composer = panel.getByRole('textbox', { name: 'Run Room message' })
-        await expect(composer).toHaveValue('Keep this interrupted draft')
-        await expect(composer).toBeFocused()
-        await panel.getByRole('button', { name: 'Close Run Room' }).click()
+        const note = panel.getByRole('textbox', { name: 'Add a note' })
+        await expect(note).toHaveValue('Keep this interrupted draft')
+        await expect(note).toBeFocused()
+        await panel.getByRole('button', { name: 'Close', exact: true }).click()
       } else {
-        const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
-        const close = evidence.getByRole('button', { name: 'Close evidence', exact: true })
+        const evidence = page.getByRole('dialog', { name: 'Captures', exact: true })
+        const close = evidence.getByRole('button', { name: 'Close', exact: true })
         await expect(close).toBeFocused()
         const box = await evidence.boundingBox()
         expect(box).not.toBeNull()

@@ -1,17 +1,18 @@
-// Hydration and live updates: one HTTP fetch fills the store, then the event
-// stream is the only thing that changes it.
-
 import { toast } from 'sonner'
-import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
-import { edgeHost, message } from '@/lib/format'
+import { api, ApiError, type Api } from '@/lib/api'
+import { edgeHost, errorSentence } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
+import { redirectRoute } from '@/lib/url-state'
 import type {
+  CoordMessageAckedPayload,
+  CoordMessagePayload,
   Event,
   GatewayCapabilities,
   GitBranchPayload,
   LinkStatus,
   OverlapPayload,
   RunArchivedPayload,
+  RunControllerPayload,
   RunDiffPayload,
   RunInputPayload,
   RunProtectedPayload,
@@ -20,21 +21,20 @@ import type {
   ServerUpdatePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
+import type { AgentPayload } from '@/store/activity'
+import { applyApprovalEvent } from '@/store/approvals'
+import { batchNotifications } from '@/store/batch'
+import { coalesce } from '@/store/coalesce'
 import { pausedFromTimeline } from '@/store/board'
+import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
+import { inMessageScope, loadMessagePage } from '@/store/messages'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
- * Names the hop that failed. The local gateway reports a dead transport as
- * 503 (protocol.CodeUnavailable) with the failing hop in the message:
- * "network unreachable: ..." when this machine never got off its own
- * network stack (DNS dead, no route), "server unreachable: ..." when it did
- * and aether-server did not answer. A fetch that never got an answer at all
- * (a TypeError from fetch) means the origin serving this page is gone, and
- * which origin that is decides what the user can do: the desktop gateway is
- * a process on this machine that can be restarted, while the server gateway
- * is across the tailnet, so its silence is a dead link or a dead host.
- * Anything else - a 401, a 500 the server produced - is neither.
+ * The local gateway reports a dead transport as 503 with the failing hop in the
+ * message ("network unreachable: ..." or "server unreachable: ..."). A fetch
+ * TypeError means the origin serving this page is gone.
  */
 function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
@@ -49,14 +49,7 @@ function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | 
   return null
 }
 
-/**
- * Which part of an edge link failed, from the "server unreachable" error
- * the local gateway passes on. The client's error keeps the edge's refusal
- * and the server's SSH banner in their own words, and a failure to reach the
- * edge at all names the edge host followed by the transport error. Any
- * other refusal the edge words itself is `edge-refused`. Null when the link
- * is not through an edge or the error is none of these.
- */
+/** Null when the link is not through an edge or the error matches none of these. */
 function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
   const edge = store.getState().linkStatus?.edge_url
   if (!edge) return null
@@ -74,17 +67,13 @@ function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
 }
 
 
-/** Names why the gateway refused the capabilities probe. */
 function refusalKind(err: ApiError, store: RootStore): UnreachableKind | null {
   if (err.status === 403) return 'refused'
   if (err.message.includes('tailnet identity unavailable')) return 'identity'
   return classifyUnreachable(err, store)
 }
 
-/**
- * Fills the store from the server. False means the fetch failed or its owner
- * was disposed. Direct callers may omit the signal; connect owns its lifetime.
- */
+/** False means the fetch failed or its owner was disposed. */
 export async function hydrate(
   store: RootStore,
   client: Api = api,
@@ -99,9 +88,7 @@ export async function hydrate(
         client.workspaceListFull(),
         client.memberList(),
         client.runList(),
-        // The conflict radar is a warning system, not a data source the app
-        // needs: an unreachable one leaves the chips off, it does not fail the
-        // hydration.
+        // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
         // A legacy remote monitor does not serve the endpoint; null keeps the
         // client on its built-in assumptions.
@@ -127,7 +114,7 @@ export async function hydrate(
         if (signal?.aborted) return false
         // Preferences are optional; report the gateway's error without
         // turning a successful server snapshot into a connection failure.
-        toast.error(message(err))
+        toast.error(errorSentence(err))
       }
     }
     s.setIdentityKey(incomingIdentity)
@@ -159,11 +146,8 @@ export async function hydrate(
     }
     if (signal?.aborted) return false
     s.setCapabilities(capabilities)
-    // The status bar's link chip reads linkStatus, and nothing else
-    // fetches it until the settings or onboarding view opens - so without
-    // this, a linked machine launches looking unlinked and the chip points
-    // at onboarding on every start. Local gateways only, and isolated: a
-    // failed poll must not fail the hydration.
+    // Nothing else fetches linkStatus before settings or onboarding opens, so
+    // without this a linked machine launches looking unlinked. Must not fail hydration.
     if (store.getState().capabilities?.local?.includes('link.status')) {
       try {
         const linkStatus = await client.localLinkStatus()
@@ -177,9 +161,11 @@ export async function hydrate(
     if (signal?.aborted) return false
     s.setHydrated(true)
     const current = store.getState()
+    const linked = current.route.params.runId
+    const unknownLink = !s.hydrated && current.route === s.route && !!linked && !current.runs[linked]
     if (
       !s.hydrated &&
-      s.route.name === 'board' &&
+      (s.route.name === 'board' || unknownLink) &&
       current.route === s.route &&
       !current.onboarded &&
       (capabilities?.local?.includes('link.status') === true ||
@@ -189,20 +175,15 @@ export async function hydrate(
           (capabilities?.methods.includes('*') ||
             (capabilities?.methods.includes('member.git') && capabilities.methods.includes('agent.list')))))
     ) {
-      store.setState({ route: { name: 'onboarding', params: {} } })
+      redirectRoute(store, { name: 'onboarding', params: {} })
     }
-    // An authorized run link outranks onboarding.
-    const requested = takeRequestedRun()
-    if (requested && store.getState().runs[requested]) {
-      store.getState().navigate('terminal', { runId: requested })
-    }
+    else if (unknownLink) redirectRoute(store, { name: 'board', params: {} })
     s.setUnreachable(null)
     return true
   } catch (err) {
     if (signal?.aborted) return false
-    // A failed re-hydration keeps the data we already have; only the error
-    // is new. Once the token is known dead, the recorded recovery hint is
-    // more useful than this raw failure, so it stays.
+    // A failed re-hydration keeps existing data. Once the token is known dead,
+    // its recorded recovery hint beats this raw failure.
     if (!store.getState().streamDead) {
       s.setUnreachable(classifyUnreachable(err, store))
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
@@ -211,11 +192,8 @@ export async function hydrate(
   }
 }
 
-/**
- * Refetches room history until a page reaches the cache boundary. A realtime
- * event only names the mutation, so one newest page is not enough when the
- * client missed a burst larger than that page during a disconnect.
- */
+/** A realtime event only names the mutation, so a missed burst larger than one
+ * page needs every page back to the cache boundary. */
 async function reconcileRoomHistory(
   store: RootStore,
   client: Api,
@@ -256,10 +234,7 @@ async function reconcileRoomHistory(
   }
 }
 
-/**
- * Evidence events are summaries by design. Walk every missed page until the
- * existing cache boundary, so a burst larger than one page remains fillable.
- */
+/** Evidence events are summaries, so walk every missed page to the cache boundary. */
 async function reconcileEvidenceHistory(
   store: RootStore,
   client: Api,
@@ -292,12 +267,8 @@ async function reconcileEvidenceHistory(
 }
 
 /**
- * Applies one event and reports whether it resolved. Await it, and await it in
- * sequence order: an event about a run the store has never seen has to fetch
- * that run first, and the cursor must never move past an event still waiting
- * on a fetch. False means the event could not be resolved at all, and only a
- * fresh snapshot repairs the store.
- *
+ * Await in sequence order: the cursor must never move past an event still
+ * waiting on a fetch. False means only a fresh snapshot repairs the store.
  * Every state read happens after the awaits, never before them.
  */
 export async function applyEvent(
@@ -306,11 +277,9 @@ export async function applyEvent(
   client: Api = api,
 ): Promise<boolean> {
   if (ev.seq > 0 && ev.seq <= store.getState().lastSeq) {
-    // Replay resumes strictly after the cursor, so an equal sequence is a
-    // duplicate. One below it means the server's event log restarted - a
-    // fresh or restored data dir numbers from scratch - and every event
-    // would be dropped forever: forget the cursor and take a fresh snapshot,
-    // exactly as a reconnect with no cursor does.
+    // Replay resumes strictly after the cursor, so equal is a duplicate. Below
+    // it means the server's event log restarted (fresh or restored data dir):
+    // forget the cursor and take a fresh snapshot.
     if (ev.seq === store.getState().lastSeq) return true
     store.getState().resetSeq()
     return false
@@ -321,9 +290,8 @@ export async function applyEvent(
     store.getState().removeWorkspace(ev.workspace_id)
   }
 
-  // Workspaces arrive only by fetch, so an event for one we do not know means
-  // a teammate created it after we hydrated. Without this its runs would be
-  // stored but rendered nowhere.
+  // No workspace.created event exists; without this a new workspace's runs
+  // would be stored but rendered nowhere.
   if (ev.type !== 'workspace.deleted' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
@@ -331,11 +299,17 @@ export async function applyEvent(
       .catch(ignore)
   }
 
-  // Members likewise: no member.* event exists, so an actor we have never
-  // seen is a teammate who joined after we hydrated. Without the re-read
-  // their name renders as a raw ID everywhere.
+  // A new teammate has no event of their own; without this they render as a raw ID.
   if (ev.actor_id && !store.getState().members[ev.actor_id]) {
     await client.memberList().then(store.getState().setMembers).catch(ignore)
+  }
+
+  if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
+    const missionID = (ev.payload as { mission_id: string }).mission_id
+    const state = store.getState()
+    state.removeMission(missionID)
+    if (state.route.name === 'missions' && state.route.params.missionId === missionID) state.navigate('missions')
+    return true
   }
 
   // Mission events are scoped projection hints. Never let an event from a
@@ -376,10 +350,8 @@ export async function applyEvent(
           .missionList({ workspace_id: ev.workspace_id, limit: 50 })
           .then((result) => {
             const state = store.getState()
-            // Merged, not replaced, so older pages the reader loaded stay.
-            // Everything newer than the stored cursor is still held, so it
-            // still marks the next older page; a cursor read for another
-            // workspace, or none, gives way to the fetched one.
+            // Merged, not replaced, so loaded older pages stay and the stored
+            // cursor still marks the next older page for this workspace.
             const loaded = state.missionListWorkspace === ev.workspace_id
             state.setMissions(
               ev.workspace_id,
@@ -406,12 +378,20 @@ export async function applyEvent(
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break
+    case 'member.changed': {
+      const p = ev.payload as { member_id: string; display_name: string }
+      await client.memberList().then(store.getState().setMembers).catch(ignore)
+      const info = store.getState().info
+      if (info && info.member.id === p.member_id) {
+        store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })
+      }
+      break
+    }
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {
-        // A run launched by someone else after we hydrated. Fetching it here,
-        // before the event is applied and before the cursor moves, is what
-        // keeps two transitions of a brand new run in order.
+        // Fetched before the cursor moves, so two transitions of a brand new
+        // run stay in order.
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
@@ -470,6 +450,21 @@ export async function applyEvent(
       store.getState().applyRunProtected(ev.run_id, p.protected)
       break
     }
+    case 'run.mode': {
+      try {
+        store.getState().upsertRun(await client.runGet(ev.run_id))
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 404)) {
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          return false
+        }
+      }
+      break
+    }
+    case 'run.controller':
+      // A run this client has not loaded arrives with the holder in its snapshot.
+      store.getState().applyRunController(ev.run_id, (ev.payload as RunControllerPayload).member_id)
+      break
     case 'run.archived': {
       const p = ev.payload as RunArchivedPayload
       if (!store.getState().runs[ev.run_id]) {
@@ -484,10 +479,7 @@ export async function applyEvent(
       break
     }
     case 'run.diff': {
-      // A snapshot carries per-file stats and the two trees bounding the
-      // interval it ended. It is the timeline entry the Diff tab lists, the
-      // range that tab asks for, and the signal that the run's cumulative
-      // patch text is behind.
+      // Also signals that the run's cumulative patch text is behind.
       const p = ev.payload as RunDiffPayload
       store.getState().noteDiffSnapshot(ev.run_id, {
         time: ev.time,
@@ -497,6 +489,29 @@ export async function applyEvent(
       })
       break
     }
+    case 'workspace.approval':
+      applyApprovalEvent(store, client, ev)
+      break
+    case 'workspace.budget':
+      if (ev.workspace_id) store.getState().applyBudgetEvent(ev.workspace_id, ev.payload as BudgetPayload)
+      break
+    case 'run.cost': {
+      // Budget events fire only on thresholds and edits; spend moves with every
+      // result. The read does not hold up the events behind it.
+      if (ev.workspace_id) scheduleBudgetRead(store, client, ev.workspace_id)
+      break
+    }
+    case 'workspace.presence':
+      // The payload names one transition, not the roster it changes.
+      coalesce(store, 'presence', () =>
+        client.presenceRoster().then(store.getState().setPresence).catch(ignore),
+      )
+      break
+    case 'run.agent':
+      // Activity is a hint for the state line: an event about a run this
+      // client has not loaded is not worth a fetch.
+      store.getState().applyAgentEvent(ev.run_id, (ev.payload ?? {}) as AgentPayload, ev.time)
+      break
     case 'server.update': {
       store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
       break
@@ -547,10 +562,8 @@ export async function applyEvent(
       break
     }
     case 'workspace.room_message': {
-      // Room event payloads intentionally contain no message body. A question
-      // or reply changes the server-computed attention count even when the
-      // room has never been opened; an open room still refreshes its durable
-      // history below.
+      // Payloads carry no message body, yet a question or reply changes the
+      // server-computed attention count even for a room never opened.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
       const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string }
@@ -561,8 +574,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(runID))
         } catch (err) {
-          // Without this snapshot the attention badge can remain stale. Leave
-          // the event unresolved so the stream performs authoritative recovery.
+          // Left unresolved so the stream recovers; else the attention badge stays stale.
           store.getState().setUnreachable(classifyUnreachable(err, store))
           return false
         }
@@ -579,10 +591,25 @@ export async function applyEvent(
       }
       break
     }
+    case 'coord.message': {
+      // The event carries no body: every loaded list the message belongs to
+      // re-reads its newest page.
+      const p = ev.payload as CoordMessagePayload
+      const scopes = Object.values(store.getState().messageLists)
+        .map((list) => list.scope)
+        .filter((scope) => inMessageScope(scope, p))
+      await Promise.all(scopes.map((scope) => loadMessagePage(store, client, scope)))
+      refreshUnacked(store, client, p.to_run_id)
+      break
+    }
+    case 'coord.message.acked': {
+      const p = ev.payload as CoordMessageAckedPayload
+      store.getState().applyMessageAcked(p.message_id, p.acked_at)
+      refreshUnacked(store, client, p.to_run_id)
+      break
+    }
     case 'workspace.evidence_packet': {
-      // Evidence events are summaries by design. Refetch every page of an
-      // already visible list until the cache boundary, preserving lazy
-      // loading for runs with no drawer open.
+      // Only lists already loaded; a run whose Captures were never opened stays lazy.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
       if (runID && workspaceID && store.getState().evidencePackets[runID]) {
@@ -598,28 +625,36 @@ export async function applyEvent(
       break
     }
   }
+  store.getState().appendLiveEvent(ev)
+  store.getState().appendSessionEvent(ev)
   store.getState().noteSeq(ev.seq)
   return true
 }
 
-/** What the capabilities probe before the stream found, or null for
- * "nothing special: open the stream". */
+/**
+ * Off the event queue, and only the unread fields: a full snapshot landing late
+ * would undo run events applied after it was read. A failed read is dropped.
+ */
+function refreshUnacked(store: RootStore, client: Api, runID: string): void {
+  if (!store.getState().runs[runID]) return
+  coalesce(store, `unacked:${runID}`, () =>
+    client
+      .runGet(runID)
+      .then((run) => store.getState().applyUnackedMessages(runID, run))
+      .catch(ignore),
+  )
+}
+
+/** Null means "nothing special: open the stream". */
 type Probe =
   | { unlinked: { capabilities: GatewayCapabilities; status: LinkStatus } }
   | { rejected: string }
   | { refused: ApiError }
 
 /**
- * Reads the capabilities descriptor before anything else, because two
- * answers change what the app does next: a local gateway with no server
- * configured goes to onboarding, and a 401 means the gateway rejected the
- * credential. The 401 matters most on a phone, where the token lives in
- * per-tab session storage: without this the WebSocket upgrade would be
- * rejected the same way, the socket would retry forever, and the app would
- * blame an unreachable server. A 403 or 503 is the gateway refusing this
- * caller outright - a tagged tailnet node, a WhoIs outage - whose reason
- * only an HTTP body carries, so it is recorded before the stream's own
- * failure can only say "unreachable".
+ * Runs before the stream: a rejected WebSocket upgrade carries no body, so a
+ * 401 would retry forever blaming an unreachable server, and a 403/503's
+ * reason would be lost.
  */
 async function probeGateway(
   store: RootStore,
@@ -635,16 +670,13 @@ async function probeGateway(
     return null
   }
   if (signal.aborted) return null
-  // Hydration writes the same descriptor, but a hydration that never
-  // succeeds writes nothing - and classifying its failure needs to know
-  // which gateway serves the page.
+  // Classifying a hydration failure needs to know which gateway serves the page.
   store.getState().setCapabilities(capabilities)
   try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
     if (signal.aborted) return null
-    // A failure before hydration succeeds is classified by whether the link
-    // runs through an edge, so the link has to be known first.
+    // Classifying a failure needs to know whether the link runs through an edge.
     store.getState().setLinkStatus(status)
     return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
@@ -653,23 +685,9 @@ async function probeGateway(
 }
 
 /**
- * Subscribes, hydrates and follows the event stream for as long as the app is
- * mounted. Returns a disposer.
- *
- * Three orderings matter.
- *
- * The subscription comes first: hydration starts only once the server has
- * acknowledged it, so a change between the snapshot and the subscription
- * cannot fall in the gap. Events that arrive while the snapshot is in flight
- * wait in the queue and are applied after it, so an older snapshot never
- * overwrites a newer event.
- *
- * Events are then applied one at a time, in sequence order, each one fully
- * resolved before the next begins. That is what keeps the single global
- * cursor honest: it can never move past an event still waiting on a fetch.
- *
- * And a reconnect with no cursor cannot replay, so the client re-fetches
- * instead of subscribing live and missing the outage.
+ * Ordering invariants: hydration starts only after the subscription is acked,
+ * and events queued meanwhile apply after the snapshot. Events apply one at a
+ * time in sequence order. A reconnect with no cursor re-fetches.
  */
 export function connect(store: RootStore, client: Api = api): () => void {
   const lifecycle = new AbortController()
@@ -750,7 +768,8 @@ export function connect(store: RootStore, client: Api = api): () => void {
     })
   }
 
-  const drain = async () => {
+  // Listeners hear one change per drained burst rather than one per write.
+  const drain = () => batchNotifications(store, async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
       if (await applyEvent(store, ev, client)) {
@@ -765,7 +784,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       void load()
       return
     }
-  }
+  })
 
   const pump = () => {
     chain = chain.then(drain).catch(ignore)
@@ -807,20 +826,14 @@ export function connect(store: RootStore, client: Api = api): () => void {
           !store.getState().hydrated &&
           !store.getState().hydrationError
         ) {
-          // The stream cannot even be established and nothing has been fetched:
-          // say so, rather than animating skeletons forever. An error already
-          // recorded - a 401 hydration, a dead token - is more precise than
-          // this one, so it stays.
+          // Say so rather than animate skeletons forever; an error already
+          // recorded is more precise, so it stays.
           store.getState().setHydrated(false, 'the server is unreachable')
         }
         if (state !== 'live') return
-        // The subscription is installed. Hydrate behind it on the first connect,
-        // and again on a reconnect that has no cursor to replay from - or one
-        // that came while the server was replacing its own binaries, because
-        // that is a server that may have just re-executed on a new version.
-        // Only a fresh server.info says it did, and the update banner and the
-        // notice in the status bar both end on that answer.
-        // Tailnet reconnects can change member even when replay is possible.
+        // Re-hydrate when there is no cursor, when the server may have just
+        // re-executed on a new version (only a fresh server.info says so), or
+        // on a tailnet reconnect, which can change member even with replay.
         const s = store.getState()
         if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress) || s.capabilities?.gateway !== 'local') {
           void load()
@@ -828,26 +841,18 @@ export function connect(store: RootStore, client: Api = api): () => void {
         subscribed = true
       },
       onUnreachable: (kind, detail) => {
-        // The gateway answered and named the failing hop: either this
-        // machine's own network, or the SSH tunnel to aether-server. Either
-        // way the gateway itself is fine.
         const s = store.getState()
         s.setUnreachable(kind === 'server' ? edgeHop(detail, store) ?? kind : kind)
-        // A refused subscribe never goes live, so hydration never runs and
-        // nothing else will ever record what happened. Keep an error already
-        // recorded: a dead token is more precise than a dead hop.
+        // A refused subscribe never goes live, so nothing else records this.
+        // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
       },
       afterSeq: () => store.getState().lastSeq,
     })
   }
 
-  // The hydration retry is the third timer a frozen tab stops, and the only
-  // one the reopened sockets cannot restart: a re-hydration that failed after
-  // the first good one leaves a cursor to replay from, so the stream goes
-  // live again without re-fetching. Without this the store would show stale
-  // data for the rest of a wait that also caps at 30 seconds. A wake with no
-  // retry pending re-fetches nothing.
+  // A frozen tab stops the hydration retry timer, and reopened sockets cannot
+  // restart it: with a cursor to replay from they go live without re-fetching.
   const stopWake = onWake(() => {
     if (signal.aborted || !retryTimer) return
     clearTimeout(retryTimer)
@@ -860,32 +865,27 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted) return
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
-      // stream is never opened. The flag is what makes the panes and the
-      // error page say the link expired instead of claiming a retry that
-      // never comes, and the gateway's own message is kept verbatim.
+      // stream is never opened.
       store.getState().setStreamDead()
       store.getState().setConnection('offline')
       store.getState().setHydrated(false, probe.rejected)
       return
     }
     if (probe && 'refused' in probe) {
-      // The gateway said why; the handshake status never reaches this code,
-      // so the stream keeps retrying and this stays the reason. A 403 is
-      // the gateway turning this device away, and a 503 naming the tailnet
-      // identity is its own daemon not answering; neither is a dead hop.
+      // The handshake status never reaches the stream code, so this stays the
+      // reason while the stream keeps retrying.
       const { refused } = probe
       store.getState().setUnreachable(refusalKind(refused, store))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))
     } else if (probe) {
-      // No server to connect to yet: the onboarding wizard links first.
       store.getState().setCapabilities(probe.unlinked.capabilities)
       store.getState().setLinkStatus(probe.unlinked.status)
       store.getState().setConnection('offline')
       store.getState().setHydrated(true)
       store.getState().setUnreachable(null)
-      store.setState({ route: { name: 'onboarding', params: {} } })
+      redirectRoute(store, { name: 'onboarding', params: {} })
       return
     }
     startStream()

@@ -19,8 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// startScheduler runs sched.Start in the background for the duration of
-// the test; assertions poll for recovery's effects.
 func startScheduler(t *testing.T, sched *Scheduler) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -45,12 +43,9 @@ func (s *failingActiveRunsStore) ListActiveRuns(context.Context) ([]*domain.Run,
 	return nil, s.err
 }
 
-// TestStartCancelledDuringRecoveryIsACleanStop pins that a shutdown landing
-// inside the recovery pass reports what the Start loop reports for a
-// shutdown: nothing. The aborted store call is the caller stopping the
-// scheduler, not a scheduler that failed to start. A failure the shutdown
-// only raced still has to be reported: Server.Run names whatever Start
-// returns as the reason the server went down.
+// A shutdown inside recovery is a clean stop, but a failure it only raced
+// must still be reported: Server.Run names whatever Start returns as the
+// reason the server went down.
 func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
 	t.Parallel()
 	t.Run("cancellation", func(t *testing.T) {
@@ -83,8 +78,7 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	sub := e.subscribe(t)
 
 	run, c := e.launchFake(t, "survive the reboot")
-	// "Reboot": the first scheduler dies without finalizing; the container
-	// keeps running (Docker semantics for a daemonless host process loss).
+	// The first scheduler dies without finalizing; the container keeps running.
 	if closeErr := e.sched.Close(); closeErr != nil {
 		t.Fatalf("Close: %v", closeErr)
 	}
@@ -93,8 +87,6 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	s2 := e.newScheduler(t, e.rt, pty2)
 	startScheduler(t, s2)
 
-	// The new instance re-attached: a fresh PTY session exists and output
-	// flows into it.
 	waitFor(t, "resumed pty session", func() bool { return pty2.session(run.ID) != nil })
 	c.output("back online\r\n")
 	waitFor(t, "output after recovery", func() bool {
@@ -110,7 +102,6 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 		t.Fatalf("recovered run status = %s, want running", r.Status)
 	}
 
-	// Exit under the new instance completes the lifecycle normally.
 	c.exitNow(0)
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
 	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
@@ -192,11 +183,9 @@ func TestRecoveryRetriesPendingSnapshotWithSameAttachment(t *testing.T) {
 	}
 }
 
-// TestRecoveryOfLegacySidecarKeepsWorkspaceScope pins the upgrade path:
-// a sidecar written before runs hung off workspaces carries session_id and
-// no workspace_id. It must still decode, and the resumed supervision must
-// publish under the run row's workspace - the subscription here is
-// workspace-filtered, so receiving the exit event is the proof.
+// A sidecar written before runs hung off workspaces has session_id and no
+// workspace_id. The subscription is workspace-filtered, so receiving the exit
+// event proves supervision publishes under the row's workspace.
 func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -323,7 +312,7 @@ func TestRecoveryPublishesRunBeforePTYStartReturns(t *testing.T) {
 	case <-time.After(waitTimeout):
 		t.Fatal("recovery never published PTY session")
 	}
-	if err := s2.Inject(t.Context(), run.ID, e.member.ID, "inject while PTY starts"); err != nil {
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "inject while PTY starts", false, nil); err != nil {
 		t.Fatalf("Inject during PTY start: %v", err)
 	}
 }
@@ -390,10 +379,8 @@ func TestRebootRecoveryQueuedAndMissingSidecar(t *testing.T) {
 	e.waitStoreStatus(t, orphan.ID, domain.RunInterrupted)
 }
 
-// TestRecoveryFindsContainerByCreationKey pins the narrow crash window
-// between Runtime.Create and the sidecar write: no sidecar exists, but the
-// container carries the run ID as its creation key, so recovery finds and
-// destroys it instead of leaking a running agent into the checkout.
+// Crash window between Runtime.Create and the sidecar write: recovery finds
+// the container by its creation key and destroys it.
 func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -409,8 +396,6 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
-	// The container was created (creation key = run ID) but the crash hit
-	// before the sidecar write: no sidecar file exists.
 	cid, err := e.rt.Create(ctx, runtime.Spec{
 		Name: string(r.ID), Image: "busybox:1.36", Command: []string{"fake-agent"},
 		TTY: true, CreationKey: string(r.ID),
@@ -617,7 +602,6 @@ func TestCheckoutGC(t *testing.T) {
 	})
 	ctx := t.Context()
 
-	// An expired terminal run and a fresh one.
 	mk := func(task string, finished time.Time) *domain.Run {
 		r := &domain.Run{
 			WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: task,
@@ -1124,11 +1108,8 @@ type destroyRetryRuntime struct {
 	failures int
 	destroys int
 	waits    int
-	// hold, when non-nil, blocks the retry destroy (the second call and
-	// on) until the test closes it. Without this, a check made in the
-	// window between the first failure and the sweep's own retry can lose
-	// that race under scheduling pressure: the retry succeeds and removes
-	// the container before the check runs.
+	// hold, when non-nil, blocks the retry destroy until closed, so a check made
+	// before the sweep's own retry cannot lose the race to it.
 	hold chan struct{}
 }
 
@@ -1796,9 +1777,8 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
-		// The barrier below holds the probe open until CloseRun has run;
-		// the default test probe timeout is far shorter than that and
-		// would race the barrier's own release.
+		// The barrier holds the probe open until CloseRun has run; the default test
+		// probe timeout would race its release.
 		cfg.ExitProbeTimeout = waitTimeout
 	})
 	ctx := t.Context()
@@ -1973,14 +1953,9 @@ func TestRecoveryPTYFailureKeepsOwnerForDelete(t *testing.T) {
 	}
 }
 
-// TestRecoveryKeepsARunParkedForItsMember covers what a restart must not do
-// to a run that is waiting for the member. Nothing has been observed on the
-// terminal since the restart, so a run parked seconds before it comes back
-// as Working on the first poll unless un-parking takes activity that was
-// actually seen. And the reporter comes back with the run - it is recorded
-// at launch, not recomputed - so once the recovered agent says it is
-// waiting again, a repaint while the member types still does not release
-// it.
+// After a restart, un-parking takes activity actually seen, and the recorded
+// reporter comes back with the run, so a repaint while the member types does
+// not release it.
 func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
@@ -2002,7 +1977,6 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 	s2 := e.newScheduler(t, e.rt, pty2)
 	startScheduler(t, s2)
 	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
-	// Many polls, no observed activity: the run is still the member's.
 	time.Sleep(100 * time.Millisecond)
 	r, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
@@ -2027,12 +2001,8 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 	}
 }
 
-// TestRecoveryKeepsAWaitingReportAcrossARestart pins the half of a restart
-// the run row cannot carry. The row says needs-attention, but not that the
-// agent itself asked for the member: without the report, the first thing
-// the recovered agent paints - and reattaching resizes the terminal, so a
-// full-screen TUI paints at once - reads as work resuming and hands the
-// run back to the agent it is still waiting for.
+// The row says needs-attention but not that the agent asked for the member.
+// Without the report, the repaint reattaching triggers reads as work resuming.
 func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
@@ -2055,9 +2025,7 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 	startScheduler(t, s2)
 	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
 
-	// The recovered agent repaints. It has said nothing since the restart,
-	// so this is the same repaint the live scheduler refuses to treat as
-	// work - and the restart must not have forgotten that.
+	// The agent has said nothing since the restart, so this repaint is not work.
 	for range 10 {
 		c.output("redraw\r\n")
 		time.Sleep(10 * time.Millisecond)
@@ -2071,19 +2039,14 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 			r.Status, r.Reason, agentstatus.ReasonIdle)
 	}
 
-	// The agent's own next turn still releases it.
 	if rerr := s2.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); rerr != nil {
 		t.Fatalf("report working after recovery: %v", rerr)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }
 
-// TestRecoveryKeepsATurnEndRunParkedThroughItsTail is the codex half of
-// the same restart. Nothing on the terminal since the restart means the
-// park effectively begins again when the run comes back, and a recovered
-// full-screen TUI paints at once - reattaching resizes it. Without a park
-// time to measure those frames against, the first two of them would read
-// as the next turn and hand the run back to an agent that is waiting.
+// The codex half: a recovered TUI paints at once on reattach, and without a
+// park time to measure against, those frames would read as the next turn.
 func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
@@ -2106,9 +2069,8 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	startScheduler(t, s2)
 	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
 
-	// The recovered TUI redraws itself over many polls. codex says nothing
-	// when a turn starts, so this is all the scheduler has to judge - and
-	// this soon after the run came back it is still the old turn.
+	// codex says nothing when a turn starts, so this soon after recovery the
+	// redraw is still the old turn.
 	stop := pump(t, c)
 	defer stop()
 	time.Sleep(time.Second)
@@ -2121,7 +2083,6 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 			r.Status, r.Reason, agentstatus.ReasonIdle)
 	}
 
-	// Output still arriving well past the redraw is the agent working.
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }
 

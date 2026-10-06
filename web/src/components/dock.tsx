@@ -1,6 +1,6 @@
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
+import { ChevronDown, ChevronsDown, ChevronsUp, ChevronUp, Plus, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { coarsePointer, useDrag, useMediaQuery, useWindowHeight } from '@/lib/hooks'
 import { onTabListKeyDown, splitterTarget } from '@/lib/keys'
@@ -12,24 +12,20 @@ export interface DockTab {
   permanent?: boolean
 }
 
-export type DockContainment = 'viewport' | 'parent'
+export type DockContainment = 'viewport' | 'parent' | 'fill'
 
 export interface DockProps {
   tabs: DockTab[]
   activeTab: string
   onSelectTab: (id: string) => void
   onAddTab?: () => void
-  /** The dock's own tab ceiling; the limit text names this number. */
   maxTabs: number
   onCloseTab?: (id: string) => void
   height: number
   onHeightChange: (height: number) => void
   collapsed: boolean
   onToggleCollapse: () => void
-  /**
-   * Use the immediate parent as a fixed-size boundary, or keep the dock
-   * independent of intrinsic parent sizing and use the viewport cap.
-   */
+  /** 'parent' bounds the dock by its immediate parent, 'viewport' by the window; 'fill' fills the parent with no resize or collapse. */
   containment?: DockContainment
   actions?: React.ReactNode
   persistentActions?: React.ReactNode
@@ -41,7 +37,7 @@ const minDockHeight = 120
 const minDockBodyHeight = 96
 const defaultDockHeaderHeight = 36
 
-/** What is left of the window once the shell's own chrome has its share. */
+// 200px stays reserved for the shell's own chrome.
 function maxDockHeight(viewport: number): number {
   return Math.max(minDockHeight, viewport - 200)
 }
@@ -66,6 +62,7 @@ export function Dock({
   persistentActions,
   children,
 }: DockProps) {
+  const fill = containment === 'fill'
   const atLimit = tabs.length >= maxTabs
   const id = useId()
   const tabID = (tab: string) => `${id}-tab-${tab}`
@@ -78,8 +75,7 @@ export function Dock({
   const headerRef = useRef<HTMLDivElement>(null)
   const [headerHeight, setHeaderHeight] = useState(defaultDockHeaderHeight)
   const [parentHeight, setParentHeight] = useState<number | null>(null)
-  // Parent-contained callers give the primary sibling a CSS minimum. Reserve
-  // that declared constraint, rather than its changing flex height.
+  // Reserve the primary sibling's declared CSS minimum, not its changing flex height.
   const [primaryMinHeight, setPrimaryMinHeight] = useState(0)
   useLayoutEffect(() => {
     const dockElement = dockRef.current
@@ -119,9 +115,7 @@ export function Dock({
           )
   const min = Math.min(requiredMinimum, max)
   const currentHeight = Math.min(max, Math.max(min, height))
-  // A finger cannot drag an edge, so touch gets the two heights the drag was
-  // ever used for - half the room and all of it - as one toggle beside the
-  // collapse control. Half is measured, not stored, so it follows the screen.
+  // A finger cannot drag the edge, so touch toggles between half and full height.
   const halfHeight = Math.min(max, Math.max(min, Math.round(max / 2)))
   const full = currentHeight >= max
   const index = Math.max(
@@ -190,8 +184,7 @@ export function Dock({
     [onCloseTab],
   )
   const stop = Math.min(focused, tabs.length - 1)
-  // Enter collapses, which unmounts this handle, so focus moves to the toggle
-  // before the pane goes: that button is in the header either way.
+  // Enter collapses and unmounts this handle, so focus moves to the toggle first.
   const collapse = useRef<HTMLButtonElement>(null)
 
   const startResize = useCallback(
@@ -239,15 +232,18 @@ export function Dock({
     <section
       ref={dockRef}
       id={dockID}
-      className="relative flex min-h-0 shrink-0 flex-col border-t border-border bg-sidebar"
-      style={collapsed ? undefined : { height: currentHeight }}
-      aria-label="Terminal dock"
+      className={cn(
+        'relative flex min-h-0 flex-col bg-chrome',
+        fill ? 'h-full flex-1' : 'shrink-0 border-t border-seam',
+      )}
+      style={collapsed || fill ? undefined : { height: currentHeight }}
+      aria-label="Environment terminal"
     >
-      {!collapsed && !coarse && (
+      {!collapsed && !coarse && !fill && (
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize terminal dock"
+          aria-label="Resize terminal"
           aria-controls={dockID}
           aria-valuenow={Math.round(currentHeight)}
           aria-valuemin={Math.round(min)}
@@ -259,13 +255,14 @@ export function Dock({
             focusRing,
             // Without `touch-none` the browser claims a pen or trackpad drag
             // as a pan and cancels the pointer stream this listens to.
-            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-primary/20 focus-visible:bg-primary/20',
+            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-accent/20 focus-visible:bg-accent/20',
           )}
         />
       )}
       <div
         ref={headerRef}
-        className="flex min-h-9 flex-wrap items-center gap-x-1 border-b border-border bg-sidebar px-2"
+        hidden={fill && tabs.length === 0 && !onAddTab && !actions && !persistentActions}
+        className="flex min-h-8 flex-wrap items-center gap-x-1 border-b border-seam bg-chrome px-2 coarse:min-h-11"
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div
@@ -277,8 +274,8 @@ export function Dock({
               <div
                 key={tab.id}
                 className={cn(
-                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted-foreground',
-                  activeTab === tab.id && 'border-b-primary text-foreground',
+                  'flex min-w-0 shrink-0 items-center border-b-2 border-transparent text-muted',
+                  activeTab === tab.id && 'border-b-accent text-text',
                 )}
               >
                 {/* Prevent the native tab button from taking focus or activating
@@ -297,7 +294,7 @@ export function Dock({
                   tabIndex={i === stop ? 0 : -1}
                   className={cn(
                     focusRing,
-                    'inline-flex min-h-9 min-w-0 max-w-40 items-center gap-0 truncate rounded-none border-0 px-2.5 py-0 text-[13px] font-medium',
+                    'inline-flex min-h-8 min-w-0 max-w-40 items-center gap-0 truncate rounded-none border-0 px-2.5 py-0 text-ui font-medium coarse:min-h-11',
                   )}
                   onFocus={() => setFocused(i)}
                   onPointerDown={(event) => {
@@ -346,7 +343,7 @@ export function Dock({
                     <span
                       data-tab-close
                       aria-hidden="true"
-                      className="mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-none text-muted-foreground transition-[background-color,color] duration-100 hover:bg-toolbar-hover hover:text-foreground active:bg-toolbar-hover motion-reduce:transition-none"
+                      className="mr-0.5 inline-flex size-[22px] shrink-0 items-center justify-center rounded-none text-muted transition-[background-color,color] duration-100 hover:bg-hover-chrome hover:text-text active:bg-hover-chrome motion-reduce:transition-none"
                     >
                       <X className="pointer-events-none size-4" />
                     </span>
@@ -361,7 +358,7 @@ export function Dock({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Add terminal tab"
+              label="Add terminal tab"
               disabled={atLimit}
               onClick={onAddTab}
             >
@@ -371,27 +368,27 @@ export function Dock({
           {atLimit && (
             // A disabled control shows no tooltip, so the ceiling is written
             // out instead of hidden in a title attribute.
-            <span role="status" className="px-1 text-[12px] text-muted-foreground">
+            <span role="status" className="px-1 text-ui-sm text-muted">
               At most {maxTabs} tabs
             </span>
           )}
         </div>
         {persistentActions}
         {!collapsed && actions && (
-          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-border max-[640px]:py-1">
+          <div className="flex min-w-0 max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[640px]:order-3 max-[640px]:max-w-full max-[640px]:basis-full max-[640px]:justify-end max-[640px]:border-t max-[640px]:border-seam max-[640px]:py-1">
             {actions}
           </div>
         )}
-        {!collapsed && coarse && (
+        {!collapsed && coarse && !fill && (
           <Button
             className="max-[640px]:order-2"
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={
+            label={
               full
-                ? 'Shrink terminal dock to half the screen'
-                : 'Expand terminal dock to the full screen'
+                ? 'Shrink terminal to half the screen'
+                : 'Expand terminal to the full screen'
             }
             aria-controls={dockID}
             onClick={() => onHeightChange(full ? halfHeight : max)}
@@ -399,18 +396,18 @@ export function Dock({
             {full ? <ChevronsDown /> : <ChevronsUp />}
           </Button>
         )}
-        <Button
+        {!fill && <Button
           ref={collapse}
           className="max-[640px]:order-2"
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={collapsed ? 'Expand terminal dock' : 'Collapse terminal dock'}
+          label={collapsed ? 'Expand terminal' : 'Collapse terminal'}
           aria-expanded={!collapsed}
           onClick={onToggleCollapse}
         >
           {collapsed ? <ChevronUp /> : <ChevronDown />}
-        </Button>
+        </Button>}
       </div>
       {!collapsed && (
         <div

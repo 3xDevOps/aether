@@ -32,7 +32,9 @@ const (
 	// TypeRunTitle carries the latest terminal title for a run.
 	TypeRunTitle Type = "run.title"
 	// TypeRunProtected carries a run's protection state.
-	TypeRunProtected Type = "run.protected"
+	TypeRunProtected  Type = "run.protected"
+	TypeRunController Type = "run.controller"
+	TypeRunMode       Type = "run.mode"
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -152,6 +154,31 @@ type RunProtectedPayload struct {
 func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
+
+// An empty MemberID means nobody holds the run's control lease.
+type RunControllerPayload struct {
+	MemberID domain.MemberID `json:"member_id"`
+}
+
+func (RunControllerPayload) EventType() Type { return TypeRunController }
+
+func init() { registerPayload[RunControllerPayload](TypeRunController) }
+
+// RunModePayload reports a mode switch. Previous is the mode the run was in
+// when the switch started. The first event of a switch has Switching and
+// Mode set to the target, as the run snapshot's switching field; the last
+// has no Switching and the mode the run is left in, which after a failed
+// switch is Previous, with the error in Reason.
+type RunModePayload struct {
+	Mode      domain.LaunchMode `json:"mode"`
+	Previous  domain.LaunchMode `json:"previous"`
+	Switching domain.LaunchMode `json:"switching,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+}
+
+func (RunModePayload) EventType() Type { return TypeRunMode }
+
+func init() { registerPayload[RunModePayload](TypeRunMode) }
 
 // RunArchivedPayload reports a run's archive state, both RFC3339. A nil
 // ArchivedAt (and DeletesAt) means the run was restored.
@@ -316,6 +343,9 @@ type AgentEventPayload struct {
 	// Tool is the tool name for tool_call and subagent kinds; empty for
 	// tool_result (the harness's result records carry only the ID).
 	Tool string `json:"tool,omitempty"`
+	// Verb is the present-tense word for Tool, set when Tool is an ACP
+	// tool kind rather than a harness tool name.
+	Verb string `json:"verb,omitempty"`
 	// ToolUseID correlates a tool_result with its originating tool_call
 	// or subagent event.
 	ToolUseID string `json:"tool_use_id,omitempty"`

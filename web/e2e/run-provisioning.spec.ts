@@ -57,7 +57,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
     'workspace.list',
   )
   await page.goto(alice.url)
-  const sidebar = page.getByRole('complementary')
+  const sidebar = page.getByRole('navigation', { name: 'Aether' })
   // The page must be subscribed before the launch, or the run's frames are
   // never sent to it and there is nothing to hold. Hydration runs behind the
   // subscription (store/sync.ts), so a settled empty run list proves it.

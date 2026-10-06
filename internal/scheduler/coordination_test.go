@@ -28,7 +28,9 @@ type fakeCoordinator struct {
 	beforeWrite func()
 
 	mu             sync.Mutex
+	onWake         func(domain.RunID)
 	released       []domain.RunID
+	idleWakes      []domain.RunID
 	coAuthors      map[domain.RunID][]string
 	coAuthorWrites map[domain.RunID]int
 }
@@ -62,6 +64,23 @@ func (f *fakeCoordinator) WriteCoAuthors(run domain.RunID, trailers []string) er
 	return nil
 }
 
+func (f *fakeCoordinator) WriteFiles(run domain.RunID, files map[string][]byte) error {
+	if f.err != nil {
+		return f.err
+	}
+	dir := filepath.Join(f.root, string(run))
+	for name, body := range files {
+		tmp := filepath.Join(dir, "."+name)
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeCoordinator) trailers(run domain.RunID) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -79,6 +98,24 @@ func (f *fakeCoordinator) Release(run domain.RunID) error {
 	f.released = append(f.released, run)
 	f.mu.Unlock()
 	return os.RemoveAll(filepath.Join(f.root, string(run)))
+}
+
+func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
+	f.mu.Lock()
+	f.idleWakes = append(f.idleWakes, run)
+	onWake := f.onWake
+	f.mu.Unlock()
+	if onWake != nil {
+		onWake(run)
+	}
+}
+
+func (f *fakeCoordinator) EnhancedSessionOpened(context.Context, domain.RunID) {}
+
+func (f *fakeCoordinator) idleWakeRuns() []domain.RunID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.idleWakes)
 }
 
 func (f *fakeCoordinator) releasedRuns() []domain.RunID {
@@ -277,7 +314,7 @@ func TestArgvOverrideRespectsHarnessCommand(t *testing.T) {
 			s := &Scheduler{harnesses: map[string]HarnessSpec{
 				name: {TUIArgs: []string{shim, harness.TaskPlaceholder}},
 			}}
-			argv, profile, err := s.command(t.Context(), "", "", name, domain.LaunchTUI, "add OAuth login")
+			argv, profile, _, err := s.command(t.Context(), "", "", name, domain.LaunchTUI, "add OAuth login")
 			if err != nil {
 				t.Fatalf("command: %v", err)
 			}

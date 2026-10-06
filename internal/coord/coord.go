@@ -114,7 +114,8 @@ type Config struct {
 	RetainsContainer func(context.Context, domain.RunID) bool
 	// Mail persists the mailbox.
 	Mail store.MessageStore
-	// Bus carries the radar's overlap changes in and timeline entries out.
+	// Bus carries the radar's overlap changes and mission changes in and
+	// timeline entries out.
 	Bus events.Bus
 	// Peers is the radar index sends are authorized against.
 	Peers Peers
@@ -128,6 +129,8 @@ type Config struct {
 	// WakeAdmission orders the final native wake frame with human control.
 	// An absent seam disables native dispatch without affecting legacy hooks.
 	WakeAdmission WakeAdmission
+	// Nil leaves enhanced runs to read mail on their own.
+	ACPWaker ACPWaker
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -163,23 +166,27 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu               sync.Mutex
-	listeners        map[socketKey]*net.UnixListener
-	buckets          map[domain.RunID]*bucket
-	inboxBuckets     map[domain.RunID]*bucket
-	requestBuckets   map[domain.RunID]*bucket
-	hookBuckets      map[domain.RunID]*bucket
-	lifecycleBuckets map[domain.RunID]*bucket
-	inboxWaiters     map[domain.RunID]*inboxWaiter
-	hookWaiters      map[domain.RunID]map[*hookWaiter]struct{}
-	inboxConsumers   map[domain.RunID]int
-	reportLocks      map[domain.RunID]*sync.Mutex
-	reportPackets    map[string]protocol.EvidencePacket
-	runs             map[domain.RunID]*runLifecycle
-	reportCursor     store.CoordOutboxCursor
-	auditCursor      store.CoordOutboxCursor
-	closed           bool
-	wg               sync.WaitGroup
+	mu                sync.Mutex
+	listeners         map[socketKey]*net.UnixListener
+	buckets           map[domain.RunID]*bucket
+	inboxBuckets      map[domain.RunID]*bucket
+	requestBuckets    map[domain.RunID]*bucket
+	hookBuckets       map[domain.RunID]*bucket
+	lifecycleBuckets  map[domain.RunID]*bucket
+	inboxWaiters      map[domain.RunID]*inboxWaiter
+	hookWaiters       map[domain.RunID]map[*hookWaiter]struct{}
+	inboxConsumers    map[domain.RunID]int
+	reportLocks       map[domain.RunID]*sync.Mutex
+	enhancedWoken     map[domain.RunID]map[string]struct{}
+	enhancedNotices   map[domain.RunID]missionNotice
+	enhancedWakeLocks map[domain.RunID]*sync.Mutex
+	reportPackets     map[string]protocol.EvidencePacket
+	runs              map[domain.RunID]*runLifecycle
+	reportCursor      store.CoordOutboxCursor
+	auditCursor       store.CoordOutboxCursor
+	outboxKick        chan struct{}
+	closed            bool
+	wg                sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -215,29 +222,34 @@ func New(cfg Config) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		cfg:              cfg,
-		radar:            newRadar(cfg.Peers, cfg.Grace, cfg.now),
-		now:              cfg.now,
-		serveCtx:         ctx,
-		stop:             cancel,
-		listeners:        make(map[socketKey]*net.UnixListener),
-		buckets:          make(map[domain.RunID]*bucket),
-		inboxBuckets:     make(map[domain.RunID]*bucket),
-		requestBuckets:   make(map[domain.RunID]*bucket),
-		hookBuckets:      make(map[domain.RunID]*bucket),
-		lifecycleBuckets: make(map[domain.RunID]*bucket),
-		inboxWaiters:     make(map[domain.RunID]*inboxWaiter),
-		hookWaiters:      make(map[domain.RunID]map[*hookWaiter]struct{}),
-		inboxConsumers:   make(map[domain.RunID]int),
-		reportLocks:      make(map[domain.RunID]*sync.Mutex),
-		reportPackets:    make(map[string]protocol.EvidencePacket),
-		runs:             make(map[domain.RunID]*runLifecycle),
+		cfg:               cfg,
+		radar:             newRadar(cfg.Peers, cfg.Grace, cfg.now),
+		now:               cfg.now,
+		serveCtx:          ctx,
+		stop:              cancel,
+		listeners:         make(map[socketKey]*net.UnixListener),
+		buckets:           make(map[domain.RunID]*bucket),
+		inboxBuckets:      make(map[domain.RunID]*bucket),
+		requestBuckets:    make(map[domain.RunID]*bucket),
+		hookBuckets:       make(map[domain.RunID]*bucket),
+		lifecycleBuckets:  make(map[domain.RunID]*bucket),
+		inboxWaiters:      make(map[domain.RunID]*inboxWaiter),
+		hookWaiters:       make(map[domain.RunID]map[*hookWaiter]struct{}),
+		inboxConsumers:    make(map[domain.RunID]int),
+		reportLocks:       make(map[domain.RunID]*sync.Mutex),
+		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
+		enhancedNotices:   make(map[domain.RunID]missionNotice),
+		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
+		reportPackets:     make(map[string]protocol.EvidencePacket),
+		runs:              make(map[domain.RunID]*runLifecycle),
+		outboxKick:        make(chan struct{}, 1),
 	}, nil
 }
 
 // Start recovers the host-side listeners left by the previous process and,
 // while coordination is enabled, begins consuming the radar's overlap
-// changes. ctx bounds only the setup; the service runs until Close.
+// changes and mission changes. ctx bounds only the setup; the service runs
+// until Close.
 func (s *Service) Start(ctx context.Context) error {
 	if err := s.recoverListeners(ctx); err != nil {
 		return err
@@ -246,10 +258,10 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap}},
+		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeMissionChanged}},
 	})
 	if err != nil {
-		return fmt.Errorf("coord: subscribe to overlap changes: %w", err)
+		return fmt.Errorf("coord: subscribe to overlap and mission changes: %w", err)
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -305,11 +317,16 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into grace bookkeeping.
-// Authorization also re-reads the live index, so a dropped event cannot
-// extend a grace window beyond the last observed overlap.
+// consume folds the radar's overlap changes into grace bookkeeping and
+// offers changed missions to their enhanced integrators. Authorization
+// also re-reads the live index, so a dropped event cannot extend a grace
+// window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
+		if p, ok := e.Payload.(events.MissionChangedPayload); ok {
+			s.wakeMissionIntegrators(p.MissionID)
+			continue
+		}
 		p, ok := e.Payload.(events.OverlapPayload)
 		if !ok || e.RunID == "" {
 			continue

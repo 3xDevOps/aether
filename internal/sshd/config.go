@@ -31,9 +31,8 @@ type ConfigBackend interface {
 	Import(ctx context.Context, member domain.MemberID, harnessName string, files []memberhome.ConfigFile) (protocol.ConfigImportResult, error)
 }
 
-// HomeConfigBackend is the persistent-home implementation. Harness definitions
-// are resolved from the caller's own member row; administrators do not get a
-// way to select another member's roots.
+// HomeConfigBackend resolves harness definitions from the caller's own member
+// row; administrators cannot select another member's roots.
 type HomeConfigBackend struct {
 	homes *memberhome.Manager
 	store store.Store
@@ -101,7 +100,7 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 		}
 		seen[p.Name] = struct{}{}
 		out = append(out, protocol.ConfigRoot{
-			Harness: p.Name, Path: displayRoot(p.LocalRoot),
+			Harness: p.Name, DisplayName: p.Label(), Path: displayRoot(p.LocalRoot),
 			RuntimeIgnores:  configRuntimeIgnores(p.Name),
 			CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 		})
@@ -125,7 +124,7 @@ func (b *HomeConfigBackend) Roots(ctx context.Context, member domain.MemberID) (
 			}
 			seen[row.Name] = struct{}{}
 			out = append(out, protocol.ConfigRoot{
-				Harness: row.Name, Path: displayRoot(p.LocalRoot),
+				Harness: row.Name, DisplayName: p.Label(), Path: displayRoot(p.LocalRoot),
 				RuntimeIgnores:  configRuntimeIgnores(row.Name),
 				CredentialNames: profilesvc.CredentialNames(p.DenyNames),
 			})

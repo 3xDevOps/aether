@@ -13,32 +13,27 @@ test('the first member links, creates a workspace and seeds it', async ({
   aether.giveGitIdentity(alice, 'Alice Local', 'alice@local.invalid')
   const wizard = await OnboardingWizard.open(page, alice.url)
 
-  await wizard.expectStep('Link')
-  await wizard.link.link(aether.server.addr, { name: 'Alice' })
+  await wizard.expectStep('Connect')
+  await expect(wizard.page.getByRole('list', { name: 'Steps' })).toHaveText(/Connect.*Repository.*Agent.*First run/)
+  await wizard.connect.link(aether.server.addr, { name: 'Alice' })
   // The first identity to authenticate on a fresh server becomes the admin,
   // and the gateway had no SSH key until this step made one.
-  await expect(wizard.link.section).toContainText('Linked to')
-  await expect(wizard.link.section).toContainText('(admin)')
-  await expect(wizard.link.section).toContainText(
+  await expect(wizard.connect.section).toContainText('Linked to')
+  await expect(wizard.connect.section).toContainText('(admin)')
+  await expect(wizard.connect.section).toContainText(
     `Created SSH key ${alice.home}/.ssh/id_ed25519`,
   )
-  await wizard.link.continue().click()
 
-  // What every commit made in this member's runs is authored as. The step
-  // offers this machine's own git config, and saving moves the wizard on.
-  await wizard.expectStep('Git identity')
-  await expect(
-    wizard.gitIdentity.section.getByLabel('Name', { exact: true }),
-  ).toHaveValue('Alice Local')
-  await expect(
-    wizard.gitIdentity.section.getByLabel('Email', { exact: true }),
-  ).toHaveValue('alice@local.invalid')
-  await wizard.gitIdentity.save('Alice Lovelace', 'alice@example.com')
-
-  await wizard.expectStep('Workspace')
-  await wizard.workspace.createFromClone('project')
+  // What every commit made in this member's runs is authored as. Connect
+  // offers this machine's own git config once the server is linked.
+  await expect(wizard.connect.identity.form.getByLabel('Name', { exact: true })).toHaveValue('Alice Local')
+  await expect(wizard.connect.identity.form.getByLabel('Email', { exact: true })).toHaveValue('alice@local.invalid')
+  await wizard.connect.identity.save('Alice Lovelace', 'alice@example.com')
+  await wizard.connect.continue().click()
 
   await wizard.expectStep('Repository')
+  await expect(wizard.repository.section).toContainText('A workspace is one repository and base branch')
+  await wizard.repository.createFromClone('project')
   await wizard.repository.addRemote(repo)
   await expect(wizard.repository.section).toContainText(`Connected ${repo}`)
   await expect(wizard.repository.section).toContainText('ssh://aether@')
@@ -49,5 +44,5 @@ test('the first member links, creates a workspace and seeds it', async ({
   await expect(wizard.repository.gitOutput()).toContainText('[new branch]      main -> main')
 
   await wizard.repository.continue().click()
-  await wizard.expectStep('Agents')
+  await wizard.expectStep('Agent')
 })

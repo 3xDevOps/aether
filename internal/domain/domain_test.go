@@ -76,8 +76,11 @@ func TestAllRunStatusesComplete(t *testing.T) {
 }
 
 func TestLaunchModeValid(t *testing.T) {
-	if !LaunchTUI.Valid() || !LaunchHeadless.Valid() {
+	if !LaunchTUI.Valid() || !LaunchHeadless.Valid() || !LaunchACP.Valid() {
 		t.Error("defined launch modes must be valid")
+	}
+	if !LaunchTUI.Interactive() || !LaunchACP.Interactive() || LaunchHeadless.Interactive() {
+		t.Error("tui and acp must be interactive, headless must not")
 	}
 	if LaunchMode("bogus").Valid() {
 		t.Error(`LaunchMode("bogus").Valid() = true, want false`)
@@ -128,10 +131,8 @@ func TestWorkspaceEnvironmentValidation(t *testing.T) {
 	}
 }
 
-// A display name is whatever a member typed into the SSH username an
-// invite was redeemed with. One holding angle brackets or a line break
-// would forge the author address on every commit a run of theirs makes,
-// so it never reaches the identity: the member id does instead.
+// A display name with angle brackets or a line break would forge the commit
+// author address, so the member id is used instead.
 func TestGitIdentityRejectsAnUnusableDisplayName(t *testing.T) {
 	tests := []struct {
 		name        string

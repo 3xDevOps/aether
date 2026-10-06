@@ -1,128 +1,107 @@
-// Board shape: run cards dealt into Orca's three buckets. Pure over a narrow
-// input so the component can memoize on exactly what it reads.
-
-import { useMemo } from 'react'
-import { runState, waitsOnHuman, type PresentationState } from '@/lib/status'
-import type { Member, Workspace } from '@/lib/types'
+import { dequal } from 'dequal'
+import { useMemo, useRef } from 'react'
+import type { RunActionCandidate } from '@/lib/commands'
+import type { StateContext } from '@/lib/needs-you'
+import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
+import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
-import { isUnseen, type Ack } from '@/store/board'
+import { useStateContext } from '@/store/hooks'
 import { isArchivable, type RunRecord } from '@/store/runs'
+import { listedRuns, runGroups, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
-export type Bucket = 'needs-you' | 'working' | 'done'
-
-export interface BoardCard {
-  run: RunRecord
-  state: PresentationState
-  owner?: Member
-  workspace?: Workspace
-  unseen: boolean
-  paused: boolean
-}
+export type BoardCard = RunTree
 
 export interface BoardColumn {
-  key: Bucket
+  key: RunGroup
   label: string
   cards: BoardCard[]
 }
 
-/**
- * An empty workspace shows every run: that is what the board falls back to
- * before hydration has named one.
- */
-export interface BoardInput {
-  workspace: string
-  workspaces: Record<string, Workspace>
-  runs: Record<string, RunRecord>
-  members: Record<string, Member>
-  acked: Record<string, Ack>
-  pausedRuns: Record<string, boolean>
-}
-
-export const bucketLabel: Record<Bucket, string> = {
-  'needs-you': 'Idle',
-  working: 'Working',
-  done: 'Done',
-}
-
-/**
- * Lifecycle to bucket. `needs-attention` covers turn-end idle and stalls;
- * outstanding requests are a separate indicator, never a bucket override.
- * A clean exit presents as `completed`, which lands in Done, not here;
- * `board()` lists one whose agent report awaits review here instead.
- */
-export function bucketOf(state: PresentationState): Bucket {
-  switch (state) {
-    case 'needs-attention':
-      return 'needs-you'
-    case 'working':
-    case 'waiting':
-      return 'working'
-    default:
-      return 'done'
-  }
-}
-
 export interface BoardData {
   columns: BoardColumn[]
-  /** Finished, archived runs in scope - hidden from Done, shown behind its toggle. */
+  /** Finished, archived runs in scope - hidden from Finished, shown behind its toggle. */
   archivedCards: BoardCard[]
+  hiddenByMine: boolean
 }
 
 const at = (iso: string) => Date.parse(iso)
 
-export function board(s: BoardInput): BoardData {
-  const columns: Record<Bucket, BoardCard[]> = {
-    'needs-you': [],
-    working: [],
-    done: [],
-  }
-  const archivedCards: BoardCard[] = []
-
-  for (const run of Object.values(s.runs)) {
+function archivedRows(s: RunsInput): RunRow[] {
+  const rows: RunRow[] = []
+  for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    const state = runState(run.status)
-    const card: BoardCard = {
+    if (s.mineOnly && run.member_id !== s.ctx.viewerID) continue
+    if (!run.archived_at || !isArchivable(run.status)) continue
+    const shown = presentRun(run, s.ctx)
+    rows.push({
       run,
-      state,
-      owner: s.members[run.member_id],
-      workspace: s.workspaces[run.workspace_id],
-      unseen: isUnseen(s.acked, run),
-      paused: state === 'working' && s.pausedRuns[run.id] === true,
-    }
-    // A live run can never be hidden: archiving is a server-side no-op
-    // outside a final status, but this guard holds even so.
-    if (run.archived_at && isArchivable(run.status)) {
-      archivedCards.push(card)
-      continue
-    }
-    columns[waitsOnHuman(run, state) ? 'needs-you' : bucketOf(state)].push(card)
+      state: shown.state,
+      reason: shown.reason,
+      group: groupOf(shown.state),
+      waitingSince: run.stateChangedAt,
+      owner: s.ctx.members[run.member_id],
+    })
   }
+  return rows
+}
 
-  const newestFirst = (a: BoardCard, b: BoardCard) =>
-    at(b.run.stateChangedAt) - at(a.run.stateChangedAt)
-  const archivedFirst = (a: BoardCard, b: BoardCard) =>
-    at(b.run.archived_at ?? '') - at(a.run.archived_at ?? '')
-
+export function board(s: RunsInput): BoardData {
+  const groups = runGroups(s)
   return {
-    columns: (Object.keys(columns) as Bucket[]).map((key) => ({
+    columns: (Object.keys(groups) as RunGroup[]).map((key) => ({
       key,
-      label: bucketLabel[key],
-      cards: columns[key].sort(newestFirst),
+      label: groupLabel[key],
+      cards: groups[key],
     })),
-    archivedCards: archivedCards.sort(archivedFirst),
+    archivedCards: runTrees(archivedRows(s), s.ctx).sort(
+      (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),
+    ),
+    hiddenByMine:
+      s.mineOnly &&
+      Object.values(s.ctx.runs).some(
+        (run) => (!s.workspace || run.workspace_id === s.workspace) && run.member_id !== s.ctx.viewerID,
+      ),
   }
 }
 
+// Unchanged cards keep their previous object so the memoized RunCard skips them.
+function reuseCards(data: BoardData, previous: Map<string, BoardCard>): Map<string, BoardCard> {
+  const next = new Map<string, BoardCard>()
+  const keep = (card: BoardCard) => {
+    const old = previous.get(card.run.id)
+    const kept = old && dequal(old, card) ? old : card
+    next.set(card.run.id, kept)
+    return kept
+  }
+  for (const column of data.columns) column.cards = column.cards.map(keep)
+  data.archivedCards = data.archivedCards.map(keep)
+  return next
+}
+
 export function useBoard(): BoardData {
+  const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
-  const workspaces = useStore((s) => s.workspaces)
-  const runs = useStore((s) => s.runs)
-  const members = useStore((s) => s.members)
-  const acked = useStore((s) => s.acked)
-  const pausedRuns = useStore((s) => s.pausedRuns)
-  return useMemo(
-    () =>
-      board({ workspace, workspaces, runs, members, acked, pausedRuns }),
-    [workspace, workspaces, runs, members, acked, pausedRuns],
-  )
+  const mineOnly = useStore((s) => s.mineOnly)
+  const cards = useRef(new Map<string, BoardCard>())
+  return useMemo(() => {
+    const data = board({ workspace, mineOnly, ctx })
+    cards.current = reuseCards(data, cards.current)
+    return data
+  }, [workspace, mineOnly, ctx])
+}
+
+function candidates(runs: RunRecord[], workspaces: Record<string, Workspace>): RunActionCandidate[] {
+  return runs.map((run) => ({ run, workspace: workspaces[run.workspace_id] }))
+}
+
+// The bulk actions sweep the whole workspace whoever owns the run: Needs you
+// spans workspaces and Mine hides teammates' runs, so the columns cannot be used.
+export function finishedRuns(workspace: string, ctx: StateContext): RunActionCandidate[] {
+  const rows = listedRuns(workspace, ctx).filter((row) => row.group === 'finished')
+  return candidates(rows.map((row) => row.run), ctx.workspaces)
+}
+
+export function workspaceRuns(workspace: string, ctx: StateContext): RunActionCandidate[] {
+  const runs = Object.values(ctx.runs).filter((run) => !workspace || run.workspace_id === workspace)
+  return candidates(runs, ctx.workspaces)
 }

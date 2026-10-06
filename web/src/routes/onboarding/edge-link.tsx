@@ -1,20 +1,17 @@
-// The Link step's first choice: reach a server through an edge. Signing in
-// runs the edge's device flow through the local gateway, which keeps the
-// device token to itself; this screen only shows the code, waits for the
-// gateway to report the sign-in, and then links a server: by the id its
-// admin gave, from the edge's list after showing what the link will pin,
-// or by claiming a new one with the code `aether-server setup` printed.
+// The local gateway runs the edge device flow and keeps the device token;
+// this screen never sees it.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/heroui'
+import { Callout } from '@/components/ui/callout'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { edgeHost, message, providerName } from '@/lib/format'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeServer } from '@/lib/types'
 
-/** How often the screen asks the gateway whether the sign-in finished. */
 const pollMs = 2000
 
 type Phase =
@@ -26,8 +23,9 @@ type Phase =
 type SignedInEdge = { edge: string; account: EdgeAccount }
 
 // Pre-wrapped: a server's refusal lists the commands that fix it, one per line.
-const errorLine =
-  'min-w-0 whitespace-pre-wrap break-words border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed'
+function ErrorLine({ children }: { children: string }) {
+  return <Callout tone="failed" role="alert" className="self-stretch whitespace-pre-wrap">{children}</Callout>
+}
 
 export function EdgeSignIn({
   client,
@@ -51,11 +49,9 @@ export function EdgeSignIn({
       if (status.login?.state === 'failed' && status.login.error) setError(status.login.error)
       const signedIn = status.edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
       if (signedIn.length > 0) {
-        // With more than one edge the person picks, as the CLI's --edge does.
         setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
         return
       }
-      // A stored sign-in the gateway cannot read is fixed by signing in again.
       const unreadable = status.edges.find((e) => e.error)?.error
       if (unreadable) setError(unreadable)
       setPhase({ name: 'signed-out' })
@@ -113,9 +109,8 @@ export function EdgeSignIn({
   const signIn = async () => {
     setStarting(true)
     setError(null)
-    // Opened before the await so a browser treats it as the click's own
-    // window rather than a blocked popup. The desktop shell refuses blank
-    // windows and opens the address in the system browser instead.
+    // Opened before the await so it is not blocked as a popup. The desktop
+    // shell refuses blank windows and opens the address in the system browser.
     const popup = window.open('about:blank', '_blank')
     if (popup) popup.opener = null
     try {
@@ -134,44 +129,39 @@ export function EdgeSignIn({
   const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
 
   return (
-    <section aria-label="Sign in" className="min-w-0 max-w-2xl space-y-3 text-sm">
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold">Sign in</h3>
-        <p className="text-[13px] leading-5 text-muted-foreground">
-          Reach your server through an edge relay, with no VPN, open port or address to set
-          up. Sign in with GitHub, then link a server by the id its admin gave you,
-          pick one your account reaches, or add a new one.
-        </p>
-      </div>
-      {error && <p className={errorLine}>{error}</p>}
+    <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
+      <p className="text-text">
+        Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.
+      </p>
+      {error && <ErrorLine>{error}</ErrorLine>}
       {phase.name === 'signed-out' && (
         <Button size="sm" disabled={starting} onClick={() => void signIn()}>
-          {starting ? 'Signing in...' : 'Sign in'}
+          {starting ? 'Signing in…' : 'Sign in'}
         </Button>
       )}
       {phase.name === 'waiting' && (
-        <div className="min-w-0 space-y-2 border-y border-border/70 py-3">
+        <div className="flex min-w-0 flex-col gap-2">
           <p>
             Open{' '}
             <a
               href={phase.login.verification_uri}
               target="_blank"
               rel="noopener noreferrer"
-              className="break-all font-mono underline underline-offset-2"
+              className="break-all font-code text-accent underline underline-offset-2"
             >
               {phase.login.verification_uri}
             </a>{' '}
             and confirm this code:
           </p>
-          <p className="font-mono text-base font-semibold tracking-wider select-all">
+          <p className="font-code text-title tracking-wider select-all">
             {phase.login.user_code}
           </p>
-          <p className="text-muted-foreground">
-            <span className="font-mono">{edgeHost(phase.login.signin_origin)}</span> signs you in
-            for the edge <span className="font-mono">{edgeHost(phase.login.edge)}</span>.
+          <p className="text-muted">
+            <span className="font-code">{edgeHost(phase.login.signin_origin)}</span> signs you in
+            for the edge <span className="font-code">{edgeHost(phase.login.edge)}</span>.
           </p>
-          <p role="status" className="text-muted-foreground">
-            Waiting for you to confirm the code in the browser...
+          <p role="status" className="text-muted">
+            Waiting for you to confirm the code in the browser…
           </p>
         </div>
       )}
@@ -201,7 +191,6 @@ function accountName(account: EdgeAccount): string {
   return `${name} (${provider})`
 }
 
-/** The edges this machine is signed in to, when there is more than one. */
 function EdgeChoice({
   edges,
   chosen,
@@ -213,7 +202,7 @@ function EdgeChoice({
 }) {
   if (edges.length < 2) return null
   return (
-    <fieldset className="min-w-0 space-y-1.5">
+    <fieldset className="flex min-w-0 flex-col gap-1.5">
       <legend className="mb-1.5">
         You are signed in to {edges.length} edges. Link through:
       </legend>
@@ -226,7 +215,7 @@ function EdgeChoice({
             onChange={() => onChoose(e.edge)}
           />
           <span className="min-w-0 break-all">
-            <span className="font-mono">{edgeHost(e.edge)}</span> as {accountName(e.account)}
+            <span className="font-code">{edgeHost(e.edge)}</span> as {accountName(e.account)}
           </span>
         </label>
       ))}
@@ -235,12 +224,10 @@ function EdgeChoice({
 }
 
 const policyLine: Record<EdgeServer['access_policy'], string> = {
-  account: 'Account access: signing in is enough',
-  'approved-devices': 'Approved devices: a new device waits for approval',
+  account: 'signing in is enough',
+  'approved-devices': 'a new device waits for approval',
 }
 
-/** The servers the signed-in account reaches, linking by id, and the claim
- * form. */
 function ServerPicker({
   client,
   edge,
@@ -255,7 +242,6 @@ function ServerPicker({
   const [servers, setServers] = useState<EdgeServer[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [adding, setAdding] = useState(false)
   const [code, setCode] = useState('')
   const [serverID, setServerID] = useState('')
   const [confirming, setConfirming] = useState<EdgeServer | null>(null)
@@ -286,84 +272,41 @@ function ServerPicker({
   }
 
   return (
-    <div className="min-w-0 space-y-3">
+    <div className="flex min-w-0 flex-col gap-3 self-stretch">
       <p>
-        Signed in to <span className="font-mono">{edgeHost(edge)}</span> as{' '}
+        Signed in to <span className="font-code">{edgeHost(edge)}</span> as{' '}
         <span className="font-medium">{accountName(account)}</span>.
       </p>
       {error && (
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <p className={errorLine}>{error}</p>
+        <div className="flex min-w-0 flex-col items-start gap-2">
+          <ErrorLine>{error}</ErrorLine>
           {servers === null && (
-            <Button size="sm" variant="outline" onClick={() => void load()}>
+            <Button size="sm" variant="secondary" onClick={() => void load()}>
               Retry
             </Button>
           )}
         </div>
       )}
-      <form
-        aria-label="Link by server id"
-        className="min-w-0 space-y-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void link(() => client.localEdgeLink(serverID.trim(), edge))
-        }}
-      >
-        <Label className="block min-w-0 max-w-sm space-y-1">
-          Server id from your admin
-          <Input
-            className="min-w-0 font-mono"
-            autoComplete="off"
-            value={serverID}
-            disabled={busy}
-            onChange={(e) => setServerID(e.target.value)}
-          />
-        </Label>
-        <p className="text-[13px] leading-5 text-muted-foreground">
-          The server&apos;s admin reads it from{' '}
-          <span className="font-mono">aether-server edge status</span>. The link accepts only
-          the server this id names.
-        </p>
-        <Button type="submit" size="sm" disabled={busy || !serverID.trim()}>
-          Link by id
-        </Button>
-      </form>
       {servers?.length === 0 && (
-        <p className="text-muted-foreground">
-          Your account reaches no servers yet. Add one with its claim code, or ask a
+        <p className="text-muted">
+          Your account reaches no servers yet. Add one with its claim code under Other ways to link, or ask a
           server&apos;s admin to invite {account.login ?? account.email ?? 'your account'}.
         </p>
       )}
       {servers && servers.length > 0 && (
-        <ul aria-label="Your servers" className="min-w-0 border-y border-border/70">
+        <ul aria-label="Your servers" className="flex min-w-0 flex-col divide-y divide-seam rounded-panel border border-seam">
           {servers.map((server) => (
-            <li
-              key={server.id}
-              className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border/70 py-2 last:border-b-0"
-            >
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="min-w-0 break-words font-medium">{server.name}</span>
-                  <Chip color={server.online ? 'success' : 'default'} variant="soft" size="sm">
-                    <Chip.Label>{server.online ? 'online' : 'offline'}</Chip.Label>
-                  </Chip>
-                  <Chip color="default" variant="tertiary" size="sm">
-                    <Chip.Label>{server.role}</Chip.Label>
-                  </Chip>
-                  <Chip color="default" variant="tertiary" size="sm">
-                    <Chip.Label>{server.kind}</Chip.Label>
-                  </Chip>
-                </div>
-                <p className="min-w-0 text-xs text-muted-foreground">
-                  {policyLine[server.access_policy]}
-                </p>
-                <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
-                  {server.id}
-                </p>
-              </div>
+            <li key={server.id} className="flex min-w-0 items-center gap-3 px-3 py-2">
+              <StatusDot tone={server.online ? 'done' : 'neutral'} />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-medium">{server.name}</span>
+                <span className="truncate text-ui-sm text-muted">
+                  {server.online ? 'Online' : 'Offline'} · {server.role} · {policyLine[server.access_policy]}
+                </span>
+              </span>
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 disabled={busy}
                 aria-label={`Link ${server.name}`}
                 onClick={() => setConfirming(server)}
@@ -390,50 +333,55 @@ function ServerPicker({
           }
         />
       )}
-      {adding ? (
-        <form
-          aria-label="Add a server"
-          className="min-w-0 space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void link(() => client.localEdgeClaim(code.trim(), edge))
-          }}
-        >
-          <Label className="block min-w-0 max-w-sm space-y-1">
-            Claim code
-            <Input
-              className="min-w-0 font-mono"
-              autoComplete="off"
-              value={code}
-              disabled={busy}
-              onChange={(e) => setCode(e.target.value)}
-            />
-          </Label>
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            <span className="font-mono">aether-server setup</span> printed it on the server,
-            valid for 30 minutes. <span className="font-mono">sudo aether-server edge claim-code</span>{' '}
-            prints a new one. Claiming makes{' '}
-            <span className="font-medium">{accountName(account)}</span>, the account the edge
-            reported when you signed in, the server&apos;s admin.
-          </p>
-          <Button type="submit" size="sm" disabled={busy || !code.trim()}>
-            {busy ? 'Claiming...' : 'Claim and link'}
-          </Button>
-        </form>
-      ) : (
-        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-          Add a server
-        </Button>
-      )}
+      <Collapsible>
+        <CollapsibleTrigger>Other ways to link</CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-4 pt-2 pl-5">
+          <form
+            aria-label="Link by server id"
+            className="flex min-w-0 max-w-sm flex-col items-start gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void link(() => client.localEdgeLink(serverID.trim(), edge))
+            }}
+          >
+            <FormField
+              className="self-stretch"
+              label="Server id from your admin"
+              help={<>The admin reads it from <span className="font-code">aether-server edge status</span>. The link accepts only the server this id names.</>}
+            >
+              <Input className="font-code" autoComplete="off" value={serverID} disabled={busy} onChange={(e) => setServerID(e.target.value)} />
+            </FormField>
+            <Button type="submit" size="sm" variant="secondary" disabled={busy || !serverID.trim()}>
+              Link by id
+            </Button>
+          </form>
+          <form
+            aria-label="Add a server"
+            className="flex min-w-0 max-w-sm flex-col items-start gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void link(() => client.localEdgeClaim(code.trim(), edge))
+            }}
+          >
+            <FormField
+              className="self-stretch"
+              label="Claim code"
+              help={<><span className="font-code">aether-server setup</span> printed it, valid for 30 minutes; <span className="font-code">sudo aether-server edge claim-code</span> prints a new one. Claiming makes {accountName(account)} the server&apos;s admin.</>}
+            >
+              <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />
+            </FormField>
+            <Button type="submit" size="sm" variant="secondary" disabled={busy || !code.trim()}>
+              {busy ? 'Claiming…' : 'Claim and link'}
+            </Button>
+          </form>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }
 
-/**
- * What linking a server from the edge's list pins, shown before it does:
- * the id comes from the edge, so only comparing it with the admin's rules
- * out an edge that lists a false one.
- */
+/** The id comes from the edge, so only comparing it with the admin's rules
+ * out an edge that lists a false one. */
 function ConfirmPin({
   client,
   edge,
@@ -470,30 +418,28 @@ function ConfirmPin({
   return (
     <section
       aria-label="Confirm server"
-      className="min-w-0 space-y-2 border-l-2 border-border px-3 py-2"
+      className="flex min-w-0 flex-col gap-2 rounded-panel border border-seam p-3"
     >
       <p className="font-medium">Link {server.name}?</p>
-      <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-muted-foreground">Server id</dt>
-        <dd className="min-w-0 break-all font-mono">{server.id}</dd>
-        <dt className="text-muted-foreground">Host key</dt>
-        <dd className="min-w-0 break-all font-mono">
-          {fingerprint ?? (error ? 'not read' : 'reading...')}
+      <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
+        <dt className="text-muted">Server id</dt>
+        <dd className="min-w-0 break-all font-code">{server.id}</dd>
+        <dt className="text-muted">Host key</dt>
+        <dd className="min-w-0 break-all font-code">
+          {fingerprint ?? (error ? 'not read' : 'reading…')}
         </dd>
       </dl>
-      {error && <p className={errorLine}>{error}</p>}
-      <p className="text-[13px] leading-5 text-muted-foreground">
-        This id comes from <span className="font-mono">{edgeHost(edge)}</span>. From now on this
-        link accepts only this host key, directly and through the edge. An edge that lists a
-        false id can send a first link to another server: compare the id with the one the
-        server&apos;s admin gives you, or that{' '}
-        <span className="font-mono">aether-server edge status</span> prints on the server.
+      {error && <ErrorLine>{error}</ErrorLine>}
+      <p className="text-ui-sm text-muted">
+        From now on this link accepts only this host key, directly and through the edge. An edge that lists a false
+        id can send a first link to another server: compare the id with the one{' '}
+        <span className="font-code">aether-server edge status</span> prints on the server.
       </p>
       <div className="flex min-w-0 flex-wrap gap-2">
         <Button size="sm" disabled={busy || fingerprint === null} onClick={onConfirm}>
-          {busy ? 'Linking...' : 'Link and pin'}
+          {busy ? 'Linking…' : 'Link and pin'}
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={onCancel}>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
       </div>

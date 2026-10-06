@@ -46,7 +46,7 @@ func (s *stringList) Set(v string) error {
 
 func profilePush(args []string) error {
 	fs := flag.NewFlagSet("profile push", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	workspace := fs.String("workspace", "", "optional workspace ID for --allow-secret audit")
 	var allow, skip stringList
 	fs.Var(&allow, "allow-secret", "send this file even though the scanner flagged it (repeatable)")
@@ -55,7 +55,7 @@ func profilePush(args []string) error {
 		return err
 	}
 	if *agent == "" {
-		return fmt.Errorf("usage: aether profile push --agent <harness> [--skip-secret <file> ...] [--allow-secret <file> ...]")
+		return fmt.Errorf("usage: aether profile push --agent <agent> [--skip-secret <file> ...] [--allow-secret <file> ...]")
 	}
 	if len(allow) > 0 && *workspace == "" {
 		return fmt.Errorf("profile push: --allow-secret requires --workspace")
@@ -99,12 +99,12 @@ func profilePush(args []string) error {
 
 func profileStatus(args []string) error {
 	fs := flag.NewFlagSet("profile status", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *agent == "" {
-		return fmt.Errorf("usage: aether profile status --agent <harness>")
+		return fmt.Errorf("usage: aether profile status --agent <agent>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		res, err := cliprofile.Status(c, *agent)
@@ -118,12 +118,12 @@ func profileStatus(args []string) error {
 
 func profileRollback(args []string) error {
 	fs := flag.NewFlagSet("profile rollback", flag.ExitOnError)
-	agent := fs.String("agent", "", "harness name")
+	agent := fs.String("agent", "", "agent name")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *agent == "" || fs.NArg() < 1 {
-		return fmt.Errorf("usage: aether profile rollback --agent <harness> <snapshot-id>")
+		return fmt.Errorf("usage: aether profile rollback --agent <agent> <snapshot-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		snap, err := cliprofile.Rollback(c, *agent, fs.Arg(0))

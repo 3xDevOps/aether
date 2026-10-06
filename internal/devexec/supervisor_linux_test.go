@@ -40,12 +40,24 @@ func TestSupervisorSubprocess(t *testing.T) {
 		os.Exit(125)
 	}
 	switch args[0] {
-	case "run":
-		code, err := Run(args[1], args[2], args[3:])
+	case "run", "run-pipe":
+		code, err := Run(args[1], args[2], args[0] == "run", args[3:])
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(code)
+	case "pipe-input":
+		if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+			_ = tty.Close()
+			os.Exit(121)
+		}
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			os.Exit(124)
+		}
+		_, _ = fmt.Fprintf(os.Stdout, "received:%s", line)
+		_, _ = fmt.Fprintln(os.Stderr, "diagnostic")
+		os.Exit(19)
 	case "input":
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
@@ -226,6 +238,45 @@ func TestSupervisorClaimInputExitAndSingleUse(t *testing.T) {
 	}
 	if _, err := Control(t.Context(), p.key, p.request); err == nil {
 		t.Fatal("start silently reused a completed creation key")
+	}
+}
+
+func TestSupervisorPipeRunsWithoutTerminal(t *testing.T) {
+	key := t.TempDir()
+	claim := "test-attempt"
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSupervisorSubprocess$", "--", "run-pipe", key, claim,
+		os.Args[0], "-test.run=^TestSupervisorSubprocess$", "--", "pipe-input")
+	cmd.Env = append(os.Environ(), "AETHER_DEVEXEC_SUBPROCESS=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	stdin, pipeErr := cmd.StdinPipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if startErr := cmd.Start(); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(stateDir(key)) })
+	request := Request{ExecID: "test-exec", ClaimToken: claim, Action: "start"}
+	if _, controlErr := Control(t.Context(), key, request); controlErr != nil {
+		_ = cmd.Process.Kill()
+		t.Fatal(controlErr)
+	}
+	if _, writeErr := io.WriteString(stdin, "hello\n"); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var exit *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &exit) || exit.ExitCode() != 19 {
+		t.Fatalf("pipe supervisor exit = %v, stderr %q; want 19 (121 means the child had a terminal)", err, stderr.String())
+	}
+	if stdout.String() != "received:hello\n" || !strings.Contains(stderr.String(), "diagnostic") {
+		t.Fatalf("pipe stdio = stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+	request.Action = "status"
+	state, err := Control(t.Context(), key, request)
+	if err != nil || !state.Exited || state.ExitCode == nil || *state.ExitCode != 19 {
+		t.Fatalf("pipe completed status = %+v, %v", state, err)
 	}
 }
 

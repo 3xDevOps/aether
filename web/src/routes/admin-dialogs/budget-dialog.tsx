@@ -1,5 +1,4 @@
-// Budget administration for one workspace, over budget.set. The server owns
-// the arithmetic and the refusal; this form only carries the numbers.
+// The server owns the arithmetic and the refusal; this form only carries the numbers.
 
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -16,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
+import { useReturnFocus } from '@/lib/hooks'
 
 export function BudgetDialog({
   workspaceID,
@@ -30,6 +30,7 @@ export function BudgetDialog({
   const [warn, setWarn] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const returnFocus = useReturnFocus()
 
   const save = async (clear: boolean) => {
     setBusy(true)
@@ -56,7 +57,7 @@ export function BudgetDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[min(560px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Workspace budget</DialogTitle>
           <DialogDescription>
@@ -84,7 +85,7 @@ export function BudgetDialog({
                 onChange={(e) => setLimit(e.target.value)}
                 aria-describedby="budget-limit-help"
               />
-              <p id="budget-limit-help" className="text-xs text-muted-foreground">
+              <p id="budget-limit-help" className="text-ui-sm text-muted">
                 Maximum spend reported for this workspace.
               </p>
             </div>
@@ -99,13 +100,13 @@ export function BudgetDialog({
                 onChange={(e) => setWarn(e.target.value)}
                 aria-describedby="budget-warn-help"
               />
-              <p id="budget-warn-help" className="text-xs text-muted-foreground">
+              <p id="budget-warn-help" className="text-ui-sm text-muted">
                 Optional threshold for an early warning.
               </p>
             </div>
           </div>
           {error && (
-            <p role="alert" className="text-xs text-state-failed">
+            <p role="alert" className="text-ui-sm text-state-failed">
               {error}
             </p>
           )}
@@ -114,11 +115,11 @@ export function BudgetDialog({
           <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>
             Clear budget
           </Button>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="budget-set" disabled={busy || !limitValid}>
-            {busy ? 'Saving...' : 'Set'}
+            {busy ? 'Saving…' : 'Set'}
           </Button>
         </DialogFooter>
       </DialogContent>

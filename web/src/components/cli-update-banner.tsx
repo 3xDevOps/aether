@@ -5,8 +5,8 @@
 // hands over the sudo command rather than a button that could not work.
 
 import { useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, LoaderCircle } from 'lucide-react'
 import { CopyableCommand } from '@/components/copyable-command'
+import { CircleCheck, Download, LoaderCircle, TriangleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -94,16 +94,16 @@ function Applied({ result, note }: { result: UpdateApplyResult; note?: string })
   const trailing =
     note ?? result.note ?? (result.restarting ? 'Restarting the dashboard.' : '')
   return (
-    <div className="space-y-1.5 text-muted-foreground">
-      <p className="font-medium text-foreground">
+    <div className="space-y-1.5 text-muted">
+      <p className="font-medium text-text">
         Updated to {result.version}.{trailing ? ` ${trailing}` : ''}
       </p>
-      <p className="rounded-sm border border-border/70 bg-muted/30 px-2 py-1 font-mono text-[11px] leading-5">
+      <p className="rounded-control border border-seam/70 bg-chrome/30 px-2 py-1 font-code text-ui-xs leading-5">
         {result.updated.join(', ')}
       </p>
       {result.restart_command && (
         <div className="space-y-1">
-          <p className="text-xs">The server binary beside it was replaced too. Restart the unit:</p>
+          <p className="text-ui-sm">The server binary beside it was replaced too. Restart the unit:</p>
           <CopyableCommand command={result.restart_command} />
         </div>
       )}
@@ -120,7 +120,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
   const { cli, cli_path: path, install_method: method } = update
   if (!cli.can_self_update) {
     return (
-      <p className="text-xs leading-5 text-muted-foreground">
+      <p className="text-ui-sm leading-5 text-muted">
         Self-update is not supported on Windows. Download {cli.latest} from the
         release page and replace the binary yourself.
       </p>
@@ -129,7 +129,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
   if (method === 'manual') {
     return (
       <div className="space-y-1.5">
-        <p className="text-xs leading-5 text-muted-foreground">
+        <p className="text-ui-sm leading-5 text-muted">
           {path} is not writable by this account. Update it from a terminal:
         </p>
         <CopyableCommand command="sudo aether update" />
@@ -137,8 +137,8 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
     )
   }
   return (
-    <Collapsible className="text-xs text-muted-foreground">
-      <CollapsibleTrigger className="font-medium hover:text-foreground">
+    <Collapsible className="text-ui-sm text-muted">
+      <CollapsibleTrigger className="font-medium hover:text-text">
         {method === 'admin-prompt'
           ? 'Install details: macOS administrator approval'
           : 'Install details: what updating changes'}
@@ -281,21 +281,21 @@ export function CliBanner({
     flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
   const buttonLabel =
     flow.name === 'applying'
-      ? 'Updating...'
+      ? 'Updating…'
       : flow.name === 'rebuilding'
-        ? 'Rebuilding...'
+        ? 'Rebuilding…'
         : flow.name === 'relaunching'
-          ? 'Relaunching...'
+          ? 'Relaunching…'
           : 'Update now'
   const applyingLine =
     update.install_method === 'admin-prompt'
-      ? `Downloading ${version}, then macOS asks for an administrator password...`
-      : 'Updating the CLI...'
+      ? `Downloading ${version}, then macOS asks for an administrator password…`
+      : 'Updating the CLI…'
   const NoticeIcon =
     current || flow.name === 'applied' || flow.name === 'rebuilt'
-      ? CheckCircle2
+      ? CircleCheck
       : flow.name === 'applyFailed' || flow.name === 'rebuildFailed'
-        ? AlertTriangle
+        ? TriangleAlert
         : flow.name === 'applying' || flow.name === 'rebuilding' || flow.name === 'relaunching'
           ? LoaderCircle
           : Download
@@ -317,21 +317,21 @@ export function CliBanner({
         {current && (
           <p>
             <span className="font-medium">Aether {version} is the newest release.</span>{' '}
-            <span className="font-normal text-muted-foreground">Nothing was downloaded.</span>
+            <span className="font-normal text-muted">Nothing was downloaded.</span>
           </p>
         )}
         {!current && !installed && (
           <>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <p className="font-medium">Aether {version} is available.</p>
-              <p className="text-xs text-muted-foreground">You are running {update.cli.version}.</p>
+              <p className="text-ui-sm text-muted">You are running {update.cli.version}.</p>
             </div>
             <HowItInstalls update={update} />
           </>
         )}
         {installLead && <p className="font-medium">Aether {version} is installed.</p>}
         {flow.name === 'applying' && (
-          <p className="text-muted-foreground">{applyingLine}</p>
+          <p className="text-muted">{applyingLine}</p>
         )}
         {flow.name === 'applied' && <Applied result={flow.result} />}
         {flow.name === 'rebuilt' && (
@@ -345,28 +345,28 @@ export function CliBanner({
         )}
         {flow.name === 'applyCancelled' && (
           <>
-            <p className="text-muted-foreground">Update cancelled, nothing was changed.</p>
-            <p className={cn(verbatim, 'text-muted-foreground')}>{flow.detail}</p>
+            <p className="text-muted">Update cancelled, nothing was changed.</p>
+            <p className={cn(verbatim, 'text-muted')}>{flow.detail}</p>
           </>
         )}
         {flow.name === 'rebuilding' && (
-          <div className="text-muted-foreground">
+          <div className="text-muted">
             <p>
               Rebuilding the app (about a minute; the first time also fetches
-              Node)...
+              Node)…
             </p>
             {flow.phase && (
-              <p className="font-mono text-xs leading-5">{flow.phase}</p>
+              <p className="font-code text-ui-sm leading-5">{flow.phase}</p>
             )}
           </div>
         )}
         {flow.name === 'relaunching' && (
-          <p className="text-muted-foreground">Relaunching</p>
+          <p className="text-muted">Relaunching</p>
         )}
         {flow.name === 'rebuildFailed' && (
           <div className="space-y-1.5">
             <p className={cn(verbatim, 'text-state-failed')}>{flow.error}</p>
-            <p className="text-muted-foreground">Rebuild it yourself:</p>
+            <p className="text-muted">Rebuild it yourself:</p>
             <CopyableCommand command="aether gui build" />
           </div>
         )}
@@ -385,7 +385,7 @@ export function CliBanner({
               rel="noreferrer"
               className={cn(
                 focusRing,
-                'inline-flex min-h-[22px] items-center whitespace-nowrap px-1 text-xs underline underline-offset-2 hover:text-foreground',
+                'inline-flex min-h-[22px] items-center whitespace-nowrap px-1 text-ui-sm underline underline-offset-2 hover:text-text',
               )}
             >
               Release notes

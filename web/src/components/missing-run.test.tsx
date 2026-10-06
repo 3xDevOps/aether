@@ -57,7 +57,7 @@ describe('missing run', () => {
       hydrated: true,
       hydrationError: null,
       streamDead: false,
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
     })
     render(<MissingRun />)
 

@@ -1,16 +1,5 @@
-import {
-  CircleAlert,
-  CloudOff,
-  Hourglass,
-  KeyRound,
-  LogIn,
-  RefreshCw,
-  ServerOff,
-  ShieldOff,
-  Unplug,
-  WifiOff,
-} from 'lucide-react'
 import type { ReactNode } from 'react'
+import { CircleAlert, CloudOff, Hourglass, KeyRound, LogIn, RefreshCw, ServerOff, ShieldOff, Unplug, WifiOff } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -38,7 +27,7 @@ type ErrorCopy = {
 /** A command the user is told to run, styled so it reads as one. */
 function Cmd({ children }: { children: string }) {
   return (
-    <code className="inline-flex rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
+    <code className="inline-flex rounded-control border border-seam/70 bg-chrome px-1.5 py-0.5 font-code text-ui-sm text-text">
       {children}
     </code>
   )
@@ -244,27 +233,27 @@ export function ConnectionError({ kind, dead, error, edge, onRetry }: Connection
   const Icon = content.icon
 
   return (
-    <main className="flex h-full min-h-0 min-w-0 overflow-y-auto bg-background p-3 sm:p-4">
+    <main className="flex h-full min-h-0 min-w-0 overflow-y-auto bg-canvas p-3 sm:p-4">
       <section
         role="alert"
         aria-labelledby="connection-error-title"
         aria-describedby="connection-error-description"
-        className="m-auto grid min-w-0 w-full max-w-[720px] overflow-hidden border border-border bg-card"
+        className="m-auto grid min-w-0 w-full max-w-[720px] overflow-hidden border border-seam bg-canvas"
       >
-        <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-border bg-sidebar px-3 py-3 sm:px-4">
-          <div className="grid size-7 shrink-0 place-items-center rounded-sm bg-state-needs-attention/15 text-state-needs-attention">
+        <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-seam bg-chrome px-3 py-3 sm:px-4">
+          <div className="grid size-7 shrink-0 place-items-center rounded-control bg-state-needs-you/15 text-state-needs-you">
             <Icon className="size-4" aria-hidden />
           </div>
           <div className="min-w-0">
-            <p className="mb-0.5 text-xs font-medium text-muted-foreground">{content.eyebrow}</p>
-            <h1 id="connection-error-title" className="text-base font-semibold leading-5">
+            <p className="mb-0.5 text-ui-sm font-medium text-muted">{content.eyebrow}</p>
+            <h1 id="connection-error-title" className="text-title leading-5">
               {content.title}
             </h1>
           </div>
         </header>
 
         <div className="min-w-0 space-y-3 px-3 py-3 sm:px-4">
-          <p id="connection-error-description" className="max-w-[68ch] text-[13px] leading-5 text-muted-foreground">
+          <p id="connection-error-description" className="max-w-[68ch] text-ui leading-5 text-muted">
             {content.description}
           </p>
 
@@ -280,12 +269,12 @@ export function ConnectionError({ kind, dead, error, edge, onRetry }: Connection
           {/* Keep the exact raw failure visible and selectable. The bounded
               block owns its scroll so it cannot push retry out of reach. */}
           {error && (
-            <Collapsible defaultOpen className="min-w-0 border border-border bg-background text-xs">
-              <CollapsibleTrigger className="px-2 text-muted-foreground hover:text-foreground">
+            <Collapsible defaultOpen className="min-w-0 border border-seam bg-canvas text-ui-sm">
+              <CollapsibleTrigger className="px-2 text-muted hover:text-text">
                 Technical details
               </CollapsibleTrigger>
-              <CollapsibleContent className="min-w-0 border-t border-border px-2 py-2">
-                <pre className="max-h-[min(14rem,35vh)] overflow-auto whitespace-pre-wrap break-words font-mono leading-5 text-foreground select-text">{error}</pre>
+              <CollapsibleContent className="min-w-0 border-t border-seam px-2 py-2">
+                <pre className="max-h-[min(14rem,35vh)] overflow-auto whitespace-pre-wrap break-words font-code leading-5 text-text select-text">{error}</pre>
               </CollapsibleContent>
             </Collapsible>
           )}

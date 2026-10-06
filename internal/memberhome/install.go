@@ -60,6 +60,18 @@ func (m *Manager) Installation(launcher, account domain.MemberID, executable str
 	return account, nil
 }
 
+// AgentInstalled looks for the ACP server only in the home the CLI comes
+// from: the launch sees only that home's ~/.local. An empty acp means the
+// agent serves no ACP.
+func (m *Manager) AgentInstalled(launcher, account domain.MemberID, cli, acp string, installPaths []string) (installed, acpInstalled bool, err error) {
+	owner, err := m.Installation(launcher, account, cli, installPaths)
+	if err != nil || owner == "" || acp == "" {
+		return owner != "", false, err
+	}
+	acpOwner, err := m.Installation(launcher, account, acp, installPaths)
+	return true, acpOwner == owner, err
+}
+
 func within(rel string, roots []string) bool {
 	return slices.ContainsFunc(roots, func(root string) bool { return rel == root || strings.HasPrefix(rel, root+"/") })
 }
@@ -76,7 +88,10 @@ type hop struct {
 // met on the way, an empty but non-nil list for a plain file, or nil when
 // there is no such installation.
 func (m *Manager) executableInstalled(member domain.MemberID, executable string) ([]hop, error) {
-	root, err := m.openHome(member)
+	root, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

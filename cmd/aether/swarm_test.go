@@ -69,7 +69,7 @@ func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.C
 
 func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
-		"-", "--agent", "claude", "--worker", "codex:headless", "--worker", "claude", "--worker", "codex:headless",
+		"-", "--agent", "claude", "--worker", "codex:background", "--worker", "claude", "--worker", "codex:background",
 		"--workspace", "ws-name",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
@@ -103,14 +103,27 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 }
 
+func TestSwarmCreateEnhancedIntegrator(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "codex", "--mode", "enhanced"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	params := missionCreateParams("ws1", "mem1", spec, "key-1")
+	want := protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "acp"}
+	if params.Integrator != want || len(params.ExecutionChoices) != 1 || protocol.MissionIntegrator(params.ExecutionChoices[0]) != want {
+		t.Fatalf("mission.create params %+v, want an acp integrator among the choices", params)
+	}
+}
+
 func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"no agent":        {args: []string{"objective"}, want: "usage: aether swarm create"},
-		"bad worker mode": {args: []string{"objective", "--agent", "claude", "--worker", "codex:batch"}, want: `invalid --worker "codex:batch"`},
-		"empty worker":    {args: []string{"objective", "--agent", "claude", "--worker", ":tui"}, want: `invalid --worker ":tui"`},
+		"no agent":              {args: []string{"objective"}, want: "usage: aether swarm create"},
+		"bad worker mode":       {args: []string{"objective", "--agent", "claude", "--worker", "codex:headless"}, want: `invalid --worker "codex:headless"`},
+		"empty worker":          {args: []string{"objective", "--agent", "claude", "--worker", ":standard"}, want: `invalid --worker ":standard"`},
+		"background integrator": {args: []string{"objective", "--agent", "claude", "--mode", "background"}, want: "--mode must be standard or enhanced"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// swarmCreate reaches withControl only after validation, and no
@@ -167,7 +180,7 @@ func TestRenderSwarm(t *testing.T) {
 	want := `swarm m1 active
 objective: ship the swarm CLI
 accountable human: mem1
-integrator: run r1 generation 2 (claude tui, account mem1)
+integrator: run r1 generation 2 (claude standard, account mem1)
 launch error: image missing (since 2026-09-25T07:01:00Z)
 
 questions (1 open):

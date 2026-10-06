@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -28,17 +29,14 @@ type PTYAttacher interface {
 	Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error)
 }
 
-// PTYHistoryReader is the read-only transcript extension implemented by the
-// production PTY host. Inputs are validated and normalized before dispatch;
-// implementations return at most limit lines in chronological order. It stays
-// separate so attach-only adapters remain small.
+// PTYHistoryReader is separate from PTYAttacher so attach-only adapters stay
+// small. Implementations return at most limit lines, oldest first.
 type PTYHistoryReader interface {
 	History(ctx context.Context, run domain.RunID, before, query string, limit int) (ptyhost.HistoryPage, error)
 }
 
-// RunLauncherWithOptions is the optional extension implemented by schedulers
-// that can pin a launch to a caller-supplied base observation. Keeping it
-// separate preserves the strict Launch seam for older adapters and tests.
+// RunLauncherWithOptions is implemented by schedulers that can pin a launch to
+// a caller-supplied base observation.
 type RunLauncherWithOptions interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
 }
@@ -62,11 +60,7 @@ type RunController interface {
 	// account would be refused over the harness or the account owner's
 	// login, and why, resolving it as Launch does.
 	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error)
-	// ContainerAddr resolves the network address of a supervised run
-	// container.
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
-	// TerminalContainerAddr resolves the network address of a member's
-	// supervised environment terminal container.
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error
 	Release(ctx context.Context, run domain.RunID, actor domain.MemberID) error
@@ -79,12 +73,22 @@ type RunController interface {
 	// PendingInputs returns an independent snapshot of unresolved requests;
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
-	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
+	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error)
+	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
+	// ACPAnswer resolves a pending request of an enhanced run's agent; the
+	// first answer wins. values is the form answer for an accepted question.
+	ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error
+	ACPCancel(ctx context.Context, run domain.RunID) error
+	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
+	// ACPHistory reads up to limit items before beforeSeq, oldest first;
+	// zero reads from the newest.
+	ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error)
+	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
+	AgentSwitchable(ctx context.Context, member, account domain.MemberID, harness string) (bool, error)
+	SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error
+	Switching(run domain.RunID) domain.LaunchMode
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
-	// SetArchived hides a Final run from the board (archived true) or
-	// restores it (false); see the scheduler implementation's doc comment
-	// for the exact refusal and idempotency rules.
 	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)
 	// Seen clears the run's outcome_unseen flag for its owner; anyone
 	// else is denied. Clearing a clear flag returns the run unchanged.
@@ -104,6 +108,9 @@ type RunController interface {
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error
+	// InstallAgent returns the end of the install command's output and its
+	// exit code.
+	InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error)
 	// SaveTerminalImage writes validated image bytes to the target account's
 	// persistent home and returns its absolute container-visible path.
 	SaveTerminalImage(ctx context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error)

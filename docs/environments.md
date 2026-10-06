@@ -1,8 +1,8 @@
 # Member environments
 
-A member's environment is the container image used by their environment
-terminal and every run they launch, including runs on another member's shared
-agent account. If the member has saved an image, Aether uses it. Otherwise,
+A member's environment is the container image used by their own container
+shell, the **Environment** page in the dashboard, and by every run they
+launch, including runs on another member's shared agent account. If the member has saved an image, Aether uses it. Otherwise,
 Aether uses the server's standard image. Sharing your agent account never
 lends your image; see [teams.md](teams.md#agent-accounts).
 
@@ -26,7 +26,7 @@ Teams that need a shared baseline can publish their own image and point
 `--standard-image` at it.
 
 The image ships `gh` and `ssh-keygen` for GitHub's sake: connecting GitHub
-in the environment terminal and signing commits inside a run need them, so
+in your environment and signing commits inside a run need them, so
 nothing has to be installed first. A team publishing its own standard image
 should keep both, and keep gh at 2.81.0 or newer: that release added
 `gh auth status --json`, which is how the server reads a member's login
@@ -61,10 +61,10 @@ support, choose one of these paths:
 
 - Update the server's standard image pin as described below, then use
   **Reset to standard** or `aether env reset`. Reset discards the saved image's
-  container-installed customizations; preserve anything needed first. Open a
-  new environment terminal and start a **new run**.
+  container-installed customizations; preserve anything needed first. Stop and
+  reopen your environment and start a **new run**.
 - To retain customizations, install your distribution's Git package with
-  native prepared-transaction support in the environment terminal, then
+  native prepared-transaction support in your environment, then
   `aether env save` and start a **new run**. Ubuntu 24.04's stock Git supports
   the required primitive; a special source installer is not needed.
 
@@ -99,7 +99,7 @@ docker pull ghcr.io/3xdevops/aether-standard:latest
 
 A container keeps the image it started from, and nothing recreates it
 while it runs, so a refreshed standard image reaches a member only when
-they stop their environment terminal and open it again.
+they stop their environment and open it again.
 
 Workspace creation does not choose an image. The command needs only the
 workspace name and, optionally, its base branch:
@@ -111,7 +111,7 @@ aether workspace init <name> --base <branch>
 
 ## Container process lifecycle
 
-Every newly created run and environment-terminal container enables Docker's
+Every newly created run and environment container enables Docker's
 minimal init. Init adopts and reaps orphaned descendants and forwards signals
 to the agent or shell.
 
@@ -120,10 +120,10 @@ that survived a server restart, is not retrofitted or recreated just to add
 init; it keeps the runtime settings it started with. A newly created terminal
 container or run receives the setting.
 
-## Install in the environment terminal
+## Install in your environment
 
-Open the environment terminal with `aether terminal`, or open the dashboard's
-terminal dock from the chevron in its header strip. This is where a member installs system tools and language
+Open your environment with `aether terminal`, or select
+**Environment** in the dashboard's sidebar. This is where a member installs system tools and language
 runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
@@ -140,7 +140,8 @@ runs. They are workspace settings, not image selection.
 
 ## Save the environment
 
-Save from the terminal dock with **Save environment**, or run:
+Save from the **Environment** page with **Save environment**, its only
+primary button, or run:
 
 ```sh
 aether env save
@@ -160,8 +161,8 @@ uses stays until the next save or reset. The command prints `saved <tag>`,
 then `new runs and terminals start from this environment`.
 
 Runs that are already running keep their existing containers. New runs the
-member launches, their workspace shells, and the next environment terminal
-open use the saved image.
+member launches, their workspace shells, and the next environment open use
+the saved image.
 The terminal that was saved keeps running, so its committed state is already
 available to later containers.
 
@@ -170,7 +171,8 @@ first and then save.
 
 ## Reset to standard
 
-Reset from **Reset to standard** in the terminal dock, or run:
+Reset from the **Environment actions** menu > **Reset to standard…** on the
+**Environment** page, or run:
 
 ```sh
 aether env reset

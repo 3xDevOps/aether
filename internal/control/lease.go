@@ -55,6 +55,10 @@ type Config struct {
 	ReconnectWindow time.Duration
 	// MaxSessionIDBytes is the maximum byte length of a client session ID.
 	MaxSessionIDBytes int
+	// OnHolderChange is called, outside every lock, after a run gains,
+	// loses or changes its controller, including a reconnect window that
+	// runs out. It may be called when nothing changed.
+	OnHolderChange func(run domain.RunID)
 }
 
 // Snapshot is a wire-safe description of the current controller. SessionID is
@@ -138,6 +142,7 @@ type Service struct {
 	now             func() time.Time
 	reconnectWindow time.Duration
 	maxSessionBytes int
+	onHolderChange  func(domain.RunID)
 	runs            map[domain.RunID]*runState
 	surfaces        map[surfaceKey]*surfaceState
 }
@@ -157,6 +162,7 @@ func New(cfg Config) *Service {
 		now:             cfg.Now,
 		reconnectWindow: cfg.ReconnectWindow,
 		maxSessionBytes: cfg.MaxSessionIDBytes,
+		onHolderChange:  cfg.OnHolderChange,
 		runs:            make(map[domain.RunID]*runState),
 		surfaces:        make(map[surfaceKey]*surfaceState),
 	}
@@ -207,6 +213,12 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 
 	runID := domain.RunID(run)
 	state := s.stateFor(runID, true)
+	installed := false
+	defer func() {
+		if installed {
+			s.holderChanged(runID)
+		}
+	}()
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	now := s.now()
@@ -267,6 +279,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 			connectionDone: make(chan struct{}),
 		}
 		state.current = current
+		installed = true
 		result := s.snapshotLocked(runID, current)
 		return result, &displaced, nil
 	}
@@ -290,6 +303,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		connectionDone: make(chan struct{}),
 	}
 	state.current = current
+	installed = true
 	return s.snapshotLocked(runID, current), nil, nil
 }
 
@@ -379,13 +393,18 @@ func (s *Service) AdmitMember(run string, member domain.MemberID, session string
 // before releasing the run lock. The durable mutation supplied by fn and the
 // authority boundary therefore form one in-process linearization point. The
 // returned snapshot is the lease displaced inside that boundary.
-func (s *Service) AdmitRevoke(run string, reason RevocationReason, fn func() error) (*Snapshot, error) {
+func (s *Service) AdmitRevoke(run string, reason RevocationReason, fn func() error) (displaced *Snapshot, err error) {
 	if err := s.validateRun(run); err != nil {
 		return nil, err
 	}
 	if fn == nil || (reason != RevocationPermission && reason != RevocationRevoked) {
 		return nil, ErrInvalid
 	}
+	defer func() {
+		if displaced != nil {
+			s.holderChanged(domain.RunID(run))
+		}
+	}()
 	state := s.stateFor(domain.RunID(run), true)
 	state.surfaceGate.Lock()
 	defer state.surfaceGate.Unlock()
@@ -472,6 +491,16 @@ func (s *Service) Disconnect(run, session string, generation uint64) {
 		current.connected = false
 		current.expiresAt = now.Add(s.reconnectWindow)
 		close(current.connectionDone)
+		runID := domain.RunID(run)
+		time.AfterFunc(s.reconnectWindow, func() {
+			state.mu.Lock()
+			s.expireLocked(state, s.now())
+			gone := state.current != current
+			state.mu.Unlock()
+			if gone {
+				s.holderChanged(runID)
+			}
+		})
 	}
 }
 
@@ -514,6 +543,12 @@ func (s *Service) releaseAdmitted(run string, member domain.MemberID, session st
 	if state == nil {
 		return ErrStale
 	}
+	released := false
+	defer func() {
+		if released {
+			s.holderChanged(domain.RunID(run))
+		}
+	}()
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	s.expireLocked(state, s.now())
@@ -536,12 +571,13 @@ func (s *Service) releaseAdmitted(run string, member domain.MemberID, session st
 	}
 	current.revoke(reason)
 	state.current = nil
+	released = true
 	return nil
 }
 
 // Fence revokes any current lease and advances the run generation. It returns
 // the displaced controller when one was present.
-func (s *Service) Fence(run string) *Snapshot {
+func (s *Service) Fence(run string) (displaced *Snapshot) {
 	if s.validateRun(run) != nil {
 		return nil
 	}
@@ -549,6 +585,11 @@ func (s *Service) Fence(run string) *Snapshot {
 	if state == nil {
 		return nil
 	}
+	defer func() {
+		if displaced != nil {
+			s.holderChanged(domain.RunID(run))
+		}
+	}()
 	state.surfaceGate.Lock()
 	defer state.surfaceGate.Unlock()
 	state.mu.Lock()
@@ -590,6 +631,12 @@ func (s *Service) Status(run string) (Snapshot, bool) {
 		return Snapshot{}, false
 	}
 	return s.snapshotLocked(domain.RunID(run), state.current), true
+}
+
+func (s *Service) holderChanged(run domain.RunID) {
+	if s.onHolderChange != nil {
+		s.onHolderChange(run)
+	}
 }
 
 func (s *Service) validateRunMember(run, member string) error {

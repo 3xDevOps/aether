@@ -1,15 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { Schedule } from '@/lib/types'
 import { TemplatesRoute } from '@/routes/templates'
 import { useStore, type RootState } from '@/store'
-import {
-  alice,
-  fakeApi,
-  otherWorkspace,
-  serverInfo,
-  template,
-  workspace,
-} from '@/test/fixtures'
+import { alice, fakeApi, otherWorkspace, serverInfo, template, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 
 const schedule: Schedule = {
@@ -24,10 +18,7 @@ const schedule: Schedule = {
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
-    workspaces: {
-      [workspace.id]: workspace,
-      [otherWorkspace.id]: otherWorkspace,
-    },
+    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     activeWorkspace: workspace.id,
     members: { [alice.id]: alice },
     info: serverInfo,
@@ -41,24 +32,39 @@ function seed(extra: Partial<RootState> = {}) {
   })
 }
 
+async function rowAction(name: string) {
+  const trigger = await screen.findByRole('button', { name: `More for ${template.name}` })
+  trigger.focus()
+  await userEvent.keyboard('{Enter}')
+  const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name })
+  item.focus()
+  await userEvent.keyboard('{Enter}')
+}
+
 describe('templates view', () => {
+  it('lists a template as one row with its agent, mode word and task', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => [schedule]) })
+    seed()
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    const row = within(await screen.findByRole('listitem', { name: `Template ${template.name}` }))
+    expect(row.getByText(template.name)).toBeDefined()
+    expect(row.getByText(/Background · Scheduled · triage the flaky tests/)).toBeDefined()
+    expect(row.getByText(/^Next/)).toBeDefined()
+    expect(row.getByRole('button', { name: `Launch ${template.name}` })).toBeDefined()
+    expect(screen.queryByRole('form')).toBeNull()
+  })
+
   it('saves a template through the gateway', async () => {
-    const client = fakeApi({
-      scheduleList: vi.fn(async () => []),
-      templateSave: vi.fn(async () => template),
-    })
+    const client = fakeApi({ scheduleList: vi.fn(async () => []), templateSave: vi.fn(async () => template) })
     seed()
     render(<TemplatesRoute params={{}} client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog'))
-    fireEvent.change(dialog.getByLabelText(/^Name/), {
-      target: { value: 'weekly sweep' },
-    })
-    fireEvent.change(dialog.getByLabelText(/^Task/), {
-      target: { value: 'sweep the flaky tests' },
-    })
-    await pickOption(dialog.getByLabelText(/^Mode/), 'headless')
+    fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
+    fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep the flaky tests' } })
+    await pickOption(dialog.getByLabelText(/^Mode/), 'Standard')
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.templateSave).toHaveBeenCalledWith({
@@ -66,33 +72,36 @@ describe('templates view', () => {
       name: 'weekly sweep',
       task: 'sweep the flaky tests',
       harness: 'claude',
-      mode: 'headless',
+      mode: 'tui',
     })
   })
 
-  it('renders next_fire_at from the schedule.save response, never client cron', async () => {
-    const client = fakeApi({
-      scheduleList: vi.fn(async () => []),
-      scheduleSave: vi.fn(async () => schedule),
-    })
+  it('duplicates a template under a new name', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []) })
     seed()
     render(<TemplatesRoute params={{}} client={client} />)
 
-    const editor = within(
-      await screen.findByRole('form', { name: `Schedule for ${template.name}` }),
+    await rowAction('Duplicate')
+    const dialog = within(await screen.findByRole('dialog', { name: 'Duplicate template' }))
+    expect((dialog.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(`${template.name} copy`)
+    fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    expect(client.templateSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: `${template.name} copy`, task: template.task, harness: template.harness, mode: template.mode }),
     )
-    fireEvent.change(editor.getByLabelText('Cron schedule'), {
-      target: { value: '0 3 * * *' },
-    })
-    fireEvent.click(editor.getByRole('button', { name: 'Schedule' }))
+  })
 
-    // The preview is the server's next_fire_at, verbatim.
-    expect(await screen.findByText(/2026-08-23T03:00:00Z/)).toBeDefined()
-    expect(client.scheduleSave).toHaveBeenCalledWith({
-      workspace_id: workspace.id,
-      template: template.name,
-      cron: '0 3 * * *',
-    })
+  it('schedules from a dialog and shows the next launch the server returned', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []), scheduleSave: vi.fn(async () => schedule) })
+    seed()
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    await rowAction('Schedule…')
+    const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
+    fireEvent.change(dialog.getByLabelText('Schedule (UTC)'), { target: { value: '0 3 * * *' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Schedule' }))
+
+    expect(await dialog.findByText(/Sun, 23 Aug 2026 03:00:00 GMT/)).toBeDefined()
+    expect(client.scheduleSave).toHaveBeenCalledWith({ workspace_id: workspace.id, template: template.name, cron: '0 3 * * *' })
   })
 
   it('launches a template and navigates to the run', async () => {
@@ -100,15 +109,14 @@ describe('templates view', () => {
     seed({ runs: {} })
     render(<TemplatesRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Launch' }))
+    fireEvent.click(await screen.findByRole('button', { name: `Launch ${template.name}` }))
 
     expect(client.templateLaunch).toHaveBeenCalledWith(workspace.id, template.name)
-    expect(await screen.findByText('nightly triage')).toBeDefined()
     // fakeApi's templateLaunch returns run_tpl; navigation lands on it, and
     // the run is seeded with it so the tab does not call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_tpl' },
       })
     })
@@ -131,16 +139,14 @@ describe('templates view', () => {
     seed()
     render(<TemplatesRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    await rowAction('Delete')
     const confirm = await screen.findByRole('alertdialog')
     expect(client.templateDelete).not.toHaveBeenCalled()
     // A confirm has no close X: answering it is the only way past it.
     expect(within(confirm).getAllByRole('button')).toHaveLength(2)
 
     fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))
-    await waitFor(() =>
-      expect(client.templateDelete).toHaveBeenCalledWith(workspace.id, template.name),
-    )
+    await waitFor(() => expect(client.templateDelete).toHaveBeenCalledWith(workspace.id, template.name))
 
     fireEvent.keyDown(confirm, { key: 'Escape' })
     expect(screen.getByRole('alertdialog')).toBeDefined()
@@ -150,6 +156,16 @@ describe('templates view', () => {
     expect(await screen.findByText(/a schedule still fires it/)).toBeDefined()
   })
 
+  it('explains templates and offers one when the workspace has none', async () => {
+    const client = fakeApi({ templateList: vi.fn(async () => []), scheduleList: vi.fn(async () => []) })
+    seed()
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    expect(await screen.findByRole('heading', { name: 'No templates yet' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'New template' }))
+    expect(await screen.findByRole('dialog', { name: 'New template' })).toBeDefined()
+  })
+
   // The route follows the sidebar switcher rather than carrying a picker of
   // its own, so changing the active workspace re-reads against the new one.
   it('reads the active workspace, not a picker of its own', async () => {
@@ -157,14 +173,7 @@ describe('templates view', () => {
     seed({ activeWorkspace: otherWorkspace.id })
     render(<TemplatesRoute params={{}} client={client} />)
 
-    await waitFor(() => {
-      expect(client.templateList).toHaveBeenCalledWith(otherWorkspace.id)
-    })
+    await waitFor(() => expect(client.templateList).toHaveBeenCalledWith(otherWorkspace.id))
     expect(screen.queryByLabelText('Workspace')).toBeNull()
-    // The budget and settings verbs moved to the workspace route.
-    expect(screen.queryByRole('button', { name: 'Budget' })).toBeNull()
-    expect(
-      screen.queryByRole('button', { name: 'Workspace settings' }),
-    ).toBeNull()
   })
 })

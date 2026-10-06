@@ -1,35 +1,47 @@
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
-import { CenterView } from '@/components/shell/center-view'
+import { CenterView, focusView } from '@/components/shell/center-view'
+import { ConnectionAnnouncer } from '@/components/shell/connection'
 import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { Sidebar } from '@/components/shell/sidebar'
-import { StatusBar } from '@/components/shell/status-bar'
-import { UpdateBanners } from '@/components/update-banner'
-
+import { TopBar } from '@/components/shell/top-bar'
+import { ShortcutsDialog } from '@/components/shortcuts'
+import { UpdateCenter } from '@/components/update-banner'
+import { useIsMobile } from '@/lib/breakpoints'
+import { useTeamRefresh } from '@/routes/team'
 
 export function AppShell() {
   useNavShortcuts()
+  useTeamRefresh()
+  const mobile = useIsMobile()
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background text-[13px] leading-[1.4] text-foreground">
-      {/* The update surface stays above the workbench without stealing its
-          vertical space when it has nothing to say. */}
-      <div className="min-h-0 min-w-0 shrink-0 max-h-[max(0px,calc(100dvh-var(--title-bar-height)-var(--status-bar-height)-10rem))] overflow-y-auto overscroll-contain">
-        <UpdateBanners />
-      </div>
-      {/* The rail is against the viewport's left edge, which a landscape
-          notch sits over. The row insets it and carries the rail's own
-          colour, so the gutter reads as more rail rather than a seam. */}
-      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-sidebar pl-[env(safe-area-inset-left)]">
+    <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
+      <a
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault()
+          focusView()
+        }}
+        className="sr-only z-50 rounded-control bg-raised px-3 py-1.5 text-ui text-text focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+      >
+        Skip to content
+      </a>
+      {mobile && <TopBar />}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+        <main
+          id="main"
+          tabIndex={-1}
+          className="min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] outline-none"
+        >
           <CenterView />
         </main>
       </div>
-      <StatusBar />
-      {/* Forms and the command center are global shell overlays. The command
-          center itself is mounted once, independently of the status Slot. */}
       <CommandPalette />
       <PaletteDialogs />
+      <ShortcutsDialog />
+      <UpdateCenter />
+      <ConnectionAnnouncer />
     </div>
   )
 }

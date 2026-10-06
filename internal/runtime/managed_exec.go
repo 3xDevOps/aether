@@ -15,15 +15,23 @@ var ErrExecUnavailable = errors.New("runtime: managed execution unavailable")
 // container, including after an execution exits.
 type ManagedExecRuntime interface {
 	StartExecTTY(context.Context, ID, ExecSpec) (ManagedExec, error)
+	// StartExecPipe owns the command the same way, without a terminal: it
+	// gets its own process group and no controlling tty, and its attachment
+	// carries separate stdin, stdout and stderr streams. Its stdout never
+	// drops bytes: a reader that falls behind slows the command instead.
+	StartExecPipe(context.Context, ID, ExecSpec) (ManagedExec, error)
 	RecoverExec(context.Context, ExecIdentity) (ManagedExec, error)
 }
 
 // ExecSpec inherits the container's configured user and environment. An empty
 // WorkingDir inherits its configured working directory. Argv is executed
 // directly; callers wanting shell syntax must explicitly use /bin/sh -c.
+// Cols and Rows size StartExecTTY's terminal; StartExecPipe ignores them.
 type ExecSpec struct {
-	Argv        []string
-	WorkingDir  string
+	Argv       []string
+	WorkingDir string
+	// Env adds KEY=VALUE entries to this exec's environment.
+	Env         []string
 	Cols, Rows  uint
 	CreationKey string
 }
@@ -52,7 +60,7 @@ type ExecState struct {
 // Detach; Status.Attached reports whether the transport is still live.
 // Stop signals and reaps the command's process group and adopted descendants
 // without stopping the run container. A recovered Docker execution has no
-// Attachment: Docker cannot reattach an exec PTY.
+// Attachment: Docker cannot reattach an exec's streams.
 type ManagedExec interface {
 	Identity() ExecIdentity
 	Attachment() Attachment

@@ -91,10 +91,14 @@ func (o CoordOutcome) Valid() bool {
 // one read returns shares a single token, and acknowledging that token
 // acknowledges exactly that batch - which is what makes delivery
 // at-least-once: a batch whose response never reached the agent is still
-// unacknowledged, so the next read returns it again.
+// unacknowledged, so the next read returns it again. MissionID is the swarm
+// the sender belonged to when it sent. RetiredAt marks mail left unread when
+// its recipient's container was released: it is history, never delivered,
+// and does not count toward the inbox cap.
 type RunMessage struct {
 	ID             string
 	WorkspaceID    domain.WorkspaceID
+	MissionID      domain.MissionID
 	FromRun        domain.RunID
 	ToRun          domain.RunID
 	Body           string
@@ -105,6 +109,7 @@ type RunMessage struct {
 	CreatedAt      time.Time
 	DeliveredAt    *time.Time
 	AckedAt        *time.Time
+	RetiredAt      *time.Time
 }
 
 // CoordReport is a durable outcome submitted by a run. A pending report is
@@ -147,26 +152,6 @@ type CoordReportPublication struct {
 	QuarantineError string
 }
 
-// CoordAuditPublication retains everything needed to reconstruct its bounded
-// timeline event. The projection intentionally has no foreign key to the
-// mailbox or runs, so retirement cannot erase a pending or quarantined retry.
-type CoordAuditPublication struct {
-	MessageID       string
-	EventID         string
-	WorkspaceID     domain.WorkspaceID
-	FromRun         domain.RunID
-	ToRun           domain.RunID
-	Body            string
-	State           string
-	CreatedAt       time.Time
-	PublishedAt     *time.Time
-	Attempts        int
-	NextAttemptAt   time.Time
-	LastError       string
-	QuarantinedAt   *time.Time
-	QuarantineError string
-}
-
 type CoordOutboxCursor struct {
 	CreatedAt time.Time
 	ID        string
@@ -175,8 +160,6 @@ type CoordOutboxCursor struct {
 const (
 	CoordReportPublicationPending   = "pending"
 	CoordReportPublicationPublished = "published"
-	CoordAuditPublicationPending    = "pending"
-	CoordAuditPublicationPublished  = "published"
 )
 
 // CoordOutboxCursorStore provides deterministic after-cursor traversal. The
@@ -208,7 +191,7 @@ type MessageStore interface {
 	GetRunMessageByIdempotency(ctx context.Context, from domain.RunID, key string) (*RunMessage, error)
 	// GetQuestion returns a persisted question by its message ID.
 	GetQuestion(ctx context.Context, id string) (*RunMessage, error)
-	// CountUnackedRunMessages returns how many messages the run has not
+	// CountUnackedRunMessages returns how many live messages the run has not
 	// acknowledged yet, delivered or not.
 	CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int, error)
 	// DeliverRunMessages acknowledges ackToken's batch, then returns the
@@ -219,8 +202,8 @@ type MessageStore interface {
 	// and tokenized - all in one transaction. An empty inbox returns no
 	// messages and no token.
 	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error)
-	// DeleteRunMessages retires a released run's inbound mailbox.
-	DeleteRunMessages(ctx context.Context, to domain.RunID) error
+	// RetireRunMessages retires a released run's unread inbound mail.
+	RetireRunMessages(ctx context.Context, to domain.RunID) error
 	AppendCoordReport(ctx context.Context, report *CoordReport) error
 	ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error)
 	FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error)
@@ -240,18 +223,16 @@ type CoordTerminalReportStore interface {
 
 var _ CoordTerminalReportStore = (*DB)(nil)
 
-// CoordAuditStore is the optional durable audit outbox seam. The SQLite DB
-// implements it; narrow compatibility stores may omit it and therefore do
-// not claim durable coordination-message projections.
-type CoordAuditStore interface {
-	GetCoordAuditPublication(context.Context, string) (*CoordAuditPublication, error)
-	ListPendingCoordAuditPublications(context.Context, int) ([]*CoordAuditPublication, error)
-	MarkCoordAuditPublished(context.Context, string, string) error
-}
+const runMessageCols = `id, workspace_id, mission_id, from_run, to_run, body, kind, correlation_id, idempotency_key, delivery_token, created_at, delivered_at, acked_at, retired_at`
 
-var _ CoordAuditStore = (*DB)(nil)
+const unreadMessage = `acked_at IS NULL AND retired_at IS NULL`
 
-const runMessageCols = `id, workspace_id, from_run, to_run, body, kind, correlation_id, idempotency_key, delivery_token, created_at, delivered_at, acked_at`
+// senderMission resolves a run's swarm the way the run snapshot does: the
+// mission it integrates, else the one mission its attempts belong to.
+const senderMission = `COALESCE(
+	(SELECT MIN(id) FROM missions WHERE current_integrator_run_id = ?1),
+	(SELECT MIN(mission_id) FROM mission_attempts WHERE run_id = ?1 HAVING COUNT(DISTINCT mission_id) = 1),
+	'')`
 const coordReportCols = `id, workspace_id, run_id, outcome, summary, next_action, evidence_refs, input_evidence_refs, idempotency_key, state, created_at, finalized_at, published_at, superseded_at`
 
 func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int) error {
@@ -324,6 +305,11 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 		}
 	}
 
+	var mission string
+	if merr := tx.QueryRowContext(ctx, `SELECT `+senderMission, m.FromRun).Scan(&mission); merr != nil {
+		return false, fmt.Errorf("store: append run message: sender mission: %w", merr)
+	}
+
 	if openPeer {
 		var exists int
 		if peerErr := tx.QueryRowContext(ctx,
@@ -353,10 +339,10 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO run_messages (`+runMessageCols+`)
-		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL
-		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND acked_at IS NULL) < ?
+		 SELECT ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, '', ?, NULL, NULL, NULL
+		 WHERE (SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND `+unreadMessage+`) < ?
 		 ON CONFLICT (from_run, idempotency_key) WHERE idempotency_key <> '' DO NOTHING`,
-		id, m.WorkspaceID, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
+		id, m.WorkspaceID, mission, m.FromRun, m.ToRun, m.Body, m.Kind, correlation,
 		m.IdempotencyKey, createdAt, m.ToRun, maxUnacked,
 	)
 	if err != nil {
@@ -388,22 +374,16 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 		}
 		return false, fmt.Errorf("store: append run message to %s: %w", m.ToRun, ErrInboxFull)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO coord_audit_publications
-			(message_id, event_id, workspace_id, from_run, to_run, body,
-			 publication_state, created_at, published_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-		id, CoordAuditEventID(id), m.WorkspaceID, m.FromRun, m.ToRun, m.Body,
-		CoordAuditPublicationPending, createdAt,
-	); err != nil {
-		return false, fmt.Errorf("store: append run message: audit outbox: %w", err)
+	if err := enqueueCoordAudit(ctx, tx, CoordAuditMessage, `m.id = ?`, id); err != nil {
+		return false, fmt.Errorf("store: append run message: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("store: append run message: commit: %w", err)
 	}
 	m.ID, m.CreatedAt = id, ts
+	m.MissionID = domain.MissionID(mission)
 	m.CorrelationID = correlation
-	m.DeliveryToken, m.DeliveredAt, m.AckedAt = "", nil, nil
+	m.DeliveryToken, m.DeliveredAt, m.AckedAt, m.RetiredAt = "", nil, nil, nil
 	return true, nil
 }
 func coordMessageEquivalent(prior, incoming *RunMessage) bool {
@@ -421,11 +401,6 @@ func coordMessageEquivalent(prior, incoming *RunMessage) bool {
 		return prior.CorrelationID == prior.ID
 	}
 	return prior.CorrelationID == ""
-}
-
-// CoordAuditEventID returns the stable event ID used for message audit rows.
-func CoordAuditEventID(messageID string) string {
-	return "coord-message:" + messageID
 }
 
 func (d *DB) GetRunMessage(ctx context.Context, id string) (*RunMessage, error) {
@@ -480,7 +455,7 @@ func (d *DB) GetQuestion(ctx context.Context, id string) (*RunMessage, error) {
 func (d *DB) CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int, error) {
 	var n int
 	if err := d.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND acked_at IS NULL`, to,
+		`SELECT COUNT(*) FROM run_messages WHERE to_run = ? AND `+unreadMessage, to,
 	).Scan(&n); err != nil {
 		return 0, fmt.Errorf("store: count unacked run messages for %s: %w", to, err)
 	}
@@ -506,7 +481,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 
 	ack, aerr := tx.ExecContext(ctx,
 		`UPDATE run_messages SET acked_at = ?
-		 WHERE to_run = ? AND delivery_token <> '' AND delivery_token = ? AND acked_at IS NULL`,
+		 WHERE to_run = ? AND delivery_token <> '' AND delivery_token = ? AND `+unreadMessage,
 		now, to, ackToken,
 	)
 	if aerr != nil {
@@ -517,6 +492,12 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 		return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", aerr)
 	}
 	acked := ackedRows > 0
+	if acked {
+		if qerr := enqueueCoordAudit(ctx, tx, CoordAuditAcked,
+			`m.to_run = ? AND m.delivery_token = ? AND m.acked_at = ?`, to, ackToken, now); qerr != nil {
+			return nil, "", false, fmt.Errorf("store: acknowledge run message batch: %w", qerr)
+		}
+	}
 
 	outstanding, err := outstandingToken(ctx, tx, to)
 	if err != nil {
@@ -525,7 +506,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	if outstanding != "" {
 		msgs, rerr := readBatch(ctx, tx,
 			`SELECT `+runMessageCols+` FROM run_messages
-			 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = ? ORDER BY created_at, rowid`, to, outstanding)
+			 WHERE to_run = ? AND `+unreadMessage+` AND delivery_token = ? ORDER BY created_at, rowid`, to, outstanding)
 		if rerr != nil {
 			return nil, "", false, rerr
 		}
@@ -534,7 +515,7 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 
 	msgs, err := readBatch(ctx, tx,
 		`SELECT `+runMessageCols+` FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token = '' ORDER BY created_at, rowid LIMIT ?`, to, limit)
+		 WHERE to_run = ? AND `+unreadMessage+` AND delivery_token = '' ORDER BY created_at, rowid LIMIT ?`, to, limit)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -563,29 +544,17 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	return msgs, token, acked, commitBatch(tx)
 }
 
-func (d *DB) DeleteRunMessages(ctx context.Context, to domain.RunID) error {
+func (d *DB) RetireRunMessages(ctx context.Context, to domain.RunID) error {
 	if to == "" {
-		return errors.New("store: delete run messages: to_run is required")
+		return errors.New("store: retire run messages: to_run is required")
 	}
-	tx, err := d.db.BeginTx(ctx, nil)
+	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("store: delete run messages for %s: begin: %w", to, err)
+		return fmt.Errorf("store: retire run messages for %s: %w", to, err)
 	}
-	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	// Published rows are only reconciliation cache. Pending and quarantined
-	// rows retain their immutable snapshots for later publication/inspection.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM coord_audit_publications
-		 WHERE publication_state = ?
-		   AND message_id IN (SELECT id FROM run_messages WHERE to_run = ?)`,
-		CoordAuditPublicationPublished, to); err != nil {
-		return fmt.Errorf("store: delete run messages for %s: clean audit outbox: %w", to, err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM run_messages WHERE to_run = ?`, to); err != nil {
-		return fmt.Errorf("store: delete run messages for %s: %w", to, err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: delete run messages for %s: commit: %w", to, err)
+	if _, err := d.db.ExecContext(ctx,
+		`UPDATE run_messages SET retired_at = ? WHERE to_run = ? AND `+unreadMessage, now, to); err != nil {
+		return fmt.Errorf("store: retire run messages for %s: %w", to, err)
 	}
 	return nil
 }
@@ -594,7 +563,7 @@ func outstandingToken(ctx context.Context, tx *sql.Tx, to domain.RunID) (string,
 	var token string
 	err := tx.QueryRowContext(ctx,
 		`SELECT delivery_token FROM run_messages
-		 WHERE to_run = ? AND acked_at IS NULL AND delivery_token <> '' ORDER BY created_at, rowid LIMIT 1`, to,
+		 WHERE to_run = ? AND `+unreadMessage+` AND delivery_token <> '' ORDER BY created_at, rowid LIMIT 1`, to,
 	).Scan(&token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -627,18 +596,22 @@ func placeholders(n int) string {
 func scanRunMessage(row interface{ Scan(...any) error }) (*RunMessage, error) {
 	var (
 		m           RunMessage
+		mission     sql.NullString
 		createdAt   int64
 		deliveredAt *int64
 		ackedAt     *int64
+		retiredAt   *int64
 	)
-	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.FromRun, &m.ToRun, &m.Body,
+	if err := row.Scan(&m.ID, &m.WorkspaceID, &mission, &m.FromRun, &m.ToRun, &m.Body,
 		&m.Kind, &m.CorrelationID, &m.IdempotencyKey, &m.DeliveryToken,
-		&createdAt, &deliveredAt, &ackedAt); err != nil {
+		&createdAt, &deliveredAt, &ackedAt, &retiredAt); err != nil {
 		return nil, err
 	}
+	m.MissionID = domain.MissionID(mission.String)
 	m.CreatedAt = decodeTime(createdAt)
 	m.DeliveredAt = decodeTimePtr(deliveredAt)
 	m.AckedAt = decodeTimePtr(ackedAt)
+	m.RetiredAt = decodeTimePtr(retiredAt)
 	return &m, nil
 }
 
@@ -1072,58 +1045,6 @@ func (d *DB) recordCoordPublicationFailure(ctx context.Context, table, key, id, 
 	return nil
 }
 
-func (d *DB) RecordCoordAuditPublicationFailure(ctx context.Context, id, lastError string, nextAttemptAt time.Time, quarantine bool) error {
-	if id == "" {
-		return errors.New("store: record coord audit publication failure: id is required")
-	}
-	if len(lastError) > 4096 {
-		lastError = lastError[:4096]
-	}
-	next := int64(0)
-	if !nextAttemptAt.IsZero() {
-		var err error
-		next, err = encodeTime(nextAttemptAt.UTC())
-		if err != nil {
-			return fmt.Errorf("store: record coord audit publication failure: %w", err)
-		}
-	}
-	now, err := encodeTime(time.Now().UTC())
-	if err != nil {
-		return fmt.Errorf("store: record coord audit publication failure: %w", err)
-	}
-	query := `UPDATE coord_audit_publications
-		SET attempts = attempts + 1, next_attempt_at = ?, last_error = ?`
-	args := []any{next, lastError}
-	if quarantine {
-		query += `, quarantined_at = ?, quarantine_error = ?`
-		args = append(args, now, lastError)
-	}
-	query += ` WHERE message_id = ? AND publication_state = ? AND quarantined_at IS NULL`
-	args = append(args, id, CoordAuditPublicationPending)
-	res, err := d.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("store: record coord audit publication failure: %w", err)
-	}
-	updated, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: record coord audit publication failure: %w", err)
-	}
-	if updated == 0 {
-		pub, qerr := d.GetCoordAuditPublication(ctx, id)
-		if errors.Is(qerr, ErrNotFound) {
-			return ErrNotFound
-		}
-		if qerr != nil {
-			return qerr
-		}
-		if pub.State == CoordAuditPublicationPublished || pub.QuarantinedAt != nil {
-			return nil
-		}
-		return errors.New("store: record coord audit publication failure: publication was not pending")
-	}
-	return nil
-}
-
 func (d *DB) GetCoordReport(ctx context.Context, id string) (*CoordReport, error) {
 	if id == "" {
 		return nil, errors.New("store: get coord report: id is required")
@@ -1208,139 +1129,6 @@ func scanCoordReportPublication(row interface{ Scan(...any) error }) (*CoordRepo
 	)
 	if err := row.Scan(&pub.ReportID, &pub.EventID, &pub.State, &createdAt, &publishedAt,
 		&pub.Attempts, &nextAttemptAt, &pub.LastError, &quarantinedAt, &pub.QuarantineError); err != nil {
-		return nil, err
-	}
-	pub.CreatedAt = decodeTime(createdAt)
-	pub.PublishedAt = decodeTimePtr(publishedAt)
-	if nextAttemptAt != 0 {
-		pub.NextAttemptAt = decodeTime(nextAttemptAt)
-	}
-	pub.QuarantinedAt = decodeTimePtr(quarantinedAt)
-	return &pub, nil
-}
-func (d *DB) GetCoordAuditPublication(ctx context.Context, id string) (*CoordAuditPublication, error) {
-	if id == "" {
-		return nil, errors.New("store: get coord audit publication: id is required")
-	}
-	pub, err := scanCoordAuditPublication(d.db.QueryRowContext(ctx,
-		`SELECT message_id, event_id, workspace_id, from_run, to_run, body,
-		        publication_state, created_at, published_at,
-		        attempts, next_attempt_at, last_error, quarantined_at, quarantine_error
-		 FROM coord_audit_publications WHERE message_id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get coord audit publication %s: %w", id, err)
-	}
-	return pub, nil
-}
-
-func (d *DB) ListPendingCoordAuditPublications(ctx context.Context, limit int) ([]*CoordAuditPublication, error) {
-	return d.ListPendingCoordAuditPublicationsAfter(ctx, CoordOutboxCursor{}, limit)
-}
-
-func (d *DB) ListPendingCoordAuditPublicationsAfter(ctx context.Context, cursor CoordOutboxCursor, limit int) ([]*CoordAuditPublication, error) {
-	if limit <= 0 {
-		return nil, errors.New("store: list coord audit publications: limit must be positive")
-	}
-	if _, err := d.db.ExecContext(ctx,
-		`DELETE FROM coord_audit_publications
-		 WHERE publication_state = ? AND NOT EXISTS
-		       (SELECT 1 FROM run_messages WHERE run_messages.id = coord_audit_publications.message_id)`,
-		CoordAuditPublicationPublished); err != nil {
-		return nil, fmt.Errorf("store: clean coord audit publications: %w", err)
-	}
-	now, err := encodeTime(time.Now().UTC())
-	if err != nil {
-		return nil, fmt.Errorf("store: list coord audit publications: %w", err)
-	}
-	query := `SELECT message_id, event_id, workspace_id, from_run, to_run, body,
-	                 publication_state, created_at, published_at,
-	                 attempts, next_attempt_at, last_error, quarantined_at, quarantine_error
-	          FROM coord_audit_publications
-	          WHERE publication_state = ? AND quarantined_at IS NULL
-	            AND (next_attempt_at = 0 OR next_attempt_at <= ?)`
-	args := []any{CoordAuditPublicationPending, now}
-	if !cursor.CreatedAt.IsZero() {
-		created, cerr := encodeTime(cursor.CreatedAt)
-		if cerr != nil {
-			return nil, fmt.Errorf("store: list coord audit publications: %w", cerr)
-		}
-		query += ` AND (created_at > ? OR (created_at = ? AND message_id > ?))`
-		args = append(args, created, created, cursor.ID)
-	}
-	query += ` ORDER BY created_at, message_id LIMIT ?`
-	args = append(args, limit)
-	rows, err := d.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list coord audit publications: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []*CoordAuditPublication
-	for rows.Next() {
-		pub, serr := scanCoordAuditPublication(rows)
-		if serr != nil {
-			return nil, fmt.Errorf("store: list coord audit publications: %w", serr)
-		}
-		out = append(out, pub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list coord audit publications: %w", err)
-	}
-	return out, nil
-}
-
-func (d *DB) MarkCoordAuditPublished(ctx context.Context, id, eventID string) error {
-	if id == "" || eventID == "" {
-		return errors.New("store: mark coord audit published: message_id and event_id are required")
-	}
-	stamp, err := encodeTime(time.Now().UTC())
-	if err != nil {
-		return fmt.Errorf("store: mark coord audit published: %w", err)
-	}
-	res, err := d.db.ExecContext(ctx,
-		`UPDATE coord_audit_publications
-		 SET publication_state = ?, published_at = ?
-		 WHERE message_id = ? AND event_id = ? AND publication_state = ?
-		   AND quarantined_at IS NULL`,
-		CoordAuditPublicationPublished, stamp, id, eventID, CoordAuditPublicationPending)
-	if err != nil {
-		return fmt.Errorf("store: mark coord audit published: %w", err)
-	}
-	updated, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("store: mark coord audit published: %w", err)
-	}
-	if updated > 0 {
-		return nil
-	}
-	pub, qerr := d.GetCoordAuditPublication(ctx, id)
-	if errors.Is(qerr, ErrNotFound) {
-		return ErrNotFound
-	}
-	if qerr != nil {
-		return qerr
-	}
-	if pub.EventID != eventID {
-		return ErrCoordAuditPublicationConflict
-	}
-	if pub.State == CoordAuditPublicationPublished {
-		return nil
-	}
-	return errors.New("store: mark coord audit published: publication was not pending")
-}
-func scanCoordAuditPublication(row interface{ Scan(...any) error }) (*CoordAuditPublication, error) {
-	var (
-		pub           CoordAuditPublication
-		createdAt     int64
-		publishedAt   *int64
-		nextAttemptAt int64
-		quarantinedAt *int64
-	)
-	if err := row.Scan(&pub.MessageID, &pub.EventID, &pub.WorkspaceID, &pub.FromRun, &pub.ToRun, &pub.Body,
-		&pub.State, &createdAt, &publishedAt, &pub.Attempts, &nextAttemptAt, &pub.LastError,
-		&quarantinedAt, &pub.QuarantineError); err != nil {
 		return nil, err
 	}
 	pub.CreatedAt = decodeTime(createdAt)

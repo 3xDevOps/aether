@@ -6,30 +6,30 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-func TestParseSteerOthers(t *testing.T) {
+func TestParseMessageOthers(t *testing.T) {
 	for in, want := range map[string]string{
 		"":                           "",
 		"everyone":                   "",
 		"admins-only":                domain.SteerOthersAdminsOnly,
 		domain.SteerOthersAdminsOnly: domain.SteerOthersAdminsOnly,
 	} {
-		got, err := parseSteerOthers(in)
+		got, err := parseMessageOthers(in)
 		if err != nil || got != want {
-			t.Errorf("parseSteerOthers(%q) = (%q, %v), want (%q, nil)", in, got, err, want)
+			t.Errorf("parseMessageOthers(%q) = (%q, %v), want (%q, nil)", in, got, err, want)
 		}
 	}
-	if _, err := parseSteerOthers("nobody"); err == nil {
-		t.Error("parseSteerOthers(nobody) accepted an undefined policy")
+	if _, err := parseMessageOthers("nobody"); err == nil {
+		t.Error("parseMessageOthers(nobody) accepted an undefined policy")
 	}
 }
 
 // Every wire value reads back as a spelling the flag accepts, so the
 // output of `workspace settings` can be typed straight back in.
-func TestDescribeSteerOthersRoundTrips(t *testing.T) {
+func TestDescribeMessageOthersRoundTrips(t *testing.T) {
 	for _, wire := range []string{"", domain.SteerOthersAdminsOnly} {
-		desc := describeSteerOthers(wire)
+		desc := describeMessageOthers(wire)
 		word := desc[:len(desc)-len(" (")-len(desc[indexOf(desc, " (")+2:])]
-		if got, err := parseSteerOthers(word); err != nil || got != wire {
+		if got, err := parseMessageOthers(word); err != nil || got != wire {
 			t.Errorf("describe(%q) = %q; parse(%q) = (%q, %v), want %q", wire, desc, word, got, err, wire)
 		}
 	}

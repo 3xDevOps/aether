@@ -23,28 +23,41 @@ while :; do sleep 1; done`
 
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
-  const sidebar = page.getByRole('button', { name: 'Expand sidebar' })
-  await expect(sidebar.or(page.getByRole('complementary', { name: 'Runs' }))).toBeVisible()
+  const sidebar = page.getByRole('button', { name: /^Open sidebar/ })
+  await expect(sidebar.or(page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }))).toBeVisible()
   if (await sidebar.isVisible()) {
     await sidebar.click()
-    await page.getByRole('dialog', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('dialog', { name: 'Aether' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
-    await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }
-  const dock = page.getByRole('region', { name: 'Terminal dock' })
-  await dock.getByRole('tab', { name: /agent-tui/ }).click()
+  await showShell(page, /agent-tui/)
+  const dock = page.locator('[data-slot=shell-terminal]')
   await expect(dock.locator('.xterm-rows')).toContainText('Shared TUI: 界 λ é')
   return dock
 }
 
+/** Shell tabs are a strip on a desktop and one menu on a phone. */
+async function showShell(page: Page, name: RegExp): Promise<void> {
+  const main = page.getByRole('main')
+  const tabs = main.getByRole('tablist', { name: 'Terminals' })
+  const menu = main.getByRole('button', { name: /^Terminal: / })
+  await expect(tabs.or(menu).first()).toBeVisible()
+  if (await tabs.isVisible()) await tabs.getByRole('tab', { name }).click()
+  else {
+    await menu.click()
+    await page.getByRole('menuitem', { name }).click()
+  }
+}
+
 async function terminalActions(page: Page, dock: Locator): Promise<Locator> {
-  await dock.getByRole('button', { name: 'More terminal actions' }).click()
+  await dock.getByRole('button', { name: 'Shell actions' }).click()
   return page.getByRole('menu')
 }
 
 async function expectCannotStop(page: Page, dock: Locator): Promise<void> {
   const menu = await terminalActions(page, dock)
-  await expect(menu.getByRole('menuitem', { name: 'Stop terminal' })).toBeDisabled()
+  await expect(menu.getByRole('menuitem', { name: 'Stop this shell' })).toBeDisabled()
   await menu.press('Escape')
   await expect(menu).toBeHidden()
 }
@@ -80,12 +93,12 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   expect((await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)).toMatchObject({ cols: 73, rows: 19 })
   await expectCannotStop(page, dock)
   const initialController = (await status()).controller
-  await dock.getByRole('button', { name: 'Take shell control' }).click()
+  await dock.getByRole('button', { name: 'Take control' }).click()
   if (initialController) {
-    await page.getByRole('dialog', { name: 'Take shell control?' })
-      .getByRole('button', { name: 'Confirm takeover' }).click()
+    await page.getByRole('dialog', { name: 'Take control of this shell?' })
+      .getByRole('button', { name: 'Take control' }).click()
   }
-  await expect(dock.getByRole('button', { name: 'Release shell control' })).toBeVisible()
+  await expect(dock.getByRole('button', { name: 'Release' })).toBeVisible()
   const firstController = (await status()).controller!
   expect(firstController.kind).toBe('member')
   const input = dock.locator('.xterm-helper-textarea')
@@ -105,7 +118,7 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   await page.keyboard.press('Control+Shift+V')
   await expect.poll(() => file('input').includes('paste-界')).toBe(true)
   await testInfo.attach('shared-alternate-screen', { body: await dock.screenshot(), contentType: 'image/png' })
-  await expect(dock.getByRole('status').filter({ hasText: 'Controller: You' })).toBeVisible()
+  await expect(dock.getByText('You control', { exact: true })).toBeVisible()
 
   const watcherContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const watcherPage = await watcherContext.newPage()
@@ -115,24 +128,24 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
     await watcherPage.setViewportSize({ width: 360, height: 740 })
     expect((await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)).toMatchObject({ cols: beforeWatch.cols, rows: beforeWatch.rows })
     await expectCannotStop(watcherPage, watcher)
-    await expect(watcher.getByRole('status').filter({ hasText: `Controller: ${member}` })).toBeVisible()
-    await watcher.getByRole('button', { name: 'Take shell control' }).click()
-    await watcherPage.getByRole('dialog', { name: 'Take shell control?' })
-      .getByRole('button', { name: 'Confirm takeover' }).click()
-    await expect(watcher.getByRole('button', { name: 'Release shell control' })).toBeVisible()
+    await expect(watcher.getByText(/ controls$/)).toBeVisible()
+    await watcher.getByRole('button', { name: 'Take control' }).click()
+    await watcherPage.getByRole('dialog', { name: 'Take control of this shell?' })
+      .getByRole('button', { name: 'Take control' }).click()
+    await expect(watcher.getByRole('button', { name: 'Release' })).toBeVisible()
     await expectCannotStop(page, dock)
     await expect(alice.api.rpc('dev.terminal.input', { ...target, control_session_id: firstController.control_session_id, control_generation: firstController.control_generation, kind: 'text', text: 'X' })).rejects.toThrow()
     expect(file('effects')).toBe('effect\n')
     await watcher.locator('.xterm-helper-textarea').focus()
     await watcherPage.keyboard.type('X')
     await expect.poll(() => file('effects')).toBe('effect\neffect\n')
-    await watcher.getByRole('button', { name: 'Release shell control' }).click()
-    await expect(watcher.getByRole('button', { name: 'Take shell control' })).toBeVisible()
+    await watcher.getByRole('button', { name: 'Release' }).click()
+    await expect(watcher.getByRole('button', { name: 'Take control' })).toBeVisible()
     await (await terminalActions(watcherPage, watcher))
-      .getByRole('menuitem', { name: 'Hide terminal' }).click()
+      .getByRole('menuitem', { name: 'Hide this shell' }).click()
     const heartbeat = file('heartbeat').length
     await expect.poll(() => file('heartbeat').length).toBeGreaterThan(heartbeat)
-    await watcher.getByRole('button', { name: /Show agent-tui/ }).click()
+    await showShell(watcherPage, /Show agent-tui/)
     await expect(watcher.locator('.xterm-rows')).toContainText('Side effect written')
     expect(file('starts')).toBe('start\n')
     expect((await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.incarnation).toBe(terminal.incarnation)
@@ -142,16 +155,16 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
     await alice.api.rpc('dev.terminal.start', { run_id: run.id, name: `capacity-${index}`, command: ['sleep', '600'] })
   }
   await expect(alice.api.rpc('dev.terminal.start', { run_id: run.id, name: 'over-capacity' })).rejects.toThrow()
-  await expect(dock.getByRole('button', { name: 'Add terminal tab' })).toBeHidden()
+  await expect(dock.getByRole('button', { name: 'New shell' })).toHaveAttribute('aria-disabled', 'true')
 
-  await expect(dock.getByRole('status').filter({ hasText: 'Controller: Nobody' })).toBeVisible()
-  await dock.getByRole('button', { name: 'Take shell control' }).click()
-  await expect(dock.getByRole('button', { name: 'Release shell control' })).toBeVisible()
+  await expect(dock.getByText(/ controls$/)).toBeHidden()
+  await dock.getByRole('button', { name: 'Take control' }).click()
+  await expect(dock.getByRole('button', { name: 'Release' })).toBeVisible()
   // A first capture includes companion launch and has a bounded 90s API
   // lifecycle; do not abort that request at the ordinary 30s locator limit.
   const captureResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/dev.terminal.screenshot'), { timeout: 95_000 })
   await (await terminalActions(page, dock))
-    .getByRole('menuitem', { name: 'Screenshot', exact: true }).click()
+    .getByRole('menuitem', { name: 'Take a screenshot', exact: true }).click()
   const captured = await captureResponse
   expect(captured.ok(), await captured.text()).toBe(true)
   const { artifact } = await captured.json() as DevTerminalScreenshotResult
@@ -166,14 +179,14 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   await testInfo.attach('shared-terminal-capture-metadata', { body: JSON.stringify(artifact), contentType: 'application/json' })
   await expect(dock.getByRole('status').filter({ hasText: /Captured/ })).toBeVisible()
   await (await terminalActions(page, dock))
-    .getByRole('menuitem', { name: 'Stop terminal' }).click()
-  await page.getByRole('dialog', { name: 'Stop this terminal process?' })
-    .getByRole('button', { name: 'Confirm stop' }).click()
+    .getByRole('menuitem', { name: 'Stop this shell' }).click()
+  await page.getByRole('dialog', { name: 'Stop this shell?' })
+    .getByRole('button', { name: 'Stop shell' }).click()
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   await page.reload()
-  await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
-  await page.getByRole('region', { name: 'Terminal dock' }).getByRole('tab', { name: /agent-tui/ }).click()
-  await expectCannotStop(page, page.getByRole('region', { name: 'Terminal dock' }))
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+  await showShell(page, /agent-tui/)
+  await expectCannotStop(page, page.locator('[data-slot=shell-terminal]'))
   expect(file('starts')).toBe('start\n')
   expect((file('input').match(/\x1b\[[?\d;]*c/g) ?? []).length).toBe(1)
 })

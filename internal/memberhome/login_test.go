@@ -14,7 +14,7 @@ import (
 
 func newLoginHomes(t *testing.T) (*Manager, string, string) {
 	t.Helper()
-	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,8 +63,6 @@ func TestLoginPathIsDir(t *testing.T) {
 	}
 }
 
-// A symlink anywhere on the path makes it unshareable, whether it points
-// inside the home, at another member's home, or at the host.
 func TestLoginPathIsDirRefusesSymlinks(t *testing.T) {
 	cases := map[string]func(t *testing.T, owner, other string){
 		"final component to another home": func(t *testing.T, owner, other string) {
@@ -109,7 +107,6 @@ func TestPrepareLoginMountpoint(t *testing.T) {
 		t.Fatalf("directory mountpoint = %v, %v; want a directory", info, err)
 	}
 
-	// The launcher's own login is kept, never truncated or replaced.
 	if err := os.WriteFile(filepath.Join(launcher, ".claude", ".credentials.json"), []byte("mine"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +124,6 @@ func TestPrepareLoginMountpoint(t *testing.T) {
 		t.Fatal("a file was accepted as a directory mountpoint")
 	}
 
-	// A symlink planted in the launcher's home cannot lead preparation out.
 	replaceWithSymlink(t, filepath.Join(launcher, ".claude"), "../other/.codex")
 	if err := manager.PrepareLoginMountpoint("launcher", ".claude/.credentials.json", false); err == nil {
 		t.Fatal("preparation followed a symlinked parent")
@@ -162,7 +158,7 @@ func replaceWithSymlink(t *testing.T, name, target string) {
 // lets one through, and the other re-reads what it wrote.
 func TestMarkBorrowedStateConcurrentCreate(t *testing.T) {
 	t.Parallel()
-	m, err := New(t.TempDir())
+	m, err := New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,5 +185,40 @@ func TestMarkBorrowedStateConcurrentCreate(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(m.Root(), string(member), ".claude.json"))
 	if err != nil || string(data) != `{"hasCompletedOnboarding":true}` {
 		t.Fatalf("state = %q, %v", data, err)
+	}
+}
+
+func TestLoginFound(t *testing.T) {
+	manager, owner, _ := newLoginHomes(t)
+	if err := os.WriteFile(filepath.Join(owner, ".codex"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(owner, ".pi", "agent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(owner, ".pi", "agent", "auth.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(owner, ".omp", "agent", "agent.db"), []byte("login"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		rels []string
+		want bool
+	}{
+		{[]string{".claude/.credentials.json"}, true},
+		{[]string{".omp/agent"}, true},
+		{[]string{".codex/auth.json", ".claude/missing"}, false},
+		// An empty file is a mountpoint Aether created, not a login.
+		{[]string{".pi/agent/auth.json"}, false},
+		{[]string{".claude/missing", ".claude/.credentials.json"}, true},
+	} {
+		if got, err := manager.LoginFound("owner", tc.rels); err != nil || got != tc.want {
+			t.Errorf("LoginFound(%v) = %v, %v; want %v", tc.rels, got, err, tc.want)
+		}
+	}
+	// An empty directory is a mountpoint too.
+	if got, err := manager.LoginFound("other", []string{".omp/agent"}); err != nil || got {
+		t.Errorf("LoginFound of an empty .omp/agent = %v, %v; want false", got, err)
 	}
 }

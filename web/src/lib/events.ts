@@ -1,34 +1,40 @@
-// Human names for the event types the feed can show, shared by the feed row
-// and the activity view's type filter so a row and its filter option cannot
-// name the same event differently.
+// Names for the event types the server emits, shared by the feed row and the
+// Activity filter so a row and its filter option cannot drift.
 
-/** One entry per type `describe` in `components/feed-entry.tsx` handles. */
 export const eventLabel = {
-  'run.status': 'Run status',
-  'run.input': 'Run input',
+  'run.status': 'Run state',
+  'run.input': 'Agent questions',
   'run.title': 'Run title',
   'run.deleted': 'Run deleted',
+  'workspace.deleted': 'Workspace deleted',
   'run.protected': 'Run protection',
-  'run.archived': 'Run archive',
-  'run.outcome_seen': 'Outcome seen',
-  'run.agent': 'Agent',
-  'run.diff': 'Diff',
-  'run.cost': 'Cost',
-  'run.overlap': 'Overlap',
-  'workspace.timeline': 'Steering',
-  'workspace.approval': 'Approval',
+  'run.controller': 'Run control',
+  'run.mode': 'Run mode',
+  'run.archived': 'Archive',
+  'run.outcome_seen': 'Result opened',
+  'run.agent': 'Agent tool use',
+  'run.diff': 'File changes',
+  'run.cost': 'Usage',
+  'run.overlap': 'Overlapping runs',
+  'workspace.timeline': 'Messages and steering',
+  'workspace.approval': 'Approvals',
   'workspace.presence': 'Presence',
   'workspace.budget': 'Budget',
-  'git.branch': 'Branch',
-  'sync.conflict': 'Sync conflict',
-  'server.update': 'Server update',
-  'workspace.room_message': 'Run Room message',
-  'workspace.evidence_packet': 'Evidence packet',
+  'git.branch': 'Branch updates',
+  'sync.conflict': 'Sync conflicts',
+  'server.update': 'Server updates',
+  'workspace.room_message': 'Run notes',
+  'workspace.evidence_packet': 'Saved evidence',
+  'coord.message': 'Agent message sent',
+  'coord.message.acked': 'Agent message read',
+  'mission.changed': 'Swarm changes',
+  'member.changed': 'Member renames',
+  'profile.change': 'Agent profiles',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel
 
 /** A server newer than this dashboard can emit a type the map has never seen. */
 export function typeLabel(type: string): string {
-  return Object.hasOwn(eventLabel, type) ? eventLabel[type as EventType] : type
+  return Object.hasOwn(eventLabel, type) ? eventLabel[type as EventType] : 'Other'
 }

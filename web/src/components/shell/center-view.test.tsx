@@ -72,7 +72,7 @@ function seed() {
   for (const id of Object.keys(sockets)) delete sockets[id]
   boardMounts = 0
   boardUnmounts = 0
-  routeRegistry.current = { terminal: StubTerminal, board: StubBoard }
+  routeRegistry.current = { run: StubTerminal, board: StubBoard }
   useStore.setState({
     identityKey: 'identity-a',
     terminalCacheEpoch: 0,
@@ -91,7 +91,7 @@ describe('CenterView route mounting', () => {
     expect(screen.getByTestId('board')).toBeDefined()
     expect(screen.queryByTestId('terminal-run_a')).toBeNull()
 
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
 
     expect(screen.queryByTestId('board')).toBeNull()
     expect(screen.getByTestId('terminal-run_a')).toBeDefined()
@@ -99,7 +99,7 @@ describe('CenterView route mounting', () => {
 
   it('unmounts the terminal when switching away', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     expect(mounts.run_a).toBe(1)
 
     setRoute('board')
@@ -110,10 +110,10 @@ describe('CenterView route mounting', () => {
 
   it('mounts a fresh terminal when revisiting a run', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     setRoute('board')
 
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
 
     expect(mounts.run_a).toBe(2)
     expect(unmounts.run_a).toBe(1)
@@ -122,14 +122,14 @@ describe('CenterView route mounting', () => {
 
   it('preserves the terminal instance for the same run, identity, and epoch', () => {
     const view = render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     const originalSocket = sockets.run_a[0]
 
     view.rerender(<CenterView />)
     act(() => {
       useStore.setState({ hydrated: true })
     })
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
 
     expect(mounts.run_a).toBe(1)
     expect(unmounts.run_a).toBeUndefined()
@@ -137,12 +137,24 @@ describe('CenterView route mounting', () => {
     expect(screen.getByTestId('terminal-run_a')).toBeDefined()
   })
 
+  it('keeps the run mounted when only its view changes', () => {
+    render(<CenterView />)
+    setRoute('run', 'run_a')
+
+    act(() => {
+      useStore.setState({ route: { name: 'run', params: { runId: 'run_a', view: 'changes' } } })
+    })
+
+    expect(mounts.run_a).toBe(1)
+    expect(unmounts.run_a).toBeUndefined()
+  })
+
   it('disposes and remounts the terminal when the run ID changes', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     const oldSocket = sockets.run_a[0]
 
-    setRoute('terminal', 'run_b')
+    setRoute('run', 'run_b')
 
     expect(screen.queryByTestId('terminal-run_a')).toBeNull()
     expect(unmounts.run_a).toBe(1)
@@ -155,7 +167,7 @@ describe('CenterView route mounting', () => {
     render(<CenterView />)
 
     for (const id of runIDs) {
-      setRoute('terminal', id)
+      setRoute('run', id)
       expect(screen.getByTestId(`terminal-${id}`)).toBeDefined()
       for (const other of runIDs.filter((candidate) => candidate !== id)) {
         expect(screen.queryByTestId(`terminal-${other}`)).toBeNull()
@@ -168,7 +180,7 @@ describe('CenterView route mounting', () => {
     }
     expect(unmounts.run_f).toBeUndefined()
 
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     expect(mounts.run_a).toBe(2)
     expect(unmounts.run_f).toBe(1)
     expect(screen.getByTestId('terminal-run_a')).toBeDefined()
@@ -176,7 +188,7 @@ describe('CenterView route mounting', () => {
 
   it('disposes and remounts the terminal when the store identity changes', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     const oldSocket = sockets.run_a[0]
 
     act(() => {
@@ -192,7 +204,7 @@ describe('CenterView route mounting', () => {
 
   it('disposes and remounts the terminal when the event epoch changes', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     const oldSocket = sockets.run_a[0]
 
     act(() => {
@@ -218,18 +230,39 @@ describe('CenterView route mounting', () => {
     expect(screen.getByTestId('board')).toBeDefined()
   })
 
-  it('shows the fallback for an unknown route', () => {
+  it('redirects an unknown page to the board without a history entry', () => {
+    window.history.replaceState(null, '', '/?page=nosuchpage')
+    const entries = window.history.length
     render(<CenterView />)
 
-    setRoute('missing')
+    setRoute('nosuchpage')
 
-    expect(screen.queryByTestId('board')).toBeNull()
-    expect(screen.getByText('No view registered for “missing”.')).toBeDefined()
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    expect(window.location.search).toBe('')
+    expect(window.history.length).toBe(entries)
+    expect(screen.getByTestId('board')).toBeDefined()
+  })
+
+  it('redirects a page the gateway does not offer once capabilities are known', () => {
+    routeRegistry.current.missions = StubBoard
+    useStore.setState({
+      hydrated: false,
+      capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events'] },
+    })
+    render(<CenterView />)
+    setRoute('missions')
+    expect(useStore.getState().route.name).toBe('missions')
+
+    act(() => {
+      useStore.setState({ hydrated: true })
+    })
+
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
   })
 
   it('does not retain a hidden terminal across store and run changes', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     setRoute('board')
 
     act(() => {
@@ -240,7 +273,7 @@ describe('CenterView route mounting', () => {
     expect(screen.queryByTestId('terminal-run_a')).toBeNull()
     expect(unmounts.run_a).toBe(1)
 
-    setRoute('terminal', 'run_a')
+    setRoute('run', 'run_a')
     expect(mounts.run_a).toBe(2)
   })
 })

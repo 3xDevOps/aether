@@ -1,8 +1,11 @@
 import { clampDockHeight } from '@/components/dock'
 import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
+import { initialRoute } from '@/lib/url-state'
+import { isRunView, type RunView } from '@/routes/run/views'
 import type {
   ConfigExclusion,
   ConfigImportResult,
+  LaunchMode,
   LinkRepoResult,
   RepoFastForwardResult,
   RepoPushResult,
@@ -10,70 +13,19 @@ import type {
 import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type GroupBy = 'status' | 'member'
-export type BoardView = 'cards' | 'map'
-
-export interface BoardMapViewport {
-  x: number
-  y: number
-  zoom: number
-}
-
-export const minBoardMapZoom = 0.02
-export const maxBoardMapZoom = 2
-
-export function normalizeBoardMapViewport(value: unknown): BoardMapViewport | null {
-  if (!value || typeof value !== 'object') return null
-  const { x, y, zoom } = value as BoardMapViewport
-  if (
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    !Number.isFinite(zoom) ||
-    zoom <= 0
-  ) return null
-  return {
-    x: Math.max(-10_000_000, Math.min(10_000_000, x)),
-    y: Math.max(-10_000_000, Math.min(10_000_000, y)),
-    zoom: Math.max(minBoardMapZoom, Math.min(maxBoardMapZoom, zoom)),
-  }
-}
-
-export function normalizeBoardMapViewports(value: unknown): Record<string, BoardMapViewport> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const viewports: [string, BoardMapViewport][] = []
-  for (const [scope, candidate] of Object.entries(value)) {
-    const viewport = normalizeBoardMapViewport(candidate)
-    if (viewport) viewports.push([scope, viewport])
-  }
-  return Object.fromEntries(viewports)
-}
-
-/** The three things an update banner can be about. */
+export type TextSize = 'default' | 'large' | 'larger'
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
-/** Where the center view is pointed. */
 export interface Route {
   name: string
   params: Record<string, string>
 }
 
-/**
- * What the onboarding Repository step settled: the clone it pointed at, the
- * remote the gateway wrote, git's answer to the seeding push once one has
- * run, and the fast-forward that answered a workspace ahead of the clone.
- * It outlives the step so walking back into Repository shows the settled
- * answer rather than an empty form or a button that was already pressed.
- * The workspace it was settled for is part of it, because a remote points at
- * one workspace: picking a different one leaves this stale, and the step
- * must ask again.
- */
+/** Outlives the step so walking back shows the settled answer. A remote
+ * points at one workspace, so picking another one leaves this stale. */
 export interface OnboardingRepo {
-  /**
-   * Identifies this connection, not the clone it points at. Re-pointing
-   * and reconnecting the same path to the same workspace is a different
-   * connection, and a push still in flight from the previous one has to be
-   * told apart from it; path and workspace alone cannot do that.
-   */
+  /** Identifies this connection, not the clone: a push still in flight from
+   * an earlier connection of the same path and workspace must be told apart. */
   link: string
   workspace: string
   path: string
@@ -82,23 +34,12 @@ export interface OnboardingRepo {
   fastForward: RepoFastForwardResult | null
 }
 
-/**
- * The onboarding wizard's steps, in order. The resume point is persisted as
- * one of these names rather than as a position, so inserting a step never
- * relocates someone who is mid-wizard.
- */
-export const onboardingSteps = [
-  'Link',
-  'Git identity',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-] as const
+/** The resume point is persisted by name, not position, so inserting a step
+ * never relocates someone mid-wizard. */
+export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First run'] as const
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
-/** The First run step's unlaunched draft. */
 export interface OnboardingFirstRun {
   harness: string
   task: string
@@ -108,12 +49,13 @@ const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }
 
 /** What leaving the wizard clears: the walk, not the member's preferences. */
 const wizardReset = {
-  onboardingStep: 'Link',
-  onboardingFurthest: 'Link',
+  onboardingStep: 'Connect',
+  onboardingFurthest: 'Connect',
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
   onboardingFirstRun: emptyFirstRun,
+  onboardingAgentSkipped: false,
 } as const
 
 /** Where to resume; anything the wizard no longer knows starts over. */
@@ -121,8 +63,9 @@ export function onboardingStepIndex(step: OnboardingStep): number {
   return Math.max(0, onboardingSteps.indexOf(step))
 }
 
-export const minSidebarWidth = 320
-export const maxSidebarWidth = 520
+export const minSidebarWidth = 220
+export const maxSidebarWidth = 400
+export const defaultSidebarWidth = 260
 
 export interface ConfigImportCandidate {
   path: string
@@ -146,65 +89,55 @@ export interface ConfigImportStatus {
 
 export interface UiSlice {
   theme: Theme
+  textSize: TextSize
   sidebarWidth: number
   sidebarCollapsed: boolean
   sidebarDrawerOpen: boolean
+  /** Mounted pages showing their own filled action in their header. */
+  headerPrimaries: number
   terminalDockHeight: number
-  runDockHeight: number
   /** Zoom level shared by every terminal, in pixels. */
   terminalFontSize: number
-  /**
-   * Whether the Diff tab wraps long lines, or null while it still follows
-   * the pointer. One run-detail route is mounted at a time, so component
-   * state would reset the toggle every time the member left Diff and came
-   * back - several times a minute on a phone.
-   */
+  /** Off makes character shortcuts (`n`, `?`, `g b`) inert, for speech
+   * input that types words the dashboard would read as commands. */
+  singleKeyShortcuts: boolean
+  /** Null while it follows the pointer. Stored here because component state
+   * would reset whenever the member leaves Diff and comes back. */
   diffWrap: boolean | null
   onboarded: boolean
   onboardingStep: OnboardingStep
-  /**
-   * The furthest step reached, which never falls back on its own. The header
-   * marks these done and lets the member jump between them: without it a
-   * jump backwards would make every later step unreachable, and Link has no
-   * Back of its own to escape with.
-   */
+  /** Never falls back on its own: a backwards jump would otherwise make later
+   * steps unreachable, and Link has no Back to escape with. */
   onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
   onboardingSource: 'local' | 'remote'
   onboardingRepo: OnboardingRepo | null
   configImportPending: boolean
   configImportStatus: ConfigImportStatus | null
-  /** What the First run step has typed but not launched. It lives here so a
-   * jump to another step and back does not throw the draft away. */
+  /** Here so a jump to another step and back keeps the draft. */
   onboardingFirstRun: OnboardingFirstRun
-  /**
-   * The workspace every scoped surface acts on: the sidebar's run list, the
-   * board, launches, templates, budgets and the activity feed. Empty until
-   * hydration names one, which is why every consumer treats empty as "all".
-   */
+  onboardingAgentSkipped: boolean
+  /** Empty until hydration names one; every consumer treats empty as "all". */
   activeWorkspace: string
-  groupBy: GroupBy
-  boardView: BoardView
-  boardMapViewports: Record<string, BoardMapViewport>
-  /**
-   * The last harness successfully used for each agent account. This is a
-   * preference, not run state: it survives run cleanup and gives a launch
-   * form with no run history the same default the member chose last time.
-   */
-  lastHarnessByAccount: Record<string, string>
+  mineOnly: boolean
+  /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
+  launchDefaults: Record<string, { mode: LaunchMode; at: number }>
   route: Route
-  /**
-   * Which version of each update banner the member has already dismissed,
-   * keyed by kind. Holding the version rather than a boolean is the point:
-   * dismissing v1.3.0 silences v1.3.0 only, and v1.3.1 shows up again.
-   */
+  /** The view each run was last shown in during this visit; never persisted. */
+  runViewMemory: Record<string, RunView>
+  detailsOpen: boolean
+  /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
+  updatesOpen: boolean
+  shortcutsOpen: boolean
   setTheme: (theme: Theme) => void
+  setTextSize: (size: TextSize) => void
   setSidebarWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
+  holdHeaderPrimary: () => () => void
   setTerminalDockHeight: (height: number) => void
-  setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
+  setSingleKeyShortcuts: (on: boolean) => void
   setDiffWrap: (wrap: boolean) => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
@@ -213,53 +146,65 @@ export interface UiSlice {
   setOnboardingSource: (source: 'local' | 'remote') => void
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
+  setOnboardingAgentSkipped: (skipped: boolean) => void
   setActiveWorkspace: (workspaceID: string) => void
-  setGroupBy: (groupBy: GroupBy) => void
-  setBoardView: (view: BoardView) => void
-  setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
-  rememberHarness: (accountID: string, harness: string) => void
+  setMineOnly: (mineOnly: boolean) => void
+  rememberLaunch: (agent: string, mode: LaunchMode) => void
+  setLaunchDefault: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
-  /** Brings every dismissed banner back; the status bar's badge calls it. */
   clearDismissedUpdates: () => void
+  setUpdatesOpen: (open: boolean) => void
+  setShortcutsOpen: (open: boolean) => void
+  setDetailsOpen: (open: boolean) => void
 }
 
-export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
+export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   theme: 'system',
-  sidebarWidth: minSidebarWidth,
+  textSize: 'default',
+  sidebarWidth: defaultSidebarWidth,
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
+  headerPrimaries: 0,
   terminalDockHeight: 280,
-  runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
+  singleKeyShortcuts: true,
   diffWrap: null,
   onboarded: false,
-  onboardingStep: 'Link',
-  onboardingFurthest: 'Link',
+  onboardingStep: 'Connect',
+  onboardingFurthest: 'Connect',
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
   configImportPending: false,
   configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
+  onboardingAgentSkipped: false,
   activeWorkspace: '',
-  groupBy: 'status',
-  boardView: 'cards',
-  boardMapViewports: {},
-  lastHarnessByAccount: {},
-  route: { name: 'board', params: {} },
+  mineOnly: false,
+  launchDefaults: {},
+  route: initialRoute(),
+  runViewMemory: {},
+  detailsOpen: true,
   dismissedUpdates: { cli: '', server: '', shell: '' },
+  updatesOpen: false,
+  shortcutsOpen: false,
   setTheme: (theme) => set({ theme }),
+  setTextSize: (textSize) => set({ textSize }),
   setSidebarWidth: (width) =>
     set({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
-  setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
+  setSingleKeyShortcuts: (singleKeyShortcuts) => set({ singleKeyShortcuts }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarDrawerOpen: (sidebarDrawerOpen) => set({ sidebarDrawerOpen }),
+  holdHeaderPrimary: () => {
+    set((s) => ({ headerPrimaries: s.headerPrimaries + 1 }))
+    return () => set((s) => ({ headerPrimaries: s.headerPrimaries - 1 }))
+  },
   setOnboarded: (onboarded) =>
     set(
       onboarded ? { onboarded: true, ...wizardReset } : { onboarded: false },
@@ -276,9 +221,9 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setOnboardingSource: (onboardingSource) => set({ onboardingSource }),
   setOnboardingRepo: (onboardingRepo) => set({ onboardingRepo }),
   setOnboardingFirstRun: (onboardingFirstRun) => set({ onboardingFirstRun }),
-  // Switching scope carries the workspace route with it. Otherwise the
-  // switcher would say one workspace while the open view, its budget dialog
-  // and its settings dialog still acted on another.
+  setOnboardingAgentSkipped: (onboardingAgentSkipped) => set({ onboardingAgentSkipped }),
+  // Carry the workspace route along, or the open view would act on a
+  // different workspace than the switcher shows.
   setActiveWorkspace: (workspaceID) =>
     set((s) => ({
       activeWorkspace: workspaceID,
@@ -287,33 +232,22 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           ? { name: 'workspace', params: { workspaceId: workspaceID } }
           : s.route,
     })),
-  setGroupBy: (groupBy) => set({ groupBy }),
-  setBoardView: (boardView) => set({ boardView }),
-  setBoardMapViewport: (scope, value) => {
-    const viewport = normalizeBoardMapViewport(value)
-    if (!viewport) return
-    set((s) => ({
-      boardMapViewports: { ...s.boardMapViewports, [scope]: viewport },
-    }))
-  },
-  rememberHarness: (accountID, harness) => {
-    if (!accountID || !harness) return
-    set((s) => ({
-      lastHarnessByAccount: { ...s.lastHarnessByAccount, [accountID]: harness },
-    }))
-  },
-  // Revealing a run acknowledges it, wherever the reveal came from: every
-  // surface routes through this one call, so this is the only place the ack
-  // belongs. Opening a workspace also makes it the active scope, so the
-  // sidebar and every scoped surface follow the view.
+  setMineOnly: (mineOnly) => set({ mineOnly }),
+  rememberLaunch: (agent, mode) =>
+    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: Date.now() } } })),
+  // Keeps `at`, which ranks the agent the launch dialog preselects.
+  setLaunchDefault: (agent, mode) =>
+    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: s.launchDefaults[agent]?.at ?? 0 } } })),
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },
+      ...(name === 'run' && params.runId && isRunView(params.view)
+        ? { runViewMemory: { ...s.runViewMemory, [params.runId]: params.view } }
+        : {}),
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
-        ? { onboarded: true, ...wizardReset }
+        ? { onboarded: true, onboardingStep: s.onboardingFurthest }
         : {}),
     }))
-    if (params.runId) get().ackRun(params.runId)
     if (name === 'workspace' && params.workspaceId) {
       set({ activeWorkspace: params.workspaceId })
     }
@@ -322,4 +256,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
     set((s) => ({ dismissedUpdates: { ...s.dismissedUpdates, [kind]: version } })),
   clearDismissedUpdates: () =>
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
+  setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
 })
