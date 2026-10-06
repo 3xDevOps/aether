@@ -13,6 +13,10 @@ import (
 
 const enhancedWakeTimeout = 20 * time.Second
 
+// enhancedWakeRetries spaces the retries of a wake that run control or a
+// mission lock refused, neither of which announces its release.
+var enhancedWakeRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+
 // ACPWaker starts turns in enhanced runs, whose agents load no hook that
 // could notice new mail on their own.
 type ACPWaker interface {
@@ -39,17 +43,28 @@ func (s *Service) wakeEnhancedLocked(run domain.RunID) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		for _, delay := range enhancedWakeRetries {
+			if !s.wakeEnhanced(run) {
+				return
+			}
+			select {
+			case <-s.serveCtx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
 		s.wakeEnhanced(run)
 	}()
 }
 
 // wakeEnhanced prompts an idle enhanced run once per set of unread message
 // IDs: a turn the agent ends without reading its mail is not repeated until
-// another message arrives.
-func (s *Service) wakeEnhanced(run domain.RunID) {
+// another message arrives. It reports whether admission refused the wake
+// while the session stayed idle, which no turn end will retry.
+func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	mail, ok := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
 	if !ok || !s.cfg.ACPWaker.IdleEnhanced(run) || !s.enterRun(run) {
-		return
+		return false
 	}
 	defer s.leaveRun(run)
 	lock := s.enhancedWakeLock(run)
@@ -60,17 +75,17 @@ func (s *Service) wakeEnhanced(run domain.RunID) {
 	ids, err := mail.ListUnackedRunMessageIDs(ctx, run, protocol.CoordMaxUnread)
 	if err != nil {
 		slog.Warn("coord: enhanced wake: list unread mail", "run", run, "error", err)
-		return
+		return false
 	}
 	if !s.unwoken(run, ids) {
-		return
+		return false
 	}
 	err = s.cfg.WakeAdmission(ctx, run, func() error {
 		return s.cfg.ACPWaker.WakeEnhanced(ctx, run, protocol.CoordInboxContext(len(ids)))
 	})
 	if err != nil {
 		slog.Debug("coord: enhanced wake suppressed", "run", run, "error", err)
-		return
+		return s.cfg.ACPWaker.IdleEnhanced(run)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -82,6 +97,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) {
 	for _, id := range ids {
 		woken[id] = struct{}{}
 	}
+	return false
 }
 
 // unwoken forgets woken IDs that are no longer unread and reports whether

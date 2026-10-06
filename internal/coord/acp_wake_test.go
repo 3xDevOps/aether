@@ -119,16 +119,19 @@ func TestEnhancedWakeSkipsBusySessionUntilIdle(t *testing.T) {
 	}
 }
 
-func TestEnhancedWakeRefusedByAdmissionStaysArmed(t *testing.T) {
+// A refusal by run control or a mission lock is retried with no new mail
+// and no turn end.
+func TestEnhancedWakeRetriesARefusedAdmission(t *testing.T) {
 	waker := newFakeACPWaker()
 	var mu sync.Mutex
-	refuse := true
+	refusals := 0
 	h := newHarness(t, 2, func(c *Config) {
 		c.ACPWaker = waker
 		c.WakeAdmission = func(_ context.Context, _ domain.RunID, dispatch func() error) error {
 			mu.Lock()
 			defer mu.Unlock()
-			if refuse {
+			if refusals == 0 {
+				refusals++
 				return errors.New("run is protected")
 			}
 			return dispatch()
@@ -137,19 +140,15 @@ func TestEnhancedWakeRefusedByAdmissionStaysArmed(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "shared.go")
 	waker.endTurn(b)
-	if _, err := h.svc.Send(context.Background(), a, sendParams(b, "refused")); err != nil {
+	if _, err := h.svc.Send(context.Background(), a, sendParams(b, "refused once")); err != nil {
 		t.Fatal(err)
 	}
-	h.svc.wakeEnhanced(b)
-	if n := waker.count(); n != 0 {
-		t.Fatalf("a refused admission still prompted the agent %d times", n)
+	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+		t.Fatalf("retried wake prompt %q, want %q", got, want)
 	}
-
 	mu.Lock()
-	refuse = false
-	mu.Unlock()
-	h.svc.wakeEnhanced(b)
-	if n := waker.count(); n != 1 {
-		t.Fatalf("after admission allows it, wakes = %d, want 1", n)
+	defer mu.Unlock()
+	if refusals != 1 {
+		t.Fatalf("admission refused %d times, want 1", refusals)
 	}
 }
