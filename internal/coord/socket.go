@@ -151,9 +151,8 @@ func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 	return s.WriteFiles(run, map[string][]byte{CoAuthorsName: body})
 }
 
-// WriteFiles replaces files in a provisioned run's directory while its
-// container may be reading them, each by a rename over the old name, as
-// WriteCoAuthors does.
+// WriteFiles renames each file over the old one: the container may be
+// reading it.
 func (s *Service) WriteFiles(run domain.RunID, files map[string][]byte) error {
 	dir, err := s.runDir(run)
 	if err != nil {

@@ -278,9 +278,7 @@ type RunReportParams struct {
 	State        string                  `json:"state,omitempty"`
 	Reason       string                  `json:"reason,omitempty"`
 	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
-	// SessionID is the agent's own session id, stored so a mode switch can
-	// resume it.
-	SessionID string `json:"session_id,omitempty"`
+	SessionID    string                  `json:"session_id,omitempty"`
 }
 
 // RunReportResult is the result of run.report. It is empty: the caller is

@@ -34,7 +34,7 @@ const (
 )
 
 // An input-only report preserves the last execution state. SessionID is the
-// agent's own top-level session, the one a mode switch resumes.
+// agent's top-level session, not a subagent's.
 type Report struct {
 	State        State                   `json:"state,omitempty"`
 	Reason       string                  `json:"reason,omitempty"`

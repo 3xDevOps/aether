@@ -20,11 +20,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
-// ErrNotSwitchable refuses a mode switch for an agent without
-// harness.Profile.Switchable.
 var ErrNotSwitchable = errors.New("scheduler: this agent cannot move a running session between Standard and Enhanced")
 
-// ErrSwitching refuses input while a run switches modes.
 var ErrSwitching = errors.New("scheduler: the run is switching between Standard and Enhanced")
 
 // tuiSettle is how long a resumed terminal must keep running for a switch to
@@ -38,7 +35,6 @@ func modeName(mode domain.LaunchMode) string {
 	return "Standard"
 }
 
-// Switching is the mode a live run is switching to, empty when none.
 func (s *Scheduler) Switching(run domain.RunID) domain.LaunchMode {
 	s.mu.Lock()
 	defer s.mu.Unlock()

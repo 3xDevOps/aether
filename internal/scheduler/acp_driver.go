@@ -201,17 +201,12 @@ func (d *acpDriver) started(run domain.RunID) (*acphost.Session, <-chan struct{}
 	}
 }
 
-// acpOpen says how connect opens the agent session.
 type acpOpen int
 
 const (
-	// openNew starts a new session and sends it the run's task.
 	openNew acpOpen = iota
-	// openRestore restores the stored session, or starts a new one and
-	// says so in the log.
+	// openRestore starts a new session when the stored one cannot be restored.
 	openRestore
-	// openSwitch restores the stored session or fails, for a mode switch
-	// that rolls back on failure.
 	openSwitch
 )
 

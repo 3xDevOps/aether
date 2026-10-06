@@ -34,9 +34,7 @@ const (
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
-	// TypeRunMode signals a live run switching between Standard (tui) and
-	// Enhanced (acp).
-	TypeRunMode Type = "run.mode"
+	TypeRunMode       Type = "run.mode"
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"

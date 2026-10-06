@@ -30,7 +30,7 @@ type ManagedExecRuntime interface {
 type ExecSpec struct {
 	Argv       []string
 	WorkingDir string
-	// Env adds KEY=VALUE entries to the container's environment.
+	// Env adds KEY=VALUE entries to this exec's environment.
 	Env         []string
 	Cols, Rows  uint
 	CreationKey string

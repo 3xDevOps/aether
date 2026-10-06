@@ -38,8 +38,6 @@ var bridgePrefixes = []string{bridgePrefix, legacyBridgePrefix}
 type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
-	// WriteFiles replaces files in a provisioned run's directory while its
-	// container is live.
 	WriteFiles(run domain.RunID, files map[string][]byte) error
 	Release(run domain.RunID) error
 	WakeIdle(run domain.RunID)
@@ -335,9 +333,6 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 	return s.provisionCoordination(ctx, c, entry, run, profile, native, digest, bin, cliMount)
 }
 
-// coordinationLaunch is what coordination adds to a run's agent command: the
-// assets for the run directory, arguments and environment, and the reporter
-// they give the run.
 type coordinationLaunch struct {
 	files    map[string][]byte
 	args     []string
