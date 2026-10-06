@@ -116,11 +116,12 @@ describe('workspace scope and route stay in sync', () => {
     useStore.getState().navigate('workspace', { workspaceId: 'wsp_2' })
     expect(useStore.getState().activeWorkspace).toBe('wsp_2')
   })
-  it('marks onboarding complete and clears its state when navigating away', () => {
+  it('marks onboarding complete and keeps its progress when navigating away', () => {
     useStore.setState({
       route: { name: 'onboarding', params: {} },
       onboarded: false,
-      onboardingStep: 'Agent',
+      onboardingStep: 'Repository',
+      onboardingFurthest: 'Agent',
       onboardingWorkspace: 'wsp_1',
       onboardingRepo: {
         link: 'lnk_1',
@@ -137,9 +138,9 @@ describe('workspace scope and route stay in sync', () => {
     expect(useStore.getState()).toMatchObject({
       route: { name: 'board', params: {} },
       onboarded: true,
-      onboardingStep: 'Connect',
-      onboardingWorkspace: '',
-      onboardingRepo: null,
+      onboardingStep: 'Agent',
+      onboardingWorkspace: 'wsp_1',
+      onboardingRepo: { workspace: 'wsp_1' },
     })
   })
   it('keeps onboarding state when navigating to onboarding again', () => {

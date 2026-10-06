@@ -35,7 +35,7 @@ export function AgentStep({
    * owns it so Back closes the sub-screen before it leaves the step. */
   setup: string
   onSetup: (subStep: string) => void
-  onNext: () => void
+  onNext: (skipped: boolean) => void
 }) {
   const { agents, error, reload } = useAgentList(client, true)
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
@@ -74,7 +74,7 @@ export function AgentStep({
       lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it. A run shows the agent in one of two modes:"
       actions={
         <>
-          {installed ? <Button onClick={onNext}>Continue</Button> : <Button variant="secondary" onClick={onNext}>Skip for now</Button>}
+          {installed ? <Button onClick={() => onNext(false)}>Continue</Button> : <Button variant="secondary" onClick={() => onNext(true)}>Skip for now</Button>}
           {back}
         </>
       }
@@ -97,7 +97,7 @@ export function AgentStep({
                 primary={installed ? undefined : agents[0].name}
                 onRun={(agent) => {
                   rememberLaunch(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
-                  onNext()
+                  onNext(false)
                 }}
               />
             </div>

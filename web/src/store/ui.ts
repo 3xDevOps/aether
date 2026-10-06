@@ -55,6 +55,7 @@ const wizardReset = {
   onboardingSource: 'remote',
   onboardingRepo: null,
   onboardingFirstRun: emptyFirstRun,
+  onboardingAgentSkipped: false,
 } as const
 
 /** Where to resume; anything the wizard no longer knows starts over. */
@@ -115,6 +116,7 @@ export interface UiSlice {
   configImportStatus: ConfigImportStatus | null
   /** Here so a jump to another step and back keeps the draft. */
   onboardingFirstRun: OnboardingFirstRun
+  onboardingAgentSkipped: boolean
   /** Empty until hydration names one; every consumer treats empty as "all". */
   activeWorkspace: string
   mineOnly: boolean
@@ -144,6 +146,7 @@ export interface UiSlice {
   setOnboardingSource: (source: 'local' | 'remote') => void
   setOnboardingRepo: (repo: OnboardingRepo | null) => void
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
+  setOnboardingAgentSkipped: (skipped: boolean) => void
   setActiveWorkspace: (workspaceID: string) => void
   setMineOnly: (mineOnly: boolean) => void
   rememberLaunch: (agent: string, mode: LaunchMode) => void
@@ -176,6 +179,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   configImportPending: false,
   configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
+  onboardingAgentSkipped: false,
   activeWorkspace: '',
   mineOnly: false,
   launchDefaults: {},
@@ -217,6 +221,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setOnboardingSource: (onboardingSource) => set({ onboardingSource }),
   setOnboardingRepo: (onboardingRepo) => set({ onboardingRepo }),
   setOnboardingFirstRun: (onboardingFirstRun) => set({ onboardingFirstRun }),
+  setOnboardingAgentSkipped: (onboardingAgentSkipped) => set({ onboardingAgentSkipped }),
   // Carry the workspace route along, or the open view would act on a
   // different workspace than the switcher shows.
   setActiveWorkspace: (workspaceID) =>
@@ -240,7 +245,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
         ? { runViewMemory: { ...s.runViewMemory, [params.runId]: params.view } }
         : {}),
       ...(s.route.name === 'onboarding' && name !== 'onboarding'
-        ? { onboarded: true, ...wizardReset }
+        ? { onboarded: true, onboardingStep: s.onboardingFurthest }
         : {}),
     }))
     if (name === 'workspace' && params.workspaceId) {

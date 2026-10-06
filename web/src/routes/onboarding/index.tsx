@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check } from '@/components/icons'
+import { Check, Minus } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
@@ -13,7 +13,7 @@ import { useStore } from '@/store'
 import { useCapability, useHeaderPrimary } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
-function StepChips({ first, current, furthest, onJump }: { first: number; current: number; furthest: number; onJump: (step: number) => void }) {
+function StepChips({ first, current, furthest, skipped, onJump }: { first: number; current: number; furthest: number; skipped: number; onJump: (step: number) => void }) {
   const list = useRef<HTMLOListElement>(null)
   useEffect(() => {
     list.current?.querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -29,8 +29,8 @@ function StepChips({ first, current, furthest, onJump }: { first: number; curren
           <li key={label} aria-current={here ? 'step' : undefined} className="flex shrink-0 items-center gap-1">
             {visibleIndex > 0 && <span aria-hidden className="h-px w-3 bg-seam max-sm:w-1.5" />}
             {!here && reached ? (
-              <Button size="sm" variant="ghost" aria-label={`${number}. ${label}, visited - go to this step`} onClick={() => onJump(i)}>
-                <Check className="text-state-done" />
+              <Button size="sm" variant="ghost" aria-label={`${number}. ${label}, ${i === skipped ? 'skipped' : 'visited'} - go to this step`} onClick={() => onJump(i)}>
+                {i === skipped ? <Minus className="text-muted" /> : <Check className="text-state-done" />}
                 {label}
               </Button>
             ) : (
@@ -59,6 +59,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   useHeaderPrimary(true)
   const persistedStep = useStore((s) => s.onboardingStep)
   const persistedFurthest = useStore((s) => s.onboardingFurthest)
+  const agentSkipped = useStore((s) => s.onboardingAgentSkipped)
   const setOnboardingStep = useStore((s) => s.setOnboardingStep)
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const onboardingSource = useStore((s) => s.onboardingSource)
@@ -90,7 +91,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader
         title="Onboarding"
-        titleAdornment={<StepChips first={firstStep} current={currentStep} furthest={furthest} onJump={setStep} />}
+        titleAdornment={<StepChips first={firstStep} current={currentStep} furthest={furthest} skipped={agentSkipped ? onboardingStepIndex('Agent') : -1} onJump={setStep} />}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col px-4 pt-6 sm:px-6">
@@ -122,7 +123,10 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               back={back}
               setup={subStep}
               onSetup={setSubStep}
-              onNext={() => setStep(onboardingStepIndex('First run'))}
+              onNext={(skipped) => {
+                useStore.getState().setOnboardingAgentSkipped(skipped)
+                setStep(onboardingStepIndex('First run'))
+              }}
             />
           )}
           {current === 'First run' && (

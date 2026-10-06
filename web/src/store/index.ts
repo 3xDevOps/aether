@@ -89,6 +89,7 @@ const persistedUi = (s: RootState) => ({
   onboardingSource: s.onboardingSource,
   onboardingRepo: s.onboardingRepo,
   onboardingFirstRun: s.onboardingFirstRun,
+  onboardingAgentSkipped: s.onboardingAgentSkipped,
 })
 
 /** Partial: an older release stored fewer keys, and a migration may drop one. */
