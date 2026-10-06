@@ -25,10 +25,11 @@ const githubScreen = '@github'
 function DefaultMode({ agent }: { agent: AgentInfo }) {
   const remembered = useStore((s) => s.launchDefaults[agent.name]?.mode)
   const setLaunchDefault = useStore((s) => s.setLaunchDefault)
+  const value = defaultMode(agent, remembered)
   return (
-    <Select value={defaultMode(agent, remembered)} onValueChange={(mode) => setLaunchDefault(agent.name, mode as LaunchMode)}>
-      <SelectTrigger aria-label={`Default mode for ${label(agent)}`} className="w-32">
-        <SelectValue />
+    <Select value={value} onValueChange={(mode) => setLaunchDefault(agent.name, mode as LaunchMode)}>
+      <SelectTrigger aria-label={`Default mode for ${label(agent)}`} className="w-auto">
+        <SelectValue>Default: {modes.find((mode) => mode.value === value)?.label}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {modes.map((mode) => (

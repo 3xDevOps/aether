@@ -2676,7 +2676,7 @@ closing a setup returns focus to that row's button), **Add agent…**
 optional Enhanced command, sent through `agent.register`), and
 `AgentExtras`, the collapsed **Git identity** (Agents page only), **GitHub**
 and **Agent config files** disclosures. The Agents page adds a **Default
-mode** select per row, which writes
+mode** select per row, shown as "Default: Standard", which writes
 `launchDefaults` without changing which agent **New run** preselects. **Run**
 on the page opens **New run** on that agent; in onboarding it moves to First
 run with that agent preselected. The Agent step's primary action is
