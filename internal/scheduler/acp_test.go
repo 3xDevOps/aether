@@ -619,8 +619,8 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 	if e.sched.IdleEnhanced(run.ID) {
 		t.Fatal("a session with a running turn is idle")
 	}
-	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); !errors.Is(err, ErrACPBusy) {
-		t.Fatalf("wake during a turn: %v, want ErrACPBusy", err)
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); !errors.Is(err, errACPBusy) {
+		t.Fatalf("wake during a turn: %v, want errACPBusy", err)
 	}
 
 	standard, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "fake", domain.LaunchTUI)

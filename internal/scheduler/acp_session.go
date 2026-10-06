@@ -209,9 +209,7 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 	return sess.SetOption(ctx, optionID, value)
 }
 
-// ErrACPBusy refuses a wake while the enhanced session has a turn running
-// or a prompt queued.
-var ErrACPBusy = errors.New("scheduler: the enhanced session is busy")
+var errACPBusy = errors.New("scheduler: the enhanced session is busy")
 
 func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 	s.mu.Lock()
@@ -231,7 +229,7 @@ func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 
 func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt string) error {
 	if !s.IdleEnhanced(run) {
-		return ErrACPBusy
+		return errACPBusy
 	}
 	sess, err := s.acp.live(run)
 	if err != nil {
@@ -242,7 +240,7 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 		return err
 	}
 	if !started {
-		return ErrACPBusy
+		return errACPBusy
 	}
 	return nil
 }
