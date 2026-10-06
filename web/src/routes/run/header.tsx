@@ -47,7 +47,7 @@ interface FrameAction {
 }
 
 /** The needs-you table names the action; the frame performs it in place. */
-function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, nav: RunNavigation): FrameAction | null {
+export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, nav: RunNavigation): FrameAction | null {
   const now = useClock()
   const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])

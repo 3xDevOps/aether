@@ -111,9 +111,6 @@ export function NeedsYouCards({ run, agent, room, nav }: {
     ).finally(() => setDeciding(null))
   }
 
-  if (inputs.length + sessionRequests.length + approvals.length + steers.length + questions.length === 0) {
-    return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
-  }
   return (
     <div className="flex flex-col gap-2">
       {sessionRequests.map((request) => (

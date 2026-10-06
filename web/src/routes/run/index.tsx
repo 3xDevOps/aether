@@ -140,7 +140,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   }
   const openCaptures = openDialog('captures')
   const details = (inset: boolean) => (
-    <RunDetails run={run} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
+    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined

@@ -238,7 +238,9 @@ be reopened), the agent is still starting, the run is protected, or the
 viewer may only watch.
 
 **Details** lists, in order: **Needs you** (every pending request with the
-actions that answer it), **Agent messages** (agent-to-agent mail to or from
+actions that answer it; when the run needs you for another reason, such as an
+idle agent or an unreviewed finish, one card with that reason and the
+header's action), **Agent messages** (agent-to-agent mail to or from
 this run, shown when there is any or the run belongs to a swarm), **Notes**
 and the run record. A note is for people only: the agent never sees it.
 **Add** posts it as a `comment`. A question a teammate posts appears in

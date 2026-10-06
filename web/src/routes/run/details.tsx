@@ -5,6 +5,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
 import { Input } from '@/components/ui/input'
+import { RequestCard } from '@/components/ui/request-card'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
@@ -14,11 +15,13 @@ import type { RoomMessage } from '@/lib/types'
 import { runLabel } from '@/lib/status'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
-import type { RunNavigation } from '@/routes/run/header'
+import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
 import { NeedsYouCards, useRunRequests } from '@/routes/run/requests'
 import type { RunRoom } from '@/routes/run/room'
+import type { RunView } from '@/routes/run/views'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { loadMessagePage, messageScopeKey, type MessageScope } from '@/store/messages'
 import { isTerminal, type RunRecord } from '@/store/runs'
@@ -180,8 +183,21 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
   )
 }
 
-export function RunDetails({ run, agent, agentName, room, nav, inset, noteDraft }: {
+function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunView; agent: AgentTerminal; nav: RunNavigation }) {
+  const presented = useRunPresentation(run)
+  const primary = usePrimaryAction(run, view, agent, nav)
+  if (presented.state !== 'needs-you') return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
+  return (
+    <RequestCard
+      title={presented.reason}
+      actions={primary && <Button size="sm" variant="secondary" onClick={primary.act}>{primary.label}</Button>}
+    />
+  )
+}
+
+export function RunDetails({ run, view, agent, agentName, room, nav, inset, noteDraft }: {
   run: RunRecord
+  view: RunView
   agentName: string
   agent: AgentTerminal
   room: RunRoom
@@ -200,7 +216,9 @@ export function RunDetails({ run, agent, agentName, room, nav, inset, noteDraft 
         </div>
       )}
       <Section id="details-needs-you" title="Needs you" count={waiting} inset={inset}>
-        <NeedsYouCards run={run} agent={agent} room={room} nav={nav} />
+        {waiting > 0
+          ? <NeedsYouCards run={run} agent={agent} room={room} nav={nav} />
+          : <ConditionCard run={run} view={view} agent={agent} nav={nav} />}
       </Section>
       <AgentMessages run={run} inset={inset} />
       <Notes run={run} room={room} inset={inset} draft={noteDraft} />

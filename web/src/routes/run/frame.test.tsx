@@ -158,6 +158,17 @@ describe('run details', () => {
     expect(within(facts).getByText('aether/run-1-checkout')).toBeDefined()
   })
 
+  it('shows a needs-you condition without a request as one card with its action', async () => {
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [] })
+    open({ status: 'needs-attention', reason: 'agent idle' }, 'terminal')
+    const panel = await details()
+    const section = within(panel.getByRole('region', { name: 'Needs you' }))
+    expect(section.queryByText('Nothing is waiting on you.')).toBeNull()
+    expect(section.getByText(/^Agent idle/)).toBeDefined()
+    fireEvent.click(section.getByRole('button', { name: 'Reply' }))
+    expect(useStore.getState().route.params.view).toBe('session')
+  })
+
   it('lets only the controller decide a teammate message, with its lease', async () => {
     const queued = roomMessage({
       id: 'steer_1', kind: 'steer_request', state: 'queued', actor_id: bob.id, body: 'add a test',
