@@ -223,8 +223,8 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `messages`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, the **Mine** toggle, board layout and per-workspace
-map camera, dismissed update versions, terminal zoom) are persisted;
+collapse state, `activeWorkspace`, the **Mine** toggle, dismissed update
+versions, terminal zoom) are persisted;
 `persistedUi` in `store/index.ts` is the list that decides. Server data is
 always re-fetched.
 
@@ -599,10 +599,9 @@ a desktop window narrower than 768px is treated as a phone here too.
   both pointer modes. Secondary actions live in More; Kill and Delete come
   last, after a separator, and require confirmation. Metadata and tabs
   scroll inside their own regions before the actions become unreachable.
-- **The board** offers Cards and Map layouts. Cards stacks its three status
-  columns on narrow screens and places them side by side from the
-  `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
-  keep state labels and run controls available (see [Board](#board)).
+- **The board** stacks its three columns into one list on narrow screens and
+  places them side by side from the `lg`/1024px breakpoint (see
+  [Board](#board)).
 
 ## Data flow
 

@@ -22,11 +22,9 @@ request ([What an edge stores](#what-an-edge-stores)).
 - **The WebView's ordinary cache** of the dashboard's files, and the
   dashboard's own local record of how you use it. That record holds how the
   dashboard looks (theme, sidebar width and whether it is collapsed, terminal
-  font size, dock heights, diff wrapping, Cards/Map layout); where you were
-  (the workspace you last opened, whether the sidebar lists only your own
-  runs, each
-  workspace map's pan and zoom, whether you take control of a terminal when
-  you open one); which harness you last launched for each of your agent
+  font size, dock heights, diff wrapping); where you were (the workspace you
+  last opened, whether the sidebar lists only your own runs, whether you take
+  control of a terminal when you open one); which harness you last launched for each of your agent
   accounts; which update notices you dismissed, by version; and
   the setup wizard's progress, which stays empty on a phone because that
   wizard only runs in the desktop `aether gui`. The dashboard writes these

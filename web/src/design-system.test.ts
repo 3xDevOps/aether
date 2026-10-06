@@ -97,7 +97,6 @@ const rules: Rule[] = [
       'routes/settings/index.tsx',
       'routes/settings/usage.tsx',
       'routes/team/approvals.tsx',
-      'routes/team/presence.tsx',
       'routes/team/timeline.tsx',
       'routes/templates/index.tsx',
       'routes/templates/schedule-editor.tsx',
