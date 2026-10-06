@@ -66,7 +66,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
           <span className="min-w-0 truncate text-muted">Server-fetched source, checkout origin, deploy keys</span>
         </CollapsibleTrigger>
         <CollapsibleContent forceMount className="flex flex-col gap-4 pt-2 pl-5 data-[state=closed]:hidden">
-          {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source in Source control before launching.</p>}
+          {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source with Review source mirror on the Repository page before launching.</p>}
           <div className="flex flex-col gap-1.5">
             <h4 className="text-ui font-medium text-text">Checkout origin</h4>
             <p className="break-words font-code text-ui-sm">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>

@@ -70,7 +70,7 @@ export function OnboardingSourceOption({
       <p className="max-w-3xl text-ui-sm text-muted">
         {canManageSource
           ? 'The server can fetch the repository itself over public HTTPS or with a read-only deploy key, so no local clone is needed.'
-          : 'The server can fetch the repository itself. An administrator manages it in Source control.'}
+          : 'The server can fetch the repository itself. An administrator sets it up on this workspace\'s Repository page.'}
       </p>
       <div role="status" aria-label="Source mirror status" aria-live="polite" className="flex min-w-0 flex-col gap-2 self-stretch text-ui-sm">
         {loading && <p className="text-muted">Checking source mirror status...</p>}
@@ -94,7 +94,7 @@ export function OnboardingSourceOption({
               <dd className="break-all font-code">{status.accepted_commit || (canManageSource ? 'None - verify and explicitly adopt a candidate before launch' : 'None - ask an administrator to verify and adopt a candidate before launch')}</dd>
             </dl>
             {status.last_error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{status.last_error}</Callout>}
-            {status.status !== 'ready' && <p>{canManageSource ? 'Source is not ready for a new run. Open Source control to repair, verify or review the candidate.' : 'Source is not ready for a new run. Ask an administrator to repair, verify or review the candidate in Source control.'} The workspace is retained; do not import it again.</p>}
+            {status.status !== 'ready' && <p>{canManageSource ? 'Source is not ready for a new run. Choose Review source mirror to repair, verify or review the candidate.' : 'Source is not ready for a new run. Ask an administrator to repair, verify or review the candidate with Review source mirror on the Repository page.'} The workspace is retained; do not import it again.</p>}
           </>
         )}
       </div>
