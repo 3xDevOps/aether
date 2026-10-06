@@ -44,7 +44,8 @@ test('a backgrounded tab reopens its event socket the moment it returns', async 
   // Four failed retries is where the client gives up and says so. The next
   // one is then at least four seconds out, and climbing.
   await expect(footer).toHaveAccessibleName(/, Offline$/)
-  await expect(page.getByRole('main').getByRole('status').filter({ hasText: 'Offline' })).toBeVisible()
+  await expect(page.getByRole('main').getByText(/^Offline/)).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Offline' })).toBeAttached()
 
   pocketed = false
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))

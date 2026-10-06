@@ -1,6 +1,7 @@
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { CenterView, focusView } from '@/components/shell/center-view'
+import { ConnectionAnnouncer } from '@/components/shell/connection'
 import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { Sidebar } from '@/components/shell/sidebar'
 import { TopBar } from '@/components/shell/top-bar'
@@ -40,6 +41,7 @@ export function AppShell() {
       <PaletteDialogs />
       <ShortcutsDialog />
       <UpdateCenter />
+      <ConnectionAnnouncer />
     </div>
   )
 }

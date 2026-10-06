@@ -49,8 +49,18 @@ export function ConnectionLine({ className }: { className?: string }) {
   const problem = useConnectionProblem()
   if (!problem) return null
   return (
-    <div role="status" className={cn('min-w-0', className)}>
+    <div className={cn('min-w-0', className)}>
       <StateLine tone="failed">{problem}</StateLine>
+    </div>
+  )
+}
+
+// Screen readers often skip a live region that mounts together with its
+// text, so this one stays mounted and only its text changes.
+export function ConnectionAnnouncer() {
+  return (
+    <div role="status" className="sr-only">
+      {useConnectionProblem()}
     </div>
   )
 }
