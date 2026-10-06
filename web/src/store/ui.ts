@@ -185,7 +185,6 @@ export interface UiSlice {
    * hydration names one, which is why every consumer treats empty as "all".
    */
   activeWorkspace: string
-  /** Working and Finished list only the viewer's own runs. */
   mineOnly: boolean
   boardView: BoardView
   boardMapViewports: Record<string, BoardMapViewport>

@@ -262,7 +262,6 @@ const reasonBorder: Record<PresentationState, string> = {
   failed: 'border-state-failed/60',
 }
 
-/** "3 working · 1 needs you · 2 done" over a swarm's members. */
 function swarmCounts({ counts }: SwarmSummary): string {
   return [
     counts.working > 0 && `${counts.working} working`,

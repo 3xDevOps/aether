@@ -363,7 +363,6 @@ function SidebarHeader() {
   )
 }
 
-/** Narrows Working and Finished to the viewer's own runs; Needs you is always the viewer's. */
 function MineToggle() {
   const mineOnly = useStore((s) => s.mineOnly)
   const setMineOnly = useStore((s) => s.setMineOnly)
@@ -391,7 +390,6 @@ function MineToggle() {
   )
 }
 
-/** Runs that need the viewer, across every workspace. */
 function NeedsYouBadge() {
   const count = useNeedsYouCount()
   if (count === 0) return null

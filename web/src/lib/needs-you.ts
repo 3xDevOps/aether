@@ -1,8 +1,3 @@
-// The Needs you conditions: every server condition that blocks a run until a
-// human acts, as one table. A condition holds for a run whoever is looking;
-// it needs *you* only when the viewer is one of the members who can resolve
-// it. See "Run state" in docs/dashboard-frontend.md.
-
 import type {
   Approval,
   Member,
@@ -16,27 +11,21 @@ import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { MissionDetail } from '@/store/missions'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** Everything a run's state is derived from beyond the run itself. */
 export interface StateContext {
   viewerID: string | null
   viewerRole: Member['role'] | null
   members: Record<string, Member>
-  /** Every listed run, so a worker can find its integrator. */
   runs: Record<string, RunRecord>
   workspaces: Record<string, Workspace>
-  /** Pending Aether approvals per run, oldest first. */
   approvalsByRun: Record<string, Approval[]>
   roomMessages: Record<string, RoomMessage[]>
-  /** Room presence per run; its controller holds the run's terminal control. */
   roomStatus: Record<string, RoomStatusResult | undefined>
   missions: Record<string, Mission>
   missionDetails: Record<string, MissionDetail>
   pausedRuns: Record<string, boolean>
-  /** Epoch milliseconds the reason lines measure waits against. */
   now: number
 }
 
-/** Where the viewer goes to resolve a condition. */
 export type NeedsYouTarget = 'request' | 'run' | 'changes' | 'notes' | 'swarm'
 
 export type NeedsYouID =
@@ -54,12 +43,9 @@ export type NeedsYouID =
 
 export interface NeedsYouCondition {
   id: NeedsYouID
-  /** The condition holds and the viewer can resolve it. */
   applies: (run: RunRecord, ctx: StateContext) => boolean
-  /** The member the condition waits on while it holds, whoever is looking. */
   waitsOn: (run: RunRecord, ctx: StateContext) => string | undefined
   reason: (run: RunRecord, ctx: StateContext) => string
-  /** When the wait began, for oldest-first ordering. */
   since: (run: RunRecord, ctx: StateContext) => string
   target: NeedsYouTarget
 }
@@ -67,13 +53,9 @@ export interface NeedsYouCondition {
 interface Spec {
   id: NeedsYouID
   holds: (run: RunRecord, ctx: StateContext) => boolean
-  /** Members who can resolve it, most responsible first. */
   resolvers: (run: RunRecord, ctx: StateContext) => (string | undefined)[]
-  /** Admins can resolve it too. */
   admins?: boolean
-  /** Counts on a Background run. */
   background?: boolean
-  /** Counts on a worker its live integrator supervises. */
   supervised?: boolean
   reason: (run: RunRecord, ctx: StateContext) => string
   since?: (run: RunRecord, ctx: StateContext) => string | undefined
@@ -100,10 +82,7 @@ function condition(spec: Spec): NeedsYouCondition {
   }
 }
 
-/**
- * An agent report finished the run and its owner has not opened it yet. The
- * flag is owner-scoped on the server.
- */
+// `outcome_unseen` is owner-scoped on the server.
 export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
   return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
 }
@@ -126,10 +105,6 @@ function attemptHold(run: RunRecord, ctx: StateContext) {
   )
 }
 
-/**
- * A worker whose swarm is running under a live integrator: the integrator,
- * not a human, handles its stops and requests, until a human holds it.
- */
 export function supervised(run: RunRecord, ctx: StateContext): boolean {
   if (run.mission_role !== 'worker' || !run.integrator_run_id) return false
   const integrator = ctx.runs[run.integrator_run_id]
@@ -151,7 +126,6 @@ export function memberName(memberID: string, ctx: Pick<StateContext, 'members'>)
   return ctx.members[memberID]?.display_name ?? memberID
 }
 
-/** "12 min" since an instant, never less than a minute's precision. */
 function waited(iso: string, now: number): string {
   const minutes = Math.floor((now - Date.parse(iso)) / 60_000)
   if (!Number.isFinite(minutes) || minutes < 1) return 'less than a minute'
@@ -192,7 +166,6 @@ function openSwarmQuestions(run: RunRecord, ctx: StateContext) {
   return (ctx.missionDetails[mission.id]?.questions ?? []).filter((q) => !q.answered_at)
 }
 
-/** The human accountable for a swarm: the mission's, else whoever started its integrator. */
 function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
   return (
     missionOf(run, ctx)?.accountable_human_id ??
@@ -205,11 +178,7 @@ const blockedPrefix = 'blocked: '
 const enhancedPrefix = 'enhanced:'
 const stalledPrefix = 'stalled:'
 
-/**
- * Checked in order; `needsYou` reports the first that applies. The rows that
- * read a reason prefix come before the generic stop, which matches any
- * parked run.
- */
+// Order matters: the reason-prefix rows must precede `stopped`, which matches any parked run.
 export const needsYouConditions: NeedsYouCondition[] = [
   condition({
     id: 'permission',
@@ -287,7 +256,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       // Without the swarm's record only a failure is certain: a completed
       // integrator may simply have finished the swarm.
       if (!missionOf(run, ctx)) return run.status === 'failed' || run.status === 'interrupted'
-      return mission !== undefined && (Boolean(mission.integrator_launch_error) || !!isTerminal(run.status))
+      return mission !== undefined && (Boolean(mission.integrator_launch_error) || isTerminal(run.status))
     },
     resolvers: (run, ctx) => [swarmHuman(run, ctx)],
     admins: true,
@@ -350,12 +319,10 @@ export const needsYouConditions: NeedsYouCondition[] = [
   }),
 ]
 
-/** The first condition the viewer can resolve on this run, if any. */
 export function needsYou(run: RunRecord, ctx: StateContext): NeedsYouCondition | undefined {
   return needsYouConditions.find((entry) => entry.applies(run, ctx))
 }
 
-/** Who the run waits on when it waits on somebody other than the viewer. */
 export function waitingOn(run: RunRecord, ctx: StateContext): string | undefined {
   if (!ctx.viewerID) return undefined
   for (const entry of needsYouConditions) {

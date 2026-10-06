@@ -149,7 +149,6 @@ function makeUnit(key: string, cards: RunRow[], parents: Map<string, string>): M
   }
 }
 
-/** Relationships: explicit role, mission and workspace. */
 export function layoutRunMap(cards: RunRow[]): RunMapLayout {
   const byKey = new Map(cards.map((card) => [runKey(card), card]))
   const ordered = [...byKey.values()].sort((a, b) => compare(runKey(a), runKey(b)))

@@ -157,7 +157,6 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   )
 }
 
-/** One run's chip, in the state the viewer sees it in. */
 export function RunStatusChip({ run }: { run: RunRecord }) {
   return <StatusChip state={useRunPresentation(run).state} />
 }

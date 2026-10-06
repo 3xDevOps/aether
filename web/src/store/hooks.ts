@@ -16,14 +16,12 @@ import {
   type SidebarGroup,
 } from '@/store/selectors'
 
-/** The state context, stable until a field it reads changes or the clock ticks. */
 export function useStateContext(): StateContext {
   const now = useClock()
   const fields = useStore(useShallow((s) => stateContextOf(s, 0)))
   return useMemo(() => ({ ...fields, now }), [fields, now])
 }
 
-/** The sidebar's groups for the active workspace and the Mine toggle. */
 export function useSidebarGroups(): SidebarGroup[] {
   const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
@@ -31,7 +29,6 @@ export function useSidebarGroups(): SidebarGroup[] {
   return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
 }
 
-/** Runs that need the viewer: in one workspace, or across all of them. */
 export function useNeedsYouCount(workspace?: string): number {
   const counts = useNeedsYouByWorkspace()
   return workspace === undefined
@@ -39,13 +36,11 @@ export function useNeedsYouCount(workspace?: string): number {
     : counts[workspace] ?? 0
 }
 
-/** Workspace ID to how many of its runs need the viewer, for the switcher. */
 export function useNeedsYouByWorkspace(): Record<string, number> {
   const ctx = useStateContext()
   return useMemo(() => needsYouByWorkspace(ctx), [ctx])
 }
 
-/** One run's state and reason as the viewer sees it, kept fresh by the clock. */
 export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
@@ -100,7 +95,6 @@ export function useRunInput(run: Run) {
   }
 }
 
-/** A workspace's runs in group order, every run when it is empty. */
 export function useListedRuns(workspace: string): RunRow[] {
   const ctx = useStateContext()
   return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])

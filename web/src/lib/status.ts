@@ -1,7 +1,3 @@
-// Presentation states. UI-only: the wire run status enum is unchanged. A run
-// shows exactly one state and one plain-words reason, derived worst-first and
-// scoped to the viewer. See "Run state" in docs/dashboard-frontend.md.
-
 import {
   isPaused,
   memberName,
@@ -15,13 +11,11 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 
 export type PresentationState = 'needs-you' | 'working' | 'paused' | 'done' | 'failed'
 
-/** The three run groups the sidebar and the board list. */
 export type RunGroup = 'needs-you' | 'working' | 'finished'
 
 export interface RunPresentation {
   state: PresentationState
   reason: string
-  /** The condition that needs the viewer, when the state is needs-you. */
   needsYou?: NeedsYouCondition
 }
 
@@ -50,7 +44,6 @@ function finishedReason(run: RunRecord): string {
   }
 }
 
-/** A run's one state and reason, as this viewer sees it. */
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const condition = needsYou(run, ctx)
   if (condition) return { state: 'needs-you', reason: condition.reason(run, ctx), needsYou: condition }
@@ -105,7 +98,6 @@ export const groupLabel: Record<RunGroup, string> = {
   finished: 'Finished',
 }
 
-/** The chip colour each state reads in. */
 export const stateTone: Record<PresentationState, 'warning' | 'accent' | 'default' | 'success' | 'danger'> = {
   'needs-you': 'warning',
   working: 'accent',

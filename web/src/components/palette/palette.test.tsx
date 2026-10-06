@@ -795,9 +795,8 @@ describe('command palette', () => {
   })
 
   it('offers restore on an archived run, reached from its own page', async () => {
-    // useAttentionRuns excludes an archived, final run entirely, so the
-    // palette must resolve the focused run from the run map instead - the
-    // only way to reach Restore is from the run's own page.
+    // The run lists exclude an archived, final run, so the palette must
+    // resolve the focused run from the run map instead.
     useStore.setState({
       runs: {
         [active.id]: toRecord(

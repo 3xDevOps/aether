@@ -1,6 +1,3 @@
-// Board shape: the sidebar's three run groups as columns. Pure over a narrow
-// input so the component can memoize on exactly what it reads.
-
 import { useMemo } from 'react'
 import type { RunActionCandidate } from '@/lib/commands'
 import type { StateContext } from '@/lib/needs-you'
@@ -17,7 +14,6 @@ import {
   type RunsInput,
 } from '@/store/selectors'
 
-/** One card: a run, or a swarm under its integrator with its members' counts. */
 export type BoardCard = RunTree
 
 export interface BoardColumn {
@@ -72,7 +68,6 @@ export function useBoard(): BoardData {
   return useMemo(() => board({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
 }
 
-/** Each card's run followed by its swarm's members. */
 export function cardRuns(cards: BoardCard[]): RunRow[] {
   return cards.flatMap((card) => [card, ...(card.swarm?.members ?? [])])
 }

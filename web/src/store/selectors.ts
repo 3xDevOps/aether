@@ -1,7 +1,3 @@
-// The run groups the sidebar and the board list: Needs you, Working and
-// Finished. Needs you is global across workspaces; the other two follow the
-// active workspace and the Mine toggle. A swarm is one entry.
-
 import type { StateContext } from '@/lib/needs-you'
 import {
   groupLabel,
@@ -20,7 +16,6 @@ import { isArchivable, type RunRecord } from '@/store/runs'
  */
 export interface RunsInput {
   workspace: string
-  /** Working and Finished list only the viewer's own runs. */
   mineOnly: boolean
   ctx: StateContext
 }
@@ -30,23 +25,18 @@ export interface RunRow {
   state: PresentationState
   reason: string
   group: RunGroup
-  /** When the wait began; Needs you lists the oldest first. */
   waitingSince: string
   owner?: Member
-  /** The run's workspace name, set only outside the active workspace. */
   workspaceName?: string
 }
 
 export interface SwarmSummary {
-  /** Some members are not listed under the swarm entry. */
   collapsed: boolean
   counts: { working: number; needsYou: number; done: number; failed: number }
-  /** Every member run besides the entry's own integrator. */
   members: RunRow[]
 }
 
 export interface RunTree extends RunRow {
-  /** Members listed under the entry: a swarm's members that need the viewer. */
   children: RunRow[]
   swarm?: SwarmSummary
 }
@@ -61,11 +51,9 @@ export interface SidebarGroup {
   key: RunGroup
   label: string
   runs: RunTree[]
-  /** Runs counted in the header: those needing the viewer, else the entries. */
   count: number
 }
 
-/** The state context as the store holds it now. */
 export function stateContextOf(s: RootState, now: number): StateContext {
   return {
     viewerID: s.info?.member.id ?? null,
@@ -83,7 +71,6 @@ export function stateContextOf(s: RootState, now: number): StateContext {
   }
 }
 
-/** Every run that is not archived, with its state as the viewer sees it. */
 export function runRows(ctx: StateContext): RunRow[] {
   const rows: RunRow[] = []
   for (const run of Object.values(ctx.runs)) {
@@ -103,7 +90,6 @@ export function runRows(ctx: StateContext): RunRow[] {
   return rows
 }
 
-/** The swarm's integrator entry: the mission's current one, else its newest. */
 function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow | undefined {
   const integrators = rows.filter((row) => row.run.mission_role === 'integrator')
   const mission = ctx.missions[rows[0].run.mission_id ?? '']
@@ -132,7 +118,6 @@ function swarmTree(root: RunRow, members: RunRow[]): RunTree {
   }
 }
 
-/** Rows folded into entries: one per standalone run and one per swarm. */
 export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
   const swarms = new Map<string, RunRow[]>()
   const trees: RunTree[] = []
@@ -149,7 +134,6 @@ export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
   }
   for (const members of swarms.values()) {
     const root = swarmRoot(members, ctx)
-    // Without an integrator there is no swarm entry to fold into.
     if (!root) trees.push(...members.map((row) => ({ ...row, children: [] })))
     else trees.push(swarmTree(root, members.filter((row) => row !== root)))
   }
@@ -162,7 +146,6 @@ const byChange = (a: RunRow, b: RunRow) =>
   b.run.stateChangedAt.localeCompare(a.run.stateChangedAt) || a.run.id.localeCompare(b.run.id)
 const failedFirst = (a: RunRow, b: RunRow) =>
   Number(b.state === 'failed') - Number(a.state === 'failed') || byChange(a, b)
-/** Needs you oldest-waiting first, Working latest change first, Failed first in Finished. */
 const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
   'needs-you': byWait,
   working: byChange,
@@ -170,14 +153,12 @@ const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
 }
 const groupOrder: RunGroup[] = ['needs-you', 'working', 'finished']
 
-/** Marks rows outside the active workspace with that workspace's name. */
 function located(row: RunRow, s: RunsInput): RunRow {
   if (!s.workspace || row.run.workspace_id === s.workspace) return row
   const workspace = s.ctx.workspaces[row.run.workspace_id]
   return { ...row, workspaceName: workspace?.name ?? row.run.workspace_id }
 }
 
-/** The three groups in scope and in order. */
 export function runGroups(s: RunsInput): RunGroups {
   const groups: RunGroups = { 'needs-you': [], working: [], finished: [] }
   for (const tree of runTrees(runRows(s.ctx), s.ctx)) {
@@ -194,14 +175,12 @@ export function runGroups(s: RunsInput): RunGroups {
   return groups
 }
 
-/** One flat list of a workspace's runs, every run when it is empty, in group order. */
 export function listedRuns(workspace: string, ctx: StateContext): RunRow[] {
   return runRows(ctx)
     .filter((row) => !workspace || row.run.workspace_id === workspace)
     .sort((a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group) || inGroup[a.group](a, b))
 }
 
-/** The non-empty groups, Needs you first. */
 export function sidebarGroups(s: RunsInput): SidebarGroup[] {
   const groups = runGroups(s)
   return groupOrder
@@ -220,7 +199,6 @@ export function sidebarGroups(s: RunsInput): SidebarGroup[] {
     }))
 }
 
-/** How many runs need the viewer in each workspace. */
 export function needsYouByWorkspace(ctx: StateContext): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const row of runRows(ctx)) {
