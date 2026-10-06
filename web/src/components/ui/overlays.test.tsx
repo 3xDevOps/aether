@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { DropdownMenu as MenuPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -67,6 +68,32 @@ test('a long menu on a phone opens as a bottom sheet', async () => {
   const menu = await openMenu()
   expect(menu.hasAttribute('data-sheet')).toBe(true)
   expect(menu.className).toContain('animate-sheet-up')
+})
+
+function GroupedItems() {
+  return (
+    <MenuPrimitive.Group aria-label="Runs">
+      {Array.from({ length: 7 }, (_, i) => (
+        <MenuItem key={i}>Run {i + 1}</MenuItem>
+      ))}
+    </MenuPrimitive.Group>
+  )
+}
+
+test('items inside a group or a caller\'s component count toward the sheet', async () => {
+  atViewport(390, { pointer: 'coarse' })
+  render(
+    <Menu>
+      <MenuTrigger asChild>
+        <Button>Actions</Button>
+      </MenuTrigger>
+      <MenuContent>
+        <GroupedItems />
+      </MenuContent>
+    </Menu>,
+  )
+  const menu = await openMenu()
+  expect(menu.hasAttribute('data-sheet')).toBe(true)
 })
 
 test('a short menu on a phone stays a popup', async () => {

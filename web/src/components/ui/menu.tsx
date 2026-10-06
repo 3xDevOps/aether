@@ -14,24 +14,17 @@ export function MenuTrigger(props: React.ComponentProps<typeof MenuPrimitive.Tri
 
 const sheetAbove = 6
 
-// Counts only items written inline or in fragments; items inside a caller's own component are not seen.
-function countItems(children: React.ReactNode): number {
-  let count = 0
-  React.Children.forEach(children, (child) => {
-    if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return
-    if (child.type === React.Fragment) count += countItems(child.props.children)
-    else if (child.type === MenuItem || child.type === MenuCheckboxItem) count++
-  })
-  return count
-}
-
 export function MenuContent({
   className,
   sideOffset = 4,
   children,
   ...props
 }: React.ComponentProps<typeof MenuPrimitive.Content>) {
-  const sheet = useIsMobile() && countItems(children) > sheetAbove
+  const [items, setItems] = React.useState(0)
+  const countItems = React.useCallback((node: HTMLDivElement | null) => {
+    if (node) setItems(node.querySelectorAll('[role^="menuitem"]').length)
+  }, [])
+  const sheet = useIsMobile() && items > sheetAbove
   return (
     <>
       {/* Radix's portal takes exactly one child. */}
@@ -42,6 +35,7 @@ export function MenuContent({
       )}
       <MenuPrimitive.Portal>
         <MenuPrimitive.Content
+          ref={countItems}
           data-slot="menu-content"
           data-sheet={sheet || undefined}
           sideOffset={sideOffset}
