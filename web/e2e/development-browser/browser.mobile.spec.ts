@@ -13,7 +13,7 @@ test('phone operates the shared login with touch, soft keyboard and composition'
     await page.getByRole('button', { name: 'Restore browser controls', exact: true }).click()
     await shareWithAgent(page, fixture)
     const beforeCancel = await fixture.currentPage()
-    await page.getByRole('button', { name: 'Browser tools', exact: true }).click()
+    await page.getByRole('button', { name: 'Page tools', exact: true }).click()
     await page.getByRole('button', { name: 'Reset session', exact: true }).click()
     const resetDialog = page.getByRole('alertdialog')
     await expect(resetDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()

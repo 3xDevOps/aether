@@ -17,6 +17,8 @@ import { BrowserSurface } from './surface'
 // sessionStorage into another window. Reloads observe first, then take control.
 let tabControlSession: string | undefined
 
+const defaultAddress = 'http://localhost:3000'
+
 const stateWords: Record<string, string> = {
   not_started: 'Browser not started',
   creating: 'Browser starting',
@@ -43,7 +45,8 @@ function BrowserRoute({ runID }: { runID: string }) {
   const [pages, setPages] = useState<DevBrowserPage[]>([])
   const [selected, setSelected] = useState('')
   const [controller, setController] = useState<DevController | null>(null)
-  const [address, setAddress] = useState('http://localhost:3000')
+  const [address, setAddress] = useState(defaultAddress)
+  const [otherAddress, setOtherAddress] = useState(false)
   const [preset, setPreset] = useState('1280x800')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -177,11 +180,11 @@ function BrowserRoute({ runID }: { runID: string }) {
       setBlocked(false)
     })
   }
-  const open = () => {
+  const open = (url = address) => {
     if (!status || (!fence && status.session_id)) return
     void perform(async () => {
       const [width, height] = preset.split('x').map(Number)
-      const result = await api.devBrowserOpen({ run_id: runID, session_id: status.session_id, control_session_id: fence?.control_session_id ?? controlSession, control_generation: fence?.control_generation ?? 0, url: address, width, height })
+      const result = await api.devBrowserOpen({ run_id: runID, session_id: status.session_id, control_session_id: fence?.control_session_id ?? controlSession, control_generation: fence?.control_generation ?? 0, url, width, height })
       const held = { surface: { kind: 'browser' as const, id: 'browser', incarnation: result.page.session_id }, fence: result.control }
       if (!alive.current || !focused.current) { await release(held); return }
       owned.current = held
@@ -295,7 +298,7 @@ function BrowserRoute({ runID }: { runID: string }) {
           </select>
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" disabled={busy || blocked || !status?.available || !fence} onClick={open}>New page</Button>
+          <Button variant="secondary" disabled={busy || blocked || !status?.available || !fence} onClick={() => open()}>New page</Button>
           <Button variant="secondary" disabled={busy} onClick={() => {
             void perform(async () => { const result = await api.devBrowserScreenshot({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision }); setCapture(result.artifact.id) })
           }}>Screenshot</Button>
@@ -315,7 +318,15 @@ function BrowserRoute({ runID }: { runID: string }) {
         <EmptyState
           title="No page open"
           action={canOpen
-            ? <Button disabled={busy} onClick={open}>Open {address}</Button>
+            ? otherAddress
+              ? <form className="flex flex-wrap items-center justify-center gap-2" onSubmit={(event) => { event.preventDefault(); open() }}>
+                  <Input aria-label="Browser URL" type="url" value={address} onChange={(event) => setAddress(event.target.value)} className="w-64" autoFocus />
+                  <Button type="submit" disabled={busy}>Open</Button>
+                </form>
+              : <div className="flex flex-col items-center gap-1">
+                  <Button disabled={busy} onClick={() => open(defaultAddress)}>Open {defaultAddress}</Button>
+                  <Button variant="link" size="sm" onClick={() => setOtherAddress(true)}>Other address…</Button>
+                </div>
             : take || (fence && status?.session_id && <Button variant="secondary" disabled={busy || blocked} onClick={() => ask('reset')}>Reset session</Button>)}
         >
           <span role="status">{state}</span>
