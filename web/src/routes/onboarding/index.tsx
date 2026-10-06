@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
@@ -14,8 +14,12 @@ import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
 function StepChips({ first, current, furthest, onJump }: { first: number; current: number; furthest: number; onJump: (step: number) => void }) {
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => {
+    list.current?.querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [current])
   return (
-    <ol aria-label="Steps" className="flex min-w-0 items-center gap-1 overflow-x-auto">
+    <ol ref={list} aria-label="Steps" className="flex min-w-0 items-center gap-1 overflow-x-auto max-sm:gap-0.5">
       {onboardingSteps.slice(first).map((label, visibleIndex) => {
         const i = visibleIndex + first
         const number = visibleIndex + 1
