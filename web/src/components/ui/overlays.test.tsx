@@ -150,7 +150,7 @@ test('a centred dialog becomes a bottom sheet below md, and stills under reduced
   render(<OpenDialog />)
   const dialog = screen.getByRole('dialog')
   expect(dialog.getAttribute('data-variant')).toBe('center')
-  for (const token of ['animate-overlay-in', 'max-md:bottom-0', 'max-md:animate-sheet-up', 'motion-reduce:animate-none']) {
+  for (const token of ['animate-overlay-in', 'max-md:bottom-[var(--keyboard-inset,0px)]', 'max-md:animate-sheet-up', 'motion-reduce:animate-none']) {
     expect(dialog.className).toContain(token)
   }
 })

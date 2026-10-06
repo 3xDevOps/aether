@@ -6,6 +6,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { TitleBar } from '@/components/shell/title-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
+import { useKeyboardInset } from '@/lib/keyboard-inset'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -42,6 +43,7 @@ export function App() {
   // a fresh subscribe and hydrate, not a page reload that would lose the
   // session token held in memory.
   const [attempt, setAttempt] = useState(0)
+  useKeyboardInset()
 
   useEffect(() => connect(useStore), [attempt, epoch])
 

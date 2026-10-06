@@ -599,7 +599,11 @@ it.
 
 Below `md` every centred dialog opens as a bottom sheet, full width and at
 most 85dvh, and scrolls inside itself, so its footer stays in reach of a thumb
-and the soft keyboard shortens it from the top. `md` is a width breakpoint, so
+and the soft keyboard shortens it from the top. iOS Safari does not resize the
+layout viewport for the keyboard, so `useKeyboardInset()`
+(`web/src/lib/keyboard-inset.ts`) sets `--keyboard-inset` from
+`visualViewport` and the sheet sits that far above the bottom edge; it is 0 on
+browsers that resize. `md` is a width breakpoint, so
 a desktop window narrower than 768px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.

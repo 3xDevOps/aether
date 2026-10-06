@@ -26,7 +26,7 @@ function DialogOverlay({ className, ...props }: React.ComponentProps<typeof Dial
   return <DialogPrimitive.Overlay data-slot="dialog-overlay" className={cn(overlayClass, className)} {...props} />
 }
 
-const bottomSheet = 'inset-x-0 bottom-0 max-h-[85dvh] rounded-b-none border-x-0 border-b-0 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-sheet-up'
+const bottomSheet = 'inset-x-0 bottom-[var(--keyboard-inset,0px)] max-h-[calc(85dvh-var(--keyboard-inset,0px))] rounded-b-none border-x-0 border-b-0 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-sheet-up'
 
 export type DialogVariant = 'center' | 'bottom' | 'side'
 
@@ -38,7 +38,7 @@ export function dialogContentClass(variant: DialogVariant = 'center', side: 'lef
     variant === 'center' &&
       'top-1/2 left-1/2 max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 animate-overlay-in',
     variant === 'center' &&
-      'max-md:top-auto max-md:left-0 max-md:w-full max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:max-h-[85dvh] max-md:inset-x-0 max-md:bottom-0 max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:pb-[calc(1rem+env(safe-area-inset-bottom))] max-md:animate-sheet-up',
+      'max-md:top-auto max-md:left-0 max-md:w-full max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:max-h-[calc(85dvh-var(--keyboard-inset,0px))] max-md:inset-x-0 max-md:bottom-[var(--keyboard-inset,0px)] max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:pb-[calc(1rem+env(safe-area-inset-bottom))] max-md:animate-sheet-up',
     variant === 'bottom' && bottomSheet,
     variant === 'side' && 'inset-y-0 flex max-w-full flex-col overflow-hidden border-y-0 pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)]',
     variant === 'side' && side === 'left' && 'left-0 rounded-l-none border-l-0 pl-[env(safe-area-inset-left)] animate-sheet-left',
