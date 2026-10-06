@@ -727,6 +727,11 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 	return nil
 }
 
+// ACPLaunchable is false until the ACP driver is wired into launch.
+func (s *Scheduler) ACPLaunchable() bool {
+	return false
+}
+
 // command resolves argv and profile for one launch by member on account's
 // shared account, with the profile from launchProfile.
 func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) ([]string, harness.Profile, error) {
@@ -742,7 +747,9 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	case domain.LaunchHeadless:
 		argv = headless
 	case domain.LaunchACP:
-		return nil, harness.Profile{}, domain.ErrLaunchModeUnavailable
+		if !s.ACPLaunchable() {
+			return nil, harness.Profile{}, domain.ErrLaunchModeUnavailable
+		}
 	default:
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
 	}

@@ -47,7 +47,8 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.cfg.Homes = homes
-	s.cfg.Runs = &fakeRuns{}
+	runs := &fakeRuns{acp: true}
+	s.cfg.Runs = runs
 	installInHome(t, homes, grantee.ID, ".local/bin/codex", ".local/bin/codex-acp", ".codex/auth.json",
 		".local/bin/omp", ".local/bin/claude")
 	installInHome(t, homes, owner.ID, ".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json",
@@ -99,6 +100,17 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	if got := own["omp"].EnhancedInstallScript; got != "" {
 		t.Fatalf("native omp enhanced install script = %q, want none", got)
 	}
+
+	runs.mu.Lock()
+	runs.acp = false
+	runs.mu.Unlock()
+	check(list(grantee.ID), map[string]state{
+		"codex": {true, true, "tui"},
+		"omp":   {true, false, "tui"},
+	})
+	runs.mu.Lock()
+	runs.acp = true
+	runs.mu.Unlock()
 
 	if err := s.cfg.Store.ShareAccount(ctx, owner.ID, grantee.ID); err != nil {
 		t.Fatal(err)

@@ -367,6 +367,13 @@ type fakeRuns struct {
 	// the refusal it reports with the same key.
 	sharedLaunches map[string]scheduler.SharedLaunch
 	sharedRefusals map[string]string
+	acp            bool
+}
+
+func (f *fakeRuns) ACPLaunchable() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.acp
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {

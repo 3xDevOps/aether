@@ -28,7 +28,7 @@ func newAgentTestServer(t *testing.T) (*Server, *domain.Member) {
 	if createMemberErr := db.CreateMember(ctx, member); createMemberErr != nil {
 		t.Fatal(createMemberErr)
 	}
-	return &Server{cfg: Config{Store: db}}, member
+	return &Server{cfg: Config{Store: db, Runs: &fakeRuns{}}}, member
 }
 
 func validAgentDefinition() protocol.AgentDefinition {
