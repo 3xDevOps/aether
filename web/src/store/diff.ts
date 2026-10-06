@@ -49,7 +49,7 @@ function keptIntervals(
   return Object.fromEntries(Object.entries(intervals).filter(([key]) => live.has(key)))
 }
 
-/** What the Diff tab knows about one run. */
+/** What the Changes view knows about one run. */
 export interface RunDiffState {
   base: string
   patch: string

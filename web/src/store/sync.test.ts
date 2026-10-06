@@ -1306,7 +1306,7 @@ describe('applyEvent', () => {
   it('removes a remotely deleted workspace and leaves its open run', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
-    store.getState().navigate('terminal', { runId: 'run_1' })
+    store.getState().navigate('run', { runId: 'run_1', view: 'terminal' })
     const applied = await applyEvent(store, statusEvent({
       type: 'workspace.deleted', run_id: '', payload: {},
     }), fakeApi({

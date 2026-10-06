@@ -44,7 +44,7 @@ export interface CommandDeps {
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
   setTheme: (theme: Theme) => void
-  /** Keeps a pull's git output for the diff tab to show. */
+  /** Keeps a pull's git output for the Changes view to show. */
   recordPull: (runID: string, result: PullResult) => void
   /** Removes a run after the server has deleted its durable record. */
   removeRun: (runID: string) => void

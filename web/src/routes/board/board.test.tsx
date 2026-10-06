@@ -353,7 +353,7 @@ describe('Needs you actions', () => {
     expect(fireEvent.keyDown(document.activeElement!, { key: 'o' })).toBe(false)
   })
 
-  it('opens the run for a Run Room question', () => {
+  it('opens the run for a teammate question', () => {
     seed([working])
     useStore.setState({
       roomMessages: {

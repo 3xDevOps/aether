@@ -137,7 +137,7 @@ export function supervised(run: RunRecord, ctx: StateContext): boolean {
   )
 }
 
-// Room status loads only with the Run Room; an older gateway's snapshot has no controller.
+// Room status loads only while the run is open; an older gateway's snapshot has no controller.
 function controller(run: RunRecord, ctx: StateContext): string | undefined {
   if (run.controller_member_id !== undefined) return run.controller_member_id || undefined
   return ctx.roomStatus[run.id]?.controller?.member_id

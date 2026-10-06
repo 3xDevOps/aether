@@ -19,8 +19,8 @@ export interface LocalSlice {
   linkStatus: LinkStatus | null
   setLinkStatus: (status: LinkStatus) => void
   /**
-   * What the last pull fetched, by run id. The verb lives in the run action
-   * bar and the git output belongs on the diff tab, so the result waits here
+   * What the last pull fetched, by run id. The verb lives in the run's More
+   * menu and the git output belongs on the Changes view, so the result waits here
    * for whichever surface shows it. Lasts as long as the tab.
    */
   pulls: Record<string, PullResult>

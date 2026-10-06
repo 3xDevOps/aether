@@ -1,4 +1,4 @@
-// Shared by the team activity view and the run Events tab so the two feeds cannot drift.
+// Shared by the Activity view and a run's Raw events so the two feeds cannot drift.
 
 import { memo, type ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'

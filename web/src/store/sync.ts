@@ -592,7 +592,7 @@ export async function applyEvent(
       break
     }
     case 'workspace.evidence_packet': {
-      // Only lists already visible; runs with no drawer open stay lazy.
+      // Only lists already loaded; a run whose Captures were never opened stays lazy.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
       if (runID && workspaceID && store.getState().evidencePackets[runID]) {
@@ -615,7 +615,7 @@ export async function applyEvent(
 }
 
 /**
- * Off the event queue, and only the count: a full snapshot landing late
+ * Off the event queue, and only the unread fields: a full snapshot landing late
  * would undo run events applied after it was read. A failed read is dropped.
  */
 function refreshUnacked(store: RootStore, client: Api, runID: string): void {
