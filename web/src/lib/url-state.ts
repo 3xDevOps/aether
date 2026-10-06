@@ -2,7 +2,6 @@ import type { Route } from '@/store/ui'
 
 const runViews = ['terminal', 'browser', 'diff', 'events']
 
-/** The param each page keeps as `id` in the query. */
 const pageIDs: Record<string, string> = {
   missions: 'missionId',
   workspace: 'workspaceId',
@@ -50,6 +49,15 @@ export function hrefFor(href: string, route: Route): string {
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   return routeFromQuery(new URLSearchParams(window.location.search))
+}
+
+/**
+ * Swaps the route without a history entry, for redirects the member did not
+ * ask for: back must not return to the address that was redirected away from.
+ */
+export function redirectRoute(store: { setState: (state: { route: Route }) => void }, route: Route) {
+  window.history.replaceState(null, '', hrefFor(window.location.href, route))
+  store.setState({ route })
 }
 
 interface RouteStore {

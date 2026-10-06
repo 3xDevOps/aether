@@ -2,6 +2,7 @@ import { toast } from 'sonner'
 import { api, ApiError, type Api } from '@/lib/api'
 import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
+import { redirectRoute } from '@/lib/url-state'
 import type {
   CoordMessageAckedPayload,
   CoordMessagePayload,
@@ -174,9 +175,9 @@ export async function hydrate(
           (capabilities?.methods.includes('*') ||
             (capabilities?.methods.includes('member.git') && capabilities.methods.includes('agent.list')))))
     ) {
-      store.setState({ route: { name: 'onboarding', params: {} } })
+      redirectRoute(store, { name: 'onboarding', params: {} })
     }
-    else if (unknownLink) store.setState({ route: { name: 'board', params: {} } })
+    else if (unknownLink) redirectRoute(store, { name: 'board', params: {} })
     s.setUnreachable(null)
     return true
   } catch (err) {
@@ -855,7 +856,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       store.getState().setConnection('offline')
       store.getState().setHydrated(true)
       store.getState().setUnreachable(null)
-      store.setState({ route: { name: 'onboarding', params: {} } })
+      redirectRoute(store, { name: 'onboarding', params: {} })
       return
     }
     startStream()

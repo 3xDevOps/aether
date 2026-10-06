@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react'
-import { bindRouteToUrl, hrefFor, routeFromQuery, routeQuery } from '@/lib/url-state'
+import { bindRouteToUrl, hrefFor, redirectRoute, routeFromQuery, routeQuery } from '@/lib/url-state'
 import { createRootStore } from '@/store'
 import type { Route } from '@/store/ui'
 
@@ -65,5 +65,24 @@ describe('bindRouteToUrl', () => {
     act(() => store.getState().navigate('board'))
 
     expect(window.history.length).toBe(length)
+  })
+
+  it('replaces the entry on a redirect so back skips the redirected address', () => {
+    window.history.replaceState(null, '', '/?page=settings')
+    window.history.pushState(null, '', '/?run=run_gone')
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+
+    act(() => redirectRoute(store, { name: 'board', params: {} }))
+    expect(window.location.search).toBe('')
+
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => {
+      expect(window.location.search).toBe('?page=settings')
+      expect(store.getState().route).toEqual({ name: 'settings', params: {} })
+    })
   })
 })

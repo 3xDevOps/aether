@@ -405,9 +405,10 @@ token is removed on first load as before.
 `aether://run/<id>` still works unchanged: both shells load
 `<dashboard>?run=<id>`, which is that run's Terminal view. When the first
 hydration does not find the run, the dashboard opens the board instead, or
-onboarding for a member who has not finished it.
+onboarding for a member who has not finished it. These redirects replace the
+history entry (`redirectRoute`), so back does not return to the dead link.
 
-## Configuration view## Configuration view
+## Configuration view
 
 The permanent `configuration` route renders the shared
 `src/components/profile-import.tsx` importer. It is available whenever

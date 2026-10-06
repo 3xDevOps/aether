@@ -17,8 +17,11 @@ if (!window.matchMedia) {
 // The store persists view preferences under one localStorage key, and
 // `activeWorkspace` is now one of them: without this, the workspace a test
 // hydrated into would still be the scope of the next test's fresh store.
+// A fresh store also reads its route from the address, which a redirect in
+// an earlier test may have rewritten.
 beforeEach(() => {
   window.localStorage.clear()
+  window.history.replaceState(null, '', '/')
 })
 
 // Once a <style> element is disconnected, removing it no longer unregisters
