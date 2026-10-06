@@ -202,15 +202,17 @@ state without editing the shell.
 `registerRoute('board', Board)` at module scope; `src/routes/index.ts` imports
 it once for that side effect. The center view looks the current route up by
 name and renders it with `route.params`. Navigation is a store action -
-`navigate('terminal', { runId })` - rather than a URL router: Next supplies the
+`navigate('run', { runId, view: 'terminal' })` - rather than a URL router: Next supplies the
 document and static assets, while the dashboard remains one client screen and
 every surface uses the same action. The route is mirrored in the address bar
 (see [URL state](#url-state)).
 
 The global `overview` route (`src/routes/overview.tsx`) is **All workspaces**:
 every run in every workspace, reached from the workspace switcher, `g` then
-`l` and the palette. Run-detail routes are Terminal, Browser, Diff and Events;
-there is no separate per-run Overview route.
+`l` and the palette. A run is one `run` route whose `view` param is
+`session`, `terminal`, `changes` or `browser` (`src/routes/run/views.ts`);
+without one it opens the view the member last used on that run, else
+Session for an Enhanced run and Terminal otherwise (`defaultView`).
 
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
@@ -397,15 +399,18 @@ is no connection to report, so neither header shows one.
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
 `?run=<id>`, with `&view=session|terminal|changes|browser` (an old
 `&view=diff` reads as `changes`); any other
-view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page; the
-board is the bare address. The store starts on the route the address names
+view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
+the name is the route's, so Activity is `?page=timeline`, and Devices is
+`?page=devices`, a tab of the Members view (`pageOf` in
+`src/lib/surfaces.ts`). The board is the bare address. The store starts on the route the address names
 (`initialRoute()`), `bindRouteToUrl` pushes a history entry per navigation,
 and back and forward navigate to the entry's route, so reload, back, `Esc`
 and a shared link agree. Other query parameters and the hash are kept; the
 token is removed on first load as before.
 
 `aether://run/<id>` still works unchanged: both shells load
-`<dashboard>?run=<id>`, which is that run's Terminal view. When the first
+`<dashboard>?run=<id>`, which opens the run's default view: Session for an
+Enhanced run, Terminal otherwise. When the first
 hydration does not find the run, the dashboard opens the board instead, or
 onboarding for a member who has not finished it. A `?page=` name with no
 view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
@@ -615,16 +620,14 @@ a desktop window narrower than 768px is treated as a phone here too.
   prompt's actions sit on their own row so long diagnostics never hide them.
 - **The sidebar** keeps the run list scrollable between its fixed header and
   its navigation rows and footer, from 220px wide up.
-- **The run header** gives its first section two lines: the title, then state,
-  harness/mode, the route's subtitle and **Task and details**. The title is the
-  agent's last terminal title; a run without one uses its prompt's first line, cut at
-  120 characters. The heading clamps to two lines and keeps the full label in
-  its `title`; the disclosure keeps the full prompt and run metadata together.
-  The second section holds the run-detail tabs and at most
-  two labeled state-dependent actions plus **More**, at every width and for
-  both pointer modes. Secondary actions live in More; Kill and Delete come
-  last, after a separator, and require confirmation. Metadata and tabs
-  scroll inside their own regions before the actions become unreachable.
+- **The run header** is the title, then the state line (see
+  [Run view](#run-view)). The title is the agent's last terminal title; a run
+  without one uses its prompt's first line, cut at 120 characters, and the
+  heading truncates to one line. The full prompt and run metadata are in
+  Details. The actions are the state's one primary action, **Details** and
+  **More**, at every width and for both pointer modes; under 720px of column
+  the view switch moves to its own row. Kill and Delete come last in More,
+  after a separator, and require confirmation.
 - **The board** stacks its three columns into one list on narrow screens and
   places them side by side from the `lg`/1024px breakpoint (see
   [Board](#board)).
@@ -928,11 +931,9 @@ An unreachable server shows its error in place of the columns.
 A run shows one of five states and one plain-words reason line, derived in
 `src/lib/status.ts` (`presentRun`). The state is for the member looking: the
 same run can need one member and read Working for another. The wire status
-enum is unchanged; the run header's **Task and details** shows it as
-**Lifecycle**. The run header also prints the server's `run.reason` under the
-reason line whenever that line does not already contain it, so a parked
-error or stall detail is never hidden. Both sit in a scrollable **State
-reason** note that takes keyboard focus so a long reason can be scrolled.
+enum is unchanged. Details lists the server's `run.reason` as **Last
+reason**, so a parked error or stall detail the reason line leaves out is
+never hidden.
 
 | State | Wire status | Group |
 | --- | --- | --- |
@@ -1073,15 +1074,15 @@ kill, release retained resources, delete, archive/restore, protect/unprotect,
 relaunch, pull branch, hand off) and board verbs (navigate, launch,
 mark all seen, archive closed runs, release finished resources) as data:
 an id, label, icon, capability gate and call. `useCommandRunner()` reports
-gateway success or its real refusal in both the action bar and palette.
+gateway success or its real refusal in both the run's More menu and the palette.
 Deletion removes the confirmed run locally; archive, restore, protect and
 release do not overwrite the server's events with an RPC response.
 
 Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
 `merged`, `abandoned`, `failed`, `interrupted`, never `completed`) plus the
 kill permission and the `run.archive` capability; neither confirms, since
-archiving is reversible. Final runs offer Archive as a primary action;
-archived runs offer Restore. The palette resolves its focused run from the
+archiving is reversible. Final runs offer Archive in More; archived runs
+offer Restore. The palette resolves its focused run from the
 run map by `route.params.runId` rather than the run list, so an
 archived run's own page still offers Restore.
 
@@ -1105,9 +1106,9 @@ again if a run changed after the command was displayed.
   no focused run. The "Go to" group uses the gated `src/lib/surfaces.ts` list.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
   New run in the sidebar and the notice an empty Board shows in place of its
-  columns; destinations in the sidebar's navigation rows; and
-  the run action bar (`src/components/run-actions.tsx`) in every run-detail
-  header, with at most two contextual labeled actions plus **More**.
+  columns; destinations in the sidebar's navigation rows; and the run
+  header's one primary action plus **More** (`src/components/run-actions.tsx`)
+  on every run view.
 - **Appearance commands** are explicit: **Use system theme**, **Use light
   theme** and **Use dark theme** set the same persisted preference as Settings.
   They are available through every gateway; no cycling theme command is needed.
@@ -1117,11 +1118,9 @@ actions—opens the same run-naming confirmation dialog from the header or
 palette. Cancel is initially focused. Palette confirmations capture the
 authenticated identity with the run and command; an identity change dismisses
 pending or visible confirmation instead of applying it to another account.
-The action bar locks while a verb is
-in flight, showing a spinner on the running primary action or on **More**.
-This also prevents a second click from racing a branch pull over SSH.
-Primary buttons use the command's `short` label and its full sentence as a
-tooltip; the overflow menu prints the full label.
+More locks while a verb is in flight and shows a spinner in place of its
+icon. This also prevents a second click from racing a branch pull over SSH.
+The menu prints each command's full label.
 
 The palette ranks with cmdk's default scorer. The pinned local cmdk patch
 in `patches/cmdk@1.1.1.patch` stays because stock cmdk 1.1.1 leaves the
@@ -1381,8 +1380,8 @@ tooltip closes on the first of them whatever it is, so a pending `g` is
 untouched.
 
 Blocking a control with `aria-disabled` rather than `disabled` keeps it in the
-tab order, which is the point; the Styleguide rule below says why. The run
-action bar, its overflow trigger, the terminal toolbar and the diff snapshot
+tab order, which is the point; the Styleguide rule below says why. The run's
+More trigger, the terminal toolbar and the diff snapshot
 list all keep their tab stops while their verbs are unavailable, and each
 guards its own handler rather than relying on the browser.
 
@@ -1957,7 +1956,9 @@ because the page cannot tell whether the terminal predates the first one.
   identical under reduced motion. It is absent
   during replay or history reading, and on release, mirroring, disconnect or
   denied steering.
-  Starting runs keep their spinner; ended runs say **This run is not running**.
+  Starting runs keep their spinner; ended runs show no control and replay
+  their recording, or say **This run has ended and left no recorded terminal
+  to replay.**
   Whether a member may steer is the server's answer:
   `-32001` downgrades the attach to a mirror and disables the toggle. An
   occupied write request is a conflict and needs the host's shared confirmed
@@ -2886,10 +2887,10 @@ itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
 **Agent config files** in this step renders the same
-`src/components/profile-import.tsx` component as the permanent
-[Configuration view](#configuration-view), collapsed until opened. It remains
-available from the Agents page and the palette on either gateway,
-independently of onboarding or workspaces. `config.roots` supplies destinations
+`src/components/profile-import.tsx` component as the Agents page
+([Agent config files](#agent-config-files)), collapsed until opened. It
+remains available from Agents, which the palette finds for "config files",
+on either gateway, independently of onboarding or workspaces. `config.roots` supplies destinations
 such as `~/.claude` and their runtime exclusions. A unique basename selects
 the destination automatically; an unknown or ambiguous basename requires a
 choice before file bytes are read. Retained browser `File` handles allow the
@@ -3442,7 +3443,7 @@ The body is one column, in this order:
    `mission.worker.release` with the observed `expected_takeover_generation`.
 4. **Agent messages**, described below.
 5. **Integration**, closed by default: the read-only candidate panel (see
-   [Candidate review in Run evidence](#candidate-review-in-run-evidence)),
+   [Candidate review in Captures](#candidate-review-in-captures)),
    listing this swarm's candidates, and a **Technical details** disclosure
    with the swarm ID, integrator run ID, generation, accepted set version,
    execution choices, task IDs and revisions, attempts, and each accepted

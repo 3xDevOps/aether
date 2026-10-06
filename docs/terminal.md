@@ -631,17 +631,17 @@ incarnations, subject to the run's retained-artifact lifecycle.
 
 ### Control availability
 
-**Upload image to terminal** is disabled until the selected terminal has a
-live attach and write permission. In a run's agent terminal, a read-only
-mirror, a `Connecting`, `Reconnecting`, or `Offline` state, a starting run,
-or a server-denied **Take control** state leaves image upload disabled. Take
-control first when the run is steerable. A run that is finished or otherwise
-not running says **This run is not running** beside its disabled control.
-The run shell can open only for a `running` or `needs-attention` run whose
-pause state is known and unpaused; otherwise its unavailable panel says
-**Run shell unavailable: this run has no live container. The Terminal tab
-replays its recorded output.** A shell that is refused says **You can view this
-run but not open a shell in it**.
+**Upload image…** in the terminal's menu is disabled until the selected
+terminal has a live attach and write permission. In a run's agent terminal, a
+read-only mirror, a `Connecting`, `Reconnecting`, or `Offline` state, a
+starting run, or a server-denied **Take control** state leaves image upload
+disabled. Take control first when the run is steerable. A run that has ended
+shows no control; its Terminal view replays the recorded output, or says
+**This run has ended and left no recorded terminal to replay.** when there is
+none. The run shell can open only for a `running` or `needs-attention` run
+whose pause state is known and unpaused; otherwise the tab strip offers no
+shell. A shell that is refused says **You can view this run but not open a
+shell in it**.
 The environment dock shows **Starting your environment container** for its
 first open and **Connecting to your environment** for a later attach; a
 startup or attach failure displays the gateway's own error. These states do
