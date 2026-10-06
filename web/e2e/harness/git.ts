@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 const run = promisify(execFile)
 
 /**
- * A diff line wider than any viewport the suite drives, so the Diff tab's
+ * A diff line wider than any viewport the suite drives, so the Changes view's
  * wrap toggle has something to act on: a patch of short lines looks the same
  * wrapped and unwrapped. Repeated here rather than in the shell script, so
  * the agent needs no `seq` in whatever image the run lands on.
