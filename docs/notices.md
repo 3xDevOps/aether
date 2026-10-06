@@ -29,17 +29,22 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard ships three fonts under the SIL Open Font License 1.1:
+The dashboard ships four fonts under the SIL Open Font License 1.1:
 
-- Saira for UI text
+- Inter for UI text
+  ([`web/public/fonts/LICENSE-inter.txt`](../web/public/fonts/LICENSE-inter.txt)).
+  Only the Latin variable WOFF2 from the
+  [`@fontsource-variable/inter`](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter)
+  package is bundled.
+- Saira for titles
   ([`web/public/fonts/LICENSE-saira.txt`](../web/public/fonts/LICENSE-saira.txt)).
-  The normal-width variable WOFF2 files cover weights 100–900 in Latin,
-  Latin extended and Vietnamese subsets, downloaded from
+  The normal-width variable WOFF2 covers weights 100-900 in the Latin subset,
+  downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
 - VT323 for the wordmark
   ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
 - `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for terminal
-  output and code
+  output
   ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
 
 The Play listing's feature graphic uses VT323 and JetBrainsMono NFM.

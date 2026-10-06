@@ -65,8 +65,8 @@ export function PhaseChip({ mission }: { mission: Mission }) {
 }
 
 const phaseTone: Record<MissionPhase, string> = {
-  planning: 'border-accent bg-accent/10',
-  active: 'border-accent bg-accent/10',
+  planning: 'border-seam bg-hover',
+  active: 'border-seam bg-hover',
   completed: 'border-state-success bg-state-success/10',
   cancelled: 'border-state-failed bg-state-failed/10',
 }

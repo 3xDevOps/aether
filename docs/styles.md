@@ -2,62 +2,96 @@
 
 ## Workbench language
 
-The dashboard is a VS Code-inspired developer workbench, not an official
-reusable VS Code component package. It uses the structure, density and neutral
-semantics of VS Code Dark Modern and Light Modern while preserving Aether's
-routes, run-state colours and capabilities. Adjoining panes are flat and
-quiet: do not add saturated accent colours, arbitrary gradients, blurred cards or
-elevated nested panels.
+The dashboard is a dense developer workbench on graphite surfaces with one
+teal accent. Adjoining panes are flat and quiet: do not add saturated colours,
+gradients, blurred cards or elevated nested panels.
 
-The UI uses Saira at 13px with a 1.4 line height; supporting copy is 12px.
-The font stack is `'Saira', system-ui, sans-serif`. Normal-width variable
-WOFF2 files cover weights 100–900 and Latin, Latin extended and Vietnamese
-characters. They ship in `web/public/fonts/` with their SIL Open Font License;
-`web/src/index.css` declares Unicode ranges and `font-display: swap`, so the
-browser fetches only the subsets it needs, without contacting Google.
-JetBrainsMono NFM is retained for terminal output, commands and code. VT323
-remains only for the Aether wordmark and the original startup splash. Do not
-use the brand face for body copy.
+## Type
+
+Fonts ship in the bundle; nothing is fetched from Google.
+
+| Face | Use | Source |
+| --- | --- | --- |
+| Inter (variable, Latin subset) | All UI text | `@fontsource-variable/inter`, one WOFF2 |
+| Saira 600 (Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
+| VT323 | The `aether` wordmark | `web/public/fonts/vt323-latin.woff2` |
+| JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
+| `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-mono`, `--font-code`) | system |
+
+Inter loads with `font-display: swap` behind `Inter Fallback`, Arial scaled
+to Inter's metrics, so the swap does not reflow text. Characters outside
+Latin render in the fallback.
+
+The type scale, in `web/src/index.css`:
+
+| Class | Size / line height | Use |
+| --- | --- | --- |
+| `text-ui-xs` | 11/16 | Dense meta |
+| `text-ui-sm` | 12/16 | Supporting copy, section labels |
+| `text-ui` | 13/20 | Default UI text; the body is 13px |
+| `text-prose` | 14/22 | Agent prose and rendered markdown |
+| `text-title` | 16/24, Saira 600 | Pane, dialog, step and empty-state headings |
+
+Weights are 400 and 500, 600 for titles. Times, counts and `+a -d` use
+`tabular-nums`. No uppercase labels. `cn()` in `web/src/lib/utils.ts` knows
+the scale, so `cn('text-ui', 'text-muted')` keeps both classes.
 
 ## Semantic palette
 
-`web/src/index.css` is authoritative. Light and dark are semantic
-Light Modern and Dark Modern modes, not separate feature palettes. The theme
-preference remains `system`, `light` or `dark`, with `system` following
-`prefers-color-scheme` live.
+`web/src/index.css` is authoritative. The theme preference is `system`,
+`light` or `dark`; `system` follows `prefers-color-scheme` live.
 
-| Token | Light Modern | Dark Modern | Use |
+| Token | Utility | Light | Dark | Use |
+| --- | --- | --- | --- | --- |
+| `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
+| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Title bar, sidebar, headers, code, browser chrome |
+| `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows, cards, ghost buttons |
+| `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces only |
+| `--seam` | `border-seam` | black 8% | white 8% | Every border |
+| `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
+| `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
+| `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
+| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons |
+| `--accent-fill` | `bg-accent` | `#367f77` | `#367f77` | The one primary button, focus ring |
+| `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
+| `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
+
+The accent marks selection, focus, the one primary button per view and
+links, nothing else. Inside a selected row, secondary text uses `text-text`.
+A floating surface is `bg-raised`, a 1px seam and `shadow-overlay`
+(`0 8px 24px -12px`, black 18% light, 60% dark).
+
+Run states, used on dots, state lines, callouts and diffs only:
+
+| State | Utility | Light | Dark |
 | --- | --- | --- | --- |
-| `--background` | `#ffffff` | `#1f1f1f` | Editor and main view |
-| `--sidebar` | `#f8f8f8` | `#181818` | Titlebar, activity/sidebar chrome, panel and statusbar |
-| `--card` | `#ffffff` | `#1f1f1f` | Main workbench surface |
-| `--popover` | `#ffffff` | `#202020` | Actual widgets and floating surfaces |
-| `--foreground` | `#3b3b3b` | `#cccccc` | Primary text |
-| `--muted-foreground` | `#616161` | `#9d9d9d` | Description and secondary text |
-| `--field-placeholder` | `#767676` | `#989898` | Placeholder text |
-| `--border` | `#e5e5e5` | `#2b2b2b` | Pane seams and quiet separators |
-| `--input` | `#949494` | `#7a7a7a` | Contrast-tuned field boundary |
-| `--primary` | `#367f77` | `#367f77` | Subdued brand teal for interactive fills and focus |
-| `--accent-soft-foreground` | `#367f77` | `#6ee7d6` | Text on soft accent surfaces; dark mode uses the landing-page mint where it has enough contrast |
-| `--success-soft-foreground` | `#1f521f` | `#89d185` | Text on success-soft surfaces; light uses the readable success foreground |
-| `--warning-soft-foreground` | `#5c4500` | `#f5d08a` | Text on warning-soft surfaces; light and dark use the readable warning foreground |
-| `--danger-soft-foreground` | `#a1260d` | `#f48771` | Text on danger-soft surfaces; VS Code error foregrounds keep the label readable |
-| `--primary-hover` | `#306f69` | `#306f69` | Primary hover |
-| `--toolbar-hover` | `#f2f2f2` | `#2a2d2e` | Flat toolbar and row hover |
-| `--selection` | `#e8e8e8` | `#17413d` | Selected rows and text |
-| `--selection-foreground` | `#000000` | `#ffffff` | Text on selection |
+| Working | `state-working` | `#1b65c2` | `#4a9eff` |
+| Needs you | `state-needs-you` | `#8a5d00` | `#e0a52a` |
+| Failed | `state-failed` | `#c8321f` | `#f05c4a` |
+| Done | `state-done` | `#1a7a36` | `#45c26a` |
+| Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
 
-`@theme` exposes the semantic utilities `bg-selection`,
-`text-selection-foreground`, `bg-primary-hover` and `bg-toolbar-hover`
-alongside the existing background, sidebar, card and field utilities.
-`--input` is intentionally stronger than the reference field-border colours
-where needed to keep the boundary discernible against its field surface.
-Pane seams retain the quieter Modern values and do not need input-border
-contrast. The subdued brand teal is separate from run status and member attribution.
-HeroUI aliases consume these semantics; they do not define a second palette.
+Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark,
+for callouts and request cards; `bg-accent-soft` likewise. Diffs use
+`text-diff-add`/`text-diff-del` (the done and failed colours) and
+`bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
+
 Member colours are the only arbitrary server data applied inline, on avatars,
-attribution rails and the Map's owner boundaries with light identity tints.
-Text remains token-based; identity colour never replaces run-state colour.
+attribution rails and the Map's owner boundaries. Identity colour never
+replaces run-state colour.
+
+The pre-v2 names (`--background`, `--foreground`, `--card`, `--sidebar`,
+`--muted`, `--muted-foreground`, `--primary`, `--border`, `--input`,
+`--toolbar-hover`, `--destructive`, `--state-waiting`,
+`--state-needs-attention`, `--state-idle` and the HeroUI names) remain as
+aliases of these tokens until every screen is rebuilt. Do not use them in new
+code.
+
+## Icons
+
+Icons come from `web/src/components/icons.ts`, which re-exports the lucide
+icons the dashboard uses at stroke width 1.75. Add a name there rather than
+importing `lucide-react`.
 
 ## Geometry and responsive behavior
 
@@ -74,14 +108,13 @@ Use compact workbench geometry rather than landing-page ornament:
   Shared `Label` captions are block-level: stacked caption-to-field spacing
   must measure 4px, including wrapped fields, rather than relying on margins
   on inline text.
-- Adjoining panes, sections, rows, run cards and tab strips have zero radius.
-  Compact controls and chips use 2px; fields, buttons, popups and dialogs use at
-  most 4px. Full circles are reserved for actual avatars, status dots, radio
-  controls and switch knobs.
-- Radius tokens are limited to 0, 2px and 4px; content panels have no shadows.
-  Restrained shadows are limited to actual floating menus, quick input and
-  dialogs. Headers stay 13-16px, with no promotional 20-24px titles or
-  oversized cards.
+- Two radii: `--radius-control` 4px (`rounded-sm`, `rounded-control`) for
+  buttons, fields, chips, rows, code and keys; `--radius-panel` 6px
+  (`rounded-md`, `rounded-lg`, `rounded-panel`) for cards, dialogs, menus,
+  popovers and callouts. `rounded-full` is for dots and avatars only.
+- Only floating surfaces cast `shadow-overlay`; content panels have none.
+  Headers stay at `text-title` or smaller.
+- Scrollbars are 8px with an `--icon-faint` thumb.
 - Board Cards use compact, natural-height rows with a full-width title, state
   badge and brief owner/harness/time metadata. Unseen titles stay bold with an
   accessible **Unseen** description, not a second dot or a **New** pill.
@@ -157,8 +190,8 @@ contributors, including shortcuts. At every width, secondary facts,
 version/storage, presence, budget and errors live in the bounded,
 keyboard-reachable status details popup. Connection and shortcuts remain
 outside it, with an Approvals signal on phones; do not duplicate Timeline
-navigation there. Wrapped readouts use a 1.5 line height so Saira's glyphs fit
-inside each row; the status bar keeps its compact row geometry.
+navigation there. Wrapped readouts use a 1.5 line height; the status bar keeps its
+compact row geometry.
 Theme discovery belongs in **Settings → Appearance**, with explicit
 **System**, **Light** and **Dark** choices and matching palette commands,
 not a cycling status icon. Appearance works on remote gateways too, while
@@ -197,17 +230,15 @@ authority boundaries are unchanged.
 
 ## Run state and startup motion
 
-The six `--state-*` tokens remain the status vocabulary for a run's
-presentation state. Domain status enums remain unchanged.
+The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
+status vocabulary for a run's presentation state. Domain status enums remain
+unchanged.
 
-| Token | Light | Dark |
-| --- | --- | --- |
-| `--state-working` | `#2b6cb0` | `#3794ff` |
-| `--state-waiting` | `#8b6c00` | `#cca700` |
-| `--state-needs-attention` | `#bc4b00` | `#e2c08d` |
-| `--state-failed` | `#c72e0f` | `#f85149` |
-| `--state-done` | `#2ea043` | `#89d185` |
-| `--state-idle` | `#6e7681` | `#858585` |
+Menus and dialogs animate over `--duration-overlay` (120ms) with
+`--ease-out`; panels change instantly. The `state-pulse` dot and the
+`live-shimmer` text sweep step through a few frames per cycle rather than
+tweening, and stop under `prefers-reduced-motion: reduce`, where the shimmer
+leaves plain muted text.
 
 `StateIndicator` uses bouncing dots for working runs in cards, headers and
 lists. The labeled run-status chip reserves the full width of all three dots
@@ -215,7 +246,7 @@ before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
 remain static. Live local control has a 1px teal inset outline around the
 terminal, alongside the toolbar's **(this tab)** controller marker and
-**Release** action. The pointer-transparent outline uses `--primary` without
+**Release** action. The pointer-transparent outline uses `--accent-fill` without
 changing layout. It appears only with live, acknowledged writable control,
 outside replay and history reading.
 Acquisition and voluntary release propagate along the outline over 720ms,

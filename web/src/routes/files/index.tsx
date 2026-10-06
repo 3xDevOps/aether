@@ -26,7 +26,6 @@ import { ApiError, api, type Api } from '@/lib/api'
 import { ViewHeader } from '@/components/view-header'
 import { runLabel } from '@/lib/status'
 import type { ConfigRoot, Run, Workspace } from '@/lib/types'
-import { terminalFontFamily } from '@/lib/term-font'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -726,7 +725,7 @@ function EditableDocument({
           EditorState.readOnly.of(!canEdit),
           EditorView.theme({
             '&': { height: '100%', fontSize: '12px' },
-            '.cm-scroller': { overflow: 'auto', fontFamily: terminalFontFamily },
+            '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-code)' },
             '.cm-content': { padding: '10px 0', minHeight: '100%' },
             '.cm-line': { padding: '0 12px', lineHeight: '22px' },
             '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--muted-foreground)' },

@@ -31,7 +31,7 @@ export function TerminalControlBorder({
     if (!svg) return
     const style = getComputedStyle(svg)
     const from = Number.parseFloat(style.strokeDashoffset) || 0
-    const primary = style.getPropertyValue('--control-border').trim()
+    const primary = style.getPropertyValue('--accent-fill').trim()
     const danger = style.getPropertyValue('--destructive').trim()
     const color = appearance === 'takeover' && previousTakeoverProgress.current === 1
       ? danger : from === 1 ? primary : style.color

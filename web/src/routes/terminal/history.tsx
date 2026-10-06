@@ -661,7 +661,7 @@ export function TerminalHistory({
       <div style={{ position: 'relative', height: totalHeight, minHeight: '100%', width, minWidth: '100%', fontFamily: frozen.fontFamily, fontSize, letterSpacing: frozen.letterSpacing * scale, lineHeight: `${cellHeight}px` }}>
         {rows.filter((row) => row.index >= archiveStart && row.index < archiveEnd).map(({ index, line }) => (
           <div key={index} data-history-row={index} data-history-cursor={line.cursor}
-            className={match === index ? 'bg-accent' : undefined}
+            className={match === index ? 'bg-selection' : undefined}
             style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: lineTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}>
             {line.text}
           </div>
@@ -674,7 +674,7 @@ export function TerminalHistory({
         {frozen.rows.slice(frozenStart, frozenEnd).map((html, offset) => {
           const index = frozenStart + offset
           return <div key={index} data-history-row={index}
-            className={match === index ? 'bg-accent' : undefined}
+            className={match === index ? 'bg-selection' : undefined}
             style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: rowTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}
             dangerouslySetInnerHTML={{ __html: html }} />
         })}

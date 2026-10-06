@@ -187,7 +187,7 @@ manifest takes the dark value. `background_color` is the separate
 `iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
 an icon on it, and any other value would leave the icon's tile showing as a
 square. That hex is deliberately darker than the dashboard's own dark
-`--background`, `#1f1f1f` - a launcher icon has to read as an object against a
+`--canvas`, `#141516` - a launcher icon has to read as an object against a
 wallpaper - so the splash lightens slightly as the SPA paints over it.
 
 Every icon is generated from `web/public/aether-mark.png` by `python3
@@ -2873,17 +2873,17 @@ about itself and appears wherever the member is an admin.
 
 ## Styleguide
 
-- **Tokens only.** See [styles.md](styles.md) for the VS Code-inspired
-  Light Modern and Dark Modern semantics, interaction tokens,
-  `--state-*` tokens, geometry, radii, fonts and the one inline-colour
+- **Tokens only.** See [styles.md](styles.md) for the palette, interaction
+  tokens, `--state-*` tokens, geometry, radii, fonts and the one inline-colour
   exception for member attributes. Components use semantic token classes rather
   than route-specific colour literals.
 - **Dark, light, system.** Settings > Appearance and explicit palette commands
   set the stored preference; `system` follows `prefers-color-scheme` live.
   There is no additional theme mode or cycling status icon.
-- **Typography and density.** The system UI stack is 13px with 12px
-  supporting copy and 1.4 line height. JetBrainsMono NFM remains terminal and
-  code; VT323 remains only the Aether wordmark and original startup. Use the
+- **Typography and density.** Inter at 13px with 12px supporting copy, on
+  the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
+  terminal's alone; code uses the system monospace stack; VT323 remains only
+  the Aether wordmark and original startup. Use the
   35/48/35/22/26/22px workbench geometry and avoid promotional titles or
   oversized cards.
 - **Flat shell and palette host.** Use a 35px title/command bar, a 48px desktop

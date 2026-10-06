@@ -45,7 +45,7 @@ ANDROID_LISTING = ROOT / "android" / "listing"
 # The ground every Aether icon is drawn on, #0a0a0a. The web app manifest's
 # `background_color` matches it so the tile does not show as a square on an
 # installed app's splash (`web/src/app/theme-color.ts`). It is darker than the
-# dashboard's own dark `--background`, #1f1f1f: an icon has to read as an
+# dashboard's own dark `--canvas`, #141516: an icon has to read as an
 # object on a launcher rather than blend into a page.
 # android/app/src/main/res/values/colors.xml repeats it for the adaptive
 # icon's background layer, which Android fills rather than draws.

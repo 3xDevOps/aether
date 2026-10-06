@@ -1,5 +1,11 @@
 import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+// Without the custom sizes, tailwind-merge reads `text-ui` as a text colour
+// and drops it when a colour class follows.
+const twMerge = extendTailwindMerge({
+  extend: { classGroups: { 'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title'] }] } },
+})
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
