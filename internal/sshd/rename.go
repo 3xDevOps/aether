@@ -49,10 +49,10 @@ func (s *Server) memberRename(ctx context.Context, member domain.MemberID, param
 	}
 	// A member without a git name signs commits with the display name.
 	s.cfg.Runs.RefreshMemberCoAuthors(ctx, target)
-	if rerr := s.refreshHomeGitIdentity(ctx, m); rerr != nil {
-		return nil, rpcError(rerr)
-	}
 	s.publishMemberChanged(ctx, member, m)
+	if rerr := s.refreshHomeGitIdentity(ctx, m); rerr != nil {
+		return nil, rpcError(fmt.Errorf("display name saved, but updating the home's git identity failed: %w", rerr))
+	}
 	return protocol.MemberRenameResult{Member: protocol.MemberFromDomain(m)}, nil
 }
 
