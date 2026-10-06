@@ -392,7 +392,8 @@ is no connection to report, so neither header shows one.
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
-`?run=<id>`, with `&view=diff|browser|events` for the other tabs; any other
+`?run=<id>`, with `&view=session|terminal|changes|browser` (an old
+`&view=diff` reads as `changes`); any other
 view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page; the
 board is the bare address. The store starts on the route the address names
 (`initialRoute()`), `bindRouteToUrl` pushes a history entry per navigation,
@@ -1481,8 +1482,7 @@ plain message), `event` and `finished`. Request titles and that copy live in
 `lib/run-requests.ts`, shared with Details. A timeline steer that matches a
 room message is shown once. **Show older messages** at the top pages room
 history back 100 messages at a time, and a failed history read shows the
-server's error with **Retry**. The log keeps the
-last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
+server's error with **Retry**. The log keeps the last 2,000 events. The list is `role="log"` with `aria-live="off"`, and each
 row carries `aria-setsize`/`aria-posinset`. The docked composer posts
 `steer_request` with the lease the tab holds; its rules are in
 [Run control](terminal.md#run-control). A refused send or image upload shows
@@ -3040,7 +3040,7 @@ accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
 
 Run actions cover the retained-run contract: Close chooses merged or abandoned,
-while Relaunch appears only for eligible retained TUI runs. Release is also
+while Reopen run appears only for eligible retained TUI runs. Release is also
 offered for finished retained mission workers; its confirmation and error path
 do not hide or delete history. Expired or unavailable runs offer no Release.
 Sidebar tests cover group disclosure, with Finished collapsed by default.

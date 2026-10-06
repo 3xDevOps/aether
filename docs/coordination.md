@@ -1061,12 +1061,12 @@ evidence leaves the task in **Review**.
 **Success and failure are terminal**: a run holds one terminal report. After
 it, a report under any new idempotency key, `blocked` included, fails with
 `CodeConflict` (`-32003`); the same key and inputs replay the original
-report. Relaunching the run (**Relaunch** on its card, or `aether relaunch
-<run>`) supersedes the terminal report, including one whose evidence capture
-failed and was never accepted, so the reopened agent can report again under a
-new idempotency key; the superseded report's key then fails with
-`CodeConflict`, as does a report whose evidence capture was still running
-when the relaunch landed. **Blocked is nonterminal**: a run may file any
+report. Relaunching the run (**Reopen run** under the run's **More** menu,
+or `aether relaunch <run>`) supersedes the terminal report, including one
+whose evidence capture failed and was never accepted, so the reopened agent
+can report again under a new idempotency key; the superseded report's key
+then fails with `CodeConflict`, as does a report whose evidence capture was
+still running when the relaunch landed. **Blocked is nonterminal**: a run may file any
 number of blocked reports, before or after one another.
 
 What a report does depends on the run:
