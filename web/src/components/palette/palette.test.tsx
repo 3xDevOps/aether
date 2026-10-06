@@ -590,7 +590,7 @@ describe('command palette', () => {
   it('launches a templated run into the active workspace', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch from a template...'))
+    fireEvent.click(await screen.findByText('Launch from a template…'))
     const template = await screen.findByLabelText('Template')
     await waitFor(() => expect(template.textContent).toBe('nightly triage'))
     expect(api.templateList).toHaveBeenCalledWith(workspace.id)
@@ -802,7 +802,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Archive closed runs...'))
+    fireEvent.click(await screen.findByText('Archive closed runs…'))
 
     expect(api.runArchive).not.toHaveBeenCalled()
 
@@ -846,7 +846,7 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Free retained containers...'))
+    fireEvent.click(await screen.findByText('Free retained containers…'))
     expect(api.runRelease).not.toHaveBeenCalled()
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(archived.id))
@@ -860,7 +860,7 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Release resources...'))
+    fireEvent.click(await screen.findByText('Release resources…'))
     const dialog = within(await screen.findByRole('alertdialog'))
     expect(api.runRelease).not.toHaveBeenCalled()
     fireEvent.click(dialog.getByRole('button', { name: 'Release resources' }))

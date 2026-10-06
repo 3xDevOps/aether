@@ -293,7 +293,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
     list.push({
       id: 'inject',
-      label: 'Send a message to the agent...',
+      label: 'Send a message to the agent…',
       short: 'Message',
       Icon: MessageSquarePlus,
       perform: (d) => d.openDialog('inject', id),
@@ -301,7 +301,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     if (cap.hasLocal('forward.start')) {
       list.push({
         id: 'forward',
-        label: 'Forward a port...',
+        label: 'Forward a port…',
         short: 'Forward',
         Icon: Cable,
         perform: (d) => d.openForwardDialog(`run:${id}`),
@@ -313,7 +313,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (run.status !== 'queued' && mayKill) {
     list.push({
       id: 'close',
-      label: 'Close run...',
+      label: 'Close run…',
       short: 'Close',
       Icon: CircleCheck,
       perform: (d) => d.openDialog('close', id),
@@ -358,7 +358,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (cap.hasMethod('run.release') && mayKill && isRetainedRun(run)) {
     list.push({
       id: 'release',
-      label: 'Release resources...',
+      label: 'Release resources…',
       short: 'Release',
       Icon: PackageX,
       done: 'Released resources',
@@ -492,7 +492,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {
     list.push({
       id: 'template',
-      label: 'Launch from a template...',
+      label: 'Launch from a template…',
       Icon: FileText,
       perform: (d) => d.onTemplates(),
     })
@@ -501,7 +501,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.archive')) {
     list.push({
       id: 'clear-done',
-      label: 'Archive closed runs...',
+      label: 'Archive closed runs…',
       Icon: Archive,
       perform: (d) => d.openDialog('clear-done'),
     })
@@ -509,7 +509,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.release')) {
     list.push({
       id: 'release-finished',
-      label: 'Free retained containers...',
+      label: 'Free retained containers…',
       Icon: PackageX,
       perform: (d) => d.openDialog('release-finished'),
     })

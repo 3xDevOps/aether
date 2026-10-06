@@ -94,11 +94,11 @@ test.each(['fine', 'coarse'] as const)('active actions remain labeled and keyboa
   expect(document.activeElement).toBe(more)
   await userEvent.keyboard('{Enter}')
   const menu = within(await screen.findByRole('menu'))
-  for (const name of ['Close run...', 'Forward a port...', 'Protect run', 'Pull branch', 'Hand off', 'Kill run', 'Delete run']) {
+  for (const name of ['Close run…', 'Forward a port…', 'Protect run', 'Pull branch', 'Hand off', 'Kill run', 'Delete run']) {
     expect(menu.getByRole('menuitem', { name })).toBeTruthy()
   }
   expect(menu.queryByRole('menuitem', { name: 'Pause run' })).toBeNull()
-  expect(menu.queryByRole('menuitem', { name: 'Send a message to the agent...' })).toBeNull()
+  expect(menu.queryByRole('menuitem', { name: 'Send a message to the agent…' })).toBeNull()
   const items = menu.getAllByRole('menuitem')
   expect(items.slice(-2).map((item) => item.textContent)).toEqual(['Kill run', 'Delete run'])
   await userEvent.keyboard('{Escape}')
@@ -145,7 +145,7 @@ test('a queued run remains deletable without offering Close', async () => {
   const record = seed({ run: { status: 'queued' } })
   render(<RunActions run={record} />)
   const menu = await openMore()
-  expect(menu.queryByRole('menuitem', { name: 'Close run...' })).toBeNull()
+  expect(menu.queryByRole('menuitem', { name: 'Close run…' })).toBeNull()
   fireEvent.click(menu.getByRole('menuitem', { name: 'Delete run' }))
   const dialog = within(await screen.findByRole('alertdialog'))
   fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
@@ -160,7 +160,7 @@ test('completed runs promote Close and eligible Relaunch, not Archive', async ()
   expect(screen.getAllByRole('button')).toHaveLength(3)
   const menu = await openMore()
   expect(menu.queryByRole('menuitem', { name: 'Archive run' })).toBeNull()
-  expect(menu.queryByRole('menuitem', { name: 'Close run...' })).toBeNull()
+  expect(menu.queryByRole('menuitem', { name: 'Close run…' })).toBeNull()
 })
 
 test.each(['merged', 'abandoned', 'failed', 'interrupted'] as const)('Archive is primary for final status %s and remains reversible', async (status) => {
@@ -294,7 +294,7 @@ test.each([
 ] satisfies Partial<Run>[])('release is absent without a finished retained resource: %j', async (over) => {
   render(<RunActions run={seed({ run: over })} />)
   expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
-  expect((await openMore()).queryByRole('menuitem', { name: 'Release resources...' })).toBeNull()
+  expect((await openMore()).queryByRole('menuitem', { name: 'Release resources…' })).toBeNull()
 })
 
 test('release requires Kill permission and the run.release capability', async () => {
@@ -398,7 +398,7 @@ test('a collaborator can steer and kill another member run, but cannot protect o
   expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Message' })).toBeTruthy()
   const menu = await openMore()
-  for (const name of ['Kill run', 'Delete run', 'Close run...']) expect(menu.getByRole('menuitem', { name })).toBeTruthy()
+  for (const name of ['Kill run', 'Delete run', 'Close run…']) expect(menu.getByRole('menuitem', { name })).toBeTruthy()
   expect(menu.queryByRole('menuitem', { name: 'Protect run' })).toBeNull()
   expect(menu.queryByRole('menuitem', { name: 'Hand off' })).toBeNull()
 })
@@ -418,5 +418,5 @@ test.each([{ run: { protected: true } }, { steerOthers: 'admins_only' }])('prote
   expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Message' })).toBeNull()
   const menu = await openMore()
-  for (const name of ['Kill run', 'Delete run', 'Close run...', 'Hand off', 'Protect run']) expect(menu.queryByRole('menuitem', { name })).toBeNull()
+  for (const name of ['Kill run', 'Delete run', 'Close run…', 'Hand off', 'Protect run']) expect(menu.queryByRole('menuitem', { name })).toBeNull()
 })

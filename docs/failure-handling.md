@@ -459,7 +459,7 @@ survives inside its workspace's and its member's spend totals - the numbers
 [`aether cost` and `aether budget`](teams.md#budgets) report, and a workspace
 budget checks - so deleting a run over budget cannot reopen the cap.
 
-The dashboard's **Release resources...** removes a finished run's retained
+The dashboard's **Release resources…** removes a finished run's retained
 container and browser without hiding the run or deleting its history.
 **Free retained containers…** in the board's Finished More menu (admins) and
 the palette applies it to eligible finished runs in the selected workspace,
@@ -469,7 +469,7 @@ These actions use the same evidence-preserving cleanup as Kill: an evidence
 or runtime error leaves cleanup incomplete and is shown in the dashboard.
 Unfinished finalization and interrupted-finish recovery return a release error
 instead of reporting that resources were freed.
-**Archive closed runs...** only hides runs and starts the archive deletion
+**Archive closed runs…** only hides runs and starts the archive deletion
 timer; it does not release container memory.
 
 Relaunch is available only for a retained TUI run - closed, or finished by its

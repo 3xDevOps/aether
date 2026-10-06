@@ -430,7 +430,7 @@ checkout, transcript and run record under their existing retention rules.
 The released session cannot be relaunched. A run that has become active is
 rejected with `-32002`; repeating a successful release is a no-op. Evidence
 capture or runtime cleanup errors are returned without claiming release.
-The dashboard offers this as **Release resources...** and, for the selected
+The dashboard offers this as **Release resources…** and, for the selected
 workspace including archived runs, **Free retained containers…**.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
