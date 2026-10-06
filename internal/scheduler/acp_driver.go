@@ -79,6 +79,7 @@ type acpRun struct {
 	stderr   *tailBuffer
 	err      error
 	stopping bool
+	ended    bool
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {
@@ -167,7 +168,7 @@ func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
 	defer d.mu.Unlock()
 	r := d.runs[run]
 	switch {
-	case r != nil && r.session != nil:
+	case r != nil && r.session != nil && !r.ended:
 		return r.session, nil
 	case r != nil && r.err != nil:
 		return nil, fmt.Errorf("%w: %w", ErrACPNotRunning, r.err)
@@ -281,7 +282,7 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		OnState: func(working bool, reason string, failed error) {
 			if oneShot && !working {
 				if reason != "" {
-					go d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
+					d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
 				}
 				return
 			}
@@ -349,12 +350,12 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 				prompt = oneShotResume
 			}
 		default:
-			go d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
+			d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
 			return
 		}
 	}
 	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false); err != nil {
-		go d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }
 
@@ -367,35 +368,46 @@ func turnEndReport(stop string) agentstatus.Report {
 
 // endOneShot ends a background run after its turn as a one-shot agent's
 // exit does: a swarm worker keeps its container, and any other run's
-// container exits 0 for a normal turn end and 1 otherwise.
+// container exits 0 for a normal turn end and 1 otherwise. Only the first
+// call for a session ends it, and its session takes no input from then on.
 func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Report) {
 	d.mu.Lock()
 	r := d.runs[entry.runID]
-	skip := d.closed || r == nil || r.stopping
+	skip := d.closed || r == nil || r.stopping || r.ended
 	live := r != nil && r.session != nil
+	if !skip {
+		r.ended = true
+	}
 	d.mu.Unlock()
 	if skip {
 		return
 	}
-	if live {
-		d.stopAdapter(context.Background(), entry.runID)
-	}
-	d.s.mu.Lock()
-	assigned, cid := entry.missionAssigned, entry.containerID
-	d.s.mu.Unlock()
-	if assigned {
-		d.report(entry.runID, idle)
-		return
-	}
-	signal := "USR2"
-	if ok {
-		signal = "USR1"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
-	defer cancel()
-	if code, _, stderr, err := d.s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", "kill -" + signal + " 1"}, ""); err != nil || code != 0 {
-		slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
-	}
+	go func() {
+		unlock := d.lockOp(entry.runID)
+		d.mu.Lock()
+		current := d.runs[entry.runID] == r
+		d.mu.Unlock()
+		if current && live {
+			d.stopAdapterLocked(context.Background(), entry.runID)
+		}
+		unlock()
+		d.s.mu.Lock()
+		assigned, cid := entry.missionAssigned, entry.containerID
+		d.s.mu.Unlock()
+		if assigned {
+			d.report(entry.runID, idle)
+			return
+		}
+		signal := "USR2"
+		if ok {
+			signal = "USR1"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
+		defer cancel()
+		if code, _, stderr, err := d.s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", "kill -" + signal + " 1"}, ""); err != nil || code != 0 {
+			slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
+		}
+	}()
 }
 
 func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
@@ -416,7 +428,7 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	d.notice(entry.runID, "Enhanced session failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if entry.launchMode == domain.LaunchHeadless {
-		go d.endOneShot(entry, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	go d.report(entry.runID, idle)
@@ -461,7 +473,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	cause = adapterError(cause, r.stderr)
 	defer d.lockOp(entry.runID)()
 	d.mu.Lock()
-	current := d.runs[entry.runID] == r && !r.stopping
+	current := d.runs[entry.runID] == r && !r.stopping && !r.ended
 	if current {
 		r.err = cause
 	}
@@ -472,7 +484,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	d.notice(entry.runID, "Enhanced session ended", cause.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
 	if entry.launchMode == domain.LaunchHeadless {
-		go d.endOneShot(entry, false, idle)
+		d.endOneShot(entry, false, idle)
 		return
 	}
 	d.report(entry.runID, idle)
