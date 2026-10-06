@@ -1,8 +1,8 @@
 // The `aether://run/<id>` deep link, from the dashboard's side. Both shells
 // turn that link into `<dashboard>?run=<id>` and load it, so the query is the
 // whole contract - and only a real browser against a real gateway shows that
-// the id survives the token exchange, the first hydration and the reload
-// that must not act on it twice.
+// the id survives the token exchange and the first hydration. The address
+// then keeps naming the open view, so a reload and back agree with it.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -12,7 +12,7 @@ const task = 'the run the link names'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a run deep link opens that run once', async ({ page, aether }) => {
+test('a run deep link opens that run and the address follows navigation', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -32,9 +32,18 @@ test('a run deep link opens that run once', async ({ page, aether }) => {
   await page.goto(`${alice.url}&run=${run.id}`)
 
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-  // Neither parameter is left where a reload would reuse it.
-  expect(new URL(page.url()).search).toBe('')
+  // The token leaves the address; the run stays in it.
+  expect(new URL(page.url()).search).toBe(`?run=${run.id}`)
 
   await page.reload()
+  await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
+
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  expect(new URL(page.url()).search).toBe('?page=settings')
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
+  await page.getByRole('heading', { name: task, exact: true }).click()
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
+  expect(new URL(page.url()).search).toBe('')
 })

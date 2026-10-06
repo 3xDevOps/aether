@@ -1,5 +1,6 @@
 import { clampDockHeight } from '@/components/dock'
 import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
+import { initialRoute } from '@/lib/url-state'
 import type {
   ConfigExclusion,
   ConfigImportResult,
@@ -216,7 +217,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   boardView: 'cards',
   boardMapViewports: {},
   lastHarnessByAccount: {},
-  route: { name: 'board', params: {} },
+  route: initialRoute(),
   dismissedUpdates: { cli: '', server: '', shell: '' },
   updatesOpen: false,
   shortcutsOpen: false,

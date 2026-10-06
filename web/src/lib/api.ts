@@ -264,19 +264,6 @@ function bearer(): string | null {
   return window.sessionStorage.getItem(tokenKey)
 }
 
-/** The run an `aether://run/<id>` deep link asked for (shells load it as
- * `?run=<id>`). Removing it from the address bar makes it one-shot, so a
- * reload or reconnect does not reopen a run the member has left. */
-export function takeRequestedRun(): string | null {
-  if (typeof window === 'undefined') return null
-  const id = new URLSearchParams(window.location.search).get('run')
-  if (!id) return null
-  const clean = new URL(window.location.href)
-  clean.searchParams.delete('run')
-  window.history.replaceState({}, '', clean.toString())
-  return id
-}
-
 async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
   const token = bearer()
   const res = await fetch(`${API_BASE}/${method}`, {

@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
+import { api, ApiError, type Api } from '@/lib/api'
 import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
@@ -160,9 +160,11 @@ export async function hydrate(
     if (signal?.aborted) return false
     s.setHydrated(true)
     const current = store.getState()
+    const linked = current.route.params.runId
+    const unknownLink = !s.hydrated && current.route === s.route && !!linked && !current.runs[linked]
     if (
       !s.hydrated &&
-      s.route.name === 'board' &&
+      (s.route.name === 'board' || unknownLink) &&
       current.route === s.route &&
       !current.onboarded &&
       (capabilities?.local?.includes('link.status') === true ||
@@ -174,11 +176,7 @@ export async function hydrate(
     ) {
       store.setState({ route: { name: 'onboarding', params: {} } })
     }
-    // An authorized run link outranks onboarding.
-    const requested = takeRequestedRun()
-    if (requested && store.getState().runs[requested]) {
-      store.getState().navigate('terminal', { runId: requested })
-    }
+    else if (unknownLink) store.setState({ route: { name: 'board', params: {} } })
     s.setUnreachable(null)
     return true
   } catch (err) {

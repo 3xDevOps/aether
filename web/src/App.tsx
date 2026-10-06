@@ -6,6 +6,7 @@ import { WindowBar } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
+import { bindRouteToUrl } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -43,6 +44,7 @@ export function App() {
   useKeyboardInset()
 
   useEffect(() => connect(useStore), [attempt, epoch])
+  useEffect(() => bindRouteToUrl(useStore), [])
 
   // An in-app update restarts the gateway on purpose, so it is not a total failure.
   const blocked = !hydrated && hydrationError !== null && !gatewayRestarting

@@ -1,0 +1,69 @@
+import { act } from '@testing-library/react'
+import { bindRouteToUrl, hrefFor, routeFromQuery, routeQuery } from '@/lib/url-state'
+import { createRootStore } from '@/store'
+import type { Route } from '@/store/ui'
+
+const query = (route: Route) => routeQuery(route).toString()
+
+afterEach(() => {
+  window.history.replaceState(null, '', '/')
+})
+
+describe('route in the query string', () => {
+  it.each<[Route, string]>([
+    [{ name: 'board', params: {} }, ''],
+    [{ name: 'terminal', params: { runId: 'run_1' } }, 'run=run_1'],
+    [{ name: 'diff', params: { runId: 'run_1' } }, 'run=run_1&view=diff'],
+    [{ name: 'settings', params: {} }, 'page=settings'],
+    [{ name: 'missions', params: { missionId: 'mis_1' } }, 'page=missions&id=mis_1'],
+    [{ name: 'workspace', params: { workspaceId: 'wsp_1' } }, 'page=workspace&id=wsp_1'],
+  ])('writes %o as "%s" and reads it back', (route, text) => {
+    expect(query(route)).toBe(text)
+    expect(routeFromQuery(new URLSearchParams(text))).toEqual(route)
+  })
+
+  it('reads the shells\' bare ?run= deep link as that run\'s terminal', () => {
+    expect(routeFromQuery(new URLSearchParams('run=run_9'))).toEqual({ name: 'terminal', params: { runId: 'run_9' } })
+  })
+
+  it('falls back to the terminal for a view it does not know', () => {
+    expect(routeFromQuery(new URLSearchParams('run=run_9&view=nope')).name).toBe('terminal')
+  })
+
+  it('keeps every other query parameter and the hash', () => {
+    expect(hrefFor('http://h/?keep=1&page=files#x', { name: 'terminal', params: { runId: 'r' } }))
+      .toBe('http://h/?keep=1&run=r#x')
+  })
+})
+
+describe('bindRouteToUrl', () => {
+  it('starts the store on the address, pushes each navigation and follows back', () => {
+    window.history.replaceState(null, '', '/?run=run_1&view=diff')
+    const store = createRootStore()
+    expect(store.getState().route).toEqual({ name: 'diff', params: { runId: 'run_1' } })
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+
+    act(() => store.getState().navigate('settings'))
+    expect(window.location.search).toBe('?page=settings')
+
+    act(() => {
+      window.history.back()
+    })
+    return vi.waitFor(() => {
+      expect(window.location.search).toBe('?run=run_1&view=diff')
+      expect(store.getState().route).toEqual({ name: 'diff', params: { runId: 'run_1' } })
+    })
+  })
+
+  it('leaves the history alone when the route does not change the address', () => {
+    const store = createRootStore()
+    const stop = bindRouteToUrl(store)
+    onTestFinished(stop)
+    const length = window.history.length
+
+    act(() => store.getState().navigate('board'))
+
+    expect(window.history.length).toBe(length)
+  })
+})

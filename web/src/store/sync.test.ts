@@ -198,7 +198,7 @@ describe('hydrate', () => {
       window.history.replaceState({}, '', '/')
     })
 
-    it('opens that run and leaves the address bar clean', async () => {
+    it('opens that run', async () => {
       window.history.replaceState({}, '', '/?run=run_1')
       const store = createRootStore()
       await hydrate(store, fakeApi())
@@ -207,8 +207,6 @@ describe('hydrate', () => {
         name: 'terminal',
         params: { runId: 'run_1' },
       })
-      // Stripped, so a reload does not reopen a run the member left.
-      expect(window.location.search).toBe('')
     })
 
     it('stays on the board for a completed member requesting a run they cannot see', async () => {
@@ -218,7 +216,6 @@ describe('hydrate', () => {
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
-      expect(window.location.search).toBe('')
     })
 
     it('does not reopen the run when a reconnect re-hydrates', async () => {
@@ -247,7 +244,6 @@ describe('hydrate', () => {
       expect(store.getState().route).toEqual(requested === 'run_1'
         ? { name: 'terminal', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
-      expect(window.location.search).toBe('')
     })
 
     it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
@@ -273,7 +269,6 @@ describe('hydrate', () => {
       expect(store.getState().route).toEqual(requested === 'run_1'
         ? { name: 'terminal', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
-      expect(window.location.search).toBe('')
       if (requested === 'run_1') {
         store.getState().navigate('board')
         await hydrate(store, client)
