@@ -47,6 +47,22 @@ function setTask(task: string) {
 }
 
 describe('new run', () => {
+  it('returns focus to what had it before the dialog opened', async () => {
+    render(<button type="button">Board</button>)
+    const before = screen.getByRole('button', { name: 'Board' })
+    before.focus()
+    const close = vi.fn(() => useStore.setState({ paletteDialog: null }))
+    useStore.setState({ closePaletteDialog: close })
+    const view = render(<LaunchDialog />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    expect(document.activeElement).toBe(screen.getByLabelText('Task'))
+
+    await userEvent.keyboard('{Escape}')
+    view.unmount()
+
+    await waitFor(() => expect(document.activeElement).toBe(before))
+  })
+
   it('collapses the agent list to the choice on a phone until Change', async () => {
     atViewport(412, { pointer: 'coarse' })
     vi.mocked(api.agentList).mockResolvedValue([

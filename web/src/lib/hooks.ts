@@ -74,18 +74,28 @@ export function handOverFocus(target: HTMLElement | null) {
   handedOver = target
 }
 
+function openerOf(active: Element | null): HTMLElement | null {
+  const menu = active?.closest('[role="menu"]')
+  // A menu item is gone once its dialog closes; its menu's trigger is still there.
+  const target = handedOver ?? (menu
+    ? [...document.querySelectorAll('[aria-controls]')].find((el) => el.getAttribute('aria-controls') === menu.id)
+    : active)
+  return target instanceof HTMLElement ? target : null
+}
+
 /** Focus handlers for a dialog that has no Radix trigger, so closing it returns focus to whatever opened it. */
 export function useReturnFocus() {
-  const opener = useRef<HTMLElement | null>(null)
+  // Read while rendering: an autoFocus field inside the dialog takes focus
+  // before any effect runs, and Radix then skips onOpenAutoFocus.
+  const [atMount] = useState(() => (typeof document === 'undefined' ? null : openerOf(document.activeElement)))
+  const opener = useRef(atMount)
+  useEffect(() => {
+    handedOver = null
+  }, [])
   return {
     onOpenAutoFocus: () => {
-      const menu = document.activeElement?.closest('[role="menu"]')
-      // A menu item is gone once its dialog closes; its menu's trigger is still there.
-      const target = handedOver ?? (menu
-        ? [...document.querySelectorAll('[aria-controls]')].find((el) => el.getAttribute('aria-controls') === menu.id)
-        : document.activeElement)
+      opener.current = openerOf(document.activeElement)
       handedOver = null
-      opener.current = target instanceof HTMLElement ? target : null
     },
     onCloseAutoFocus: (event: Event) => {
       if (!opener.current?.isConnected) return
