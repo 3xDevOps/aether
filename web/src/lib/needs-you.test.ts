@@ -139,6 +139,12 @@ const rows: {
     reason: 'Worker blocked: no database access',
   },
   {
+    id: 'turn-ended',
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'agent idle' }),
+    ctx: {},
+    reason: 'Waiting for your reply',
+  },
+  {
     id: 'stopped',
     run: { ...record({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' }), stateChangedAt: '2026-08-14T10:08:00Z', stateChangedAtEstimated: false },
     ctx: {},

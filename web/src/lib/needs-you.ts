@@ -38,6 +38,7 @@ export type NeedsYouID =
   | 'control-hold'
   | 'enhanced-failure'
   | 'blocked'
+  | 'turn-ended'
   | 'stopped'
   | 'unreviewed-finish'
 
@@ -341,6 +342,20 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) =>
       `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
     action: () => terminalAction,
+  }),
+  condition({
+    id: 'turn-ended',
+    target: 'run',
+    holds: (run, ctx) =>
+      isEnhanced(run) &&
+      run.status === 'needs-attention' &&
+      !isPaused(run, ctx) &&
+      !run.reason?.startsWith(stalledPrefix) &&
+      !run.reason?.startsWith(blockedPrefix) &&
+      enhancedFailure(run) === undefined,
+    resolvers: (run) => [run.member_id],
+    action: () => ({ kind: 'reply', label: 'Reply' }),
+    reason: () => 'Waiting for your reply',
   }),
   condition({
     id: 'stopped',
