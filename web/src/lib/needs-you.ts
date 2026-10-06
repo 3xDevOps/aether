@@ -357,6 +357,7 @@ export function needsYou(run: RunRecord, ctx: StateContext): NeedsYouCondition |
 
 /** Who the run waits on when it waits on somebody other than the viewer. */
 export function waitingOn(run: RunRecord, ctx: StateContext): string | undefined {
+  if (!ctx.viewerID) return undefined
   for (const entry of needsYouConditions) {
     const member = entry.waitsOn(run, ctx)
     if (member !== undefined) return member

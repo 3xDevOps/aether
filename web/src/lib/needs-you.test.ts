@@ -238,6 +238,7 @@ describe('viewer scoping', () => {
   it('needs nobody before the viewer is known', () => {
     const stopped = record({ status: 'needs-attention' })
     expect(needsYou(stopped, stateContext({ viewerID: null, viewerRole: null }))).toBeUndefined()
+    expect(presentRun(stopped, stateContext({ viewerID: null, viewerRole: null })).reason).not.toMatch(/^Waiting for/)
   })
 })
 
