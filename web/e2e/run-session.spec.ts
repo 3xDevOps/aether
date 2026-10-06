@@ -34,7 +34,9 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(page.getByText('Answer the request above to continue.')).toBeVisible()
   await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'Answer' }).click()
   await expect(card).toBeFocused()
-  await page.keyboard.press('2')
+  await expect(card.getByRole('button')).toHaveText(['Allow', 'Reject', 'Always Allow'])
+  await expect(page.getByRole('log', { name: 'Session' }).getByText('Waiting for your approval: rm -rf build')).toBeVisible()
+  await page.keyboard.press('1')
   await expect(log.getByText(/Approved: run/)).toBeVisible()
   await expect(log.getByText('permission: allow')).toBeVisible()
   await expect.poll(async () => {
