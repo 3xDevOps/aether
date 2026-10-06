@@ -1,3 +1,4 @@
+import { ApiError } from '@/lib/api'
 import type { Event, RunMessage } from '@/lib/types'
 import { createRootStore } from '@/store'
 import { loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
@@ -140,5 +141,18 @@ describe('agent message events', () => {
     const payload = { message_id: 'msg-3', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
     expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(false)
     expect(store.getState().lastSeq).toBe(0)
+  })
+
+  it('applies the event when the recipient run is already deleted', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const client = fakeApi({
+      runGet: vi.fn(async () => {
+        throw new ApiError(404, 'run.get: run run_1 not found')
+      }),
+    })
+    const payload = { message_id: 'msg-3', to_run_id: 'run_1', acked_at: '2026-10-05T10:01:00Z' }
+    expect(await applyEvent(store, messageEvent(8, payload, 'coord.message.acked'), client)).toBe(true)
+    expect(store.getState().lastSeq).toBe(8)
   })
 })
