@@ -247,7 +247,7 @@ separate:
 
 ### Public remote repository
 
-In **Onboarding → Workspace** or **Manage workspaces**:
+In **Onboarding → Repository** or **Manage workspaces**:
 
 1. Choose **Import repository** under **Public or private remote repository**.
 2. Fill **Workspace name**, a credential-free HTTPS **Source URL**, and the
