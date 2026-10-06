@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import { Copy } from '@/components/icons'
-import { AgentMessageRow } from '@/components/messages/message-row'
+import { MessageRow as AgentMessage } from '@/components/messages/message-row'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -102,15 +102,8 @@ function EntryRow({ entry, runID }: { entry: WorkItem; runID: string }) {
 
 function MailRow({ messageID, runID }: { messageID: string; runID: string }) {
   const m = useStore((s) => s.runMessages[messageID])
-  const runs = useStore((s) => s.runs)
   if (!m) return null
-  return (
-    <AgentMessageRow
-      message={m}
-      label={(id) => (id === runID ? 'This run' : runs[id] ? labelOfRun(runs[id]) : id)}
-      onOpenRun={(id) => id === runID ? undefined : () => useStore.getState().navigate('run', { runId: id })}
-    />
-  )
+  return <AgentMessage message={m} flush label={(id, run) => (id === runID ? 'This run' : run ? labelOfRun(run) : id)} />
 }
 
 function hasDetail(entry: WorkItem): boolean {

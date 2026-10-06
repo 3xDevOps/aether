@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { AgentMessageRow } from '@/components/messages/message-row'
+import { MessageRow } from '@/components/messages/message-row'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -56,15 +56,13 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const messages = useStore(useShallow((s) => (s.messageLists[key]?.ids ?? []).map((id) => s.runMessages[id]!)))
   const olderCursor = useStore((s) => s.messageLists[key]?.nextBefore)
   const error = useStore((s) => s.messageErrors[key])
-  const runs = useStore((s) => s.runs)
-  const navigate = useStore((s) => s.navigate)
   const [all, setAll] = useState(false)
   const [loading, setLoading] = useState(false)
   useEffect(() => {
     void loadMessagePage(useStore, api, { kind: 'run', workspaceID: run.workspace_id, runID: run.id })
   }, [run.workspace_id, run.id])
   if (messages.length === 0 && !run.mission_id) return null
-  const label = (id: string) => (id === run.id ? 'This run' : runs[id] ? runLabel(runs[id]) : id)
+  const label = (id: string, other: RunRecord | undefined) => (id === run.id ? 'This run' : other ? runLabel(other) : id)
   const shown = all ? messages : messages.slice(-recentMessages)
   const older = async () => {
     setLoading(true)
@@ -81,11 +79,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
       <ol className="flex flex-col gap-3">
         {shown.map((m) => (
           <li key={m.id}>
-            <AgentMessageRow
-              message={m}
-              label={label}
-              onOpenRun={(runID) => (runID === run.id ? undefined : () => navigate('run', { runId: runID }))}
-            />
+            <MessageRow message={m} label={label} flush />
           </li>
         ))}
       </ol>

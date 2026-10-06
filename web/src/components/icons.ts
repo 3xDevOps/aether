@@ -78,8 +78,6 @@ import {
   Trash2 as LucideTrash2,
   Circle as LucideCircle,
   CircleDot as LucideCircleDot,
-  MessageCircleQuestionMark as LucideMessageCircleQuestionMark,
-  FileCheck as LucideFileCheck,
   ArrowRightLeft as LucideArrowRightLeft,
   Brain as LucideBrain,
   ListPlus as LucideListPlus,
@@ -178,8 +176,6 @@ export const Globe = icon(LucideGlobe)
 export const Trash2 = icon(LucideTrash2)
 export const Circle = icon(LucideCircle)
 export const CircleDot = icon(LucideCircleDot)
-export const MessageCircleQuestion = icon(LucideMessageCircleQuestionMark)
-export const FileCheck = icon(LucideFileCheck)
 export const ArrowRightLeft = icon(LucideArrowRightLeft)
 export const Brain = icon(LucideBrain)
 export const ListPlus = icon(LucideListPlus)

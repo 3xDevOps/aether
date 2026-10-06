@@ -1,5 +1,5 @@
-import { memo, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowRight, CircleHelp, ClipboardCheck, FileCheck, type LucideIcon, MessageCircleQuestion, MessageSquare, Reply } from '@/components/icons'
+import { memo, useState } from 'react'
+import { ArrowRight, CircleHelp, ClipboardCheck, type LucideIcon, MessageSquare, Reply } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { runLabel } from '@/lib/status'
@@ -55,17 +55,19 @@ export const MessageRow = memo(function MessageRow({
   message,
   onThread,
   label,
+  flush = false,
 }: {
   message: RunMessage
   onThread?: (thread: string) => void
   label?: ParticipantLabel
+  flush?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const long = message.body.split('\n').length > 3 || message.body.length > 280
   const thread = message.correlation_id || (message.kind === 'question' || message.kind === 'report' ? message.id : '')
   const report = message.kind === 'report' ? [['Outcome', message.outcome], ['Summary', message.summary === message.body ? '' : message.summary], ['Next', message.next_action]].filter(([, value]) => value) : []
   return (
-    <article aria-label={`${kinds[message.kind]?.word ?? 'Message'} ${message.id}`} className="grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] gap-x-2 gap-y-1 px-4 py-2 text-ui">
+    <article aria-label={`${kinds[message.kind]?.word ?? 'Message'} ${message.id}`} className={cn('grid min-w-0 grid-cols-[0.875rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-ui', !flush && 'px-4 py-2')}>
       <span className="flex h-5 items-center">
         <MessageKindGlyph kind={message.kind} />
       </span>
@@ -103,59 +105,3 @@ export const MessageRow = memo(function MessageRow({
     </article>
   )
 })
-
-const kindGlyph: Record<RunMessageKind, { Icon: LucideIcon; label: string }> = {
-  message: { Icon: MessageSquare, label: 'Message' },
-  question: { Icon: MessageCircleQuestion, label: 'Question' },
-  reply: { Icon: Reply, label: 'Reply' },
-  report: { Icon: FileCheck, label: 'Report' },
-}
-
-function bodyOf(m: RunMessage): string {
-  if (m.kind !== 'report') return m.body
-  return [m.outcome && `Outcome: ${m.outcome}`, m.summary, m.body, m.next_action && `Next: ${m.next_action}`]
-    .filter(Boolean)
-    .join('\n')
-}
-
-export function AgentMessageRow({ message, label, onOpenRun }: {
-  message: RunMessage
-  label: (runID: string) => string
-  onOpenRun: (runID: string) => (() => void) | undefined
-}) {
-  const { Icon, label: kind } = kindGlyph[message.kind] ?? kindGlyph.message
-  const body = useRef<HTMLParagraphElement>(null)
-  const [long, setLong] = useState(false)
-  const [open, setOpen] = useState(false)
-  const text = bodyOf(message)
-  useLayoutEffect(() => {
-    const node = body.current
-    if (node) setLong(node.scrollHeight > node.clientHeight + 1)
-  }, [text])
-  const participant = (runID: string) => {
-    const open = onOpenRun(runID)
-    return open
-      ? <Button variant="link" size="sm" onClick={open}><span className="max-w-40 truncate">{label(runID)}</span></Button>
-      : <span className="max-w-40 truncate text-text">{label(runID)}</span>
-  }
-  return (
-    <article data-slot="agent-message" aria-label={`${kind} from ${label(message.from_run_id)} to ${label(message.to_run_id)}`} className="flex min-w-0 flex-col gap-0.5 text-ui-sm">
-      <div className="flex min-w-0 items-center gap-1.5 text-muted">
-        <Icon role="img" aria-label={kind} className="size-3.5 shrink-0" />
-        {participant(message.from_run_id)}
-        <span aria-hidden>→</span>
-        {participant(message.to_run_id)}
-        <RelativeTime at={message.created_at} className="ml-auto shrink-0 tabular-nums" />
-      </div>
-      <p ref={body} className={cn('pl-5 break-words whitespace-pre-wrap text-text', !open && 'line-clamp-3')}>{text}</p>
-      <div className="flex items-center gap-2 pl-5 text-muted">
-        <span>{deliveryWord(message)}</span>
-        {(long || open) && (
-          <Button variant="link" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {open ? 'Show less' : 'Show more'}
-          </Button>
-        )}
-      </div>
-    </article>
-  )
-}
