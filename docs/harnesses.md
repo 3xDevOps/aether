@@ -129,12 +129,13 @@ aether agent add claude --enhanced
 ```
 
 types the agent's install command followed by that line into the environment
-terminal (or prints it when no terminal opens). The dashboard calls
-`agent.install` with `{"name":"claude","enhanced":true}` instead: the server
-runs the same command in the member's environment terminal, starting it if
-needed, waits up to 10 minutes, and answers with the last 8 KiB of output,
-the exit status, and whether the agent and its adapter now resolve. One
-install runs per member at a time. It first waits for a pre-launch update
+terminal (or prints it when no terminal opens). The server RPC
+`agent.install` with `{"name":"claude","enhanced":true}` runs the same
+command in the member's environment terminal, starting it if needed, waits
+up to 10 minutes, and answers with the last 8 KiB of output, the exit
+status, and whether the agent and its adapter now resolve. The dashboard's
+agent setup does not call it yet; it types the install command into the
+terminal as the CLI does. One install runs per member at a time. It first waits for a pre-launch update
 writing into the same home, and a launch skips that update while an install
 runs. The server wraps the command in `mktemp` and `timeout`, so the
 environment image must provide both (coreutils or busybox); without them the
