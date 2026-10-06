@@ -44,7 +44,6 @@ export interface SessionStream {
 
 const codeInvalidParams = -32602
 const codeConflict = -32003
-/** The server ended or restarted the session: resubscribe at once with after_seq. */
 const resubscribe = 1012
 const policy = 1008
 

@@ -92,8 +92,6 @@ const Block = memo(function Block({ source }: { source: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{source}</ReactMarkdown>
 })
 
-/** Blocks are split with marked's lexer so a streaming answer re-renders only
- * its last block; every completed block keeps its rendered output. */
 export function Markdown({ text }: { text: string }) {
   const blocks = useMemo(() => lexer(text).map((token) => token.raw).filter((raw) => raw.trim()), [text])
   return (

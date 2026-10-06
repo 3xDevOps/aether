@@ -9,7 +9,6 @@ export function resetItems(): void {
   seq = 0
 }
 
-/** One log item; seq and time advance with every call. */
 export function item(kind: SessionItem['kind'], turn: number, fields: Partial<SessionItem> = {}): SessionItem {
   seq++
   return { seq, epoch: 0, time: new Date(start + seq * 1000).toISOString(), turn, kind, ...fields }
@@ -29,7 +28,6 @@ export const state = (over: Partial<SessionState> = {}): SessionState => ({
   ...over,
 })
 
-/** The server side of one /ws/acp socket, scripted from a test. */
 export class ScriptedSession {
   constructor(readonly socket: StubSocket) {}
 
