@@ -72,12 +72,12 @@ test('a run whose session is missing never reads as offline while it waits', asy
   })
 
   await page.goto(alice.url)
-  await page.getByRole('complementary').getByRole('button', { name: /session is late/ }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /session is late/ }).click()
   // The wait only applies to a run that can still gain a session, so the test
   // is only about what it says while the run is one.
   await expect(
     page.locator('header').filter({ hasText: 'a run whose session is late' }),
-  ).toContainText('Working')
+  ).toContainText('Agent working')
 
   // Every dropped socket, the refusal, and the reconnect that refusal earns.
   await expect(async () => {

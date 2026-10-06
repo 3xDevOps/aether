@@ -74,6 +74,12 @@ describe('terminal zoom', () => {
     expect(hydrated).not.toHaveProperty('boardMapViewports')
     expect(hydrated.theme).toBe('dark')
   })
+
+  it('drops the run dock height from a version 7 payload', () => {
+    const hydrated = rehydrate({ runDockHeight: 240, theme: 'dark' }, 7)
+    expect(hydrated).not.toHaveProperty('runDockHeight')
+    expect(hydrated.theme).toBe('dark')
+  })
 })
 
 // The active workspace and the workspace route are two views of one thing:
@@ -97,11 +103,11 @@ describe('workspace scope and route stay in sync', () => {
   })
 
   it('leaves other routes alone when the scope switches', () => {
-    useStore.getState().navigate('events', { runId: 'run_1' })
+    useStore.getState().navigate('run', { runId: 'run_1' })
     useStore.getState().setActiveWorkspace('wsp_2')
 
     expect(useStore.getState().route).toEqual({
-      name: 'events',
+      name: 'run',
       params: { runId: 'run_1' },
     })
   })
@@ -200,28 +206,32 @@ describe('update dismissals are per version', () => {
   })
 })
 
-describe('terminal dock heights', () => {
-  it('uses the defaults, clamps updates, and persists both preferences', () => {
+describe('terminal dock height', () => {
+  it('uses the default, clamps updates, and persists the preference', () => {
     const initial = useStore.getState()
     expect(initial.terminalDockHeight).toBe(280)
-    expect(initial.runDockHeight).toBe(240)
 
     initial.setTerminalDockHeight(0)
-    initial.setRunDockHeight(window.innerHeight)
 
     expect(useStore.getState().terminalDockHeight).toBe(120)
-    expect(useStore.getState().runDockHeight).toBe(
-      Math.max(120, window.innerHeight - 200),
-    )
-
     const stored = JSON.parse(
       window.localStorage.getItem('aether.ui') ?? '{}',
     ) as { state?: Record<string, unknown> }
-    expect(stored.state).toMatchObject({
-      terminalDockHeight: 120,
-      runDockHeight: Math.max(120, window.innerHeight - 200),
-    })
-    useStore.setState({ terminalDockHeight: 280, runDockHeight: 240 })
+    expect(stored.state).toMatchObject({ terminalDockHeight: 120 })
+    useStore.setState({ terminalDockHeight: 280 })
+  })
+})
+
+describe('run view memory', () => {
+  it('remembers the view a run was opened in for the rest of the visit', () => {
+    useStore.getState().navigate('run', { runId: 'run_1', view: 'changes' })
+    useStore.getState().navigate('board')
+    useStore.getState().navigate('run', { runId: 'run_1' })
+
+    expect(useStore.getState().runViewMemory).toEqual({ run_1: 'changes' })
+    const stored = JSON.parse(window.localStorage.getItem('aether.ui') ?? '{}') as { state?: Record<string, unknown> }
+    expect(stored.state).not.toHaveProperty('runViewMemory')
+    useStore.setState({ runViewMemory: {} })
   })
 })
 

@@ -199,7 +199,7 @@ describe('command palette', () => {
   })
 
   it('starts with navigation rather than a focused destructive command', async () => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
     const search = await screen.findByRole('combobox')
     await waitFor(() => expect(screen.getByRole('option', { name: 'Open the board' }).getAttribute('aria-selected')).toBe('true'))
@@ -214,9 +214,9 @@ describe('command palette', () => {
       const route = useStore((state) => state.route)
       const input = useRef<HTMLInputElement>(null)
       useEffect(() => {
-        if (route.name === 'terminal') input.current?.focus()
+        if (route.name === 'run') input.current?.focus()
       }, [route])
-      return route.name === 'terminal' ? <input ref={input} aria-label="Destination terminal" /> : null
+      return route.name === 'run' ? <input ref={input} aria-label="Destination terminal" /> : null
     }
     render(<><SearchButton /><CommandPalette /><Destination /></>)
     const trigger = screen.getByRole('button', { name: 'Search' })
@@ -229,7 +229,7 @@ describe('command palette', () => {
   })
 
   it.each(['Kill run', 'Delete run'])('requires explicit confirmation before %s calls the gateway', async (label) => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     open()
     fireEvent.click(await screen.findByRole('option', { name: label }))
     const confirmation = await screen.findByRole('alertdialog')
@@ -244,7 +244,7 @@ describe('command palette', () => {
   })
 
   it.each(['Cancel', 'Escape'])('cancels a destructive command with %s and returns to the terminal', async (dismiss) => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+    useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
     render(<CommandPalette />)
     overlay('<div class="xterm"><textarea aria-label="Terminal input"></textarea></div>')
     const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
@@ -266,7 +266,7 @@ describe('command palette', () => {
   it.each(['Kill run', 'Delete run'])(
     'discards a pending %s handoff when the identity changes',
     async (label) => {
-      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
       render(<CommandPalette />)
       overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
       const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
@@ -312,7 +312,7 @@ describe('command palette', () => {
   ] as const)(
     'invalidates a visible %s confirmation on identity change (confirm before render: %s)',
     async (label, confirmBeforeRender) => {
-      useStore.setState({ route: { name: 'terminal', params: { runId: active.id } } })
+      useStore.setState({ route: { name: 'run', params: { runId: active.id } } })
       render(<CommandPalette />)
       overlay('<textarea aria-label="Old terminal"></textarea><input aria-label="New terminal" />')
       const oldTerminal = screen.getByRole('textbox', { name: 'Old terminal' })
@@ -376,7 +376,7 @@ describe('command palette', () => {
     act(() => useStore.getState().applyRunTitle(active.id, 'quasar migration'))
     await waitFor(() => expect(screen.getByRole('option', { name: /quasar migration/ }).getAttribute('aria-selected')).toBe('true'))
     fireEvent.keyDown(search, { key: 'Enter' })
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: active.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: active.id } })
   })
 
   it('drops archived results and selects the remaining match as live status changes arrive', async () => {
@@ -399,7 +399,7 @@ describe('command palette', () => {
 
   it('does not execute a disabled match, then follows its live enablement', async () => {
     useStore.setState({
-      route: { name: 'terminal', params: { runId: active.id } },
+      route: { name: 'run', params: { runId: active.id } },
       capabilities: { gateway: 'local', methods: ['*'], ws: [], local: ['pull'] },
     })
     open()
@@ -450,7 +450,7 @@ describe('command palette', () => {
     fireEvent.click(item)
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: 'run_1' },
     })
     expect(useStore.getState().paletteOpen).toBe(false)
@@ -472,7 +472,7 @@ describe('command palette', () => {
 
   it('steers the run the centre view is showing, on any of its tabs', async () => {
     useStore.setState({
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       pausedRuns: { run_1: false },
     })
     open()
@@ -485,7 +485,7 @@ describe('command palette', () => {
   it('offers neither pause nor resume while the paused state is unknown', async () => {
     // A legacy gateway sends no `paused` field, so the client cannot tell which
     // verb the server would accept.
-    useStore.setState({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     open()
 
     await screen.findByText('Kill run')
@@ -516,7 +516,7 @@ describe('command palette', () => {
         harness: 'claude',
       })),
     )
-    await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+    await waitFor(() => expect(useStore.getState().route.name).toBe('run'))
   })
 
   it('opens the launch dialog on Swarm from New swarm', async () => {
@@ -602,7 +602,7 @@ describe('command palette', () => {
     )
     await waitFor(() =>
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_tpl' },
       }),
     )
@@ -732,7 +732,7 @@ describe('command palette', () => {
   it('pulls the focused run branch through the local gateway', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ last_commit: 'abc1234' })) },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -751,7 +751,7 @@ describe('command palette', () => {
     // The server refuses to hand a run to someone who cannot own one.
     useStore.setState({
       members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
     })
     open()
 
@@ -775,7 +775,7 @@ describe('command palette', () => {
           }),
         ),
       },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -811,7 +811,7 @@ describe('command palette', () => {
     await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(done.id, true))
   })
 
-  it('offers relaunch only on a retained TUI Done run', async () => {
+  it('offers Reopen only on a retained TUI Done run', async () => {
     useStore.setState({
       runs: {
         [active.id]: toRecord(
@@ -822,7 +822,7 @@ describe('command palette', () => {
           }),
         ),
       },
-      route: { name: 'terminal', params: { runId: 'run_1' } },
+      route: { name: 'run', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',
         methods: ['*'],
@@ -832,7 +832,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Relaunch run'))
+    fireEvent.click(await screen.findByText('Reopen run'))
 
     await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith('run_1'))
   })
@@ -856,7 +856,7 @@ describe('command palette', () => {
   it('confirms focused release before calling the gateway', async () => {
     useStore.setState({
       runs: { [active.id]: toRecord(run({ ...active, status: 'merged', reason: 'closed; retained container' })) },
-      route: { name: 'terminal', params: { runId: active.id } },
+      route: { name: 'run', params: { runId: active.id } },
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()

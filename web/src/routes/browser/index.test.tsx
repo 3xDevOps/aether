@@ -1,13 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { api } from '@/lib/api'
 import type { DevBrowserCloseResult, DevBrowserPage, DevControlAcquireResult, DevController } from '@/lib/types'
-import '@/routes/browser'
-import { lookupRoute } from '@/routes/registry'
+import { BrowserView } from '@/routes/browser'
 import { useStore } from '@/store'
 import { run, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-const BrowserView = lookupRoute('browser')!
 const surface = { kind: 'browser' as const, id: 'browser', incarnation: 'browser-1' }
 let controller: DevController | null
 let poll: () => void
@@ -39,7 +37,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('releases only its own browser lease on window blur, not toolbar focus changes', async () => {
-  const view = render(<BrowserView params={{ runId: 'run_1' }} />)
+  const view = render(<BrowserView runID="run_1" />)
   fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
   await screen.findByRole('button', { name: 'Release control' })
   const held = controller!
@@ -57,7 +55,7 @@ it('releases only its own browser lease on window blur, not toolbar focus change
 it('does not release another controller when a denied watcher loses focus or detaches', async () => {
   controller = { kind: 'member', member_id: 'peer', control_session_id: 'peer-tab', control_generation: 9, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
   vi.mocked(api.devControlAcquire).mockRejectedValue(new Error('Control is held by another member'))
-  const view = render(<BrowserView params={{ runId: 'run_1' }} />)
+  const view = render(<BrowserView runID="run_1" />)
   fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
   await screen.findByRole('alert')
   fireEvent.blur(window)
@@ -69,7 +67,7 @@ it('releases an acquisition that completes after local focus was lost', async ()
   let finish!: (value: DevControlAcquireResult) => void
   const pending = new Promise<DevControlAcquireResult>((resolve) => { finish = resolve })
   vi.mocked(api.devControlAcquire).mockReturnValueOnce(pending)
-  const view = render(<BrowserView params={{ runId: 'run_1' }} />)
+  const view = render(<BrowserView runID="run_1" />)
   fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
   const session = vi.mocked(api.devControlAcquire).mock.calls[0][0].control_session_id
   fireEvent.blur(window)
@@ -84,7 +82,7 @@ it('releases an acquisition that completes after local focus was lost', async ()
 
 async function openConfirmation(action: 'Close page' | 'Reset session') {
   vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page], selected_page_id: page.page_id })
-  render(<BrowserView params={{ runId: 'run_1' }} />)
+  render(<BrowserView runID="run_1" />)
   fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
   await waitFor(() => expect(screen.getByRole('button', { name: 'Go' }).hasAttribute('disabled')).toBe(false))
   fireEvent.click(screen.getByRole('button', { name: 'Browser tools' }))
@@ -160,7 +158,7 @@ it('opens with the chosen preset before exposing page navigation', async () => {
     controller = { kind: 'member', control_session_id: target.control_session_id, control_generation: 1, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
     return { page: opened, control: controller }
   })
-  render(<BrowserView params={{ runId: 'run_1' }} />)
+  render(<BrowserView runID="run_1" />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Open browser' }).hasAttribute('disabled')).toBe(false))
   expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull()
@@ -177,7 +175,7 @@ it('allows observers to capture evidence without granting page mutations', async
   const screenshot = vi.spyOn(api, 'devBrowserScreenshot').mockRejectedValue(new Error('Capture quota reached'))
   const close = vi.spyOn(api, 'devBrowserClose')
   const reset = vi.spyOn(api, 'devBrowserReset')
-  render(<BrowserView params={{ runId: 'run_1' }} />)
+  render(<BrowserView runID="run_1" />)
   await screen.findByRole('button', { name: 'Go' })
   fireEvent.click(screen.getByRole('button', { name: 'Browser tools' }))
   for (const name of ['Close page', 'Reset session', 'New page']) {

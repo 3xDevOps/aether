@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import type { Api } from '@/lib/api'
 import type { Candidate, CandidateSummary } from '@/lib/integration-types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
-import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
+import { CapturesDialog } from '@/routes/run/captures'
 import { useStore } from '@/store'
 import { evidencePacket, fakeApi, integrationCandidate, run, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
@@ -104,8 +104,7 @@ describe('candidate review authority and resolution drafts', () => {
       integrationShow: vi.fn(async () => ({ candidate: first })),
       integrationResolve: resolve,
     })
-    render(<EvidenceDrawer workspaceID={workspace.id} runID="run_1" client={client} />)
-    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    render(<CapturesDialog workspaceID={workspace.id} runID="run_1" client={client} open onOpenChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
     fireEvent.click(await screen.findByLabelText(`Select packet ${packet.id}`))
     fireEvent.change(screen.getByLabelText('Target ref'), { target: { value: 'refs/heads/reviewed' } })
@@ -154,8 +153,7 @@ describe('candidate review authority and resolution drafts', () => {
       integrationShow: vi.fn(async () => ({ candidate: first })),
       integrationVerify: verify,
     })
-    render(<EvidenceDrawer workspaceID={workspace.id} runID="run_1" client={client} />)
-    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    const view = render(<CapturesDialog workspaceID={workspace.id} runID="run_1" client={client} open onOpenChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Show full' }))
     fireEvent.change(await screen.findByLabelText('Verification argv'), { target: { value: '["go","test","./resize"]' } })
@@ -182,8 +180,8 @@ describe('candidate review authority and resolution drafts', () => {
     expect(screen.getByRole('button', { name: 'Run verification' })).toHaveProperty('disabled', false)
     expect(verify).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close evidence' }))
-    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    view.rerender(<CapturesDialog workspaceID={workspace.id} runID="run_1" client={client} open={false} onOpenChange={() => {}} />)
+    view.rerender(<CapturesDialog workspaceID={workspace.id} runID="run_1" client={client} open onOpenChange={() => {}} />)
     expect(screen.getByRole('button', { name: 'Candidate review' }).getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Show full' }))

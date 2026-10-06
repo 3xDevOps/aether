@@ -74,7 +74,7 @@ describe('new run', () => {
 
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', task: 'fix the flaky test' }))
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: run().id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
   })
 
   it('preselects the most recently launched agent in its remembered mode', async () => {

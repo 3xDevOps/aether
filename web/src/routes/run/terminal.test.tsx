@@ -5,7 +5,7 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { RoomStatusResult, Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
-import '@/routes/terminal'
+import '@/routes/run'
 import { codeDenied, type TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
@@ -21,8 +21,8 @@ vi.mock('@/lib/api', async (importOriginal) => {
 })
 
 function terminalRoute() {
-  const View = lookupRoute('terminal')
-  if (!View) throw new Error('terminal route not registered')
+  const View = lookupRoute('run')
+  if (!View) throw new Error('run route not registered')
   return View
 }
 
@@ -126,7 +126,7 @@ afterEach(() => {
 })
 
 describe('terminal view', () => {
-  it('shows every named viewer and distinguishes another session owned by this member', async () => {
+  it('names the controller and distinguishes another session owned by this member', async () => {
     const view = mount({}, { member_id: bob.id })
     attached()
     const status = {
@@ -134,7 +134,7 @@ describe('terminal view', () => {
       run_id: 'run_1',
       protected: false,
       controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
-      watchers: [alice.id, bob.id, 'mem_unknown', 'mem_four', 'mem_five'],
+      watchers: [alice.id, bob.id, 'mem_unknown'],
       queued_steers: 0,
     }
     // Let the initial status fetch finish before supplying a newer room snapshot.
@@ -145,19 +145,14 @@ describe('terminal view', () => {
       roomStatusError: {},
     }))
     const presence = within(screen.getByRole('group', { name: 'Run presence' }))
-    expect(presence.getByText('(another session)')).toBeDefined()
-    expect(presence.queryByText('(this tab)')).toBeNull()
-    for (const name of ['Alice', 'Bob', 'mem_unknown', 'mem_four', 'mem_five']) {
-      expect(presence.getAllByText(name)).toHaveLength(name === 'Alice' ? 2 : 1)
-    }
+    expect(presence.getByText('You control in another tab')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
-    expect(presence.queryByText('(this tab)')).toBeNull()
+    expect(presence.queryByText('You control')).toBeNull()
     controlAck(true, 1, 1)
-    expect(presence.getByText('(this tab)')).toBeDefined()
-    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('You control')).toBeDefined()
     act(() => StubSocket.last().onclose?.({ code: 1006, reason: '' }))
-    expect(presence.queryByText('(this tab)')).toBeNull()
+    expect(presence.queryByText('You control')).toBeNull()
     view.unmount()
   })
 
@@ -179,17 +174,15 @@ describe('terminal view', () => {
     status.mockReturnValue(refresh.promise)
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
     controlAck(true, 1, 1)
-    expect(presence.getByText('(this tab)')).toBeDefined()
+    expect(presence.getByText('You control')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     controlAck(false, 2, 1)
-    expect(presence.queryByText('(another session)')).toBeNull()
-    expect(presence.getByText('(last known)')).toBeDefined()
+    expect(presence.getByText('You control in another tab (last known)')).toBeDefined()
     await act(async () => {
       refresh.reject(new Error('presence service unavailable'))
       await Promise.resolve()
     })
-    expect(presence.queryByText('(another session)')).toBeNull()
-    expect(presence.getByText('(last known)')).toBeDefined()
+    expect(presence.getByText('You control in another tab (last known)')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
     view.unmount()
   })
@@ -200,11 +193,10 @@ describe('terminal view', () => {
     await act(async () => {})
     act(() => useStore.setState({ roomStatus: {}, roomStatusError: {} }))
     const presence = within(screen.getByRole('group', { name: 'Run presence' }))
-    expect(presence.getAllByText('Loading…')).toHaveLength(2)
-    expect(presence.queryByText('Nobody')).toBeNull()
+    expect(presence.getByText('Checking control…')).toBeDefined()
     act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
-    expect(presence.getAllByText('Unavailable')).toHaveLength(2)
-    expect(presence.queryByText('Nobody')).toBeNull()
+    expect(presence.getByText('Control unknown')).toBeDefined()
+    expect(screen.getByText('Presence unavailable: status unavailable')).toBeDefined()
     act(() => useStore.setState({
       roomStatus: { run_1: {
         workspace_id: run().workspace_id,
@@ -215,19 +207,9 @@ describe('terminal view', () => {
       } },
       roomStatusError: {},
     }))
-    expect(presence.getByText('Nobody')).toBeDefined()
-    expect(presence.getByText('None')).toBeDefined()
-    expect(presence.queryByText('Unavailable')).toBeNull()
+    expect(presence.getByText(/^Nobody controls/)).toBeDefined()
     act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
-    expect(presence.getByText('Last known presence')).toBeDefined()
-    expect(screen.getByText('status unavailable')).toBeDefined()
-    act(() => {
-      useStore.setState({ roomStatusError: {} })
-      StubSocket.last().onclose?.({ code: 1006, reason: '' })
-    })
-    expect(presence.queryByText('Nobody')).toBeNull()
-    expect(presence.queryByText('None')).toBeNull()
-    expect(presence.getByText('Last known presence')).toBeDefined()
+    expect(presence.getByText('Nobody controls (last known)')).toBeDefined()
     view.unmount()
   })
 
@@ -272,22 +254,18 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it.each(['toolbar', 'phone Room'] as const)('reports an occupied short-click conflict from the %s without transferring control', async (source) => {
-    if (source === 'phone Room') atViewport(390, { height: 844, pointer: 'coarse' })
+  it.each(['desktop', 'phone'] as const)('reports an occupied short-click conflict on %s without transferring control', async (source) => {
+    if (source === 'phone') atViewport(390, { height: 844, pointer: 'coarse' })
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     const view = mount({}, { member_id: bob.id })
     attached(undefined, undefined, { control_generation: 7 })
     await act(async () => {})
     const socket = StubSocket.last()
-    if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    const controlButton = source === 'phone Room'
-      ? within(screen.getByRole('dialog', { name: 'Run Room' })).getByRole('button', { name: 'Take control' })
-      : screen.getByRole('button', { name: 'Take control' })
+    const controlButton = within(screen.getByRole('group', { name: 'Run presence' })).getByRole('button', { name: 'Take control' })
     fireEvent.click(controlButton)
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
     expect(socket.frames().at(-1)).not.toHaveProperty('takeover')
     controlAck(false, 1, 7, { ok: false, error: 'run control is held by another session' })
-    if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Close Run Room' }))
     expect(screen.getByText('run control is held by another session')).toBeDefined()
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(useStore.getState().terminals.run_1.write).toBe(false)
@@ -295,18 +273,15 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it.each(['toolbar', 'phone Room'] as const)('requires a continuous hold from the %s and waits for server ownership', async (source) => {
-    if (source === 'phone Room') atViewport(390, { height: 844, pointer: 'coarse' })
+  it.each(['desktop', 'phone'] as const)('requires a continuous hold on %s and waits for server ownership', async (source) => {
+    if (source === 'phone') atViewport(390, { height: 844, pointer: 'coarse' })
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     const view = mount({}, { member_id: bob.id })
     attached(undefined, undefined, { control_generation: 7 })
     await act(async () => {})
     const socket = StubSocket.last()
     const header = socket.frames()[0] as { control_session_id: string }
-    if (source === 'phone Room') fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
-    const controlButton = source === 'phone Room'
-      ? within(screen.getByRole('dialog', { name: 'Run Room' })).getByRole('button', { name: 'Take control' })
-      : screen.getByRole('button', { name: 'Take control' })
+    const controlButton = within(screen.getByRole('group', { name: 'Run presence' })).getByRole('button', { name: 'Take control' })
     vi.useFakeTimers()
     try {
       fireEvent.keyDown(controlButton, { key: ' ' })
@@ -410,7 +385,7 @@ describe('terminal view', () => {
     attached()
     if (presence === 'unavailable') {
       await act(async () => status.reject(new Error('presence service unavailable')))
-      expect(screen.getByText('presence service unavailable')).toBeDefined()
+      expect(screen.getByText('Presence unavailable: presence service unavailable')).toBeDefined()
     }
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -440,7 +415,7 @@ describe('terminal view', () => {
 
     act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
     expect(screen.getByText('Take control')).toBeDefined()
-    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
 
     // Lease displacement sets no permission-denial latch.
     view.unmount()
@@ -467,7 +442,7 @@ describe('terminal view', () => {
       }),
     )
 
-    expect(screen.getByText('You cannot steer this run.')).toBeDefined()
+    expect(screen.getByText('You can watch this run but not type in it.')).toBeDefined()
     view.unmount()
   })
 
@@ -510,7 +485,7 @@ describe('terminal view', () => {
 
     const toggle = screen.getByRole('button', { name: 'Take control' })
     expect(toggle.getAttribute('aria-disabled')).toBe('true')
-    expect(screen.getByText('You cannot steer this run.')).toBeDefined()
+    expect(screen.getByText('You can watch this run but not type in it.')).toBeDefined()
     view.unmount()
   })
 
@@ -545,7 +520,7 @@ describe('terminal view', () => {
     act(() => authorized.onopen?.())
     expect(authorized.frames()[0]).toMatchObject({ write: true, screen: true })
     expect(authorized.frames()[0]).not.toHaveProperty('resume')
-    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
     view.unmount()
   })
   it('retries control on an authority change without replacing the stream', () => {
@@ -586,7 +561,7 @@ describe('terminal view', () => {
     expect(StubSocket.opened).toHaveLength(1)
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
     controlAck(true, 3, 2)
-    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    expect(screen.queryByText('You can watch this run but not type in it.')).toBeNull()
     view.unmount()
   })
 
@@ -637,17 +612,15 @@ describe('terminal view', () => {
     const view = mount()
     attached()
     await waitFor(() => expect(document.querySelector('.xterm')).toBeDefined())
-    expect(screen.getByRole('button', { name: 'Open Run Room' })).toBeDefined()
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
-    expect(screen.getByRole('tablist', { name: 'Run tabs' })).toBeDefined()
+    expect(screen.getByRole('toolbar', { name: 'Terminal toolbar' })).toBeDefined()
+    expect(screen.getByRole('tablist', { name: 'Run views' })).toBeDefined()
     expect(screen.getByRole('tabpanel')).toBeDefined()
     const pane = document.querySelector('.xterm')
 
     view.unmount()
 
-    expect(screen.queryByRole('button', { name: 'Open Run Room' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
-    expect(screen.queryByRole('tablist', { name: 'Run tabs' })).toBeNull()
+    expect(screen.queryByRole('toolbar', { name: 'Terminal toolbar' })).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Run views' })).toBeNull()
     expect(screen.queryByRole('tabpanel')).toBeNull()
     expect(pane?.isConnected).toBe(false)
   })
@@ -852,7 +825,7 @@ describe('terminal view', () => {
       })
       socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     })
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.min-h-0.flex-1.bg-canvas') as HTMLElement
     await waitFor(() => expect(callbacks).toHaveLength(1))
     expect(host.style.visibility).toBe('hidden')
 

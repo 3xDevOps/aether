@@ -49,7 +49,7 @@ describe('feed rows', () => {
     expect(row.textContent).toContain('Planner → Backend · question')
 
     within(row).getByRole('button', { name: 'Planner' }).click()
-    expect(useStore.getState().route).toMatchObject({ name: 'terminal', params: { runId: 'run_planner' } })
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_planner' } })
   })
 
   it('falls back to the wire string for a type it has never heard of', () => {

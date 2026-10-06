@@ -41,7 +41,7 @@ test('selected paths preserve unrelated staging, report index failure, and retai
     'git init --bare /tmp/published.git',
     'git remote add writable /tmp/published.git',
   ].join(' && ')])
-  await page.getByRole('tab', { name: 'Diff', exact: true }).click()
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click()
   await page.getByText('Native changes & publish', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Select selected.txt', exact: true }).check()
   await page.getByRole('button', { name: 'Review selected paths' }).click()

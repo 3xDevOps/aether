@@ -6,7 +6,7 @@ import { expect, test } from './mobile'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a phone protects a run from More and reads its diff', async ({
+test('a phone protects a run from More and reads its changes', async ({
   page,
   aether,
 }) => {
@@ -54,7 +54,7 @@ test('a phone protects a run from More and reads its diff', async ({
   const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
-  for (const name of ['Browser', 'Events', 'Diff']) {
+  for (const name of ['Browser', 'Session', 'Changes']) {
     const tab = page.getByRole('tab', { name, exact: true })
     await tab.tap()
     await expect(tab).toHaveAttribute('aria-selected', 'true')

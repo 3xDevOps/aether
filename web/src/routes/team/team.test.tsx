@@ -70,7 +70,7 @@ describe('team refresh and summary', () => {
         }),
       ),
     })
-    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    seed({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<><TeamRefresh client={client} /><TeamSummary /></>)
 
     await vi.waitFor(() => expect(waiting()).toBe(1))
@@ -130,7 +130,7 @@ describe('team refresh and summary', () => {
   it('re-reads the queue and beats presence when the tab returns', async () => {
     const approvalList = vi.fn(async () => [approval()])
     const presenceHeartbeat = vi.fn(async () => 90)
-    seed({ route: { name: 'terminal', params: { runId: 'run_1' } } })
+    seed({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<TeamRefresh client={fakeApi({ approvalList, presenceHeartbeat })} />)
 
     await vi.waitFor(() => expect(waiting()).toBe(1))
@@ -322,7 +322,7 @@ describe('approval inbox', () => {
     fireEvent.click(await screen.findByText('rewrite the checkout flow'))
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: 'run_1' },
     })
   })

@@ -39,20 +39,20 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   // The fake agent exits, but the interactive run keeps its supervised shell.
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready')
-  await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
+  await expect(page.locator('header').filter({ hasText: task })).toContainText('Agent working')
 }
 
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
-  await expect(header).toContainText('Working')
+  await expect(header).toContainText('Agent working')
   await header.getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Close run…', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(header).toContainText('Done')
-  await expect(header).toContainText('closed; retained container')
+  await expect(header).toContainText('Merged')
+  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('closed; retained container')
   await expect(dialog).toHaveCount(0)
 }
 
@@ -135,7 +135,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await page.keyboard.press('Escape')
 
   await expect(dialog).toHaveCount(0)
-  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  const tabs = page.getByRole('tablist', { name: 'Run views' })
   await expect(tabs).toBeVisible()
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
@@ -184,12 +184,12 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
 
   // `:focus-visible` follows the last input, and the wizard used the mouse, so
   // a scripted focus() does not match in Chromium. Every focus ends on a key press.
-  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  const tabs = page.getByRole('tablist', { name: 'Run views' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
-  const events = tabs.getByRole('tab', { name: 'Events' })
+  const events = tabs.getByRole('tab', { name: 'Session' })
   await expect(events).toBeFocused()
-  expectVisibleFocus('the run tab', await indicator(events))
+  expectVisibleFocus('the run view tab', await indicator(events))
   // Closing the run first would move its row under the collapsed Finished group.
   const row = page
     .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })

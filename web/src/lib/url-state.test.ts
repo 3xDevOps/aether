@@ -12,8 +12,8 @@ afterEach(() => {
 describe('route in the query string', () => {
   it.each<[Route, string]>([
     [{ name: 'board', params: {} }, ''],
-    [{ name: 'terminal', params: { runId: 'run_1' } }, 'run=run_1'],
-    [{ name: 'diff', params: { runId: 'run_1' } }, 'run=run_1&view=diff'],
+    [{ name: 'run', params: { runId: 'run_1' } }, 'run=run_1'],
+    [{ name: 'run', params: { runId: 'run_1', view: 'changes' } }, 'run=run_1&view=changes'],
     [{ name: 'settings', params: {} }, 'page=settings'],
     [{ name: 'missions', params: { missionId: 'mis_1' } }, 'page=missions&id=mis_1'],
     [{ name: 'workspace', params: { workspaceId: 'wsp_1' } }, 'page=workspace&id=wsp_1'],
@@ -22,25 +22,26 @@ describe('route in the query string', () => {
     expect(routeFromQuery(new URLSearchParams(text))).toEqual(route)
   })
 
-  it('reads the shells\' bare ?run= deep link as that run\'s terminal', () => {
-    expect(routeFromQuery(new URLSearchParams('run=run_9'))).toEqual({ name: 'terminal', params: { runId: 'run_9' } })
+  it('reads the shells\' bare ?run= deep link as that run with its default view', () => {
+    expect(routeFromQuery(new URLSearchParams('run=run_9'))).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 
-  it('falls back to the terminal for a view it does not know', () => {
-    expect(routeFromQuery(new URLSearchParams('run=run_9&view=nope')).name).toBe('terminal')
+  it('reads the old diff view as Changes and drops a view it does not know', () => {
+    expect(routeFromQuery(new URLSearchParams('run=run_9&view=diff'))).toEqual({ name: 'run', params: { runId: 'run_9', view: 'changes' } })
+    expect(routeFromQuery(new URLSearchParams('run=run_9&view=events'))).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })
 
   it('keeps every other query parameter and the hash', () => {
-    expect(hrefFor('http://h/?keep=1&page=files#x', { name: 'terminal', params: { runId: 'r' } }))
+    expect(hrefFor('http://h/?keep=1&page=files#x', { name: 'run', params: { runId: 'r' } }))
       .toBe('http://h/?keep=1&run=r#x')
   })
 })
 
 describe('bindRouteToUrl', () => {
   it('starts the store on the address, pushes each navigation and follows back', () => {
-    window.history.replaceState(null, '', '/?run=run_1&view=diff')
+    window.history.replaceState(null, '', '/?run=run_1&view=changes')
     const store = createRootStore()
-    expect(store.getState().route).toEqual({ name: 'diff', params: { runId: 'run_1' } })
+    expect(store.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes' } })
     const stop = bindRouteToUrl(store)
     onTestFinished(stop)
 
@@ -51,8 +52,8 @@ describe('bindRouteToUrl', () => {
       window.history.back()
     })
     return vi.waitFor(() => {
-      expect(window.location.search).toBe('?run=run_1&view=diff')
-      expect(store.getState().route).toEqual({ name: 'diff', params: { runId: 'run_1' } })
+      expect(window.location.search).toBe('?run=run_1&view=changes')
+      expect(store.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes' } })
     })
   })
 

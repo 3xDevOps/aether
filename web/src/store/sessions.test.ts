@@ -1,0 +1,119 @@
+import type { Event } from '@/lib/types'
+import { createRootStore } from '@/store'
+import { toRecord } from '@/store/runs'
+import { readSessionLog, rowsForRun, workSummary, type SessionRow } from '@/store/sessions'
+import { alice, bob, fakeApi, roomMessage, run } from '@/test/fixtures'
+
+let seq = 0
+function event(type: string, payload: unknown, time: string, actor = ''): Event {
+  seq++
+  return { id: `ev_${seq}`, seq, time, workspace_id: 'wsp_1', run_id: 'run_1', actor_id: actor, type, payload }
+}
+
+const names: Record<string, string> = { [alice.id]: 'Alice', [bob.id]: 'Bob' }
+const memberName = (id: string) => names[id] ?? id
+
+function rows(over: Parameters<typeof rowsForRun>[0]): Omit<SessionRow, 'id' | 'at'>[] {
+  return rowsForRun(over).map(({ id: _id, at: _at, ...row }) => row)
+}
+
+describe('session rows', () => {
+  it('folds consecutive tool calls into one work row with verb-first entries', () => {
+    const events = [
+      event('run.agent', { kind: 'tool_call', tool: 'Bash', tool_use_id: 't1', detail: 'go test ./...' }, '2026-08-14T10:03:00Z'),
+      event('run.agent', { kind: 'tool_result', tool_use_id: 't1' }, '2026-08-14T10:03:01Z'),
+      event('run.agent', { kind: 'tool_call', tool: 'Read', tool_use_id: 't2', detail: 'src/auth.ts' }, '2026-08-14T10:03:02Z'),
+      event('run.agent', { kind: 'tool_call', tool: 'Read', tool_use_id: 't3', detail: 'src/db.ts' }, '2026-08-14T10:03:03Z'),
+      event('run.agent', { kind: 'tool_result', tool_use_id: 't3', is_error: true }, '2026-08-14T10:03:04Z'),
+    ]
+    const [start, work] = rowsForRun({ run: toRecord(run()), events, room: [], memberName })
+    expect(start).toMatchObject({ kind: 'event', text: 'Run started' })
+    expect(work).toMatchObject({
+      kind: 'work',
+      summary: 'Ran 1 command and read 2 files',
+      entries: [
+        { label: 'Ran go test ./...', status: 'done' },
+        { label: 'Reading src/auth.ts', status: 'running' },
+        { label: 'Read src/db.ts', status: 'failed' },
+      ],
+    })
+  })
+
+  it('names mixed work in one sentence', () => {
+    expect(workSummary([{ kind: 'tool_call', tool: 'Bash' }, { kind: 'tool_call', tool: 'Bash' }])).toBe('Ran 2 commands')
+    expect(workSummary([
+      { kind: 'tool_call', tool: 'Edit' }, { kind: 'subagent', tool: 'Task' }, { kind: 'tool_call', tool: 'Grep' },
+    ])).toBe('Edited 1 file, delegated 1 task and ran 1 search')
+  })
+
+  it('shows a room message to the agent once, with its delivery word, even after the inject records it', () => {
+    const steer = roomMessage({
+      id: 'msg_1', kind: 'steer_request', state: 'sent', actor_id: bob.id, body: 'add a test', created_at: '2026-08-14T10:04:00Z',
+    })
+    const queued = roomMessage({
+      id: 'msg_2', kind: 'steer_request', state: 'queued', actor_id: bob.id, body: 'and docs',
+      created_at: '2026-08-14T10:05:00Z', deliver_after: '2026-08-14T10:05:45Z',
+    })
+    const events = [event('workspace.timeline', { kind: 'steer', message: 'add a test' }, '2026-08-14T10:04:01Z', bob.id)]
+    const users = rows({ run: toRecord(run()), events, room: [steer, queued], memberName }).filter((row) => row.kind === 'user')
+    expect(users).toEqual([
+      { kind: 'user', authorID: bob.id, body: 'add a test', delivery: 'Sent', deliverAfter: undefined, failure: undefined },
+      { kind: 'user', authorID: bob.id, body: 'and docs', delivery: 'Queued', deliverAfter: '2026-08-14T10:05:45Z', failure: undefined },
+    ])
+  })
+
+  it('turns notes, questions and their replies, and steering entries into their own rows', () => {
+    const room = [
+      roomMessage({ id: 'c1', kind: 'comment', actor_id: bob.id, body: 'looks good', created_at: '2026-08-14T10:04:00Z' }),
+      roomMessage({ id: 'q1', kind: 'question', actor_id: bob.id, body: 'keep the prefix?', created_at: '2026-08-14T10:05:00Z' }),
+      roomMessage({ id: 'r1', kind: 'reply', actor_id: alice.id, body: 'yes', correlation_id: 'q1', created_at: '2026-08-14T10:06:00Z' }),
+    ]
+    const events = [
+      event('workspace.timeline', { kind: 'pause' }, '2026-08-14T10:03:00Z', alice.id),
+      event('workspace.timeline', { kind: 'handoff', message: bob.id }, '2026-08-14T10:07:00Z', alice.id),
+    ]
+    expect(rows({ run: toRecord(run()), events, room, memberName })).toEqual([
+      { kind: 'event', text: 'Run started' },
+      { kind: 'event', text: 'Paused by Alice' },
+      { kind: 'note', authorID: bob.id, body: 'looks good' },
+      { kind: 'request', answer: 'reply', authorID: bob.id, title: 'Bob asked', body: 'keep the prefix?', reply: { authorID: alice.id, body: 'yes' } },
+      { kind: 'event', text: 'Alice handed the run to Bob' },
+    ])
+  })
+
+  it('ends with the terminal requests and the finish', () => {
+    const waiting = toRecord(run({ pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'permission' }] }))
+    expect(rows({ run: waiting, events: [], room: [], memberName }).at(-1)).toEqual({
+      kind: 'request', answer: 'terminal', title: 'The agent asks for permission', body: 'Answer in the terminal',
+    })
+    const failed = toRecord(run({ status: 'failed', reason: 'agent exited 1', finished_at: '2026-08-14T10:09:00Z' }))
+    expect(rows({ run: failed, events: [], room: [], memberName }).at(-1)).toEqual({
+      kind: 'finished', text: 'Failed: agent exited 1', tone: 'failed',
+    })
+    const recorded = [event('run.status', { to: 'completed' }, '2026-08-14T10:09:00Z')]
+    const done = toRecord(run({ status: 'completed' }))
+    expect(rows({ run: done, events: recorded, room: [], memberName }).filter((row) => row.kind === 'finished')).toEqual([
+      { kind: 'finished', text: 'Finished', tone: 'done' },
+    ])
+  })
+})
+
+describe('session log', () => {
+  it('reads the run history to the head and keeps live events that arrive after', async () => {
+    const store = createRootStore()
+    const first = event('run.agent', { kind: 'tool_call', tool: 'Read' }, '2026-08-14T10:03:00Z')
+    const second = event('workspace.timeline', { kind: 'pause' }, '2026-08-14T10:04:00Z')
+    const workspaceTimeline = vi.fn()
+      .mockResolvedValueOnce({ events: [first], next_seq: first.seq, more: true })
+      .mockResolvedValueOnce({ events: [second], next_seq: second.seq, more: false })
+    await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
+
+    expect(workspaceTimeline).toHaveBeenNthCalledWith(2, expect.objectContaining({ run_id: 'run_1', after_seq: first.seq }))
+    expect(workspaceTimeline.mock.calls[0]![0].types).toEqual(['run.agent', 'workspace.timeline', 'run.status'])
+    const live = event('run.status', { to: 'completed' }, '2026-08-14T10:05:00Z')
+    store.getState().appendSessionEvent(live)
+    store.getState().appendSessionEvent({ ...live, run_id: 'run_other', seq: live.seq + 1 })
+    expect(store.getState().sessionLogs.run_1!.events.map((e) => e.seq)).toEqual([first.seq, second.seq, live.seq])
+    expect(store.getState().sessionLogs.run_other).toBeUndefined()
+  })
+})

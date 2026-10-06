@@ -45,7 +45,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(
     page.getByRole('heading', { name: 'write the result file', exact: true }),
   ).toBeVisible()
-  const tabs = page.getByRole('tablist', { name: 'Run tabs' })
+  const tabs = page.getByRole('tablist', { name: 'Run views' })
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -67,7 +67,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(terminal).toContainText('hello-from-agent', { timeout: 30_000 })
 
   const header = page.locator('header').filter({ hasText: 'write the result file' })
-  await expect(header).toContainText('Working')
+  await expect(header).toContainText('Agent working')
 
   // Closing is an explicit user action for an interactive run. The agent
   // committed its work, so record the successful outcome through the real UI.
@@ -76,8 +76,8 @@ test('the first run completes', async ({ page, aether }) => {
   const closeDialog = page.getByRole('dialog', { name: 'Close this run?' })
   await expect(closeDialog).toBeVisible()
   await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()
-  await expect(header).toContainText('Done')
-  await expect(header).toContainText('closed; retained container')
+  await expect(header).toContainText('Merged')
+  await expect(page.getByRole('complementary', { name: 'Run details' })).toContainText('closed; retained container')
 })
 
 test('with no agent installed the first run sends you back to Agent', async ({

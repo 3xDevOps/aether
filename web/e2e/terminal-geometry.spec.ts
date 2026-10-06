@@ -116,7 +116,9 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     })
     await expect.poll(firstVisible).not.toBeNull()
     const pinnedRow = await firstVisible()
-    await page.getByRole('button', { name: 'Increase terminal text size' }).click()
+    await page.getByRole('button', { name: 'Terminal tools', exact: true }).click()
+    await page.getByRole('menuitem', { name: /^Larger text/ }).click()
+    await page.keyboard.press('Escape')
     await expect.poll(firstVisible).toEqual(pinnedRow)
     await scrollback.focus()
     await page.keyboard.press('End')
@@ -135,7 +137,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     }
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
-    await page.getByRole('tab', { name: 'Events', exact: true }).click()
+    await page.getByRole('tab', { name: 'Session', exact: true }).click()
     await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
     await assertGrid(72, 22)
   } finally {

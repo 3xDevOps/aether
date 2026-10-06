@@ -80,7 +80,7 @@ describe('run rows', () => {
     const row = runList().getByRole('button', { name: /^Working · rewrite the checkout flow/ })
     fireEvent.click(row)
 
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: 'run_1' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1' } })
     expect(row.getAttribute('aria-current')).toBe('page')
   })
 
@@ -91,7 +91,7 @@ describe('run rows', () => {
     const item = row.closest('[data-slot="list-row"]') as HTMLElement
     fireEvent.click(within(item).getByRole('button', { name: 'Review' }))
 
-    expect(useStore.getState().route).toEqual({ name: 'diff', params: { runId: 'run_3' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
   it('keeps one tab stop in the list and walks it with j, k and the arrows', () => {
@@ -112,11 +112,11 @@ describe('run rows', () => {
   it('opens what a Needs you row waits on, not always its terminal', () => {
     render(<AppShell />)
     fireEvent.click(runList().getByRole('button', { name: /^Needs you · docs-site · ship the invoice export/ }))
-    expect(useStore.getState().route).toEqual({ name: 'diff', params: { runId: 'run_3' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
   it('walks on from the open run when focus is outside the list', () => {
-    act(() => useStore.getState().navigate('terminal', { runId: 'run_2' }))
+    act(() => useStore.getState().navigate('run', { runId: 'run_2' }))
     render(<AppShell />)
     const rows = runList().getAllByRole('button').filter((b) => b.hasAttribute('data-run-row'))
     const open = rows.findIndex((row) => row.getAttribute('aria-current') === 'page')

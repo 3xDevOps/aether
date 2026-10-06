@@ -97,7 +97,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await pr.getByRole('button', { name: 'Create reviewed PR' }).click()
   }
   try {
-    await page.getByRole('tab', { name: 'Diff', exact: true }).click()
+    await page.getByRole('tab', { name: 'Changes', exact: true }).click()
     await page.getByText('Native changes & publish', { exact: true }).click()
     await page.getByRole('checkbox', { name: `Select ${file}`, exact: true }).check()
     await page.getByRole('button', { name: 'Review selected paths' }).click()
@@ -138,8 +138,8 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await pr.getByRole('button', { name: 'Refresh PR feedback' }).click()
     const feedback = pr.getByRole('region', { name: 'PR feedback' })
     await feedback.locator('article').filter({ hasText: selectedFeedback }).getByRole('checkbox').check()
-    await feedback.getByRole('button', { name: 'Send selected feedback to Run Room' }).click()
-    await expect(feedback.getByRole('status')).toContainText('Run Room delivery:')
+    await feedback.getByRole('button', { name: 'Send selected feedback to the agent' }).click()
+    await expect(feedback.getByRole('status')).toContainText('Delivery:')
     const room = await admin.api.rpc<{ messages: RoomMessage[] }>('run.room.list', { workspace_id: workspaceID, run_id: run.id, limit: 100 })
     const posted = room.messages.find((entry) => entry.body.includes(selectedFeedback))!
     expect(posted.kind).toBe('steer_request')

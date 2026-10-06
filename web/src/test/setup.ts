@@ -47,12 +47,14 @@ afterEach(async () => {
 })
 
 // Radix measures, scrolls and captures the pointer over whatever it pops out -
-// an open select, a dialog, a menu - and xterm's fit addon measures its host.
+// an open select, a dialog, a menu - xterm's fit addon measures its host, and
+// the session timeline's virtualizer scrolls its list.
 // jsdom implements none of these, and a component that reaches for one throws
 // before it renders.
 // Assigned rather than stubbed, so a file calling `vi.unstubAllGlobals()`
 // restores this rather than taking it away.
 Element.prototype.scrollIntoView = vi.fn()
+Element.prototype.scrollTo = () => {}
 Element.prototype.hasPointerCapture = () => false
 Element.prototype.releasePointerCapture = () => {}
 globalThis.ResizeObserver = class {

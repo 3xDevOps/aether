@@ -33,11 +33,14 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
 
-  const tools = dock.getByRole('toolbar', { name: 'Terminal controls' })
-  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
-  await expect(dock.getByRole('button', { name: 'Terminal tools', exact: true })).toBeHidden()
+  const tools = dock.getByRole('button', { name: 'Terminal tools', exact: true })
+  await tools.click()
+  const menu = page.getByRole('menu')
+  for (const name of [/^Find/, 'Copy selection', 'Copy screen', 'Paste', 'Upload image…']) {
+    await expect(menu.getByRole('menuitem', { name })).toBeVisible()
+  }
+  await page.keyboard.press('Escape')
+  await expect(tools).toBeFocused()
 
   const screen = dock.locator('.xterm-screen')
   await screen.click()
@@ -93,24 +96,19 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
   await find.press('Escape')
   await expect(dock.getByLabel('Find in terminal')).toBeHidden()
 
-  // A narrow pane uses the same tools through a keyboard-accessible popover.
+  // A narrow pane reaches the same tools from the keyboard.
   await page.setViewportSize({ width: 640, height: 800 })
-  const compactTools = dock.getByRole('button', { name: 'Terminal tools', exact: true })
-  await expect(compactTools).toBeVisible()
-  await expect(dock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
-  await compactTools.focus()
+  await tools.focus()
   await page.keyboard.press('Enter')
-  const compactControls = page.getByRole('toolbar', { name: 'Terminal controls' })
-  await expect(compactControls.getByRole('button', { name: 'Copy last screen' })).toBeVisible()
-  await compactControls.getByRole('button', { name: 'Open terminal search' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Copy screen' })).toBeVisible()
+  await page.getByRole('menuitem', { name: /^Find/ }).click()
   await find.fill('aether-found-me')
   await find.press('Enter')
   await expect(dock.locator('.xterm-selection div').first()).toBeVisible()
   await find.press('Escape')
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await expect(tools.getByRole('button', { name: 'Open terminal search' })).toBeVisible()
 
-  // Touch keeps the compact menu even when the viewport is wide.
+  // Touch uses the same menu, with touch-sized rows.
   const touchContext = await browser.newContext({
     hasTouch: true,
     viewport: { width: 1600, height: 1000 },
@@ -122,12 +120,11 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
     const touchDock = touchPage.getByRole('region', { name: 'Terminal dock' })
     await nav(touchPage).getByRole('button', { name: 'Environment', exact: true }).click()
     await expect(touchDock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
-    await expect(touchDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeHidden()
     await touchDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
-    const touchControls = touchPage.getByRole('toolbar', { name: 'Terminal controls' })
-    await expect(touchControls.getByRole('button', { name: 'Copy terminal selection' })).toBeVisible()
-    await expect(touchControls.getByRole('button', { name: 'Paste into terminal' })).toBeVisible()
-    await touchControls.getByRole('button', { name: 'Open terminal search' }).click()
+    const copy = touchPage.getByRole('menuitem', { name: 'Copy selection' })
+    await expect(copy).toBeVisible()
+    expect(Math.round((await copy.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44)
+    await touchPage.getByRole('menuitem', { name: /^Find/ }).click()
     const touchFind = touchDock.getByLabel('Find in terminal')
     await touchFind.fill('aether-found-me')
     await touchFind.press('Enter')

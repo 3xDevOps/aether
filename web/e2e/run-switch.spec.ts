@@ -216,7 +216,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   })
   unanswered = run.id
 
-  const sidebar = page.getByRole('complementary')
+  const sidebar = page.getByRole('navigation', { name: 'Aether' })
   await sidebar.getByRole('button', { name: /the second run/ }).click()
   await expect(
     page.getByRole('heading', { name: 'the second run', exact: true }),

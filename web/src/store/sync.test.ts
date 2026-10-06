@@ -204,7 +204,7 @@ describe('hydrate', () => {
       await hydrate(store, fakeApi())
 
       expect(store.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_1' },
       })
     })
@@ -242,7 +242,7 @@ describe('hydrate', () => {
       }))
 
       expect(store.getState().route).toEqual(requested === 'run_1'
-        ? { name: 'terminal', params: { runId: requested } }
+        ? { name: 'run', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
     })
 
@@ -267,7 +267,7 @@ describe('hydrate', () => {
       await hydrate(store, client)
 
       expect(store.getState().route).toEqual(requested === 'run_1'
-        ? { name: 'terminal', params: { runId: requested } }
+        ? { name: 'run', params: { runId: requested } }
         : { name: 'onboarding', params: {} })
       if (requested === 'run_1') {
         store.getState().navigate('board')

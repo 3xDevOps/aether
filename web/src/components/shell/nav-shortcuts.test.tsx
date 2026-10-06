@@ -59,7 +59,7 @@ describe('navigation shortcuts', () => {
   })
 
   it('leaves character keys inert while single-key shortcuts are off, but not Escape', () => {
-    useStore.setState({ singleKeyShortcuts: false, route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ singleKeyShortcuts: false, route: { name: 'run', params: { runId: 'run_1' } } })
     onTestFinished(() => { useStore.setState({ singleKeyShortcuts: true }) })
     render(<AppShell />)
 
@@ -67,7 +67,7 @@ describe('navigation shortcuts', () => {
     press('g')
     press('l')
     expect(useStore.getState().paletteDialog).toBe(null)
-    expect(useStore.getState().route.name).toBe('events')
+    expect(useStore.getState().route.name).toBe('run')
 
     press('Escape')
     expect(useStore.getState().route.name).toBe('board')
@@ -145,9 +145,7 @@ describe('navigation shortcuts', () => {
   })
 
   it('leaves a run for the board on Escape, and does nothing elsewhere', () => {
-    // The Events tab rather than the Terminal one: same run route family,
-    // no xterm to stand up for a keyboard assertion.
-    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('Escape')
@@ -159,7 +157,7 @@ describe('navigation shortcuts', () => {
   })
 
   it('leaves a run that is not in the store on Escape', () => {
-    useStore.setState({ route: { name: 'terminal', params: { runId: 'run_gone' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_gone' } } })
     render(<AppShell />)
     expect(screen.getByRole('heading', { name: 'Run not found' })).toBeDefined()
 
@@ -168,15 +166,15 @@ describe('navigation shortcuts', () => {
   })
 
   it('lets a pending chord swallow the Escape that cancels it', () => {
-    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('g')
-    press('Escape', screen.getByRole('tab', { name: 'Events' }))
-    expect(useStore.getState().route.name).toBe('events')
+    press('Escape', screen.getByRole('tab', { name: 'Session' }))
+    expect(useStore.getState().route.name).toBe('run')
 
     // The same Escape with no chord pending is the one that leaves.
-    press('Escape', screen.getByRole('tab', { name: 'Events' }))
+    press('Escape', screen.getByRole('tab', { name: 'Session' }))
     expect(useStore.getState().route.name).toBe('board')
   })
 
@@ -184,7 +182,7 @@ describe('navigation shortcuts', () => {
   // the event handled. React has already closed the overlay by the time this
   // listener runs, so the only thing left to read is the event itself.
   it('leaves an Escape another layer already acted on alone', () => {
-    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     const dismiss = (e: KeyboardEvent) => e.preventDefault()
@@ -192,9 +190,9 @@ describe('navigation shortcuts', () => {
 
     // Dispatched at an element so the document listener is on the path,
     // exactly as a real key press reaches Radix before the window.
-    const tab = screen.getByRole('tab', { name: 'Events' })
+    const tab = screen.getByRole('tab', { name: 'Session' })
     press('Escape', tab)
-    expect(useStore.getState().route.name).toBe('events')
+    expect(useStore.getState().route.name).toBe('run')
 
     document.removeEventListener('keydown', dismiss, { capture: true })
     press('Escape', tab)
@@ -217,7 +215,7 @@ describe('navigation shortcuts', () => {
   // and the run stays open - one press to dismiss the tooltip, and the next
   // leaves, which is the whole cost of showing hints on focus.
   it('lets a tooltip take the first Escape and no more than that', async () => {
-    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)
     const control = screen.getByRole('button', { name: 'Search' })
     await hintOn(control)
@@ -225,7 +223,7 @@ describe('navigation shortcuts', () => {
     await userEvent.keyboard('{Escape}')
 
     expect(screen.queryByRole('tooltip')).toBeNull()
-    expect(useStore.getState().route.name).toBe('events')
+    expect(useStore.getState().route.name).toBe('run')
 
     await userEvent.keyboard('{Escape}')
 
@@ -240,7 +238,7 @@ describe('navigation shortcuts', () => {
     ['list box', '<div role="listbox"><div role="option">one</div></div>'],
     ['confirm', '<div role="alertdialog"><button type="button">ok</button></div>'],
   ])('stands down while a %s has the keyboard', (_, markup) => {
-    useStore.setState({ route: { name: 'events', params: { runId: 'run_1' } } })
+    useStore.setState({ route: { name: 'run', params: { runId: 'run_1' } } })
     render(<AppShell />)
 
     press('n')
@@ -255,7 +253,7 @@ describe('navigation shortcuts', () => {
     press('l', target)
 
     expect(useStore.getState().paletteDialog).toBe(null)
-    expect(useStore.getState().route.name).toBe('events')
+    expect(useStore.getState().route.name).toBe('run')
   })
 
   // Chromium drops focus to body without a focusout when the focused element

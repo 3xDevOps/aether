@@ -17,7 +17,7 @@ describe('run list', () => {
     fireEvent.click(screen.getByText('rewrite the checkout flow'))
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: listed.id },
     })
   })

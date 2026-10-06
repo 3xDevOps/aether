@@ -152,11 +152,11 @@ async function listCandidates(api: API, workspaceID: string): Promise<CandidateS
 }
 
 async function openCandidateReview(page: Page): Promise<CandidateReviewSurface> {
-  await page.getByRole('region', { name: 'Run evidence', exact: true })
-    .getByRole('button', { name: /^Evidence(?: \(\d+\))?$/ }).click()
-  const evidence = page.getByRole('dialog', { name: 'Retained evidence', exact: true })
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Captures…' }).click()
+  const evidence = page.getByRole('dialog', { name: 'Captures', exact: true })
   await expect(evidence).toBeVisible()
-  await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible({
+  await expect(evidence.getByRole('button', { name: 'Open finish capture' })).toBeVisible({
     timeout: terminalTimeout,
   })
   await evidence.getByRole('button', { name: 'Candidate review', exact: true }).click()

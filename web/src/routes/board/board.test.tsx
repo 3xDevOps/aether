@@ -157,7 +157,7 @@ describe('board columns', () => {
     seed([working])
     renderBoard()
     fireEvent.click(screen.getByRole('button', { name: 'still going' }))
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: working.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id } })
   })
 
   it('lists what needs the viewer from every workspace, naming the other one', () => {
@@ -212,7 +212,7 @@ describe('board columns', () => {
     renderBoard()
 
     fireEvent.click(cardOf('coordinate checkout work').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: 'run_integrator' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_integrator' } })
   })
 
   it('renders card meta contributions: an overlap count and a swarm conflict count', () => {
@@ -280,7 +280,7 @@ describe('Needs you actions', () => {
     renderBoard()
 
     fireEvent.click(cardOf('still going').getByRole('button', { name: 'Open terminal' }))
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: working.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id } })
   })
 
   it('opens the changes of an unreviewed finish', () => {
@@ -289,7 +289,7 @@ describe('Needs you actions', () => {
 
     expect(column('Needs you').getByText('Finished, review the result')).toBeDefined()
     fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Review' }))
-    expect(useStore.getState().route).toEqual({ name: 'diff', params: { runId: merged.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: merged.id, view: 'changes' } })
   })
 
   it('replies to an idle agent from a popover anchored to the card', async () => {
@@ -338,7 +338,7 @@ describe('Needs you actions', () => {
 
     screen.getByRole('button', { name: 'waiting on you' }).focus()
     await userEvent.keyboard('o')
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: stopped.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
   it('leaves a, r and o alone when no card has focus or the card has no such action', () => {
@@ -363,7 +363,7 @@ describe('Needs you actions', () => {
 
     expect(column('Needs you').getByText('still going')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'still going' }))
-    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: working.id } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: working.id } })
   })
 
   it('offers no action on Working and Finished cards', () => {

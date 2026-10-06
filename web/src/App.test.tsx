@@ -53,7 +53,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /^Alice, / })).toBeDefined()
   })
 
-  it('shows the terminal tab a sidebar row lands on', async () => {
+  it('opens a sidebar row on the run\'s Terminal view', async () => {
     await mount()
     await vi.waitFor(() =>
       expect(sidebar().getByText('rewrite the checkout flow')).toBeDefined(),
@@ -63,7 +63,7 @@ describe('App', () => {
     fireEvent.click(row)
 
     expect(row.getAttribute('aria-current')).toBe('page')
-    const strip = await screen.findByRole('tablist', { name: 'Run tabs' })
+    const strip = await screen.findByRole('tablist', { name: 'Run views' })
     await vi.waitFor(() =>
       expect(
         within(strip).getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected'),

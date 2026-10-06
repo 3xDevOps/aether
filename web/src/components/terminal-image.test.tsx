@@ -3,10 +3,14 @@ import type { Terminal } from '@xterm/xterm'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import {
-  TerminalImageAction,
+  type TerminalImageController,
   useTerminalImage,
   validateTerminalImage,
 } from './terminal-image'
+
+function Chooser({ image }: { image: TerminalImageController }) {
+  return <button type="button" aria-label="Upload image to terminal" disabled={!image.canUpload} onClick={image.openPicker} />
+}
 
 function imageFile(name = 'screen.png', type = 'image/png', size = 4): File {
   return new File([new Uint8Array(size)], name, { type })
@@ -29,7 +33,7 @@ function Probe({
   })
   return (
     <>
-      <TerminalImageAction controller={image} />
+      <Chooser image={image} />
       {image.dialog}
     </>
   )
@@ -95,7 +99,7 @@ describe('terminal image upload', () => {
       const image = useTerminalImage({ terminal, imageTargetKey: 'main', focusTerminal: focus })
       return (
         <>
-          <TerminalImageAction controller={image} />
+          <Chooser image={image} />
           {image.dialog}
         </>
       )

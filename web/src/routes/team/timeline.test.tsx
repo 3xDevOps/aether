@@ -130,7 +130,7 @@ describe('workspace activity feed', () => {
     )
 
     expect(useStore.getState().route).toEqual({
-      name: 'terminal',
+      name: 'run',
       params: { runId: 'run_1' },
     })
   })

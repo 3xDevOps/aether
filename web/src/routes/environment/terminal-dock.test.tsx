@@ -303,7 +303,7 @@ describe('environment terminal dock', () => {
     xterm.input?.('blocked')
     expect(attach.send).not.toHaveBeenCalled()
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.min-h-0.flex-1.bg-canvas') as HTMLElement
     expect(host.style.visibility).toBe('hidden')
 
     act(() => socket.onmessage?.({ data: new Uint8Array([1]).buffer }))

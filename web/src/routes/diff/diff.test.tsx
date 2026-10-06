@@ -2,8 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { api } from '@/lib/api'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { parsePatch } from '@/routes/diff/parse'
-import '@/routes/diff'
-import { lookupRoute } from '@/routes/registry'
+import { ChangesView } from '@/routes/diff'
 import { useStore } from '@/store'
 import { initialDiff, intervalKey, type DiffSnapshot, type RunDiffState } from '@/store/diff'
 import { toRecord } from '@/store/runs'
@@ -66,7 +65,7 @@ function seed(diff?: Partial<RunDiffState>) {
     // A stored view preference, so each test starts with the toggle back on
     // the pointer default rather than on whatever the last one chose.
     diffWrap: null,
-    route: { name: 'diff', params: { runId: active.id } },
+    route: { name: 'run', params: { runId: active.id, view: 'changes' } },
     hydrated: true,
   })
 }
@@ -82,10 +81,9 @@ function snapshot(time: string, parentTree: string, tree: string): DiffSnapshot 
   }
 }
 
-const DiffView = lookupRoute('diff')!
 
 function renderDiff() {
-  return render(<DiffView params={{ runId: active.id }} />)
+  return render(<ChangesView runID={active.id} />)
 }
 
 beforeEach(() => {
@@ -445,7 +443,7 @@ test('a conflict chip names the file and the member and opens their run', async 
 
   fireEvent.click(chip)
   expect(useStore.getState().route).toEqual({
-    name: 'terminal',
+    name: 'run',
     params: { runId: peerRun.id },
   })
 })
@@ -473,7 +471,7 @@ it('sends an unknown run to the shared missing-run view', () => {
   seed()
   useStore.setState({ hydrationError: null, streamDead: false })
 
-  render(<DiffView params={{ runId: 'run_missing' }} />)
+  render(<ChangesView runID="run_missing" />)
 
   expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
 })

@@ -1540,7 +1540,7 @@ describe('onboarding wizard', () => {
     // call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_1' },
       })
       expect(useStore.getState().runs.run_1).toBeDefined()

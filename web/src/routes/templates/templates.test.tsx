@@ -108,7 +108,7 @@ describe('templates view', () => {
     // the run is seeded with it so the tab does not call it deleted.
     await waitFor(() => {
       expect(useStore.getState().route).toEqual({
-        name: 'terminal',
+        name: 'run',
         params: { runId: 'run_tpl' },
       })
     })
