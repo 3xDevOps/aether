@@ -18,7 +18,7 @@ export function ViewHeader({
 }: {
   title: string
   titleAdornment?: ReactNode
-  subtitle?: string
+  subtitle?: ReactNode
   actions?: ReactNode
 }) {
   const mobile = useIsMobile()
@@ -34,7 +34,7 @@ export function ViewHeader({
   }
   const stateLine = !mobile && problem
     ? <ConnectionLine />
-    : !mobile && subtitle && <span className="truncate text-ui-sm text-muted">{subtitle}</span>
+    : !mobile && (typeof subtitle === 'string' ? <span className="truncate text-ui-sm text-muted">{subtitle}</span> : subtitle)
   return (
     <PaneHeader
       title={mobile ? <span className="sr-only">{title}</span> : title}
