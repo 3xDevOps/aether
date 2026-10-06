@@ -290,21 +290,24 @@ func (m modeSwitch) writeShell() (string, error) {
 	return nonce, nil
 }
 
-// commitMode records the mode the container now runs. The sidecar decides
-// the driver after a restart, so it is written first.
+// commitMode records the mode the container now runs. The intent stays until
+// the run row holds the mode, so a restart retries a row that failed to save.
 func (s *Scheduler) commitMode(ctx context.Context, entry *supervised, mode domain.LaunchMode, reporter harness.Reporter) error {
 	acp := mode == domain.LaunchACP
+	err := s.cfg.Store.SetRunMode(ctx, entry.runID, mode, acp)
+	if err != nil {
+		err = fmt.Errorf("record the run's mode: %w", err)
+	}
 	s.mu.Lock()
-	entry.launchMode, entry.acp, entry.reporter, entry.switchIntent = mode, acp, reporter, nil
-	var errs []error
-	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		errs = append(errs, fmt.Errorf("persist the run's mode: %w", err))
+	defer s.mu.Unlock()
+	entry.launchMode, entry.acp, entry.reporter = mode, acp, reporter
+	if err == nil {
+		entry.switchIntent = nil
 	}
-	s.mu.Unlock()
-	if err := s.cfg.Store.SetRunMode(ctx, entry.runID, mode, acp); err != nil {
-		errs = append(errs, fmt.Errorf("record the run's mode: %w", err))
+	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
+		err = errors.Join(err, fmt.Errorf("persist the run's mode: %w", werr))
 	}
-	return errors.Join(errs...)
+	return err
 }
 
 // settleSwitch finishes a mode switch the previous server process left

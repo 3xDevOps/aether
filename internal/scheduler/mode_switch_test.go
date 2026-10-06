@@ -1,12 +1,14 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // fakeSupervisor answers the swap exec as the run supervisor would: it runs
@@ -66,7 +69,9 @@ func (f *fakeSupervisor) exec(_ runtime.ID, argv []string) (int, string, error) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bodies = append(f.bodies, body)
+	f.state = argv[4] + " started\n"
 	if body != "" && f.exitStatus != "" {
+		f.state = argv[4] + " exited " + f.exitStatus + "\n"
 		return 3, f.exitStatus + "\n", nil
 	}
 	return 0, "", nil
@@ -87,9 +92,9 @@ type switchEnv struct {
 	sup   *fakeSupervisor
 }
 
-func newSwitchEnv(t *testing.T) *switchEnv {
+func newSwitchEnv(t *testing.T, opts ...func(*Config)) *switchEnv {
 	t.Helper()
-	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	e, rt := newACPEnv(t, append(opts, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))...)
 	coord, _ := withCoordination(t, e)
 	sup := &fakeSupervisor{coord: coord}
 	rt.execHandler = sup.exec
@@ -104,6 +109,30 @@ func (e *switchEnv) launch(t *testing.T, task string, mode domain.LaunchMode) *d
 	}
 	e.sup.run = run.ID
 	return run
+}
+
+// restart closes the scheduler and recovers the run in a new one, which
+// settles any switch the first left unfinished.
+func (e *switchEnv) restart(t *testing.T) *Scheduler {
+	t.Helper()
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	waitFor(t, "the recovered run", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		return s2.runs[e.sup.run] != nil && s2.runs[e.sup.run].switchIntent == nil
+	})
+	return s2
 }
 
 func modeEvents(t *testing.T, sub events.Subscription, run domain.RunID, n int) []events.RunModePayload {
@@ -283,24 +312,7 @@ func TestRestartSettlesAnInterruptedSwitch(t *testing.T) {
 			}
 			e.sup.state = tc.state
 			before := len(e.rt.all())
-			if err := e.sched.Close(); err != nil {
-				t.Fatal(err)
-			}
-
-			cfg := e.cfg
-			cfg.PTY = newFakePTY()
-			cfg.PTY.(*fakePTY).logDir = e.pty.logDir
-			s2, err := New(cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = s2.Close() })
-			startScheduler(t, s2)
-			waitFor(t, "the recovered run", func() bool {
-				s2.mu.Lock()
-				defer s2.mu.Unlock()
-				return s2.runs[run.ID] != nil && s2.runs[run.ID].switchIntent == nil
-			})
+			s2 := e.restart(t)
 			if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != tc.want {
 				t.Fatalf("row mode %q, want %q", row.Mode, tc.want)
 			}
@@ -341,6 +353,41 @@ func TestSwitchToEnhancedRestoresTheTerminalWhenTheAdapterFails(t *testing.T) {
 	items := waitItems(t, e.sched, run.ID, "the failure notice", noticeTitled("Switch to Enhanced failed"))
 	if !strings.Contains(items[len(items)-1].Notice.Description, "exec: no such file") {
 		t.Fatalf("notice %+v", items[len(items)-1])
+	}
+}
+
+type failingRunModeStore struct {
+	store.Store
+	failed atomic.Bool
+}
+
+func (s *failingRunModeStore) SetRunMode(ctx context.Context, id domain.RunID, mode domain.LaunchMode, acp bool) error {
+	if s.failed.CompareAndSwap(false, true) {
+		return errors.New("database is locked")
+	}
+	return s.Store.SetRunMode(ctx, id, mode, acp)
+}
+
+func TestRestartRecordsAModeTheRunRowMissed(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t, func(cfg *Config) { cfg.Store = &failingRunModeStore{Store: cfg.Store} })
+	run := e.launch(t, "", domain.LaunchACP)
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+
+	err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admitNow)
+	if err == nil || !strings.Contains(err.Error(), "record the run's mode: database is locked") {
+		t.Fatalf("switch error %v", err)
+	}
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.Mode != domain.LaunchTUI || sc.Switch == nil {
+		t.Fatalf("sidecar %+v (%v), want Standard with the switch kept", sc, err)
+	}
+
+	s2 := e.restart(t)
+	if row, _ := e.db.GetRun(t.Context(), run.ID); row.Mode != domain.LaunchTUI || row.ACP {
+		t.Fatalf("row mode %q acp %v, want the switch recorded on restart", row.Mode, row.ACP)
+	}
+	if s2.acp.session(run.ID) != nil {
+		t.Fatal("recovery started an ACP server beside the resumed terminal")
 	}
 }
 
