@@ -631,8 +631,8 @@ blocked worker in a swarm you are accountable for. The full list is in
 **Working** with "Waiting for Alice" for everyone else. Needs you lists every
 workspace; Working and Finished list the selected one. Native question
 coverage depends on the harness reporter; see [harnesses.md](harnesses.md).
-`aether runs --attention` lists the `needs-attention` wire status, not Needs
-you.
+Desktop **Run idle** notifications and `aether runs --attention` follow the
+`needs-attention` wire status, not Needs you.
 
 ### Handoff and finishing runs
 
