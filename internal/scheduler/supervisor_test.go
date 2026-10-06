@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // TestSupervisorSwapsItsChild drives the real supervisor script on a PTY
@@ -64,7 +66,32 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState("n4 started")
+
 	if got := strings.Count(p.output.String(), "[aether] harness exited with code"); got != 1 {
 		t.Fatalf("harness exit lines = %d, output = %q", got, p.output.String())
+	}
+}
+
+func TestSupervisorIgnoresServedSwap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	next, state, starts := filepath.Join(dir, "next-command"), filepath.Join(dir, "state"), filepath.Join(dir, "starts")
+	p := startTestPTYProcess(t, supervisorCommand(next, state, []string{"/bin/sh", "-c", "printf 'harness-%s\\n' ready; while :; do read -r line; done"}))
+	defer func() {
+		_ = p.cmd.Process.Kill()
+		_ = p.master.Close()
+	}()
+	p.waitForOutput(t, "harness-ready")
+	if err := os.WriteFile(next, []byte("# n1\necho up >> "+shellquote.QuoteAlways(starts)+"; while :; do read -r line; done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := p.cmd.Process.Signal(syscall.SIGALRM); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if got, _ := os.ReadFile(starts); string(got) != "up\n" {
+		t.Fatalf("a SIGALRM for a served request restarted the child: starts = %q", got)
 	}
 }

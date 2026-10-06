@@ -37,9 +37,10 @@ func supervisorCommand(nextFile, stateFile string, argv []string) []string {
 
 // supervisorScript ends the current child on SIGALRM and then runs the body
 // of the next-command file, or a login shell when the body is empty. A
-// second SIGALRM while the first is pending kills the child. The file's
-// first line is "# <nonce>"; the state file reads "<nonce> started" once the
-// old child is gone and "<nonce> exited <status>" when the new one exits.
+// second SIGALRM while the first is pending kills the child; one that arrives
+// after the file's nonce was consumed is ignored. The file's first line is
+// "# <nonce>"; the state file reads "<nonce> started" once the old child is
+// gone and "<nonce> exited <status>" when the new one exits.
 const supervisorScript = `exec 3<&0
 nl='
 '
@@ -49,6 +50,7 @@ child_signaled=
 pending_signal=
 pending_status=
 swap=
+consumed=
 interrupted=
 
 forward_shutdown() {
@@ -69,6 +71,11 @@ request_shutdown() {
 
 request_swap() {
 	interrupted=1
+	requested=
+	{ read -r requested < "$next_file"; } 2>/dev/null || :
+	if [ "$requested" = "# $consumed" ]; then
+		return
+	fi
 	if [ -n "$swap" ] && [ -n "$child" ]; then
 		kill -KILL "$child" 2>/dev/null || :
 		return
@@ -133,6 +140,7 @@ do
 		next=$(cat "$next_file" 2>/dev/null) || next=
 		nonce=${next%%"$nl"*}
 		nonce=${nonce#"# "}
+		consumed=$nonce
 		case $next in
 		*"$nl"*) body=${next#*"$nl"} ;;
 		esac
