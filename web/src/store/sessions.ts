@@ -301,7 +301,7 @@ const deliveryWord: Record<RoomMessageState, Delivery> = {
 
 export function deliveryOf(m: RoomMessage): Pick<Extract<SessionRow, { kind: 'user' }>, 'delivery' | 'deliverAfter' | 'failure'> {
   return {
-    delivery: deliveryWord[m.state],
+    delivery: m.state === 'sent' && m.agent_delivery === 'queued' ? 'Queued' : deliveryWord[m.state],
     deliverAfter: m.state === 'queued' ? m.deliver_after : undefined,
     failure: m.failure?.message,
   }

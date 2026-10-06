@@ -19,6 +19,7 @@ import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 export function deliveryLabel(result: RoomPostResult): string {
+  if (result.message.state === 'sent' && result.message.agent_delivery === 'queued') return 'queued'
   switch (result.receipt ?? result.message.state) {
     case 'queued':
       return 'queued'

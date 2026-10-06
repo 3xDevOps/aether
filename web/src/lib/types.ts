@@ -509,6 +509,8 @@ export interface RoomMessage {
   decided_by?: string
   decided_at?: string
   delivered_at?: string
+  /** A sent steer an Enhanced run's agent queued behind its running turn, until it takes it. */
+  agent_delivery?: 'queued' | 'delivered'
   failure?: RoomMessageFailure
   created_at: string
   updated_at: string

@@ -7,7 +7,7 @@ import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { alice, bob, run, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -121,6 +121,24 @@ describe('the Enhanced session view', () => {
     await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
     expect(await within(log).findByText('$ npm test')).toBeDefined()
     expect(within(log).getByText('Exit code 0')).toBeDefined()
+  })
+
+  it('reads Queued on a message the agent holds behind its turn, then why it was not sent', async () => {
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true }) }, [item('turn_start', 1)])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    const queued = roomMessage({ id: 'msg_q', kind: 'steer_request', body: 'and docs', state: 'sent', agent_delivery: 'queued', updated_at: '2026-08-14T10:00:01Z' })
+    act(() => useStore.getState().upsertRoomMessage(queued))
+    expect(await within(log).findByText('Queued')).toBeDefined()
+    act(() => useStore.getState().upsertRoomMessage({ ...queued, agent_delivery: 'delivered', updated_at: '2026-08-14T10:00:02Z' }))
+    expect(await within(log).findByText('Sent')).toBeDefined()
+    expect(within(log).queryByText('Queued')).toBeNull()
+    act(() => useStore.getState().upsertRoomMessage(roomMessage({
+      id: 'msg_lost', kind: 'steer_request', body: 'and tests', state: 'not_sent', agent_delivery: 'queued',
+      failure: { code: 'agent_disconnected', message: 'acphost: agent connection closed' },
+    })))
+    expect(await within(log).findByText('Not sent')).toBeDefined()
+    expect(within(log).getByText('acphost: agent connection closed')).toBeDefined()
   })
 
   it('docks a permission on the composer and answers it with the lease, by click or by digit', async () => {

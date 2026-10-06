@@ -49,10 +49,10 @@ function withSteers(rows: SessionRow[], room: RoomMessage[]): SessionRow[] {
       Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow)
     if (!steer) return row
     used.add(steer.id)
-    return { ...row, authorID: steer.actor_id }
+    return { ...row, authorID: steer.actor_id, ...(steer.state === 'not_sent' ? deliveryOf(steer) : {}) }
   })
   const waiting = steers.filter((m) => !used.has(m.id) && m.state !== 'cancelled')
-    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, authorID: m.actor_id, ...deliveryOf(m), ...(m.state === 'sent' ? { delivery: 'Queued' } : {}) }))
+    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, authorID: m.actor_id, ...deliveryOf(m) }))
   return byTime(matched, waiting)
 }
 
