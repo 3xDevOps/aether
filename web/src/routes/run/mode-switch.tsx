@@ -1,3 +1,4 @@
+import { ToggleGroup } from 'radix-ui'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -14,9 +15,9 @@ const modes = [
 
 export function ModeSwitch({ run, agent, switchable }: { run: RunRecord; agent: AgentTerminal; switchable: boolean }) {
   const [busy, setBusy] = useState(false)
-  if (run.mode !== 'tui' && run.mode !== 'acp') return null
+  if (!switchable || (run.mode !== 'tui' && run.mode !== 'acp')) return null
   const live = run.status === 'running' || run.status === 'needs-attention'
-  const reason = !switchable ? 'Chosen when the run starts' : !live ? 'Only a running agent can switch' : undefined
+  const reason = live ? undefined : 'Only a running agent can switch'
   const pending = busy || Boolean(run.switching)
   const select = async (mode: 'tui' | 'acp') => {
     if (mode === run.mode || pending || reason) return
@@ -33,25 +34,29 @@ export function ModeSwitch({ run, agent, switchable }: { run: RunRecord; agent: 
       setBusy(false)
     }
   }
+  const current = run.switching ?? run.mode
   return (
-    <div role="radiogroup" aria-label="Run mode" className="flex shrink-0 items-center rounded-control border border-seam p-0.5">
-      {modes.map(({ mode, label }) => {
-        const checked = (run.switching ?? run.mode) === mode
-        return (
+    <ToggleGroup.Root
+      type="single"
+      aria-label="Run mode"
+      value={current}
+      onValueChange={(next) => {
+        if (next === 'tui' || next === 'acp') void select(next)
+      }}
+      className="flex shrink-0 items-center rounded-control border border-seam p-0.5"
+    >
+      {modes.map(({ mode, label }) => (
+        <ToggleGroup.Item key={mode} value={mode} asChild>
           <Button
-            key={mode}
-            role="radio"
-            aria-checked={checked}
             size="sm"
-            variant={checked ? 'secondary' : 'ghost'}
+            variant={current === mode ? 'secondary' : 'ghost'}
             aria-disabled={Boolean(reason) || pending || undefined}
-            hint={reason ?? (checked ? undefined : `Switch this run to ${label}`)}
-            onClick={() => void select(mode)}
+            hint={reason ?? (current === mode ? undefined : `Switch this run to ${label}`)}
           >
             {label}
           </Button>
-        )
-      })}
-    </div>
+        </ToggleGroup.Item>
+      ))}
+    </ToggleGroup.Root>
   )
 }
