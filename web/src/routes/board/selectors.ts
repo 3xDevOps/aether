@@ -3,14 +3,15 @@
 
 import { useMemo } from 'react'
 import type { RunActionCandidate } from '@/lib/commands'
+import type { StateContext } from '@/lib/needs-you'
 import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
 import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
-import { isArchivable } from '@/store/runs'
+import { isArchivable, type RunRecord } from '@/store/runs'
 import {
+  listedRuns,
   runGroups,
-  stateContextOf,
   type RunRow,
   type RunTree,
   type RunsInput,
@@ -76,25 +77,18 @@ export function cardRuns(cards: BoardCard[]): RunRow[] {
   return cards.flatMap((card) => [card, ...(card.swarm?.members ?? [])])
 }
 
-function candidates(rows: RunRow[], workspaces: Record<string, Workspace>): RunActionCandidate[] {
-  return rows.map(({ run }) => ({ run, workspace: workspaces[run.workspace_id] }))
+function candidates(runs: RunRecord[], workspaces: Record<string, Workspace>): RunActionCandidate[] {
+  return runs.map((run) => ({ run, workspace: workspaces[run.workspace_id] }))
 }
 
-/** The Finished column's runs, swarm members included, which Archive closed runs sweeps. */
-export function finishedRuns(data: BoardData, workspaces: Record<string, Workspace>): RunActionCandidate[] {
-  return candidates(cardRuns(data.columns.find((c) => c.key === 'finished')?.cards ?? []), workspaces)
+// The bulk actions sweep the whole workspace whoever owns the run: Needs you
+// spans workspaces and Mine hides teammates' runs, so the columns cannot be used.
+export function finishedRuns(workspace: string, ctx: StateContext): RunActionCandidate[] {
+  const rows = listedRuns(workspace, ctx).filter((row) => row.group === 'finished')
+  return candidates(rows.map((row) => row.run), ctx.workspaces)
 }
 
-/** Every run in scope, archived ones included, which Release finished resources sweeps. */
-export function allRuns(data: BoardData, workspaces: Record<string, Workspace>): RunActionCandidate[] {
-  return candidates(
-    [...data.columns.flatMap((column) => cardRuns(column.cards)), ...data.archivedCards],
-    workspaces,
-  )
-}
-
-/** The board as the store holds it now, for a snapshot taken outside render. */
-export function currentBoard(): BoardData {
-  const s = useStore.getState()
-  return board({ workspace: s.activeWorkspace, mineOnly: s.mineOnly, ctx: stateContextOf(s, Date.now()) })
+export function workspaceRuns(workspace: string, ctx: StateContext): RunActionCandidate[] {
+  const runs = Object.values(ctx.runs).filter((run) => !workspace || run.workspace_id === workspace)
+  return candidates(runs, ctx.workspaces)
 }

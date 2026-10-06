@@ -959,8 +959,11 @@ archived run leaves. Each archived card, and the run header for one, show
 `ColumnHeader` in Cards and the Runs header in Map offer this action; the
 palette carries the same command whenever the gateway serves `run.archive`.
 All open `ClearDoneConfirm` (`src/routes/board/clear-done-dialog.tsx`) over
-the `clearDonePlan()` (`src/lib/commands.ts`) snapshot taken when opened;
-the palette's dialog takes it from the board as it stands then. When none
+the `clearDonePlan()` (`src/lib/commands.ts`) snapshot taken when opened.
+Both actions read the active workspace's runs (`finishedRuns` and
+`workspaceRuns` in `src/routes/board/selectors.ts`), whoever owns them: the
+Mine toggle does not narrow them and another workspace's Needs you runs never
+join them. When none
 qualify, the dialog says "No closed runs to archive" and which runs archive
 acts on. Eligible runs are
 `isArchivable`, not already archived, and killable by the caller. The dialog
@@ -979,7 +982,7 @@ its dialog says "No finished runs hold resources" and which runs release
 acts on when none qualify. Its
 `releaseFinishedPlan()` searches all runs in the active workspace,
 including archived runs behind the toggle and finished runs still awaiting
-review; it does not depend on visible Finished cards. It requires `run.release`,
+review; it does not depend on visible cards. It requires `run.release`,
 the Kill permission and a finished status with an existing retained-container
 reason (explicit Close, agent report or mission worker). Active and
 needs-attention runs are excluded. The confirmation says resources are removed,

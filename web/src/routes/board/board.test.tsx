@@ -1258,6 +1258,27 @@ describe('release finished resources', () => {
     expect(api.runArchive).not.toHaveBeenCalled()
   })
 
+  it("sweeps the whole active workspace, never another workspace's Needs you runs, whatever Mine shows", async () => {
+    const mine = run({ id: 'release_mine', status: 'merged', reason: 'closed; retained container' })
+    const theirs = run({ id: 'release_theirs', status: 'merged', member_id: bob.id, reason: 'closed; retained container' })
+    const unreviewedElsewhere = run({
+      id: 'release_other_needs_you', status: 'completed', outcome_unseen: true,
+      reason: 'agent reported success; retained container', workspace_id: otherWorkspace.id,
+    })
+    seedAs(alice, [mine, theirs, unreviewedElsewhere])
+    useStore.setState({ mineOnly: true })
+    render(<Board />)
+    expect(column('Needs you').getByText(unreviewedElsewhere.task)).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release finished resources...' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Release 2' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Released resources for 2 runs'))
+    expect(api.runRelease).toHaveBeenCalledWith(mine.id)
+    expect(api.runRelease).toHaveBeenCalledWith(theirs.id)
+    expect(api.runRelease).not.toHaveBeenCalledWith(unreviewedElsewhere.id)
+  })
+
   it('bounds concurrency, continues after errors and reports the first real refusal', async () => {
     const runs = Array.from({ length: 8 }, (_, i) => run({
       id: `release_pool_${i}`, status: 'merged', reason: 'closed; retained container',

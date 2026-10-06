@@ -19,22 +19,22 @@ import { registerRoute } from '@/routes/registry'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
-import { allRuns, cardRuns, finishedRuns, useBoard, type BoardColumn } from '@/routes/board/selectors'
+import { cardRuns, finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { RunMap } from '@/routes/board/run-map'
 import { useBoardTransition } from '@/routes/board/use-board-transition'
 import { useStore } from '@/store'
-import { useCapability, useSelf, useSelfRole } from '@/store/hooks'
+import { useCapability, useSelf, useSelfRole, useStateContext } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import '@/components/palette'
 
 /** The active workspace's runs, as status columns or a spatial workbench. */
 export function Board() {
   const data = useBoard()
+  const ctx = useStateContext()
   const { columns, archivedCards } = data
   const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
-  const workspaces = useStore((s) => s.workspaces)
   const boardView = useStore((s) => s.boardView)
   const setBoardView = useStore((s) => s.setBoardView)
   const { boardRef, changeView } = useBoardTransition(
@@ -55,9 +55,9 @@ export function Board() {
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
-  const donePlan = clearDonePlan(finishedRuns(data, workspaces), caps, self)
+  const donePlan = clearDonePlan(finishedRuns(activeWorkspace, ctx), caps, self)
   const runClear = (eligible: RunRecord[]) => runClearDone(eligible, { api, removeRun })
-  const releasePlan = releaseFinishedPlan(allRuns(data, workspaces), caps, self)
+  const releasePlan = releaseFinishedPlan(workspaceRuns(activeWorkspace, ctx), caps, self)
 
   const [showArchived, setShowArchived] = useState(false)
   // The toggle only exists while there is something behind it; once the
