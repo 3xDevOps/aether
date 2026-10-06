@@ -45,8 +45,9 @@ Discovery follows relative symlinks and absolute links under `/root` or
 `/home/aether` within your home. Claude's native installer uses an
 absolute link to its versioned executable. Broken links, links outside the
 home, and files without executable permission are not marked installed.
-Use **Refresh agents** after installing in an open terminal; no app or server
-restart is needed.
+The launch dialog reads the agent list each time it opens, so an install in an
+open terminal shows up the next time you open it; no app or server restart is
+needed.
 
 Choose an agent once:
 

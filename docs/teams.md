@@ -827,9 +827,9 @@ launch runs on that account. In the dashboard:
 - **Share or revoke:** the owner opens **Members** and, under **Your agent
   account**, presses **Share account** beside the teammate, or **Revoke
   access** to take it back.
-- **Launch on it:** the recipient presses **New run** on the Board and picks
-  the owner, listed as `<name> (shared)`, in the **Account** picker
-  (**Integrator account** when launching a swarm).
+- **Launch on it:** the recipient presses **New run**, opens **Options** and
+  picks the owner, listed as `<name> (shared)`, under **Account**
+  (**Integrator account** on the **Swarm** tab).
 
 The CLI equivalent, for agents and scripts:
 
@@ -876,8 +876,8 @@ local and hosted gateways. `aether github connect`
 equivalent.
 
 A member-defined agent (`aether agent add`) runs only on its member's own
-account. On a shared account the launch dialog lists it as `<name> (your
-account only)` and does not offer it; a launch from the CLI is refused:
+account. On a shared account the launch dialog shows it disabled as **Your
+account only**; a launch from the CLI is refused:
 
 ```
 scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
@@ -962,8 +962,11 @@ run that asks you clarifying questions only if it needs answers, splits the
 objective into tasks, runs as many workers on them as it judges useful,
 delivers the verified result, and reports success. No human approves the plan
 or the delivery.
-The dashboard's launch dialog creates one under **Swarm**; the CLI does the
-same with `aether swarm create`. The integrator runs on your account (or the
+The dashboard's launch dialog creates one on its **Swarm** tab: an
+objective, the **Integrator agent**, **Agents for workers**, and a **Worker
+mode** that defaults to Background. The dashboard's integrator always runs
+Standard, and a worker whose agent cannot use the worker mode runs Standard,
+which its row says. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
 shared account named by `--account`) with the `--agent` harness in
 `standard` mode, or `enhanced` with `--mode enhanced`
 ([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on a

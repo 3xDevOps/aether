@@ -1179,55 +1179,66 @@ The template form's open state lives with
 knows only the other two. It lists the active
 workspace's templates over `template.list` and starts the run with
 `template.launch` (both on `lib/api.ts` like every other call), then reveals
-it.
+it. It shows the chosen template's agent, mode and task before Launch.
 
-The launch form asks for an account, a task, an agent and a mode. `account.list`
-puts the caller first, followed by accounts explicitly shared with them. A
-shared selection sends its ID as `account_member_id` on `agent.list` and
-`run.launch`. `agent.list` still returns the caller's own agents and
-installations, since the run executes in the caller's environment, and marks
-with `login_missing` each agent the account's owner has no login for, with
-`own_account_only` each name that resolves to the caller's own
-member-defined agent, which runs only on the caller's own account, and with
-`unavailable` the launch's own error for each agent whose owner login exists
-but cannot be shared. The form takes the reason from those three fields,
-never from `source`: a member-defined name that is also a server-wide
-definition launches the server-wide one, so it can be `login_missing`. It
-lists the first as disabled "(not logged in)" entries and says "<owner> is
-not logged in to <agent>", that the owner logs in from the terminal dock on
-their own Board, and to press **Refresh agents** then; the second as "(your
-account only)" entries with "Your own agent definitions run only on your own
-account" and which **Account** entry launches them; the third as
-"(unavailable)" entries with "<agent> cannot launch on this account: " and
-the server's error unchanged; the swarm grid disables their worker rows the same way and
-drops a ticked worker whose agent stops being launchable when the lists
-refresh. The task is optional in
-interactive mode - a taskless launch drops the member into the agent's TUI
-with no seeded prompt - and required in headless, which has no interactive
-surface, so the form disables Launch and says why rather than sending a
-request the gateway will refuse (`runLaunch` in `internal/sshd/handlers.go` is
-the same rule). Only what was actually chosen goes on the wire: an empty task
-and the default `tui` mode are the server's own defaults. The **Agent** field
-is always there. It reads "Choose an agent" until one is picked, and there is
-no way back to that state once one is. Under it are the installed entries from
-`agent.list`, then `custom`, the escape hatch that `agent.list` never returns
-and that only launches where the deployment pinned a harness with
-`--harness-definitions`. `agent.list` reports installation from the
-caller's persistent `~/.local/bin` or, on a shared account, the owner's;
-uninstalled shipped entries
-remain visible on the Agents page so setup can install them. The launch form
-also remembers the most recently used installed agent for each account and
-falls back to the first installed entry. With nothing installed nothing is
-preselected, so Launch stays disabled until the member picks one: "No agent is
-installed in your environment." and a **Set up an agent** button sit beside the
-field rather than replacing it, and the button opens the Agents view. On a
-shared account the heading reads "Neither you nor <owner> has an agent
-installed." and the note says the run uses the owner's login and the
-caller's installation, or the owner's when the caller has none. A failed
-list request shows its error and no setup button - nothing here can fix a
-gateway that did not answer - and Launch stays disabled there too. **Refresh
-agents** retries discovery after a connection failure or an installation
-completed in another terminal.
+The launch form lives in `components/launch/`. Its **Run** tab asks for a
+task, an agent and a mode; an account appears only when one is shared with
+the caller. The agent picker is a list of rows from `agent.list`: the
+vendor glyph in its colour, the display name, and "Login found" or "No login
+found" for a shipped agent (`login_found` checks the launch home for login
+files, not for a working session; a server that does not report it shows
+nothing). An agent that is not installed stays listed, disabled, with
+**Set up**, which closes the dialog and opens Agents. The last row is
+`custom`, the escape hatch that `agent.list` never returns and that only
+launches where the deployment pinned a harness with `--harness-definitions`.
+With nothing installed, nothing is preselected, Launch stays disabled, and
+the form says "No agent is installed in your environment." with a **Set up
+an agent** button. The list is read each time the dialog opens; a failed
+read shows its error and no setup button, and Launch stays disabled.
+
+**Mode** is a segmented control with one line per mode: **Standard** (`tui`,
+"Your agent's own terminal"), **Enhanced** (`acp`, "Native messages,
+approvals and progress", see [enhanced-runs.md](enhanced-runs.md)) and
+**Background** (`headless`, "Runs the task once, no interaction"). Enhanced
+is disabled with the reason under the control when the agent reports
+`enhanced: none` ("<agent> has no Enhanced support.") or the adapter is not
+installed ("The Enhanced adapter for <agent> is not installed.", with
+**Set up**). A launch never switches mode on its own: the mode sent is the
+one the control shows, and a refusal from `run.launch` appears in the dialog
+verbatim under "Launch failed" while the dialog stays open. The task is
+optional in Standard and Enhanced - a taskless launch opens the agent with
+no prompt - and required in Background, which takes no input, so Launch
+stays disabled until one is written (`runLaunch` in
+`internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
+the wire: an empty task and `tui` are the server's defaults.
+
+The form remembers a mode per agent in the persisted `launchDefaults` slice
+(`{mode, at}` keyed by agent name, store version 6). It preselects the
+launchable agent launched most recently, then the agent of the newest run,
+then the first launchable one, and starts in that agent's remembered mode,
+else its `default_mode` from `agent.list`, else Standard; a remembered mode
+the agent can no longer use shows as Standard.
+
+**Options** appears when `account.list` returns more than the caller and
+holds the **Account** select: the caller first as "(you)", then accounts
+shared with them as "(shared)". A shared selection sends its ID as
+`account_member_id` on `agent.list` and `run.launch`. `agent.list` still
+returns the caller's own agents and installations, since the run executes
+in the caller's environment, and marks each agent the account's owner has no
+login for with `login_missing`, each name that resolves to the caller's own
+member-defined agent with `own_account_only`, and each agent whose owner
+login exists but cannot be shared with `unavailable` and the launch's own
+error. The form takes the reason from those fields, never from `source`: a
+member-defined name that is also a server-wide definition launches the
+server-wide one, so it can be `login_missing`. Refused rows are disabled
+("Not logged in", "Your account only", "Unavailable"), and one note under
+the picker says "<owner> is not logged in to <agent>" and that the owner logs
+in from their own terminal dock, that the caller's own definitions run only
+on their own account, and "<agent> cannot launch on this account: " with
+the server's error unchanged. On a shared account with nothing installed the
+heading reads "Neither you nor <owner> has an agent installed." and the note
+says the run uses the owner's login and the caller's installation, or the
+owner's when the caller has none.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
@@ -3212,39 +3223,41 @@ concluding the page is wrong.
 
 ## Missions and swarm creation
 
-The launch dialog keeps **Single agent** as its default. When the gateway
-advertises `mission.create`, it also offers **Swarm**: one concise objective,
-an integrator account and harness, and an explicit list of allowed
-account/harness/mode execution choices. The integrator always runs in `tui` mode, because
-`mission.create` and `mission.replace-integrator` refuse a headless
-integrator, so the swarm form has no integrator mode field; worker rows keep
-their own mode. `mission.create` refuses an integrator whose exact
-account/harness/mode is not one of `execution_choices`, so the list always
-starts with a checked, disabled **Integrator** row that follows the
-integrator fields and reads `tui`. A ticked worker row with the same tuple
-is not sent twice, and the list is sent sorted by account, harness, and
-mode, so the same set is always the same request. The worker rows default to the
-integrator's account and first installed harness in `headless` mode. Its
-submit button is **Create swarm**, matching the missions header action, and
-success toasts `Swarm created`; creating a swarm starts the integrator, not
-the workers. The form sends the exact selected values to `mission.create`,
-including a client idempotency key, then navigates to
-`missions/<server-issued-id>`.
+The launch dialog opens on **Run**. When the gateway advertises
+`mission.create` and the member's role may launch, it also has a **Swarm**
+tab, titled **New swarm**, with the help line "The integrator plans the
+work, starts a worker run per task, and combines the results." It asks for
+an objective, the **Integrator agent** (the same picker as Run, on the
+account under Options), **Agents for workers** (a checkbox row per installed
+agent and account, defaulting to the integrator account's first launchable
+agent) and **Worker mode**, which defaults to Background. The integrator
+always runs Standard: `mission.create` refuses a Background integrator, which
+exits after one turn, and an Enhanced one, which is not woken when a worker
+reports. Each worker choice is sent in the worker mode when its agent can
+use it and in Standard otherwise; the row says so ("Runs Standard: no
+Enhanced support"). Rows a shared account cannot launch are disabled with
+the same reasons as the Run picker, and a ticked worker whose agent stops
+being launchable when the lists are read again is dropped.
 
-Swarm is offered only while `cap.hasMethod('mission.create')` and the
-member's role may launch. The dialog opens on Swarm from the Missions route
-or the palette's **Create swarm...** entry (`openPaletteDialog('swarm')`,
-listed under the same two conditions) when both hold, and on Single agent
-otherwise. If either stops holding while the dialog is open on Swarm - a
-re-hydration that could not read the capabilities, or a role change - the
-dialog stays on Swarm with **Create swarm** disabled and says why, naming
-missing capabilities before the role:
+`mission.create` refuses an integrator whose exact account/harness/mode is
+not one of `execution_choices`, so the integrator's `tui` choice is always
+sent; a worker choice with the same tuple is not sent twice, and the list is
+sorted by account, harness and mode, so the same set is always the same
+request. **Create swarm** starts the integrator, not the workers, toasts
+`Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
+such as `mission: coordination is unavailable`, appears in the dialog
+verbatim under "Swarm not created".
 
-- `Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.`
+The dialog opens on Swarm from the Missions route or the palette's **Create
+swarm...** entry (`openPaletteDialog('swarm')`, listed under the same two
+conditions) when both hold, and on Run otherwise. If either stops holding
+while the dialog is open on Swarm - a re-hydration that could not read the
+capabilities, or a role change - the dialog stays on Swarm with **Create
+swarm** disabled and says why, naming missing capabilities before the role:
+
+- `Swarm launch is unavailable: the server did not report its capabilities. Switch to Run to launch a run.`
 - `Swarm launch is unavailable: your role cannot launch.`
-- `Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Single agent to launch a run.`
-
-The **Launch type** select stays so the member can switch to Single agent.
+- `Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Run to launch a run.`
 
 The key belongs to the submitted contents, not to the dialog: the tab keeps
 one key per distinct set of contents in memory until a create with them

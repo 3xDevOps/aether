@@ -596,6 +596,11 @@ aether run "add a health check endpoint" --workspace myproject --agent claude
 ```
 
 The run gets its own container and checkout while using your persistent home.
+In the dashboard, **New run** asks for the task, the agent and the **Mode**:
+**Standard** opens the agent's own terminal, **Enhanced** shows its
+messages, approvals and progress as native controls
+([enhanced-runs.md](enhanced-runs.md)), and **Background** runs the task once
+with no interaction. The CLI takes `--mode enhanced` or `--mode background`.
 
 ```
 run run-d6ay38tj8j running
