@@ -99,22 +99,25 @@ export function SyncPanel({
   const active = session?.state === 'running' || session?.state === 'conflict'
 
   return (
-    <section aria-label="Sync" className="min-w-0 space-y-3 border-t border-seam/70 pt-3">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-ui font-medium">Local sync overlay</h2>
-          <p className="mt-0.5 text-ui-sm text-muted">
-            Mirror this run's worktree into the linked repository.
-          </p>
-        </div>
-        <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 border border-seam/70 bg-chrome px-2 py-1 text-ui-sm font-medium">
+    <section aria-label="Sync" className="min-w-0 space-y-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
           {active ? (
-            <RefreshCw className="size-3.5 text-state-working" aria-hidden />
+            <RefreshCw className="size-3.5 shrink-0 text-state-working" aria-hidden />
           ) : (
-            <CircleCheck className="size-3.5 text-muted" aria-hidden />
+            <CircleCheck className="size-3.5 shrink-0" aria-hidden />
           )}
-          {session ? `Overlay ${session.state}` : 'No sync session for this run.'}
+          {!session ? 'Not mirroring' : session.state === 'running' ? 'Mirroring' : `Mirror ${session.state}`}
         </span>
+        {active ? (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void stop()}>
+            Stop mirroring
+          </Button>
+        ) : (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void start()}>
+            Start mirroring
+          </Button>
+        )}
       </div>
       {session?.state === 'conflict' && session.conflict && (
         <div className="border-l-2 border-state-needs-you/60 bg-state-needs-you/10 px-3 py-2">
@@ -128,17 +131,6 @@ export function SyncPanel({
           </p>
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        {active ? (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void stop()}>
-            Stop
-          </Button>
-        ) : (
-          <Button size="sm" disabled={busy} onClick={() => void start()}>
-            Start
-          </Button>
-        )}
-      </div>
       {error && (
         <div role="alert" className="border-l-2 border-state-failed/60 bg-state-failed/10 px-3 py-2">
           <p className="text-ui-sm text-state-failed">{error.text}</p>

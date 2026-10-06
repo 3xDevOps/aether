@@ -2767,9 +2767,13 @@ every gateway:
   [Keyboard and focus](#keyboard-and-focus)).
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`), **Saved servers** with **Switch**, the
-  **Sync daemon** install (`daemon.status`), and **Mirror run files**, which
-  starts and stops a live run's sync overlay (`sync.status`). The
-  server-hosted dashboard omits the section.
+  **Sync daemon** (`daemon.status`), and **Mirror run files**, which starts
+  and stops a live run's sync overlay (`sync.status`). Each row says in one
+  sentence what it does and prefills its target read-only: the daemon the
+  linked server and repository, the mirror the newest live run (or the one
+  already mirroring). **Change** edits the target; **Install** and **Start
+  mirroring** are secondary buttons. The server-hosted dashboard omits the
+  section.
 - **Server**: the server version and protocol, with **Update…** when an
   update is waiting; the disk gauge with what Aether holds on that
   filesystem (worktrees, transcripts, database, repositories) and the free

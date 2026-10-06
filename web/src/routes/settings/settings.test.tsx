@@ -43,18 +43,24 @@ function seed(extra: Partial<RootState> = {}) {
 }
 
 describe('settings view', () => {
-  // A placeholder cannot be chosen, so picking no run must be a real option.
-  it('opens the mirror panel for a run and closes it again', async () => {
-    seed({ runs: { [active.id]: toRecord(active) } })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+  it('offers the newest live run for mirroring and Change picks another', async () => {
+    const older = run({ id: 'run_0', task: 'tidy the README', created_at: '2026-01-01T00:00:00Z' })
+    const newer = { ...active, created_at: '2026-02-01T00:00:00Z' }
+    const client = fakeApi()
+    seed({ runs: { [older.id]: toRecord(older), [newer.id]: toRecord(newer) } })
+    render(<SettingsRoute params={{}} client={client} />)
 
-    const picker = screen.getByLabelText('Mirror run files')
-    await pickOption(picker, runLabel(active))
+    expect(screen.getByText(runLabel(newer))).toBeDefined()
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
 
-    await pickOption(picker, 'Pick a run')
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }))
+    const option = await screen.findByRole('option', { name: runLabel(older) })
+    option.focus()
+    fireEvent.keyDown(option, { key: 'Enter' })
+    expect(await screen.findByText(runLabel(older))).toBeDefined()
+    fireEvent.click(await screen.findByRole('button', { name: 'Start mirroring' }))
 
-    expect(screen.queryByRole('region', { name: 'Sync' })).toBeNull()
+    expect(client.localSyncStart).toHaveBeenCalledWith(older.id)
   })
 
   it('applies and persists explicit themes on a server without calling local methods', async () => {
@@ -181,6 +187,19 @@ describe('settings view', () => {
     expect(within(server).queryByText('Retained containers')).toBeNull()
   })
 
+  it('shows the linked server and repository read-only until Change', async () => {
+    seed()
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+
+    const form = await screen.findByRole('form', { name: 'Install sync daemon' })
+    await within(form).findByText('/src/repo')
+    expect(within(form).queryByRole('textbox')).toBeNull()
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Change' }))
+
+    expect((within(form).getByLabelText('Repository') as HTMLInputElement).value).toBe('/src/repo')
+  })
+
   it('installs the daemon and shows the unit path and enable note', async () => {
     const client = fakeApi()
     seed()
@@ -212,7 +231,6 @@ describe('settings view', () => {
     })
     render(<SettingsRoute params={{}} client={client} />)
 
-    await pickOption(screen.getByLabelText('Mirror run files'), runLabel(active))
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
     expect(client.localDaemonStatus).not.toHaveBeenCalled()
     expect(client.localDaemonInstall).not.toHaveBeenCalled()

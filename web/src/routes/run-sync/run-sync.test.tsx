@@ -53,15 +53,15 @@ describe('sync panel', () => {
     seed()
     render(<SyncPanel runID="run_1" client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Start mirroring' }))
 
-    expect(await screen.findByText('Overlay running')).toBeDefined()
+    expect(await screen.findByText('Mirroring')).toBeDefined()
     expect(client.localSyncStart).toHaveBeenCalledWith('run_1')
     expect(useStore.getState().syncSessions.run_1?.state).toBe('running')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop mirroring' }))
 
-    expect(await screen.findByText('No sync session for this run.')).toBeDefined()
+    expect(await screen.findByText('Not mirroring')).toBeDefined()
     expect(client.localSyncStop).toHaveBeenCalledWith('run_1')
   })
 
@@ -74,7 +74,7 @@ describe('sync panel', () => {
     seed()
     render(<SyncPanel runID="run_1" client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Start mirroring' }))
 
     expect(
       await screen.findByText('sync.start: overlay checkout has local changes'),
