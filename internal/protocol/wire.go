@@ -258,6 +258,17 @@ type MemberColorResult struct {
 	Member Member `json:"member"`
 }
 
+// MemberRenameParams: empty MemberID means the caller; anyone else requires
+// the admin role.
+type MemberRenameParams struct {
+	MemberID    string `json:"member_id,omitempty"`
+	DisplayName string `json:"display_name"`
+}
+
+type MemberRenameResult struct {
+	Member Member `json:"member"`
+}
+
 // MemberGitParams: an empty field clears that half back to its fallback.
 // MemberID defaults to the caller.
 type MemberGitParams struct {

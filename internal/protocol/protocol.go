@@ -45,6 +45,7 @@ const (
 	MethodMemberInvite    = "member.invite"
 	MethodMemberRemove    = "member.remove"
 	MethodMemberColor     = "member.color"
+	MethodMemberRename    = "member.rename"
 	MethodMemberGit       = "member.git"
 	MethodMemberRole      = "member.role"
 	MethodAccountList     = "account.list"
