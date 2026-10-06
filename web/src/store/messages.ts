@@ -101,7 +101,6 @@ export function scopeMessages(state: MessagesSlice, scope: MessageScope): RunMes
   return list ? list.ids.map((id) => state.runMessages[id]) : []
 }
 
-/** A failed read is recorded against the scope, not thrown. */
 export async function loadMessagePage(store: RootStore, client: Api, scope: MessageScope, older = false): Promise<void> {
   const before = store.getState().messageLists[messageScopeKey(scope)]?.nextBefore
   if (older && !before) return

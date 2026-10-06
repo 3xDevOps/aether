@@ -3,11 +3,12 @@ package events
 import "github.com/3xDevOps/Aether/internal/domain"
 
 const (
-	// TypeCoordMessage leaves the body behind coord.messages.list.
 	TypeCoordMessage      Type = "coord.message"
 	TypeCoordMessageAcked Type = "coord.message.acked"
 )
 
+// CoordMessagePayload never carries the body; members read it with
+// coord.messages.list.
 type CoordMessagePayload struct {
 	MessageID     string             `json:"message_id"`
 	WorkspaceID   domain.WorkspaceID `json:"workspace_id"`

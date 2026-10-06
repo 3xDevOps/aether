@@ -155,7 +155,7 @@ func runSnapshotQuery(where string) string {
 		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
 		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
-		(SELECT COUNT(*) FROM run_messages m WHERE m.to_run = runs.id AND m.acked_at IS NULL AND m.retired_at IS NULL)
+		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
 		FROM runs
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (

@@ -93,7 +93,6 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
   ),
 }
 
-/** A run named the way its card names it, opening the run when clicked. */
 function RunName({ id }: { id: unknown }) {
   const runID = typeof id === 'string' ? id : ''
   const run = useStore((s) => s.runs[runID])
