@@ -398,13 +398,13 @@ function NeedsYouBadge() {
       aria-label={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       title={`${count} ${count === 1 ? 'run needs' : 'runs need'} you`}
       role="img"
-      className="rounded-sm bg-state-needs-attention/15 px-1.5 text-[11px] font-medium text-state-needs-attention"
+      className="rounded-sm bg-state-needs-you/15 px-1.5 text-[11px] font-medium text-state-needs-you"
     >
       <Chip
         color="warning"
         variant="soft"
         size="sm"
-        className="bg-state-needs-attention/15 text-state-needs-attention"
+        className="bg-state-needs-you/15 text-state-needs-you"
       >
         <Chip.Label>{count}</Chip.Label>
       </Chip>
