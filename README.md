@@ -94,7 +94,7 @@ onboarding wizard; use local `aether gui` for the one-time directory picker and
 other local filesystem or repository actions.
 
 Inside either dashboard: a workspace switcher, a board bucketed by what needs
-attention, a live read-only terminal mirror of any run, per-run diff timelines,
+attention (Needs you, Working, Finished; approve or reply from the card), a live read-only terminal mirror of any run, per-run diff timelines,
 the event feed, the shared approval inbox, presence indicators, the member
 roster, and a disk gauge. Launch, inject, pause, kill, close, relaunch and
 handoff all call the same methods the CLI does, with the same permission checks

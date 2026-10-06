@@ -294,19 +294,15 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:badges` | `{ run }` | the run card's status row, alongside state and paused badges |
-| `card:warnings` | `{ run }` | collapsed status-row controls beside Details |
-| `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
-| `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
+| `card:meta` | `{ run }` | the run card's meta line, after the agent, owner and diff counts |
 
 `AppShell` mounts the shell-wide hosts once: the command palette, the launch
 and run forms, the shortcuts dialog, the updates dialog and the team refresh
 (`useTeamRefresh`).
 
-Card slot content may render its own links and buttons; the article's pointer
-handler ignores interactive descendants, so those controls stay interactive.
-Conflict chips and watcher avatars belong in these slots. The shared
-request indicator includes approvals rather than adding a second badge.
+`card:meta` content renders inside `CardControls`, above the card's open
+target, so its links and buttons stay interactive. Keep it to one short
+item per contributor: a count or a word, with details behind a popover.
 
 ## Sidebar
 
@@ -816,133 +812,67 @@ forever.
 
 ## Board
 
-`src/routes/board/` is the default center view, reached through the
-sidebar's **Board** row. Its header shows the run count and a **Cards / Map**
-segmented layout control. The sidebar owns the primary New run action.
+`src/routes/board/` is the default center view and the triage surface,
+reached through the sidebar's **Board** row; the sidebar is navigation and
+owns the primary New run action. The board shows three columns, **Needs
+you**, **Working** and **Finished**, each headed by its name and count.
+`board()` in `src/routes/board/selectors.ts` reads `runGroups`, so the board
+has the sidebar's scoping, ordering and Mine filter: Needs you spans every
+workspace and sorts oldest wait first. Under the `lg`/1024px breakpoint the
+columns stack into one list and Finished starts collapsed.
 
-**Cards** arranges runs in the sidebar's three groups as columns, **Needs
-you**, **Working** and **Finished**, with the same scoping, ordering and
-Mine toggle (`board()` in `src/routes/board/selectors.ts` reads
-`runGroups`). A swarm is one card with its workers' counts; workers never
-appear as cards of their own. Each card shows its state chip and reason line.
-The flat bordered
-columns stack on narrow screens and sit side by side from the `lg`/1024px
-breakpoint, where subgrid keeps their column headers the same height.
+A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
 
-Cards uses compact, natural-height rows; Map uses fixed card geometry from
-`map-layout.ts`. Both keep a bounded full-width title preview and the full
-`runLabel` as the navigation button's accessible name. The state badge,
-protection and archival indicators remain, without a redundant state dot or
-New pill. Owner, harness and timestamp stay in the compact preview.
-Counted file-overlap and mission-conflict buttons remain beside the status
-metadata and open diagnostic popovers. **Details** reveals the full task,
-reason, branch/copy control and additional metadata inline in Cards and in a
-dialog in Map, so expansion does not disturb map geometry. The run page exposes
-the full task and metadata through **Task and details**.
+1. the state line: shaped dot, reason, and the wait or change time;
+2. the title (`runLabel`), two lines at most;
+3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
+   harness name), owner avatar, `+added −deleted` once a `run.diff` snapshot
+   is known, the workspace name for a run outside the active one, and the
+   `card:meta` slot (file overlaps, swarm conflicts, swarm role, sync).
 
-An empty workspace shows one "Ready for a task" panel and a primary New run
-action rather than three repeated empty columns. Loading uses delayed
-skeletons, and hydrated empty columns say "Nothing here." without confusing
-an in-flight request with an empty result.
+A click anywhere on the card opens the run. A swarm is one card: the
+objective, a phase word ("Swarm active") and its workers' counts; it opens
+the swarm page. Workers never appear as cards of their own; a swarm whose
+integrator is not listed is rooted at its oldest worker.
 
-The card's article remains a pointer surface for noninteractive metadata, while
-interactive descendants and any non-collapsed text selection are ignored by
-the article handler. The Details content is navigation-exempt, so branch text
-can be selected or copied without opening the run. It shows the full branch
-with a copy button beside it.
-Reaching for the branch is therefore not a way into the run; the rest of the
-card is. Copying goes through `src/lib/clipboard.ts`, shared with
-`CopyableCommand`, because an origin without `navigator.clipboard` - plain
-http, an older engine - has to fall back to selecting the text for a manual
-copy rather than failing quietly.
+A Needs you card shows its primary action on hover, on keyboard focus and
+always on a touch screen (`card-action.tsx`):
 
-**Map** groups runs by their actual owning member, with a named boundary and
-light identity tint. Standalone runs remain individual cards; swarm groups
-label integrators and workers and draw directed hierarchy connectors. Workers
-stay inside their own owner's boundary even when coordinated by another
-member's integrator; those cross-owner connectors are dashed. A worker whose
-integrator is not in the current map, for example because it is archived,
-remains visible and is labeled as having an integrator not visible.
-Relationships use the snapshot fields described under [Sidebar](#sidebar),
-not task-text guesses. Deterministic rectangular shelf packing uses fixed
-dimensions from `map-layout.ts`, not measured card-content heights, to arrange
-the groups into a landscape-oriented map rather than a radial graph or a
-single vertical stack. Zoom/Fit and archived-run controls share the Runs header.
+| Condition | Action |
+| --- | --- |
+| Approval request (`approval.decide`) | **Approve**, resolved in place |
+| Agent idle or stalled | **Reply**: a popover composer on the card; the message goes through `run.inject`, `Mod+Enter` sends |
+| Native permission or question on a Standard run | **Open terminal** |
+| Anything else | **Open**: the run, its Diff for an unreviewed finish, or the swarm page |
 
-Map navigation stays inside its canvas:
+With a card focused, `a` approves, `r` replies and `o` opens (the `card` key
+scope). A failed send keeps the draft and shows the server's error.
 
-- Drag blank canvas with the mouse or scroll the wheel to pan.
-- Hold Ctrl or Cmd while scrolling to zoom around the pointer.
-- On touch screens, drag to pan and pinch to zoom.
-- With the canvas focused, arrow keys pan; Shift increases the step.
-  `+` / `-` zoom and `Home` / `0` fit all runs.
-- Visible **Zoom out**, zoom percentage, **Zoom in** and **Fit** controls
-  provide the same operations without gestures. Tab reaches run controls.
+**Finished footer.** **Archived (n)** swaps Finished for archived runs, each
+with `deletesInLabel(deletes_at)`; **Back to Finished** returns. The More menu
+holds **Archive closed runs…** and, for admins, **Free retained
+containers…**. Both open the palette's confirmations
+(`src/components/palette/clear-done-dialog.tsx`) over a plan snapshotted
+when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
+`src/lib/commands.ts`, over the whole active workspace whoever owns the run.
+`runClearDone()` and `runReleaseFinished()` run at most six calls at once,
+continue past failures and report the first real error; archive counts
+`CodeNotFound` as done. Archiving hides a run whose status is final
+(`isArchivable`) from every group and schedules its deletion; freeing removes
+a retained container and keeps the run and its history.
 
-The selected layout and each workspace's map pan/zoom are stored in the
-existing `aether.ui` origin-local preferences. They survive layout switches,
-route changes and reloads; switching workspaces restores that workspace's
-camera. Unlike the separately stored workspace selection, these preferences
-do not cross origins, including a local gateway's changed ephemeral port.
-While Map stays open, a changed run set or card geometry refits only when
-every card would be offscreen. Routine metadata updates and return visits
-preserve the camera.
-Switching Cards to Map or back moves matching cards between their measured
-rectangles, including width and height, over 460ms. Reduced-motion preference
-skips this movement.
+**Empty board.** With no runs in scope the board names the first unmet
+requirement, with one sentence and one button:
 
-**Archiving hides a finished run from Finished without deleting it.** A run
-carries `archived_at`/`deletes_at` once archived. Every hide guard -
-`board()`, `runRows()`, and so every group and count - drops it once its
-status is also final (`isArchivable`: `merged`, `abandoned`, `failed`,
-`interrupted`); a route that opens a run by id is untouched, since it reads
-the run map directly. In Cards, the Finished `ColumnHeader` grows an "Archived N"
-toggle once N is over zero, swapping the column's content to those runs. Map
-keeps the same toggle in its Runs header and replaces Finished runs with
-archived runs while leaving active runs visible. Both return to Finished when
-the last
-archived run leaves. Each archived card, and the run header for one, show
-`deletesInLabel(deletes_at)` (`src/lib/format.ts`):
-"deleted today" under 24h (past due included), "deleted in 1 day" under
-48h, then "deleted in N days".
+1. no workspace: **Add your repository** (onboarding, Workspace step);
+2. `files.tree` on the base branch fails: **Push your base branch**, with the
+   server's error (onboarding, Repository step);
+3. `agent.list` reports nothing installed: **Set up an agent** (Agents);
+4. otherwise: "A run is one agent working on its own branch in its own
+   container." and **New run**, for members who may launch.
 
-**Archive closed runs... hides every eligible Finished run.** The Finished
-`ColumnHeader` in Cards and the Runs header in Map offer this action; the
-palette carries the same command whenever the gateway serves `run.archive`.
-All open `ClearDoneConfirm` (`src/routes/board/clear-done-dialog.tsx`) over
-the `clearDonePlan()` (`src/lib/commands.ts`) snapshot taken when opened.
-Both actions read the active workspace's runs (`finishedRuns` and
-`workspaceRuns` in `src/routes/board/selectors.ts`), whoever owns them: the
-Mine toggle does not narrow them and another workspace's Needs you runs never
-join them. When none
-qualify, the dialog says "No closed runs to archive" and which runs archive
-acts on. Eligible runs are
-`isArchivable`, not already archived, and killable by the caller. The dialog
-says archiving hides runs and schedules their deletion after retention, but
-does not free container memory. It counts completed runs awaiting Close and
-runs this caller cannot act on. `runClearDone()` archives at most six at once,
-in Finished order (failures first, then latest change), starting another as
-each settles. A failure does not stop the rest. `CodeNotFound` counts as
-success and removes the vanished run locally. The final toast reports the
-archived and failed counts, with the first real error in that order.
-
-**Release finished resources... frees retained containers without archiving.**
-The same Cards/Map header and the command palette offer workspace-scoped bulk
-release; the palette offers it whenever the gateway serves `run.release`, and
-its dialog says "No finished runs hold resources" and which runs release
-acts on when none qualify. Its
-`releaseFinishedPlan()` searches all runs in the active workspace,
-including archived runs behind the toggle and finished runs still awaiting
-review; it does not depend on visible cards. It requires `run.release`,
-the Kill permission and a finished status with an existing retained-container
-reason (explicit Close, agent report or mission worker). Active and
-needs-attention runs are excluded. The confirmation says resources are removed,
-relaunch becomes unavailable, and the run and history remain visible. The
-bulk executor reuses the six-call concurrency bound, continues after failures
-and reports successful and failed counts with the first server error. Unlike
-bulk archive, a release refusal is never reclassified as a success; no release
-removes or archives a run in the client. A same-status `run.status` event
-updates its reason so the action disappears once its container is released.
+Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
+An unreachable server shows its error in place of the columns.
 
 ### Run state
 
@@ -1324,8 +1254,9 @@ scopes share keys, or one begins the other's sequence.
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
-The scopes are `global`, `run`, `request` and `composer`; `request` and
-`composer` have no bindings yet. When a key matches in two live scopes, the
+The scopes are `global`, `run`, `card`, `request` and `composer`; `card` is
+the board's `a`/`r`/`o` on the focused card, and `request` and `composer`
+have no bindings yet. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
@@ -2247,8 +2178,9 @@ both what it renders and the overlap set the conflict chips read.
   open, so on a coarse pointer the same list is rendered as visible text
   beside the chip. A tooltip is a hint for a pointer, never the only copy of
   a fact.
-- **Conflict chips are advisory.** `conflict-chips.tsx` registers into
-  `card:chips` and the Diff tab renders the same component in its header. It
+- **Conflict chips are advisory.** `conflict-chips.tsx` registers an overlap
+  count into `card:meta`, whose popover lists the chips, and the Diff tab
+  renders the chips in its header. It
   reads the overlap set the conflict radar reports (`run.overlaps` at
   hydration, then `run.overlap` events), names the file and the other member,
   and navigates to their run. The event payload names peer runs but not their
@@ -3397,13 +3329,13 @@ stale generation, revoked authority, or foreign control holder leaves the
 hold in place and surfaces the conflict; an integrator or worker cannot
 release it through the assignment-scoped socket. Integrator replacement is
 gated by capabilities and role, pins `expected_generation`, and reuses one
-idempotency key across retries while reloading the resulting mission. The
-mission marker joins ordinary run cards through the `card:badges` slot; the
-shell and board remain unchanged.
+idempotency key across retries while reloading the resulting mission. A run's
+swarm role ("Integrator", "Worker") joins its card through the `card:meta`
+slot.
 
 `mission.show` also carries bounded server-derived scope diagnostics. The
 mission task view labels intended overlap, observed overlap and out-of-scope
 paths and links each diagnostic to the task or peer run. The same diagnostics
-are registered into the existing run-card conflict-chip slot, so overlap
+are registered into the run card's `card:meta` slot as a conflict count, so overlap
 warnings stay in the conflict experience rather than creating a second board
 or lock surface.

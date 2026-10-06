@@ -958,7 +958,7 @@ runtime state.
 
 | Spec | Scenario |
 | --- | --- |
-| `board-card` | Opening a card's Details without opening the run, then selecting the visible full branch name and using its copy control without navigating - all of which require real browser hit testing |
+| `board-card` | A run whose agent reports an idle turn lands in Needs you; its **Reply** stays hidden until the card is hovered, sits above the card's open target, and posts through `run.inject` into the Run Room history; `o` on the focused card opens the run - hit testing and hover only a real browser does |
 | `onboarding-first-member` | A fresh server: link (first identity becomes admin, SSH key generated), set the git identity from what this machine's `git config` offers, create the workspace, point the step at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |

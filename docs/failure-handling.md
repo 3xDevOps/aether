@@ -461,8 +461,9 @@ budget checks - so deleting a run over budget cannot reopen the cap.
 
 The dashboard's **Release resources...** removes a finished run's retained
 container and browser without hiding the run or deleting its history.
-**Release finished resources...** applies it to eligible finished runs in the
-selected workspace, including archived runs. Released sessions cannot be
+**Free retained containers…** in the board's Finished More menu (admins) and
+the palette applies it to eligible finished runs in the selected workspace,
+including archived runs. Released sessions cannot be
 relaunched; the existing checkout and history retention rules still apply.
 These actions use the same evidence-preserving cleanup as Kill: an evidence
 or runtime error leaves cleanup incomplete and is shown in the dashboard.
