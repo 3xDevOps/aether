@@ -56,8 +56,6 @@ func runRun(args []string) error {
 		return err
 	}
 	*mode = wireMode
-	// A taskless launch drops you into the agent's interactive surface.
-	// Background has none, so it still needs a prompt.
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
 		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--workspace] [--account <member-id>] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
