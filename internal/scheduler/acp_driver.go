@@ -32,6 +32,9 @@ const (
 	// provisioning: the adapter can answer before the launch marks the run
 	// running.
 	acpReportWait = 30 * time.Second
+	// acpSteerTimeout bounds a delivery, which runs under the run's
+	// admission lock and may wait on the agent's answer to a steer.
+	acpSteerTimeout = 15 * time.Second
 )
 
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
@@ -112,6 +115,8 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	if err != nil {
 		return "", err
 	}
+	ctx, cancel := context.WithTimeout(ctx, acpSteerTimeout)
+	defer cancel()
 	receipt, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(message)}, steer)
 	return receipt.Outcome, err
 }
