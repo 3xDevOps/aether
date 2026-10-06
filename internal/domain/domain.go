@@ -669,8 +669,9 @@ type Run struct {
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID
-	// HarnessSessionID is legacy persisted data retained for existing rows.
-	// It is not relaunch authority; new launches leave it empty.
+	// HarnessSessionID is the agent's own session id, which a driver records
+	// so a reopened run can resume the same conversation. Empty until a
+	// driver records one.
 	HarnessSessionID string
 	// BaseCommit is the commit SHA recorded for the workspace base at the
 	// last base check. Empty means no base commit has been observed.

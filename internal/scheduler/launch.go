@@ -13,7 +13,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -468,12 +467,13 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return fail("attach", err)
 	}
-	if perr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(run.ID), att); perr != nil {
+	driver := s.driver(run.Mode)
+	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
 		return fail("start pty session", perr)
 	}
 	if derr := s.cfg.Git.StartDiffWatch(ctx, run.WorkspaceID, run.ID); derr != nil {
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run.ID))
+		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
 		return fail("start diff watch", derr)
 	}
 	s.mu.Lock()
@@ -485,7 +485,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Unlock()
 	if err != nil {
 		s.cfg.Git.StopDiffWatch(run.ID)
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run.ID))
+		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
 		return fail("mark running", err)
 	}
 	run.Status = domain.RunRunning

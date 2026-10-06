@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // legalTransition encodes the pinned lifecycle table (Wave 1 contract
@@ -221,6 +222,11 @@ type sidecar struct {
 	BridgePath          string                   `json:"bridge_path,omitempty"`
 	CoordDir            string                   `json:"coord_dir,omitempty"`
 	GitAuthorEmail      string                   `json:"git_author_email,omitempty"`
+	// AgentSessionID and AgentExec belong to a driver that hosts the agent
+	// outside the primary PTY: its session id and its managed exec, which
+	// every reattach stops before starting a fresh one.
+	AgentSessionID string                `json:"agent_session_id,omitempty"`
+	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -276,6 +282,8 @@ func (e *supervised) sidecar() sidecar {
 		BridgePath:          e.bridgePath,
 		CoordDir:            e.coordDir,
 		GitAuthorEmail:      e.gitAuthorEmail,
+		AgentSessionID:      e.agentSessionID,
+		AgentExec:           e.agentExec,
 	}
 }
 

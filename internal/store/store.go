@@ -119,6 +119,9 @@ type Store interface {
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
+	// SetRunAgentSession records only the agent's own session id
+	// (Run.HarnessSessionID), leaving every other field untouched.
+	SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error

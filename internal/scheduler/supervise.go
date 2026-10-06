@@ -275,7 +275,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		if settleErr := s.settleRetainedCompletion(ctx, entry); settleErr != nil {
 			slog.Warn("scheduler: settle completed worker retention", "run", entry.runID, "error", settleErr)
 		}
-		_ = s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID))
+		_ = s.driver(entry.launchMode).Stop(ctx, entry.runID)
 		s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
 		return
 	}
@@ -299,7 +299,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// Keep the recording available through the capture above. A process that
 	// exits has already stopped producing PTY bytes, so stopping the session
 	// now cannot change the captured transcript.
-	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID)); err != nil {
+	if err := s.driver(entry.launchMode).Stop(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
 	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
@@ -567,7 +567,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			continue
 		}
 		activity, observed := started, false
-		if t, ok := s.cfg.PTY.LastOutput(ptyhost.RunSession(e.runID)); ok && t.After(activity) {
+		if t := s.driver(e.launchMode).LastActivity(e.runID); t.After(activity) {
 			activity, observed = t, true
 		}
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {

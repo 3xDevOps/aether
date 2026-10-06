@@ -339,6 +339,16 @@ func (d *DB) UpdateRunCommit(ctx context.Context, id domain.RunID, commit string
 	return err
 }
 
+// SetRunAgentSession updates only the run's harness_session_id.
+func (d *DB) SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET harness_session_id = ? WHERE id = ?`, session, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run agent session: %w", err)
+	}
+	return err
+}
+
 // SetRunTitle updates only the run's title, leaving all other columns
 // untouched.
 func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) error {

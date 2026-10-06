@@ -369,6 +369,10 @@ type supervised struct {
 	// its owner edits their git identity, so it is what tells the agent's
 	// own commits apart from Aether's.
 	gitAuthorEmail string
+	// agentSessionID and agentExec mirror the sidecar fields of the same
+	// name for a driver that hosts the agent outside the primary PTY.
+	agentSessionID string
+	agentExec      *runtime.ExecIdentity
 	// coAuthorMu serializes the read-modify-write of this run's co-author
 	// list. Two members steering at once would otherwise interleave
 	// listing the steerers with writing the file, and the list left on

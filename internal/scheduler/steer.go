@@ -10,7 +10,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -550,9 +549,9 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
-// Inject writes a steering message to the live run agent's PTY, ending
-// with the harness's submit sequence so the text reaches the agent's
-// conversation rather than sitting in its input box.
+// Inject delivers a steering message to the live run's agent through its
+// driver; the tui driver ends it with the harness's submit sequence so the
+// text reaches the agent's conversation rather than sitting in its input box.
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -579,7 +578,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return err
 	}
-	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, harness.SubmitSequence(r.Harness)); err != nil {
+	if err := s.driver(r.Mode).Deliver(ctx, r, m, message); err != nil {
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
@@ -828,7 +827,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 		// Detach before committing so no PTY client can continue typing while
 		// the close operation snapshots the worktree.
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run))
+		_ = s.driver(mode).Stop(context.WithoutCancel(ctx), run)
 		s.cfg.PTY.StopSessionsWithPrefix(context.WithoutCancel(ctx), string(ptyhost.RunShellSession(run, "")))
 		paused := alreadyPaused
 		if !paused {
@@ -1032,15 +1031,16 @@ func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervi
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
 			fmt.Errorf("scheduler: restore closed run: attach: %w", err))
 	}
-	if err := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
+	driver := s.driver(entry.launchMode)
+	if err := driver.Resume(ctx, entry, att); err != nil {
 		_ = att.Close()
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(entry.runID))
+		_ = driver.Stop(context.WithoutCancel(ctx), entry.runID)
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
 			fmt.Errorf("scheduler: restore closed run: pty: %w", err))
 	}
 	if err := s.cfg.Git.StartDiffWatch(ctx, entry.workspaceID, entry.runID); err != nil {
 		s.cfg.Git.StopDiffWatch(entry.runID)
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(entry.runID))
+		_ = driver.Stop(context.WithoutCancel(ctx), entry.runID)
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
 			fmt.Errorf("scheduler: restore closed run: diff watch: %w", err))
 	}

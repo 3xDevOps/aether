@@ -219,7 +219,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run))
+		_ = s.driver(entry.launchMode).Stop(context.WithoutCancel(ctx), run)
 		mustPause := resumed || !paused
 		var pauseErr error
 		if mustPause {
@@ -331,7 +331,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, rollback(err)
 	}
-	if startSessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(run), att); startSessionErr != nil {
+	if startSessionErr := s.driver(entry.launchMode).Resume(ctx, entry, att); startSessionErr != nil {
 		_ = att.Close()
 		return nil, rollback(startSessionErr)
 	}
@@ -1388,13 +1388,14 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 	}
 }
 
-func (s *Scheduler) startRecoveryPTYSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
+func (s *Scheduler) resumeRecoveredAgent(ctx context.Context, entry *supervised, att runtime.Attachment) error {
+	driver := s.driver(entry.launchMode)
 	backoff := recoveryPTYRetryInitial
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		err := s.cfg.PTY.StartSession(ctx, key, att)
+		err := driver.Resume(ctx, entry, att)
 		if !errors.Is(err, ptyhost.ErrSnapshotPending) {
 			return err
 		}
@@ -1470,7 +1471,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
 		}
-		if serr := s.startRecoveryPTYSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
+		if serr := s.resumeRecoveredAgent(ctx, entry, att); serr != nil {
 			_ = att.Close()
 			s.cfg.Git.StopDiffWatch(r.ID)
 			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(serr, ctxErr) {
@@ -1592,6 +1593,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		bridgePath:          sc.BridgePath,
 		coordDir:            sc.CoordDir,
 		gitAuthorEmail:      sc.GitAuthorEmail,
+		agentSessionID:      sc.AgentSessionID,
+		agentExec:           sc.AgentExec,
 		done:                make(chan struct{}),
 	}
 }
