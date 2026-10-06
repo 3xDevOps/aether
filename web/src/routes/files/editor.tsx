@@ -9,6 +9,7 @@ import { message } from '@/lib/format'
 import { DiffDocument, EditableDocument, editorCommands } from '@/routes/files/document'
 import { isBaseBranch, type SelectFile, type Selection, sourceKey, sourceLabel } from '@/routes/files/sources'
 import { useStore } from '@/store'
+import { useHeaderPrimary } from '@/store/hooks'
 
 export type ViewerMode = 'file' | 'diff'
 
@@ -35,6 +36,7 @@ export function FileEditor({
 }) {
   const key = sourceKey(selection, selection.path)
   const identityEpoch = useStore((s) => s.identityEpoch)
+  useHeaderPrimary(true)
   const document = useStore((s) => s.documents[key])
   const draft = useStore((s) => s.drafts[key])
   const drafts = useStore((s) => s.drafts)

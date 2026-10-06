@@ -11,10 +11,12 @@ import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
 import { PushStep } from '@/routes/diff/publish-push'
 import { usePublish, type Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
+import { useHeaderPrimary } from '@/store/hooks'
 
 /** Stays mounted while the run is open so a typed message or an uncertain
  * PR creation survives closing the dialog and switching views. */
 export function PublishDialog({ run, client = api }: { run: Run; client?: Api }) {
+  useHeaderPrimary(true)
   const [open, setOpen] = useState(false)
   const p = usePublish(run, client, open)
   const [step, setStep] = useState('commit')
