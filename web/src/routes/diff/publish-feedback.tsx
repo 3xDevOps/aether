@@ -75,7 +75,7 @@ export function PRFeedback({ p, feedback }: { p: Publish; feedback: RunPRFeedbac
         the Session composer; this does not type directly into the agent.
       </p>
       <div className="grid justify-items-start gap-1">
-        <Button disabled={p.busy || !chosen.length} onClick={send}>
+        <Button variant="secondary" disabled={p.busy || !chosen.length} onClick={send}>
           Send selected feedback to the agent
         </Button>
         <InlineError>{p.errors.send}</InlineError>

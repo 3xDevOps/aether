@@ -18,6 +18,7 @@ export function PushStep({ p }: { p: Publish }) {
   const { pushTarget: push } = p
   const urls = status.remotes?.find((remote) => remote.name === push.remote)?.push_urls ?? []
   const pr = p.currentPRReview?.result.pull_request
+  const prNext = !!p.currentPRReview
   return (
     <div className="grid min-w-0 gap-4">
       <section aria-labelledby={`${ids}-push`} className="grid min-w-0 gap-3">
@@ -71,6 +72,7 @@ export function PushStep({ p }: { p: Publish }) {
         </Attest>
         <div className="grid justify-items-start gap-1">
           <Button
+            variant={prNext ? 'secondary' : 'primary'}
             disabled={p.busy || !p.canWrite || !p.caps.hasMethod('run.git.push') || !p.expected || !p.pushReviewed || !Object.values(push).every((value) => value.trim())}
             onClick={() => void p.perform('push', p.pushBranch)}
           >
@@ -172,6 +174,7 @@ export function PushStep({ p }: { p: Publish }) {
             </Attest>
             <div className="grid justify-items-start gap-1">
               <Button
+                variant={prNext ? 'primary' : 'secondary'}
                 disabled={
                   p.busy || !p.canWrite || !p.caps.hasMethod('run.pr.create') || p.uncertain || !p.currentPRReview ||
                   !!p.currentPRReview.result.error || !p.prReviewed || !p.title.trim()
