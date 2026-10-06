@@ -120,19 +120,19 @@ describe('local setup methods', () => {
     window.sessionStorage.clear()
   })
 
-  it('reads the detected harnesses over the local gateway', async () => {
+  it('reads the detected agents over the local gateway', async () => {
     const fetchSpy = fakeFetch({
-      harnesses: [{ name: 'claude', installed: true }],
+      agents: [{ name: 'claude', installed: true }],
       searched: ['/usr/local/bin'],
       repo_path: '/src/repo',
     })
     vi.stubGlobal('fetch', fetchSpy)
 
-    const detected = await api.envHarnesses()
+    const detected = await api.envAgents()
 
-    expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.harnesses')
+    expect(fetchSpy.mock.calls[0][0]).toBe('/local/v1/env.agents')
     expect(detected).toEqual({
-      harnesses: [{ name: 'claude', installed: true }],
+      agents: [{ name: 'claude', installed: true }],
       searched: ['/usr/local/bin'],
       repo_path: '/src/repo',
     })

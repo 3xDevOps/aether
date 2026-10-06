@@ -1397,15 +1397,15 @@ export interface ServerUpdatePayload {
 }
 
 
-/** env.harnesses: one setup-capable harness's local availability. */
-export interface HarnessStatus {
+/** env.agents: one setup-capable agent's local availability. */
+export interface LocalAgentStatus {
   name: string
   installed: boolean
 }
 
-/** env.harnesses. `repo_path` is set when the link config knows exactly one repository folder. */
-export interface EnvHarnessesResult {
-  harnesses: HarnessStatus[]
+/** env.agents. `repo_path` is set when the link config knows exactly one repository folder. */
+export interface EnvAgentsResult {
+  agents: LocalAgentStatus[]
   /** The folders the gateway looked in, so an empty result can say where. */
   searched: string[]
   /** Why the login shell could not be asked for its PATH; set only when

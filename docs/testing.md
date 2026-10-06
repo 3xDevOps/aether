@@ -938,7 +938,7 @@ tears it down with everything it created:
   `known_hosts` entry it writes, the saved link config and the member's
   persistent agent/configuration home all belong to that member and never touch
   the developer's own. `PATH` and `SHELL` are fixed too, because
-  `env.harnesses` reports what is installed on this machine and that answer
+  `env.agents` reports what is installed on this machine and that answer
   has to be the same on a laptop and on a runner.
 - Real git repositories on disk, seeded with the `agent.sh` the fake harness
   runs.

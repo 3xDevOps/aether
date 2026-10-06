@@ -22,7 +22,7 @@ import type {
   EdgeLogin,
   EdgeServer,
   EdgeStatus,
-  EnvHarnessesResult,
+  EnvAgentsResult,
   EnvSaveResult,
   EvidenceGetResult,
   EvidencePacketListResult,
@@ -920,9 +920,9 @@ export const api = {
   localUpdateApply: () => local<UpdateApplyResult>('update.apply'),
   /** Progress of a desktop-app rebuild started by update.apply. */
   localUpdateStatus: () => local<UpdateBuildStatus>('update.status'),
-  /** Which setup-capable harnesses this machine has on PATH, plus the
+  /** Which setup-capable agents this machine has on PATH, plus the
    * linked repository folder when the gateway knows exactly one. */
-  envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
+  envAgents: () => local<EnvAgentsResult>('env.agents'),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
   terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
     call<TerminalHistoryResult>('terminal.history', params, signal),

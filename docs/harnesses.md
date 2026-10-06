@@ -99,7 +99,7 @@ Environment. Every shipped agent carries a vendor install command
 runs it through `agent.install`, then types the agent's login command into
 the Environment. `fake` and custom agents have none; install their executable
 into `~/.local/bin` yourself in `aether terminal`. The local gateway's
-`env.harnesses` check of this machine's `PATH` covers only `claude`, `codex`
+`env.agents` check of this machine's `PATH` covers only `claude`, `codex`
 and `pi` (`harness.SetupHarnesses`).
 
 The **Enhanced** column is how the agent serves the Agent Client Protocol

@@ -810,8 +810,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       requested_by: alice.id,
       requested_at: '2026-08-14T10:06:00Z',
     })),
-    envHarnesses: vi.fn(async () => ({
-      harnesses: [
+    envAgents: vi.fn(async () => ({
+      agents: [
         { name: 'claude', installed: true },
         { name: 'codex', installed: false },
         { name: 'pi', installed: false },
