@@ -301,7 +301,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
       }
     }
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 5000)
+    const timer = window.setInterval(() => void refresh(), 10_000)
     return () => {
       active = false
       window.clearInterval(timer)

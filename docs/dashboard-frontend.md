@@ -837,8 +837,8 @@ server-hosted gateway sends no token; WhoIs authenticates each request.
 The disk gauge in status details renders when `server.info` carries a `disk`
 object (`used_bytes`, `total_bytes`). That field does not arrive with
 `server.info`: `protocol.ServerInfoResult` is shared with the CLI and frozen,
-so the gateway serves the number on `GET /api/v1/disk` and the team refresh
-writes it onto the stored info, which is the gauge's only reader. The field
+so the gateway serves the number on `GET /api/v1/disk` and the team reads
+write it onto the stored info, which is the gauge's only reader. The field
 stays optional and the gauge stays hidden if the read fails. What `statfs`
 answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
@@ -1485,7 +1485,7 @@ The dashboard-specific state wiring is:
 - `RunRoom` reads history, pagination, loading, action errors and presence from
   `src/store/collaboration.ts`. `run.room.list` loads on opening and reconciles
   every ten seconds while open; live room events merge through normal store
-  sync. `run.room.status` runs on mount, every five seconds and when acknowledged
+  sync. `run.room.status` runs on mount, every ten seconds and when acknowledged
   control metadata changes. Refreshes are serialized with an abortable 15-second
   deadline; polling continues after timeout. Each snapshot retains the exact
   acknowledged `ControlMetadata` reference: taking then releasing can restore
@@ -1501,6 +1501,10 @@ The dashboard-specific state wiring is:
   `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
   the agent terminal and exposes its own control action without duplicating
   room state.
+  While the run is open in a visible tab, `RunDock` reads `dev.terminal.list`
+  and the active tab's `dev.control.status` together every ten seconds; its
+  own start, stop and control actions refresh at once, so the interval only
+  catches what other members and the agent did.
   The toolbar and phone Room share `ControlButton` and `useTakeover`; the
   host renders one `TakeoverDialog` above Room and Evidence for the current
   holder's decision. `RunDock` defers Evidence's responsive sheet/popover swap
@@ -2152,8 +2156,8 @@ device run.
 
 `src/routes/terminal/events.tsx` is the run-detail Events tab: the workspace
 activity feed pinned to the run in view. It drives the same feed slice and
-paging readers the team activity view uses (`openFeed`, `drain`,
-`olderFeed`), and both views render rows through the one shared component
+paging readers and live appends the team activity view uses (`openFeed`,
+`useLiveFeed`, `olderFeed`), and both views render rows through the one shared component
 (`src/components/feed-entry.tsx`), whose describe covers every feed payload -
 `run.agent` and `run.diff` included - so the two feeds cannot drift apart.
 Because the slice is shared, the pin is borrowed: the tab captures the
@@ -2257,20 +2261,30 @@ questions and queued steer requests stay contextual to their run. Unanswered
 questions contribute to **Needs input**; both contribute to the Run Room
 count, and neither creates a second action inbox.
 
-- **They refresh from the event cursor, not a timer.** Every event the store
-  applies advances `lastSeq`, and that is the only signal available that a
-  teammate may have changed one of these reads - the gateway has no push
-  channel for a roster or a queue. `useTeamRefresh` in `src/routes/team/sync.ts`
-  re-reads them when the cursor moves, with a floor between refreshes so a
-  chatty run does not become a request per event. It is mounted from the
-  status-bar contribution, the one surface that is always on screen, which is
-  also where the presence heartbeat lives. It also refreshes and beats on
-  `onWake`, because a backgrounded tab freezes both timers: a phone returns
-  with its presence already expired server-side (the TTL is 45s) and with no
-  cursor movement to show an approval that arrived while it was away. The
-  refresh keeps the same floor as the debounced one, so app switching cannot
-  turn into a request per workspace each time; the heartbeat is one request
-  and always goes.
+- **Events keep them current; a full read only fills gaps.**
+  `useTeamRefresh` in `src/routes/team/sync.ts` reads everything once on
+  mount, again whenever the event stream comes back live - a reconnect that
+  re-hydrates does not replay what it missed - and when the workspace set or
+  **Show decided** changes. Between those, `applyEvent` updates the store
+  from the events that change these reads:
+  - `workspace.approval` names the request and its decision but not its
+    text. A request the inbox holds is decided in place (and dropped while
+    decided requests are hidden); an unknown one reads that one workspace's
+    `approval.list`. Each such event is counted per workspace, and a full
+    read that started before it does not overwrite its workspace.
+  - `workspace.budget` carries the state, cap and spend, applied as they
+    are. It only fires on a threshold crossing, so a metered `run.cost`
+    re-reads that workspace's `budget.get` to keep the spend current.
+  - `workspace.presence` names one transition, so it re-reads
+    `presence.roster`.
+  The hook is mounted from the status-bar contribution, the one surface that
+  is always on screen, which is also where the presence heartbeat lives
+  (every 15 s, with the disk gauge read beside it). It also reads and beats
+  on `onWake`, because a backgrounded tab freezes its timers and drops its
+  socket: a phone returns with its presence already expired server-side (the
+  TTL is 45s) and may have missed an approval. That read keeps a 2.5 s floor,
+  so app switching cannot turn into a request per workspace each time; the
+  heartbeat is one request and always goes.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
   team settings. A deployment has a handful of them and they outlive every
@@ -2306,8 +2320,14 @@ count, and neither creates a second action inbox.
   fetched queue, because the next fetch no longer returns it.
 - **The feed opens at the end of the log.** `workspace.timeline` pages forward
   from a cursor only, so the view first asks for a page past the end - that
-  answer carries the log head - and opens a window back from it; the live tail
-  is the same paging call from the cursor the window reached. "Load older"
+  answer carries the log head - and opens a window back from it. After that
+  the feed is live without reading: while a feed view is mounted
+  (`useLiveFeed`), `applyEvent` appends each event the filters select by the
+  server reader's own rule (workspace, run, actor, type; `run.diff`,
+  `run.title` and `run.agent` only when asked for by type), skipping a
+  sequence already held. The cursor follows only while the window is whole -
+  no read in flight, failed or cut short - and a view reads from the cursor
+  again when the stream reconnects. "Load older"
   reads the new stretch only, up to where the previous window began, keeping
   what is already loaded: re-reading the whole widened window would spend the
   page budget on history the feed already has and lose the newest end of it.
@@ -2360,8 +2380,9 @@ count, and neither creates a second action inbox.
   **Disable mirror** require explicit confirmations.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
-- The same refresh reads `GET /api/v1/disk` and writes it onto the stored
-  `server.info`, which is what fills the status bar's disk gauge.
+- The full read and the heartbeat interval read `GET /api/v1/disk` and write
+  it onto the stored `server.info`, which is what fills the status bar's disk
+  gauge.
 
 ## Devices and invitations
 

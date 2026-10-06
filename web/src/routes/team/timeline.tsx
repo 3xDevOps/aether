@@ -21,7 +21,7 @@ import { eventLabel, type EventType } from '@/lib/events'
 import { belowSm, useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import type { RouteProps } from '@/routes/registry'
-import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
+import { olderFeed, openFeed, pageBudget, useLiveFeed } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { useRunIDs } from '@/store/hooks'
 
@@ -71,7 +71,6 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   const loading = useStore((s) => s.feedLoading)
   const error = useStore((s) => s.feedError)
   const truncated = useStore((s) => s.feedTruncated)
-  const lastSeq = useStore((s) => s.lastSeq)
 
   // The feed is workspace-scoped: prefer the workspace the caller named, then
   // the active one, then any we know.
@@ -92,11 +91,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
     void openFeed(useStore, client)
   }, [filters, client])
 
-  // Live tail: every applied event moves the cursor, and whatever landed
-  // after ours is one page away.
-  useEffect(() => {
-    if (!useStore.getState().feedLoading) void drain(useStore, client)
-  }, [lastSeq, client])
+  useLiveFeed(true, client)
 
   // Tailwind's `sm`: below it the four selects stack, one labelled row each.
   const narrow = useMediaQuery(belowSm)

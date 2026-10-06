@@ -1,8 +1,8 @@
 // The team surfaces are read models the gateway already serves: the approval
-// inbox, the presence roster, budgets, and workspace history. None of them has
-// a push channel of its own, so they refresh when the event cursor moves -
-// every event the store applies advances `lastSeq`, and that is the signal
-// that something a teammate did may have changed one of these reads.
+// inbox, the presence roster, budgets, and workspace history. They are read
+// whole when the app connects, reconnects or wakes; between those, the events
+// that change them update the store directly (`applyEvent` in
+// `store/sync.ts`).
 
 import { useEffect, useRef } from 'react'
 import { api, type Api } from '@/lib/api'
@@ -13,12 +13,7 @@ import type { FeedFilters } from '@/store/timeline'
 
 /** Presence expires after 45s server-side; a third of it keeps us online. */
 const heartbeatMs = 15_000
-/**
- * Bursts of events coalesce into one refresh at most this often. Most
- * events change none of these reads - a diff snapshot moves the cursor
- * just as an approval does - so the floor is what keeps a chatty run from
- * turning into a request per event.
- */
+/** A wake within this long of the last full read does not read again. */
 const minGapMs = 2500
 /** How far back from the log head the feed opens, in event sequence. */
 const feedWindow = 500
@@ -74,7 +69,11 @@ export async function refreshInbox(store: RootStore, client: Api = api): Promise
       client
         .approvalList(wsp, s.showDecided)
         .then((list) => {
-          if (store.getState().inboxRequest === id) store.getState().setInbox(wsp, list)
+          const now = store.getState()
+          // An approval event applied meanwhile is newer than this answer.
+          if (now.inboxRequest === id && now.inboxEvents[wsp] === s.inboxEvents[wsp]) {
+            now.setInbox(wsp, list)
+          }
           return null
         })
         .catch(message),
@@ -123,40 +122,41 @@ function rememberDisk(disk: DiskUsage): void {
 }
 
 /**
- * Keeps the team reads current for as long as the status bar is mounted:
- * one refresh per burst of events, and a heartbeat on its own interval.
+ * Keeps the team reads current for as long as the status bar is mounted: a
+ * full read on mount and on every reconnect - events missed while away are
+ * not all replayed - and when the set of reads changes, plus the heartbeat
+ * on its own interval.
  */
 export function useTeamRefresh(client: Api = api): void {
-  const runs = useStore((s) => s.runs)
   const route = useStore((s) => s.route)
-  const lastSeq = useStore((s) => s.lastSeq)
+  const offline = useStore((s) => s.connection !== 'live')
   const showDecided = useStore((s) => s.showDecided)
   const workspaceIDs = useStore((s) => Object.keys(s.workspaces).sort().join(','))
   const lastRun = useRef(0)
 
   useEffect(() => {
-    const wait = Math.max(0, minGapMs - (Date.now() - lastRun.current))
-    const timer = setTimeout(() => {
-      lastRun.current = Date.now()
-      void refreshTeam(useStore, client)
-    }, wait)
-    return () => clearTimeout(timer)
-  }, [runs, route, lastSeq, showDecided, workspaceIDs, client])
+    // Losing the connection is no reason to read; getting it back is.
+    if (offline && lastRun.current > 0) return
+    lastRun.current = Date.now()
+    void refreshTeam(useStore, client)
+  }, [offline, showDecided, workspaceIDs, client])
 
   useEffect(() => {
     void heartbeat(useStore, client)
-    const timer = setInterval(() => void heartbeat(useStore, client), heartbeatMs)
+    const timer = setInterval(() => {
+      void heartbeat(useStore, client)
+      // Disk usage has no event; the heartbeat's pace is plenty for a gauge.
+      void client.disk().then(rememberDisk).catch(ignore)
+    }, heartbeatMs)
     return () => clearInterval(timer)
   }, [route, client])
 
-  // A backgrounded tab freezes both timers above, so a phone comes back with
-  // presence already expired server-side and an inbox that may have gained an
-  // approval while it was away. Neither has a push channel, and the event
-  // cursor only moves if something else happened, so returning to the
-  // foreground is the signal. The fan-out keeps the same floor the debounced
-  // refresh has - flipping between two apps, or a cellular link flapping
-  // `online`, must not become 2 + 2N requests a time - while the heartbeat,
-  // one small request and the reason the wake exists, always goes.
+  // A backgrounded tab freezes the timer above, so a phone comes back with
+  // presence already expired server-side (the TTL is 45s) and an inbox that
+  // may have gained an approval while its socket was down. Flipping between
+  // two apps, or a cellular link flapping `online`, must not become 2 + 2N
+  // requests a time, so the full read keeps a floor; the heartbeat, one small
+  // request and the reason the wake exists, always goes.
   useEffect(
     () =>
       onWake(() => {
@@ -169,6 +169,25 @@ export function useTeamRefresh(client: Api = api): void {
       }),
     [client],
   )
+}
+
+/**
+ * Marks a feed view mounted while `active`, so `applyEvent` adds the live
+ * events its filters select, and reads what the stream may have skipped when
+ * the connection comes back. The view opens the feed itself.
+ */
+export function useLiveFeed(active: boolean, client: Api = api): void {
+  const holdFeed = useStore((s) => s.holdFeed)
+  const live = useStore((s) => s.connection === 'live')
+  const wasLive = useRef(live)
+
+  useEffect(() => (active ? holdFeed() : undefined), [active, holdFeed])
+
+  useEffect(() => {
+    const reconnected = live && !wasLive.current
+    wasLive.current = live
+    if (reconnected && active && !useStore.getState().feedLoading) void drain(useStore, client)
+  }, [live, active, client])
 }
 
 /**

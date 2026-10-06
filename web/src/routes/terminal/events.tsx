@@ -11,7 +11,7 @@ import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
+import { olderFeed, openFeed, pageBudget, useLiveFeed } from '@/routes/team/sync'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 
@@ -25,7 +25,6 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
   const loading = useStore((s) => s.feedLoading)
   const error = useStore((s) => s.feedError)
   const truncated = useStore((s) => s.feedTruncated)
-  const lastSeq = useStore((s) => s.lastSeq)
 
   const workspaceID = run?.workspace_id ?? ''
   const pinned = filters.workspaceID === workspaceID && filters.runID === runID
@@ -47,11 +46,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
     if (pinned) void openFeed(useStore, client)
   }, [pinned, filters, client])
 
-  // Live tail: every applied event moves the cursor, and whatever landed
-  // after ours is one page away.
-  useEffect(() => {
-    if (pinned && !useStore.getState().feedLoading) void drain(useStore, client)
-  }, [pinned, lastSeq, client])
+  useLiveFeed(pinned, client)
 
   if (!run) {
     return <MissingRun />

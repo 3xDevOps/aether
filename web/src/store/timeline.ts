@@ -41,6 +41,12 @@ export interface TimelineSlice {
   feedError: string | null
   /** The read stopped on its page budget with history still unread. */
   feedTruncated: boolean
+  /** How many mounted views show the feed; live events are added only while one does. */
+  feedViews: number
+  /** Marks a feed view mounted; the returned function unmarks it. */
+  holdFeed: () => () => void
+  /** Adds a live event the filters select, as the server's reader would page it. */
+  appendLiveEvent: (event: Event) => void
   setFeedFilters: (filters: Partial<FeedFilters>) => void
   beginFeed: () => void
   resetFeed: (floor: number, older: boolean) => void
@@ -60,6 +66,27 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set) => ({
   feedLoading: false,
   feedError: null,
   feedTruncated: false,
+  feedViews: 0,
+  holdFeed: () => {
+    set((s) => ({ feedViews: s.feedViews + 1 }))
+    return () => set((s) => ({ feedViews: s.feedViews - 1 }))
+  },
+  appendLiveEvent: (event) =>
+    set((s) => {
+      if (s.feedViews === 0 || !selects(s.feedFilters, event)) return {}
+      const last = s.feed.at(-1)
+      if (s.feed.some((e) => e.seq === event.seq)) return {}
+      return {
+        feed: !last || last.seq < event.seq
+          ? [...s.feed, event]
+          : [...s.feed, event].sort((a, b) => a.seq - b.seq),
+        // The cursor may skip ahead only while the window is whole: a read in
+        // flight, failed or cut short still has history before this event.
+        feedCursor: s.feedLoading || s.feedError || s.feedTruncated
+          ? s.feedCursor
+          : Math.max(s.feedCursor, event.seq),
+      }
+    }),
   setFeedFilters: (filters) =>
     set((s) => ({ feedFilters: { ...s.feedFilters, ...filters } })),
   beginFeed: () =>
@@ -90,3 +117,14 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set) => ({
     set({ feedLoading, feedError }),
   setFeedTruncated: (feedTruncated) => set({ feedTruncated }),
 })
+
+/** Per-run firehoses the server's reader leaves out unless asked for by type. */
+const detailTypes = new Set(['run.diff', 'run.title', 'run.agent'])
+
+/** The server reader's filter (`internal/timeline`), applied to one event. */
+function selects(f: FeedFilters, event: Event): boolean {
+  if (!f.workspaceID || event.workspace_id !== f.workspaceID) return false
+  if (f.runID && event.run_id !== f.runID) return false
+  if (f.memberID && event.actor_id !== f.memberID) return false
+  return f.type ? event.type === f.type : !detailTypes.has(event.type)
+}

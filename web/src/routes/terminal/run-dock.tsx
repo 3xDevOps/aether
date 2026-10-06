@@ -32,6 +32,7 @@ import {
 } from '@/store/terminal'
 
 const maxShellTabs = 4
+const statusPollMs = 10_000
 const shellRefusal = 'You can view this run but not open a shell in it'
 const emptyReplay = new Uint8Array()
 
@@ -85,35 +86,30 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
   const reportError = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : String(cause))
   }, [])
+  // One status pass while the run is open: the shell list, then who controls
+  // the active tab. The dock's own actions refresh at once, so the interval
+  // only has to catch what other members and the agent did.
   useEffect(() => {
+    setOwner(null)
     let cancelled = false
     let timer: number | undefined
     const poll = async () => {
       if (document.visibilityState === 'visible') {
-        try { await refresh() } catch (cause) { if (!cancelled) reportError(cause) }
+        try {
+          await refresh()
+          if (activeTab && incarnation) {
+            const result = await api.devControlStatus({
+              run_id: runID, surface: { kind: 'terminal', id: activeTab, incarnation },
+            })
+            if (!cancelled) setOwner(result.controller)
+          }
+        } catch (cause) { if (!cancelled) reportError(cause) }
       }
-      if (!cancelled) timer = window.setTimeout(poll, 2000)
+      if (!cancelled) timer = window.setTimeout(poll, statusPollMs)
     }
     void poll()
     return () => { cancelled = true; refreshRevision.current++; clearTimeout(timer) }
-  }, [refresh, reportError])
-  useEffect(() => {
-    setOwner(null)
-    if (!activeTab || !incarnation) return
-    let cancelled = false
-    let timer: number | undefined
-    const poll = async () => {
-      try {
-        const result = await api.devControlStatus({
-          run_id: runID, surface: { kind: 'terminal', id: activeTab, incarnation },
-        })
-        if (!cancelled) setOwner(result.controller)
-      } catch (cause) { if (!cancelled) reportError(cause) }
-      if (!cancelled) timer = window.setTimeout(poll, 2000)
-    }
-    void poll()
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [activeTab, incarnation, runID, reportError])
+  }, [refresh, activeTab, incarnation, runID, reportError])
   const paused = useStore((s) => s.pausedRuns[runID] ?? run?.paused)
   const pauseKnown = paused !== undefined
   const canOpenShell =

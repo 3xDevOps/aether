@@ -21,8 +21,10 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
+import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { pausedFromTimeline } from '@/store/board'
+import type { BudgetPayload } from '@/store/cost'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
@@ -499,6 +501,23 @@ export async function applyEvent(
       })
       break
     }
+    case 'workspace.approval':
+      await applyApprovalEvent(store, client, ev)
+      break
+    case 'workspace.budget':
+      if (ev.workspace_id) store.getState().applyBudgetEvent(ev.workspace_id, ev.payload as BudgetPayload)
+      break
+    case 'run.cost':
+      // Budget events mark threshold crossings only; the spend the status
+      // bar shows moves with every metered result.
+      if (ev.workspace_id) {
+        await client.budgetGet(ev.workspace_id).then(store.getState().setBudget).catch(ignore)
+      }
+      break
+    case 'workspace.presence':
+      // The payload names one transition, not the roster it changes.
+      await client.presenceRoster().then(store.getState().setPresence).catch(ignore)
+      break
     case 'run.agent':
       // Activity is a hint for the state line: an event about a run this
       // client has not loaded is not worth a fetch.
@@ -605,6 +624,7 @@ export async function applyEvent(
       break
     }
   }
+  store.getState().appendLiveEvent(ev)
   store.getState().noteSeq(ev.seq)
   return true
 }
