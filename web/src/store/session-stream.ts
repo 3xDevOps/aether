@@ -12,13 +12,17 @@ interface Owned {
   sessionID: string
   autoWrite: boolean
   askedWrite: boolean
+  autoRequest: boolean
+  autoRetries: number
+  retryTimer?: ReturnType<typeof setTimeout>
+  stopWatch: () => void
 }
 
-/** Sockets live here, not in a view, so switching views keeps the stream. */
 const owned = new Map<string, Owned>()
 const controlSessions = new Map<string, string>()
 
 const historyPage = 200
+const autoRetryLimit = 5
 
 function controlSession(runID: string): string {
   let id = controlSessions.get(runID)
@@ -39,9 +43,31 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
     entry.users++
   } else {
     const sessionID = controlSession(runID)
-    const created: Owned = { users: 1, sessionID, autoWrite, askedWrite: false, stream: null as unknown as SessionStream }
+    const created: Owned = {
+      users: 1, sessionID, autoWrite, askedWrite: false, autoRequest: false, autoRetries: 0,
+      stream: null as unknown as SessionStream, stopWatch: () => {},
+    }
     entry = created
     owned.set(runID, created)
+    const askAutomatically = () => {
+      clearTimeout(created.retryTimer)
+      created.autoRequest = created.stream.control(true)
+    }
+    const stopFree = store.subscribe((next, prior) => {
+      const was = prior.runs[runID]?.controller_member_id
+      const now = next.runs[runID]?.controller_member_id
+      if (created.askedWrite && was && now === '' && !next.acpSessions[runID]?.control?.has_control) askAutomatically()
+    })
+    // A reload would otherwise leave the old page's lease held for the server's reconnect window.
+    const release = () => {
+      const control = store.getState().acpSessions[runID]?.control
+      if (control?.has_control) created.stream.control(false, { generation: control.control_generation })
+    }
+    window.addEventListener('pagehide', release)
+    created.stopWatch = () => {
+      stopFree()
+      window.removeEventListener('pagehide', release)
+    }
     created.stream = connectSessionStream(runID, {
       afterSeq: () => store.getState().acpSessions[runID]?.seq ?? 0,
       lease: () => {
@@ -61,7 +87,7 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
         })
         if (created.autoWrite && !created.askedWrite && !ack.has_control) {
           created.askedWrite = true
-          created.stream.control(true)
+          askAutomatically()
         }
       },
       onFrames: (frames) => {
@@ -69,8 +95,18 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
       },
       onControl: (frame) => {
         const held = store.getState().acpSessions[runID]?.control
+        const automatic = frame.request_id !== undefined && created.autoRequest
+        if (frame.request_id !== undefined) created.autoRequest = false
         if (frame.request_id !== undefined && !frame.ok) {
-          store.getState().acpControl(runID, held, frame.error)
+          if (!automatic) {
+            store.getState().acpControl(runID, held, frame.error)
+            return
+          }
+          const holder = store.getState().runs[runID]?.controller_member_id
+          const self = store.getState().info?.member.id
+          if (created.autoRetries < autoRetryLimit && (!holder || holder === self)) {
+            created.retryTimer = setTimeout(askAutomatically, 1000 * 2 ** created.autoRetries++)
+          }
           return
         }
         const has = frame.has_control === true
@@ -98,7 +134,14 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
   return () => {
     if (--held.users > 0) return
     held.stream.close()
+    held.stopWatch()
+    clearTimeout(held.retryTimer)
     owned.delete(runID)
+    void batchNotifications(store, async () => {
+      store.getState().acpStream(runID, 'connecting')
+      store.getState().acpControl(runID, undefined)
+      store.getState().acpTakeover(runID, undefined)
+    })
   }
 }
 

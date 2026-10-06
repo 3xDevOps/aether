@@ -1521,8 +1521,12 @@ open and not `switching`; `store/session-stream.ts` owns the socket
 resume, an immediate resubscribe on close 1012, a final stop on 1008 or a
 `-32602` refusal) and the control session id, so the lease and timed
 takeover frames work as on an attach and switching views keeps the stream.
-The tab asks for the lease once on its first ack when the terminal would
-(the owner, not a phone, not a swarm worker). Frames go through
+The tab asks for the lease on its first ack when the terminal would (the
+owner, not a phone, not a swarm worker). A refused automatic request shows
+no error: it retries with backoff while the holder is the viewer or nobody,
+and again when `run.controller` reports the lease free. Leaving the page
+releases a held lease, so a reload takes it straight back; closing the
+stream resets the run's stream and lease state. Frames go through
 `batchNotifications`, so a burst re-renders once per frame.
 
 The `sessions` slice keeps each run's `AcpSession`: items grouped into
@@ -1550,13 +1554,15 @@ components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
-**Queue** (`Mod` held, or no steering), **Interrupt** (`run.acp.cancel`, an
-empty box during a turn) or **Resume** (a paused run). `Mod+Enter` sends,
+**Queue** (`Mod+Shift` held, or no steering), **Interrupt**
+(`run.acp.cancel`, an empty box during a turn) or **Resume** (a paused
+run). `Mod+Enter` does what the pill says and nothing on an empty box,
 `Mod+Shift+Enter` queues; on touch only the pill sends. Footer menus set
 mode, model and effort with `run.acp.set_option`; `/` completes the agent's
 commands and `@` paths from the Files tree cache. It closes with one line
 of reason while switching, for a Background run, while connecting, while a
-request is pending, or without the lease (**Take control**). Pending
+request is pending (keeping **Interrupt** for the lease holder), or
+without the lease (**Take control**). Pending
 requests dock above it one at a time (`routes/run/session-requests.tsx`),
 the same cards Details lists; `1`-`4` pick an option while a card has
 focus, and the header's **Answer** focuses the docked card.
