@@ -45,7 +45,7 @@ describe('repository page', () => {
 
     expect(screen.queryByRole('button', { name: 'Set budget…' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Change…' })).toBeNull()
-    expect(screen.getByText('Any member who may steer can message runs started by others.')).toBeDefined()
+    expect(screen.getByText('Any member who can message runs may also message runs started by others.')).toBeDefined()
   })
 
   it('says when the workspace no longer exists', () => {

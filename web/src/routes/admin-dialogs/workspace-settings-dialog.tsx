@@ -93,7 +93,7 @@ export function WorkspaceSettingsDialog({
             <Button type="button" size="sm" variant="secondary" onClick={onRepository}>Repository settings</Button>
           </section>}
           <div className="min-w-0 space-y-1 text-[13px]">
-            <Label htmlFor="workspace-steer">Who may steer others&apos; runs</Label>
+            <Label htmlFor="workspace-steer">Who may message others&apos; runs</Label>
             <Select
               value={steerOthers || everyone}
               onValueChange={(value) => setSteerOthers(value === everyone ? '' : value)}
@@ -102,12 +102,12 @@ export function WorkspaceSettingsDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={everyone}>everyone with steer</SelectItem>
+                <SelectItem value={everyone}>everyone who can message runs</SelectItem>
                 <SelectItem value="admins_only">admins only</SelectItem>
               </SelectContent>
             </Select>
             <p id="workspace-steer-help" className="text-xs text-muted-foreground">
-              This policy controls steering for runs owned by another member.
+              Applies to runs started by another member.
             </p>
           </div>
           {error && (

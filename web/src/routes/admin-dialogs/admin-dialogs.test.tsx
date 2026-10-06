@@ -29,7 +29,7 @@ describe('workspace settings dialog', () => {
     )
 
     const dialog = within(await screen.findByRole('dialog'))
-    await pickOption(dialog.getByLabelText(/Who may steer/), 'admins only')
+    await pickOption(dialog.getByLabelText(/Who may message/), 'admins only')
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.workspaceSettings).toHaveBeenCalledWith({

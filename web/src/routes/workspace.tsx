@@ -75,7 +75,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               label="Messages to others' runs"
               help={adminOnly
                 ? 'Only admins may message runs started by other members.'
-                : 'Any member who may steer can message runs started by others.'}
+                : 'Any member who can message runs may also message runs started by others.'}
               control={isAdmin && caps.hasMethod('workspace.settings') && (
                 <Button size="sm" variant="secondary" onClick={() => setDialog('settings')}>Change…</Button>
               )}
