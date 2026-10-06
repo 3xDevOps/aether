@@ -63,6 +63,9 @@ import {
   PanelRight as LucidePanelRight,
   CircleCheck as LucideCircleCheck,
   CircleX as LucideCircleX,
+  MessageCircleQuestion as LucideMessageCircleQuestion,
+  CornerDownRight as LucideCornerDownRight,
+  ClipboardCheck as LucideClipboardCheck,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -142,3 +145,6 @@ export const ScrollText = icon(LucideScrollText)
 export const PanelRight = icon(LucidePanelRight)
 export const CircleCheck = icon(LucideCircleCheck)
 export const CircleX = icon(LucideCircleX)
+export const MessageCircleQuestion = icon(LucideMessageCircleQuestion)
+export const CornerDownRight = icon(LucideCornerDownRight)
+export const ClipboardCheck = icon(LucideClipboardCheck)

@@ -14,6 +14,7 @@ import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import { presentRun } from '@/lib/status'
 import type { AgentInfo, Mission } from '@/lib/types'
+import { AgentMessages } from '@/routes/missions/agent-messages'
 import { ClampedText } from '@/routes/missions/clamped-text'
 import { CancelSwarm, ReplaceIntegrator } from '@/routes/missions/dialogs'
 import { SwarmIntegration } from '@/routes/missions/integration'
@@ -233,6 +234,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
             onAnswered={onChanged}
           />
           <SwarmTasks detail={detail} agents={agents} canRelease={canRelease} client={client} onChanged={onChanged} />
+          <AgentMessages detail={detail} client={client} />
           <SwarmIntegration detail={detail} client={client} />
         </div>
       </div>

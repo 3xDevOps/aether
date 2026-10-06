@@ -117,3 +117,31 @@ export async function loadMessagePage(store: RootStore, client: Api, scope: Mess
     store.getState().setMessageError(scope, message(err))
   }
 }
+
+export type MessageGroup =
+  | { kind: 'single'; message: RunMessage }
+  | { kind: 'thread'; question: RunMessage; replies: RunMessage[] }
+  | { kind: 'run'; from: string; to: string; messages: RunMessage[] }
+
+/** Oldest first. A reply joins its question when that question is loaded;
+ * adjacent plain messages between one pair collapse into a run. */
+export function groupMessages(messages: RunMessage[]): MessageGroup[] {
+  const threads = new Map<string, RunMessage[]>()
+  for (const m of messages) if (m.kind === 'question') threads.set(m.correlation_id || m.id, [])
+  const groups: MessageGroup[] = []
+  for (const m of messages) {
+    const replies = m.correlation_id ? threads.get(m.correlation_id) : undefined
+    const last = groups.at(-1)
+    if (m.kind === 'reply' && replies) replies.push(m)
+    else if (m.kind === 'question') groups.push({ kind: 'thread', question: m, replies: threads.get(m.correlation_id || m.id)! })
+    else if (m.kind !== 'message') groups.push({ kind: 'single', message: m })
+    else if (last?.kind === 'run' && last.from === m.from_run_id && last.to === m.to_run_id) last.messages.push(m)
+    else groups.push({ kind: 'run', from: m.from_run_id, to: m.to_run_id, messages: [m] })
+  }
+  return groups.map((g) => (g.kind === 'run' && g.messages.length === 1 ? { kind: 'single', message: g.messages[0] } : g))
+}
+
+export function deliveryWord(m: Pick<RunMessage, 'delivered_at' | 'acked_at'>): 'Acknowledged' | 'Delivered' | 'Sent' {
+  if (m.acked_at) return 'Acknowledged'
+  return m.delivered_at ? 'Delivered' : 'Sent'
+}

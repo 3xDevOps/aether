@@ -1,7 +1,7 @@
 import { ApiError } from '@/lib/api'
 import type { Event, RunMessage } from '@/lib/types'
 import { createRootStore } from '@/store'
-import { loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
+import { deliveryWord, groupMessages, loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
 import { applyEvent, hydrate } from '@/store/sync'
 import { fakeApi, run, workspace } from '@/test/fixtures'
 
@@ -87,6 +87,43 @@ describe('messages slice', () => {
 
     await loadMessagePage(store, client, missionScope)
     expect(store.getState().messageErrors['mission:mission-1']).toContain('server unreachable')
+  })
+})
+
+describe('message grouping', () => {
+  const at = (minute: number) => `2026-10-05T10:${String(minute).padStart(2, '0')}:00Z`
+  const shape = (groups: ReturnType<typeof groupMessages>) =>
+    groups.map((g) => (g.kind === 'single' ? g.message.id : g.kind === 'thread' ? `${g.question.id}<${g.replies.map((m) => m.id)}>` : `[${g.messages.map((m) => m.id)}]`))
+
+  it('collapses adjacent plain messages between one pair, never questions, replies or reports', () => {
+    const groups = groupMessages([
+      runMessage({ id: 'a', created_at: at(1) }),
+      runMessage({ id: 'b', created_at: at(2) }),
+      runMessage({ id: 'c', created_at: at(3) }),
+      runMessage({ id: 'q', kind: 'question', correlation_id: 'q', created_at: at(4) }),
+      runMessage({ id: 'd', created_at: at(5) }),
+      runMessage({ id: 'r', kind: 'report', created_at: at(6) }),
+      runMessage({ id: 'e', created_at: at(7) }),
+      runMessage({ id: 'f', from_run_id: 'run_other', created_at: at(8) }),
+      runMessage({ id: 'g', from_run_id: 'run_other', created_at: at(9) }),
+    ])
+    expect(shape(groups)).toEqual(['[a,b,c]', 'q<>', 'd', 'r', 'e', '[f,g]'])
+  })
+
+  it('threads a reply under its loaded question and keeps an orphan reply on its own', () => {
+    const groups = groupMessages([
+      runMessage({ id: 'q', kind: 'question', correlation_id: 'q', created_at: at(1) }),
+      runMessage({ id: 'm', created_at: at(2) }),
+      runMessage({ id: 'r1', kind: 'reply', correlation_id: 'q', from_run_id: 'run_1', to_run_id: 'run_worker', created_at: at(3) }),
+      runMessage({ id: 'r2', kind: 'reply', correlation_id: 'paged-out', created_at: at(4) }),
+    ])
+    expect(shape(groups)).toEqual(['q<r1>', 'm', 'r2'])
+  })
+
+  it('names the delivery state', () => {
+    expect(deliveryWord(runMessage())).toBe('Sent')
+    expect(deliveryWord(runMessage({ delivered_at: at(1) }))).toBe('Delivered')
+    expect(deliveryWord(runMessage({ delivered_at: at(1), acked_at: at(2) }))).toBe('Acknowledged')
   })
 })
 
