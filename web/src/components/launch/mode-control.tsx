@@ -40,25 +40,25 @@ export function ModeControl({
             value={mode.value}
             disabled={Boolean(refused[mode.value])}
             aria-labelledby={`${id}-${mode.value}`}
-            aria-describedby={`${id}-${mode.value}-description`}
+            aria-describedby={refused[mode.value] ? `${id}-${mode.value}-description ${id}-${mode.value}-reason` : `${id}-${mode.value}-description`}
             className={cn(
               focusRingInset,
               'group flex min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded-control px-2 py-1.5 text-left text-muted transition-colors duration-100 motion-reduce:transition-none',
               'hover:enabled:bg-hover-chrome hover:enabled:text-text data-[state=checked]:bg-raised data-[state=checked]:text-text data-[state=checked]:ring-1 data-[state=checked]:ring-seam',
-              'disabled:cursor-not-allowed disabled:text-icon-faint',
+              'disabled:cursor-not-allowed disabled:opacity-50',
             )}
           >
             <span id={`${id}-${mode.value}`} className="text-ui font-medium">
               {mode.label}
             </span>
-            <span id={`${id}-${mode.value}-description`} className="text-ui-sm text-muted group-disabled:text-icon-faint">
+            <span id={`${id}-${mode.value}-description`} className="text-ui-sm text-muted">
               {mode.description}
             </span>
           </RadioGroupPrimitive.Item>
         ))}
       </RadioGroupPrimitive.Root>
       {reasons.map(({ mode, reason, setUp }) => (
-        <p key={mode} className="text-ui-sm text-muted">
+        <p key={mode} id={`${id}-${mode}-reason`} className="text-ui-sm text-muted">
           {reason}
           {setUp && (
             <>

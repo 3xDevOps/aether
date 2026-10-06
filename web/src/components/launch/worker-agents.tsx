@@ -1,6 +1,7 @@
 import { launchable } from '@/components/launch/agent-picker'
 import { agentLabel, modeRefusal } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type { AgentInfo, LaunchMode, Member } from '@/lib/types'
@@ -21,12 +22,14 @@ function refusal(member: Member, agent: AgentInfo): string | null {
 export function WorkerAgents({
   accounts,
   agentsByAccount,
+  error,
   choices,
   mode,
   onToggle,
 }: {
   accounts: Member[]
   agentsByAccount: Record<string, AgentInfo[]> | null
+  error: string | null
   choices: WorkerChoice[]
   mode: LaunchMode
   onToggle: (choice: WorkerChoice, on: boolean) => void
@@ -37,7 +40,9 @@ export function WorkerAgents({
       <Label asChild>
         <p>Agents for workers</p>
       </Label>
-      {agentsByAccount === null ? (
+      {error ? (
+        <Callout tone="failed" role="alert">Listing agents for workers failed: {error}</Callout>
+      ) : agentsByAccount === null ? (
         <p className="text-ui-sm text-muted">Loading installed agents…</p>
       ) : rows.length === 0 ? (
         <p className="text-ui-sm text-muted">No agent is installed for workers.</p>

@@ -110,7 +110,8 @@ describe('new run', () => {
     expect(modeSegment('Enhanced').disabled).toBe(true)
     // A remembered mode the agent cannot use shows as Standard, never as a silent downgrade at launch.
     expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('The Enhanced adapter for Claude Code is not installed.')).toBeDefined()
+    const reason = screen.getByText('The Enhanced adapter for Claude Code is not installed.')
+    expect(modeSegment('Enhanced').getAttribute('aria-describedby')?.split(' ')).toContain(reason.id)
     fireEvent.click(screen.getByRole('button', { name: 'Set up' }))
     expect(useStore.getState().route.name).toBe('agents')
   })
@@ -135,6 +136,9 @@ describe('new run', () => {
     expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' })
     expect(useStore.getState().paletteDialog).toBe('launch')
     expect(launchButton().disabled).toBe(false)
+
+    await userEvent.click(modeSegment('Standard'))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('needs a task for Background and says so', async () => {
@@ -161,6 +165,7 @@ describe('new run', () => {
     render(<LaunchDialog />)
     await screen.findByText('No agent is installed in your environment.')
     expect(launchButton().disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Set up Claude Code' })).toBeNull()
 
     await userEvent.click(agentRow(/^custom/))
     expect(launchButton().disabled).toBe(false)
@@ -359,6 +364,17 @@ describe('swarm', () => {
     await openSwarm()
     await create('coordinate checkout work')
     expect((await screen.findByRole('alert')).textContent).toBe('Swarm not createdmission: coordination is unavailable')
+  })
+
+  it('says so in the worker list when reading an account\'s agents fails', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => {
+      if (account === bob.id) throw new Error('agent.list: connection closed')
+      return [claude()]
+    })
+    render(<LaunchDialog />)
+    expect((await screen.findByRole('alert')).textContent).toBe('Listing agents for workers failed: agent.list: connection closed')
+    expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true')
   })
 
   it('opens on Run, with no tabs, when swarm launch is unavailable', async () => {

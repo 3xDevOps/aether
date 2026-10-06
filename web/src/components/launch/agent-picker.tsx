@@ -40,12 +40,12 @@ export function AgentPicker({
   agents: AgentInfo[]
   value: string
   onChange: (name: string) => void
-  onSetUp: () => void
+  onSetUp?: () => void
   disabled?: boolean
 }) {
   const sorted = [...agents].sort((a, b) => rank(a) - rank(b))
   const rows = [
-    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent), setUp: !agent.installed })),
+    ...sorted.map((agent) => ({ name: agent.name, glyph: agent.glyph ?? agent.name, label: agentLabel(agent, agent.name), status: status(agent), enabled: launchable(agent), setUp: !agent.installed && onSetUp !== undefined })),
     { name: customAgent, glyph: customAgent, label: customAgent, status: 'Server-defined', enabled: true, setUp: false },
   ]
   return (

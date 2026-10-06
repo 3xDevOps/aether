@@ -67,6 +67,7 @@ export function LaunchDialog() {
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
+  const [workerError, setWorkerError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<WorkerChoice[]>([])
   const [workerMode, setWorkerMode] = useState<LaunchMode>('headless')
   const [error, setError] = useState<string | null>(null)
@@ -92,6 +93,7 @@ export function LaunchDialog() {
         : 'Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Run to launch a run.'
 
   const chooseAgent = (name: string, list: AgentInfo[]) => {
+    setError(null)
     setHarness(name)
     const info = list.find((item) => item.name === name)
     setMode(initialMode(info, name, useStore.getState().launchDefaults[name]?.mode))
@@ -133,6 +135,7 @@ export function LaunchDialog() {
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return
     let live = true
+    setWorkerError(null)
     Promise.all(accounts.map(async (member) => {
       const list = await api.agentList(member.id === ownAccountID ? undefined : member.id)
       return [member.id, list.filter((item) => item.installed === true)] as const
@@ -146,7 +149,7 @@ export function LaunchDialog() {
         return fallback ? [{ account_member_id: account, harness: fallback.name }] : []
       })
     }).catch((err) => {
-      if (live) setAgentError(message(err))
+      if (live) setWorkerError(message(err))
     })
     return () => { live = false }
   }, [accounts, account, kind, ownAccountID])
@@ -229,7 +232,7 @@ export function LaunchDialog() {
           agents={agents}
           value={harness}
           onChange={(name) => chooseAgent(name, agents)}
-          onSetUp={setUp}
+          onSetUp={noAgents ? undefined : setUp}
           disabled={launching}
         />
       )
@@ -288,7 +291,7 @@ export function LaunchDialog() {
               </FormField>
               {picker}
               {harness && (
-                <ModeControl label="Mode" value={mode} onChange={setMode} refused={refusals(agent, harness)} onSetUp={setUp} />
+                <ModeControl label="Mode" value={mode} onChange={(next) => { setMode(next); setError(null) }} refused={refusals(agent, harness)} onSetUp={setUp} />
               )}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
@@ -297,7 +300,7 @@ export function LaunchDialog() {
                 <Textarea autoFocus required rows={3} placeholder="What outcome should the integrator coordinate?" value={objective} onChange={(event) => setObjective(event.target.value)} />
               </FormField>
               {picker}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} choices={workers} mode={workerMode} onToggle={toggleWorker} />
+              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} />
               <ModeControl
                 label="Worker mode"
                 value={workerMode}
