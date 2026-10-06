@@ -51,6 +51,26 @@ describe('profile dialog', () => {
     expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
     expect(within(screen.getByRole('dialog', { name: 'Profile' })).getByText('Alicia')).toBeDefined()
     expect(form.queryByRole('alert')).toBeNull()
+    expect(form.queryByRole('status')).toBeNull()
+  })
+
+  it('keeps a saved name when the roster refresh after it fails', async () => {
+    const renamed = { ...alice, display_name: 'Alicia' }
+    const client = fakeApi({
+      memberRename: vi.fn(async () => renamed),
+      memberList: vi.fn().mockRejectedValue(new Error('member.list: gateway closed')),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: 'Alicia' } })
+    fireEvent.click(form.getByRole('button', { name: 'Save' }))
+    expect((await form.findByRole('status')).textContent).toBe('Name saved. Refreshing the member list failed: member.list: gateway closed')
+    expect(form.queryByRole('alert')).toBeNull()
+    expect((form.getByLabelText('Display name') as HTMLInputElement).value).toBe('Alicia')
+    expect(useStore.getState().info?.member.display_name).toBe('Alicia')
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
+    expect(useStore.getState().members[bob.id]).toEqual(bob)
   })
 
   it('edits the git identity your agents commit as', () => {

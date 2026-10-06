@@ -61,23 +61,33 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
 
 function DisplayNameForm({ client, current }: { client: Api; current: string }) {
   const setMembers = useStore((s) => s.setMembers)
+  const setMember = useStore((s) => s.setMember)
   const [name, setName] = useState(current)
   const [error, setError] = useState<string | null>(null)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const save = async () => {
     setBusy(true)
     setError(null)
+    setRefreshError(null)
+    let member: Member
     try {
-      const member = await client.memberRename(name)
-      const s = useStore.getState()
-      if (s.info) s.setInfo({ ...s.info, member: { ...s.info.member, display_name: member.display_name } })
-      setName(member.display_name)
-      setMembers(await client.memberList())
-      toast.success('Display name saved')
+      member = await client.memberRename(name)
     } catch (err) {
       setError(message(err))
-    } finally {
       setBusy(false)
+      return
+    }
+    const s = useStore.getState()
+    if (s.info) s.setInfo({ ...s.info, member: { ...s.info.member, display_name: member.display_name } })
+    setMember(member)
+    setName(member.display_name)
+    setBusy(false)
+    toast.success('Display name saved')
+    try {
+      setMembers(await client.memberList())
+    } catch (err) {
+      setRefreshError(`Name saved. Refreshing the member list failed: ${message(err)}`)
     }
   }
   return (
@@ -104,6 +114,7 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
         </Button>
       </div>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      {refreshError && <Callout tone="needs-you" role="status">{refreshError}</Callout>}
     </form>
   )
 }

@@ -4,10 +4,12 @@ import type { SliceCreator } from '@/store/slice'
 export interface MembersSlice {
   members: Record<string, Member>
   setMembers: (members: Member[]) => void
+  setMember: (member: Member) => void
 }
 
 export const createMembersSlice: SliceCreator<MembersSlice> = (set) => ({
   members: {},
   setMembers: (members) =>
     set({ members: Object.fromEntries(members.map((m) => [m.id, m])) }),
+  setMember: (member) => set((s) => ({ members: { ...s.members, [member.id]: member } })),
 })
