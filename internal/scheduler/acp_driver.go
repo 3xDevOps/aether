@@ -40,6 +40,12 @@ const (
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
 var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
 
+// The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
+const (
+	acpFailedReason = "enhanced session failed: "
+	acpEndedReason  = "enhanced session ended: "
+)
+
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
 // stdio the acphost session owns. The adapter never outlives that pipe, so
@@ -285,7 +291,7 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
 	d.notice(entry.runID, "Enhanced session failed", err.Error())
-	go d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: "enhanced session failed: " + err.Error()})
+	go d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()})
 }
 
 // notice appends to the item log of a run with no live session. The caller
@@ -338,7 +344,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 		return
 	}
 	d.notice(entry.runID, "Enhanced session ended", cause.Error())
-	d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: "enhanced session ended: " + cause.Error()})
+	d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()})
 }
 
 func adapterError(err error, stderr *tailBuffer) error {

@@ -128,9 +128,9 @@ const rows: {
   },
   {
     id: 'enhanced-failure',
-    run: record({ status: 'needs-attention', reason: 'enhanced: adapter handshake failed' }),
+    run: record({ status: 'needs-attention', reason: 'enhanced session failed: acphost: initialize: EOF' }),
     ctx: {},
-    reason: 'Enhanced unavailable: adapter handshake failed',
+    reason: 'Enhanced unavailable: acphost: initialize: EOF',
   },
   {
     id: 'blocked',
@@ -187,6 +187,17 @@ describe('needs you conditions', () => {
     expect(presentRun(idle, stateContext())).toEqual(
       expect.objectContaining({ state: 'needs-you', reason: 'Agent idle for 3 min' }),
     )
+  })
+
+  it("surfaces the server's ended reason as Enhanced unavailable", () => {
+    const ended = record({
+      status: 'needs-attention',
+      reason: "enhanced session ended: the agent's ACP server exited with code 1",
+    })
+    expect(presentRun(ended, stateContext())).toMatchObject({
+      state: 'needs-you',
+      reason: "Enhanced unavailable: the agent's ACP server exited with code 1",
+    })
   })
 
   it('names no wait for a run parked before the snapshot', () => {

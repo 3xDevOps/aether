@@ -175,8 +175,14 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
-const enhancedPrefix = 'enhanced:'
+// Mirrors acpFailedReason and acpEndedReason in internal/scheduler/acp_driver.go.
+export const enhancedReasonPrefixes = ['enhanced session failed: ', 'enhanced session ended: '] as const
 const stalledPrefix = 'stalled:'
+
+function enhancedFailure(run: RunRecord): string | undefined {
+  const prefix = enhancedReasonPrefixes.find((p) => run.reason?.startsWith(p))
+  return prefix === undefined ? undefined : run.reason!.slice(prefix.length)
+}
 
 // Order matters: the reason-prefix rows must precede `stopped`, which matches any parked run.
 export const needsYouConditions: NeedsYouCondition[] = [
@@ -273,13 +279,12 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
   }),
   condition({
-    // A placeholder predicate until Enhanced runs report their failures.
     id: 'enhanced-failure',
     target: 'run',
     background: true,
-    holds: (run) => run.reason?.startsWith(enhancedPrefix) === true,
+    holds: (run) => enhancedFailure(run) !== undefined,
     resolvers: (run) => [run.member_id],
-    reason: (run) => `Enhanced unavailable: ${run.reason?.slice(enhancedPrefix.length).trim()}`,
+    reason: (run) => `Enhanced unavailable: ${enhancedFailure(run)}`,
   }),
   condition({
     id: 'blocked',
@@ -298,7 +303,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       run.status === 'needs-attention' &&
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(blockedPrefix) &&
-      !run.reason?.startsWith(enhancedPrefix),
+      enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],
     reason: (run, ctx) => {
       const label = run.reason?.startsWith(stalledPrefix) ? 'No activity' : 'Agent idle'
