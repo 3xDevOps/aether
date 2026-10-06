@@ -687,7 +687,7 @@ describe('command palette', () => {
     expect(screen.queryByText('Agents')).toBeNull()
   })
 
-  it('jumps to the approval inbox, the activity feed and the files tree', async () => {
+  it('jumps to the activity feed and the files tree, and leaves retired pages out', async () => {
     useStore.setState({
       capabilities: {
         gateway: 'local',
@@ -699,8 +699,10 @@ describe('command palette', () => {
     open()
     await screen.findByText('rewrite the checkout flow')
 
+    expect(screen.queryByText('Approvals')).toBeNull()
+    expect(screen.queryByText('Onboarding')).toBeNull()
+    expect(screen.getByText('Members › Devices')).toBeDefined()
     for (const [label, route] of [
-      ['Approvals', 'approvals'],
       ['Activity', 'timeline'],
       ['Files', 'files'],
     ]) {

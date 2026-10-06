@@ -3,6 +3,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { OnboardingSection } from '@/routes/onboarding/settings-section'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { ServerSection } from '@/routes/settings/server'
@@ -81,6 +82,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
           <ThisComputerSection client={client} />
           <ServerSection />
           <UsageSection client={client} />
+          <OnboardingSection />
         </div>
       </div>
     </div>

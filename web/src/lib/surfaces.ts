@@ -21,9 +21,10 @@ export interface Surface {
   name: string
   label: string
   Icon: LucideIcon
-  /** `nav` rows sit in the sidebar, `admin` rows under its hairline, and
-   * `palette` destinations are reached from the command palette only. */
-  place: 'nav' | 'admin' | 'palette'
+  /** `nav` rows sit in the sidebar, `admin` rows under its hairline,
+   * `palette` destinations are reached from the command palette only, and
+   * `link` pages only from a link elsewhere in the dashboard. */
+  place: 'nav' | 'admin' | 'palette' | 'link'
   keywords?: string
   tabs?: string[]
 }
@@ -49,13 +50,13 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'] })
   list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin' })
   if (cap.hasMethod('approval.list'))
-    list.push({ name: 'approvals', label: 'Approvals', Icon: ShieldQuestion, place: 'palette' })
+    list.push({ name: 'approvals', label: 'Approvals', Icon: ShieldQuestion, place: 'link' })
   if (cap.hasMethod('member.device.list'))
-    list.push({ name: 'devices', label: 'Devices', Icon: MonitorSmartphone, place: 'palette' })
+    list.push({ name: 'devices', label: 'Members › Devices', Icon: MonitorSmartphone, place: 'palette', keywords: 'Devices' })
   if (cap.hasMethod('workspace.list'))
     list.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2, place: 'palette' })
   if (cap.hasLocal('link.status') || (cap.hasMethod('member.git') && cap.hasMethod('agent.list')))
-    list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass, place: 'palette' })
+    list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass, place: 'link' })
   return list
 }
 

@@ -70,7 +70,7 @@ export function PaletteBody({
   // own page still needs its commands (Restore among them).
   const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
-  const goTo = surfaces(cap).filter((surface) => surface.name !== 'board').map((surface) => ({
+  const goTo = surfaces(cap).filter((surface) => surface.name !== 'board' && surface.place !== 'link').map((surface) => ({
     ...surface,
     value: `${surface.label} ${surface.name} ${surface.keywords ?? ''}`,
   }))
