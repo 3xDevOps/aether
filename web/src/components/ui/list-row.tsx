@@ -30,7 +30,7 @@ export function ListRow({
         aria-current={selected || undefined}
         className={cn(
           focusRingInset,
-          'flex h-full min-w-0 flex-1 items-center gap-2 rounded-control px-2 text-left [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted',
+          'flex h-full min-w-0 flex-1 items-center gap-2 rounded-control px-2 text-left [&_svg]:shrink-0 [&_svg:not([data-slot=status-dot])]:size-3.5 [&_svg:not([data-slot=status-dot])]:text-muted',
         )}
         {...props}
       >
