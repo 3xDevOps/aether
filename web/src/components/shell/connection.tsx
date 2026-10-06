@@ -35,11 +35,13 @@ export const unreachableLabel: Record<UnreachableKind, string> = {
   identity: 'the server cannot identify this device - check tailscaled on the server host',
 }
 
-/** The connection problem in one sentence, or null while the feed is live
- * or still making its first connection. */
+/** The connection problem in one sentence, or null while the feed is live,
+ * still making its first connection, or has no server to connect to. */
 export function useConnectionProblem(): string | null {
   const connection = useStore((s) => s.connection)
   const unreachable = useStore((s) => s.unreachable)
+  const noServer = useStore((s) => s.linkStatus?.server_configured === false)
+  if (noServer) return null
   if (unreachable) return `${connectionLabel[connection]} · ${unreachableLabel[unreachable]}`
   if (connection === 'live' || connection === 'connecting') return null
   return connectionLabel[connection]

@@ -386,7 +386,8 @@ and end-to-end tests select by these names.
 (`src/components/view-header.tsx`), a `PaneHeader` with the title in
 `text-title`, an optional one-line subtitle, the view's actions, the sidebar
 opener while the sidebar is hidden, and on desktop the connection problem in
-place of the subtitle.
+place of the subtitle. While `link.status` reports no server configured there
+is no connection to report, so neither header shows one.
 
 ### URL state
 
