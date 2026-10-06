@@ -218,7 +218,7 @@ there is no separate per-run Overview route.
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `palette`, `approvals`, `presence`, `cost`, `timeline`, `diff`, `shell`,
-`local`, `ui`). A new feature adds a slice file and one spread in
+`local`, `messages`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
 collapse state, `activeWorkspace`, the **Mine** toggle, board layout and per-workspace
@@ -247,6 +247,12 @@ board card, a run list row, a feed entry, an approval, the members and
 devices views or the diff timeline keeps moving without re-rendering the
 row. A per-second countdown, such as a queued steer's delivery in the Run
 Room, is its own small component and re-renders only its text.
+
+The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
+swarm, or run scope, merged by message ID. A `coord.message` event carries no
+body, so every loaded scope the message belongs to re-reads its newest page;
+`coord.message.acked` stamps the row. Both re-read the recipient run for its
+`unacked_messages`.
 
 **`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,

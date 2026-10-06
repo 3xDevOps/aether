@@ -212,6 +212,11 @@ you include in verification notes. A member who explicitly downloads,
 exports or publishes a capture creates a separate copy under that
 destination's access and retention rules.
 
+Messages one agent sends another stay on your server as workspace history
+until the sending or receiving run is deleted. Every member of the workspace
+can read their bodies, the same audience the workspace timeline has. Do not
+ask agents to pass credentials to each other.
+
 ## Permissions
 
 `INTERNET` is the only permission the app asks for. The androidx library

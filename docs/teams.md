@@ -784,8 +784,11 @@ chip on both run cards naming the file and the other member. It is early
 warning, not locking - nothing is blocked.
 
 On top of that, overlapping runs can message each other directly through their
-agents (on by default; `--conflict-coordination=false` turns it off). See
-[coordination.md](coordination.md) and [mcp-bridge.md](mcp-bridge.md).
+agents (on by default; `--conflict-coordination=false` turns it off). Every
+message shows in Activity as an **Agent message** row naming sender,
+recipient, and kind, and every member can read the bodies through
+`coord.messages.list`. See [coordination.md](coordination.md#seeing-agent-messages)
+and [mcp-bridge.md](mcp-bridge.md).
 
 ### Budgets
 

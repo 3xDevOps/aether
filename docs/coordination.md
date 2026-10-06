@@ -265,8 +265,8 @@ no silent PTY fallback, attachment to an arbitrary running TUI, or automatic
 restart of an exited or closed run. Headless runs may use supported boundary
 hooks while alive, but do not receive native idle wake.
 
-Accepted messages, questions, and replies retain their originating run in the
-workspace timeline. **Durable acceptance**, **an admitted wake**, and
+Accepted messages, questions, and replies retain their originating run (see
+[Seeing agent messages](#seeing-agent-messages)). **Durable acceptance**, **an admitted wake**, and
 **explicit acknowledgement** are different events: neither a send receipt,
 hook execution, nor native API acceptance proves model receipt or processing.
 Only the agent's later `inbox --ack` acknowledges the returned batch; there is
@@ -278,6 +278,52 @@ resulting model turn, and the agent's explicit inbox read and acknowledgement.
 A reply after a manually supplied prompt proves messaging, not an idle wake.
 Configured files or a helper-only check do not prove that the root harness
 loaded the integration or received the turn.
+
+## Seeing agent messages
+
+Members read agent mail on the control channel with `coord.messages.list`.
+It needs View on the workspace, so every member of the workspace can read
+message bodies, the same audience the workspace timeline has.
+
+```json
+{"workspace_id":"<workspace-id>","mission_id":"<mission-id>","run_id":"<run-id>","correlation_id":"<question-or-report-id>","before":"<next_before>","limit":50}
+```
+
+Only `workspace_id` is required. `run_id` matches mail the run sent or
+received. `mission_id` matches mail sent while the sender served that swarm;
+the stamp is taken at send, so mail from before Aether recorded it has none.
+`correlation_id` selects one question and its replies, or one report. Rows
+come newest first, 50 by default and at most 100; pass `next_before` as
+`before` for the next older page. A cursor the server did not issue is
+refused with `-32602`.
+
+Each row has `id`, `workspace_id`, `mission_id`, `from_run_id`, `to_run_id`,
+`kind`, `correlation_id`, `body`, `created_at`, `delivered_at`, and
+`acked_at`. `kind` is `message`, `question`, `reply`, or `report`: a worker
+report forwarded to its integrator lists as `report` and adds the report's
+`outcome`, `summary`, and `next_action`. `delivered_at` is when the
+recipient's harness first read the batch and `acked_at` when the agent
+acknowledged it; neither proves the model read the body.
+
+Two events follow the mail live. They come from a durable outbox, so a server
+restart delays them rather than losing them, and neither carries the body:
+
+| Event | Run | Payload |
+| --- | --- | --- |
+| `coord.message` | sender | `message_id`, `workspace_id`, `mission_id`, `from_run_id`, `to_run_id`, `kind`, `correlation_id` |
+| `coord.message.acked` | recipient | `message_id`, `to_run_id`, `acked_at` |
+
+The dashboard's Activity feed shows `coord.message` as an **Agent message**
+row such as `Planner → Backend · question`. `workspace.timeline` accepts
+`mission_id`, which matches every run that has served the swarm, and its
+`run_id` filter also matches mail addressed to the run. A run snapshot's
+`unacked_messages` counts mail addressed to the run that it has not
+acknowledged.
+
+Mail stays as history until its run is deleted, by `aether delete` or the
+archive sweep. When a run's container is released, mail it never
+acknowledged is retired: it stops counting toward the 100-message inbox cap
+and is never delivered, but still lists, without `acked_at`.
 
 ## `aether-internal` CLI
 
@@ -1157,8 +1203,9 @@ Completed workers cannot be relaunched, including after a human relabels their
 outcome. Explicit Kill, Delete, and worker cancellation still destroy the
 container; a negative TTL requests immediate cleanup. Recovery rebinds
 `coord3.sock` for retained runs. When a run's container is destroyed,
-Aether releases the coordination directory and mailbox after any required
-evidence capture has completed. With `--conflict-coordination=false`, runs
+Aether releases the coordination directory and retires the run's unread mail
+after any required evidence capture has completed; the messages stay listed
+until the run is deleted. With `--conflict-coordination=false`, runs
 still receive their identity socket and per-launch discovery hint.
 `coord.status` reports the live method allow-list; conflict and mission
 operations remain disabled rather than inheriting authority from the socket.
