@@ -100,8 +100,9 @@ launchable for runs but is not offered in that setup flow.
 The **Enhanced** column is how the agent serves the Agent Client Protocol
 (ACP): JSON-RPC over the agent's stdio, through which an enhanced run reads
 the agent's messages, tool calls, and permission requests instead of its
-terminal. `run.launch` does not accept an enhanced mode yet. See
-[Enhanced mode adapters](#enhanced-mode-adapters).
+terminal. [enhanced-runs.md](enhanced-runs.md) covers launching and
+operating one; [Enhanced mode adapters](#enhanced-mode-adapters) covers
+installing what serves it.
 
 ### Enhanced mode adapters
 
@@ -779,8 +780,10 @@ with a reason that leads with `stalled:`. See
 
 The following disable or exclude automatic reporting:
 
-- **Headless runs.** `--mode headless` never gets the reporter: the agent
-  exits when it is done and never waits for anyone.
+- **Background runs.** `--mode background` never gets the reporter: the
+  agent exits when it is done and never waits for anyone.
+- **Enhanced runs.** `--mode enhanced` needs no reporter: the session host
+  reports both ends of every turn itself ([enhanced-runs.md](enhanced-runs.md)).
 - **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
   the run identity socket, canonical CLI and discovery remain available.
 - **An argv override.** A `--harness-definitions` entry that redefines a
@@ -833,7 +836,8 @@ transcript plus the diff timeline, which is always enough. Adding an adapter is
 
 ## How Aether launches them
 
-`--mode tui` (the default) runs the agent's native interactive TUI in a
+`--mode standard` (wire name `tui`, the default) runs the agent's native
+interactive TUI in a
 persistent server-side PTY: `aether attach <run>` puts you in it from the
 CLI, and the dashboard navigates there automatically on launch. Container
 PID 1 supervises the TUI process and, after any normal harness exit, opens a
@@ -841,24 +845,26 @@ login shell; exiting that shell opens another. The run and container remain
 `running` until an explicit Close, Kill, or Delete. A signal or other
 non-normal harness failure records `failed` and cleans up without a
 replacement shell.
-`--mode headless` runs the agent's machine-readable mode as a one-shot:
+`--mode background` (wire name `headless`) runs the agent's
+machine-readable mode as a one-shot:
 on exit Aether commits and publishes the branch, records `completed` or
 `failed`, and destroys the container immediately. Headless runs never open a
 replacement shell and are not relaunchable.
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
-A third mode, `acp`, is reserved for running the agent over the Agent Client
-Protocol. It will use the tui container shape: the same supervised PID 1,
-retention on Close, and relaunch. Until it ships, `run.launch`, templates, and
-swarm integrators reject it with `enhanced mode (acp) is not available yet`.
+`--mode enhanced` (wire name `acp`) runs the agent over the Agent Client
+Protocol in the tui container shape: the supervised PID 1 runs a login shell
+and the agent's ACP server runs beside it. It retains on Close and relaunches
+like tui; see [enhanced-runs.md](enhanced-runs.md).
 
-The task prompt is optional in tui mode: launch without one and you land in
+The task prompt is optional in tui and acp mode: launch without one and you land in
 the agent's interactive TUI with an empty composer, exactly as if you had
 started the CLI yourself, and type the first prompt there. Every argv token
 that carries the prompt is then dropped, so `opencode --prompt={task}` leaves
 whole rather than dangling an empty flag. Headless mode has no interactive
-surface, so it still requires a task.
+surface, so it still requires a task. An enhanced run without a task waits
+for the first message.
 
 Task-bearing and taskless launches use the same capability-neutral discovery
 instruction:

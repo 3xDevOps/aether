@@ -51,6 +51,14 @@ that archive.
 
 ## Run control and the Run Room
 
+An [enhanced run](enhanced-runs.md) has no agent terminal: its primary
+terminal is the container's login shell, and the agent runs beside it over
+the Agent Client Protocol. Use that shell to log the agent in or work next to
+it; what you type there never reaches the agent's conversation. The run's
+control lease is the same one: holding it from the shell or from the session
+view (`/ws/acp/<run_id>`) is what lets you answer the agent's permission
+requests, and a takeover moves it between the two.
+
 The **primary harness terminal** has one controller session at a time. A member
 needs the run's **Steer** permission to acquire it. Viewing, presence, and run
 ownership by themselves do not grant input access. A writable primary terminal

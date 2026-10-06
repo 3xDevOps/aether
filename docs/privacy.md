@@ -123,6 +123,16 @@ project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 
+An [enhanced run](enhanced-runs.md) records its agent session on your server
+in `<data-dir>/transcripts/<run_id>.items.jsonl`: the prompts members send, the
+agent's messages and thoughts, tool call inputs, command output and diffs,
+permission requests and their answers. Whatever the agent or a tool prints,
+a secret included, can land there. Anyone with **View** on the run can read
+it through the dashboard; answering or steering needs **Steer** and the run's
+control lease. It is capped at 64 MiB per run and deleted with the run's
+terminal transcripts, when the run's checkout is reclaimed or the run is
+deleted. Standard runs keep only their terminal transcript.
+
 The shared app browser runs on your server, not in the phone's WebView.
 Browser input, app-terminal input, observations, frames, and explicit capture
 requests travel through your Aether server. A page opened there makes its

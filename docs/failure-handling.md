@@ -411,7 +411,7 @@ Saved missions and attempt reservations are not deleted.
 
 ### TUI lifecycle and relaunch
 
-For `--mode tui`, container PID 1 supervises the harness. After any normal
+For `--mode standard` (`tui`), container PID 1 supervises the harness. After any normal
 harness exit, PID 1 opens a login shell; when that shell exits, another login
 shell opens. The run and its container therefore remain `running` until an
 explicit Close, Kill, or Delete, or until the agent reports its own outcome.
@@ -489,6 +489,21 @@ relaunch never falls back to a new run. When retention ends, a closed run's
 reason becomes `retained container expired` or `retained container
 unavailable`; a run its agent finished keeps `completed` or `failed` and its
 reason drops `; retained container`.
+
+### Enhanced runs
+
+An enhanced run ([enhanced-runs.md](enhanced-runs.md)) has the tui container
+and lifecycle above; the agent's ACP server is a separate exec the server
+replaces at every reattach.
+
+| Failure | What happens |
+| --- | --- |
+| The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Close and Reopen start a fresh session. |
+| The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
+| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and resumes the stored session in a fresh one: `session/resume`, else `session/load` without re-logging the replay. A turn cut off by the restart is logged as **Turn interrupted**. |
+| The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
+| The container is paused at a reattach | The ACP server starts when the run is resumed. |
+| The agent sends more than 64 MiB to the item log | From then on only requests, turn boundaries and notices are recorded, with a **Session log is full** notice. |
 
 ### Disk pressure
 

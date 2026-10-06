@@ -686,7 +686,7 @@ launch it by name, or put it on a cron schedule:
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
-  [--mode headless] [--param key=value] [--budget <tokens>]
+  [--mode standard|enhanced|background] [--param key=value] [--budget <tokens>]
 aether template list
 aether run --template nightly-triage [--param key=value]
 aether template delete nightly-triage
@@ -961,14 +961,16 @@ delivers the verified result, and reports success. No human approves the plan
 or the delivery.
 The dashboard's launch dialog creates one under **Swarm**; the CLI does the
 same with `aether swarm create`. The integrator runs on your account (or the
-shared account named by `--account`) with the `--agent` harness in `tui`
-mode. Each `--worker` allows workers on a harness, in `tui` unless the value
-ends in `:headless`; workers may use the integrator's harness. `-` in place
-of the objective reads it from stdin.
+shared account named by `--account`) with the `--agent` harness in
+`standard` mode, or `enhanced` with `--mode enhanced`
+([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on a
+harness, in `standard` mode unless the value ends in `:enhanced` or
+`:background`; workers may use the integrator's harness. `-` in place of the
+objective reads it from stdin.
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --worker claude:headless --worker codex:headless
+  --agent claude --worker claude:background --worker codex:background
 ```
 
 ```

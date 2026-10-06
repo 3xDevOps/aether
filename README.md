@@ -119,6 +119,10 @@ OMP, and OpenCode; other CLIs can use a custom launch definition. Native
 idle wake is available through loaded pi, OMP, and version-matched OpenCode
 integrations; command-hook integrations deliver at the next supported
 boundary instead. Neither a send receipt nor a wake acknowledges mail.
+Every built-in agent can also run **enhanced**, driven over the Agent Client
+Protocol so the dashboard shows its messages, tool calls and permission
+requests as native controls: `aether run "..." --agent codex --mode enhanced`
+([enhanced runs](docs/enhanced-runs.md)).
 See [per-harness setup and limits](docs/harnesses.md) and
 [member environments](docs/environments.md).
 
@@ -133,6 +137,7 @@ See [per-harness setup and limits](docs/harnesses.md) and
 | [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
+| [Enhanced runs](docs/enhanced-runs.md) | Driving an agent over the Agent Client Protocol: launch, permissions, restarts, the session log. |
 | [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |

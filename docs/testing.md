@@ -618,6 +618,25 @@ AETHER_ACP_IMAGE=aether-standard:local \
   go test -tags integration -run TestACPAdapterInstall -v ./internal/harness/
 ```
 
+With `ACP_LIVE=1` it also opens a session with each adapter through the
+session host (`initialize` then `session/new`, no prompt), so no login is
+needed; a logged-out Codex skips at `session/new`.
+
+[Enhanced runs](enhanced-runs.md) are proven without a real agent:
+`internal/acphost/acpmock` replays conversations recorded from the real
+adapters and answers prompts by their text, so tests can drive a permission
+request (`ask permission`) or a turn that runs until cancelled (`wait`). The
+scheduler's unit tests run it behind the fake runtime;
+`TestIntegrationEnhancedRunDocker` (scheduler) and
+`TestIntegrationEnhancedRunGateway` (server) build it as a static binary and
+run it as the ACP server of a real container, the second through
+`/ws/acp/<run_id>` on the server gateway:
+
+```sh
+make test-integration INTEGRATION_PKGS='./internal/scheduler ./internal/server' \
+  INTEGRATION_RUN='TestIntegrationEnhancedRun'
+```
+
 ### Native mailbox lifecycle and idle-wake smoke
 
 Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures

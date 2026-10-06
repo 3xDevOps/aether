@@ -182,6 +182,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
+| `GET` | `/ws/acp/<run_id>` | an enhanced run's session item stream (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
@@ -505,7 +506,7 @@ retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","acp","terminal","dev/browser"],
  "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.link",
           "edge.login","edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
@@ -519,7 +520,7 @@ The server gateway answers the same shape with no `local` field because it
 cannot run verbs on the browser's machine:
 
 ```json
-{"gateway":"server","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
+{"gateway":"server","methods":["*"],"ws":["events","attach","acp","terminal","dev/browser"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -542,6 +543,28 @@ The two `GET` endpoints above are backed by control-channel methods, as are
 the file reads and the member and workspace writes below. `aether gui`
 proxies these methods over SSH; the server gateway dispatches them in-process.
 Both transports therefore expose the same API shape and authorization checks.
+
+### Enhanced-run methods
+
+These act on an [enhanced run](enhanced-runs.md)'s agent session. The first
+three need **Steer** and the run's control lease (`control_session_id` and
+`control_generation`, from `/ws/acp` or a terminal attach); without them the
+call is refused with `-32602`, and with a lease another session holds with
+`-32003`.
+
+| Method | Request body | Success result |
+| --- | --- | --- |
+| `run.input.answer` | `{run_id, request_id, option_id, control_session_id, control_generation}` | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
+| `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
+| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
+| `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...]}`, oldest first, cut like stream frames |
+| `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole |
+
+A run whose session is not running answers `-32004` with the reason.
+`run.inject` takes `steer: true` to add a message to the agent's running
+turn, and `control_session_id`/`control_generation` to deliver it at once
+rather than after the Run Room's moderation delay; its result's `outcome` is
+`sent`, `queued` or `injected` for an enhanced run.
 
 ### Candidate integration methods
 
@@ -1393,7 +1416,7 @@ bootstrap gate before showing the server's error. An attach the gateway
 refused, one parked on a `session ended` close, and a run still waiting for
 its PTY session are not reopened by either event.
 
-Every live socket - `events`, `attach`, and `terminal` - is pinged by the
+Every live socket - `events`, `attach`, `acp`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
 **10**. A client that changed networks or went to sleep leaves a half-open
 connection that reads as live on both ends; the ping is what releases the PTY
@@ -1706,6 +1729,58 @@ agent exit returns the session to a login shell, so another installed agent
 can use the same run checkout. A run shell can only be opened while the
 container is live; finished runs expose their recorded terminal output but do
 not create new shell tabs.
+
+### `GET /ws/acp/<run_id>`
+
+An [enhanced run](enhanced-runs.md)'s session item log: the items already
+logged after the client's cursor, then each new one as the agent sends it.
+A run that is not enhanced is refused with `-32602`. Every frame is JSON
+text.
+
+1. Client sends one header frame. `write` asks for the run's control lease
+   with the same fields a terminal attach uses (`takeover`,
+   `release_control`); without it the socket only reads.
+
+   ```json
+   {"after_seq":412,"write":true,"control_session_id":"tab-1",
+    "control_generation":0,"takeover":false,"release_control":false}
+   ```
+
+2. Server answers one ack frame. `seq` is the high-water mark the client
+   holds once the `replay` frames that follow are applied; `live` says
+   whether a session is running; `state` is its snapshot (turn in flight,
+   queued prompts, pending requests with their options, mode, config
+   options, commands). A refusal carries `code` and `error` and closes 1008.
+
+   ```json
+   {"ok":true,"seq":431,"replay":19,"epoch":0,"live":true,
+    "state":{"turn_in_flight":true,"queued":0,"pending":[],"mode":"auto"},
+    "has_control":true,"control_session_id":"tab-1","control_generation":7}
+   ```
+
+3. Server streams one frame per item, `{"seq":432,"item":{...}}`. An item
+   over 32 KiB is cut to its identity fields with `"truncated":true`;
+   `run.acp.item` returns it whole. A cursor past the end of the log (the
+   log was replaced) is answered with `{"reset":true,"epoch":1}` first:
+   drop what you hold and apply the replay from the start. Items are the
+   `acphost.Item` kinds `message`, `thought`, `tool_call`, `plan`, `request`,
+   `mode_change`, `config_options`, `commands`, `usage`, `auth_status`,
+   `session_info`, `notice`, `turn_start`, `turn_end` and `reset`; skip kinds
+   you do not know.
+4. Lease frames are the attach's: the client sends
+   `{"type":"control","request_id":1,"write":true}` to take control or
+   `{"type":"control","request_id":2,"control_generation":7}` to release it,
+   and `{"type":"takeover",...}` frames for the timed handoff; the server
+   answers with `control` and `takeover` frames, and sends a `control` frame
+   with `revocation_reason` when another session takes the lease. The socket
+   stays open as a viewer.
+
+The socket closes **1012** `session stream ended; resubscribe with
+after_seq` when the session ends or restarts, when the run has no session
+and one starts, or when the client falls 1024 items behind: reconnect with
+your last `seq`. It closes **1008** when membership or Steer is withdrawn. A
+run accepts at most 32 of these sockets at once; the next is refused with
+`-32003`.
 
 ### `GET /ws/terminal?tab=<tab>`
 
