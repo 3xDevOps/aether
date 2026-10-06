@@ -129,8 +129,7 @@ func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.A
 }
 
 func (d *acpDriver) Stop(ctx context.Context, run domain.RunID) error {
-	d.stopAdapter(ctx, run)
-	return d.s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(run))
+	return errors.Join(d.stopAdapter(ctx, run), d.s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(run)))
 }
 
 func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
@@ -236,11 +235,14 @@ func (d *acpDriver) openForSwitch(ctx context.Context, entry *supervised) error 
 
 // open runs under the run's op lock.
 func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) error {
-	d.stopAdapterLocked(ctx, entry.runID)
+	if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: stop the previous ACP server", "run", entry.runID, "error", err)
+	}
 	d.stopStaleExec(ctx, entry)
 
 	d.s.mu.Lock()
 	paused, cid, coordDir, cachedSession, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.task
+	oneShot := entry.launchMode == domain.LaunchHeadless
 	d.s.mu.Unlock()
 	if paused {
 		// Docker cannot exec into a frozen container; Resume connects.
@@ -264,7 +266,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		return fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
 	}
 	fresh := how == openNew
-	oneShot := entry.launchMode == domain.LaunchHeadless
 	sessionID, mode := "", profile.ACPMode
 	if oneShot && profile.ACPAutoMode != "" {
 		mode = profile.ACPAutoMode
@@ -336,7 +337,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		OnActivity: func(kind, target string) { d.activity(entry, kind, target) },
 	})
 	if err != nil {
-		d.stopExec(exec)
+		if stopErr := d.stopExec(exec); stopErr != nil {
+			slog.Warn("scheduler: stop the failed ACP server", "run", runID, "error", stopErr)
+		}
 		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
 	}
 	if id := sess.SessionID(); id != run.HarnessSessionID {
@@ -419,7 +422,9 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 		current := d.runs[entry.runID] == r
 		d.mu.Unlock()
 		if current && live {
-			d.stopAdapterLocked(context.Background(), entry.runID)
+			if err := d.stopAdapterLocked(context.Background(), entry.runID); err != nil {
+				slog.Warn("scheduler: stop the background run's ACP server", "run", entry.runID, "error", err)
+			}
 		}
 		unlock()
 		d.s.mu.Lock()
@@ -535,12 +540,14 @@ func adapterError(err error, stderr *tailBuffer) error {
 	return err
 }
 
-func (d *acpDriver) stopAdapter(ctx context.Context, run domain.RunID) {
+func (d *acpDriver) stopAdapter(ctx context.Context, run domain.RunID) error {
 	defer d.lockOp(run)()
-	d.stopAdapterLocked(ctx, run)
+	return d.stopAdapterLocked(ctx, run)
 }
 
-func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) {
+// stopAdapterLocked keeps the adapter's exec identity in the sidecar when the
+// adapter may still be running, so a later open stops it.
+func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) error {
 	d.mu.Lock()
 	r := d.runs[run]
 	delete(d.runs, run)
@@ -549,7 +556,7 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) {
 	}
 	d.mu.Unlock()
 	if r == nil || r.exec == nil {
-		return
+		return nil
 	}
 	if r.session != nil {
 		_ = r.session.Close()
@@ -559,7 +566,9 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) {
 		case <-ctx.Done():
 		}
 	}
-	d.stopExec(r.exec)
+	if err := d.stopExec(r.exec); err != nil {
+		return err
+	}
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
 	if entry := d.s.runs[run]; entry != nil && entry.agentExec != nil && entry.agentExec.ExecID == r.exec.Identity().ExecID {
@@ -568,6 +577,7 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) {
 			slog.Warn("scheduler: persist stopped ACP server", "run", run, "error", err)
 		}
 	}
+	return nil
 }
 
 // shutdown closes every session without stopping its adapter or reporting
@@ -585,13 +595,18 @@ func (d *acpDriver) shutdown() {
 	}
 }
 
-func (d *acpDriver) stopExec(exec runtime.ManagedExec) {
+func (d *acpDriver) stopExec(exec runtime.ManagedExec) error {
 	ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
 	defer cancel()
-	if _, err := exec.Stop(ctx, acpStopGrace); err != nil {
-		slog.Warn("scheduler: stop the agent's ACP server", "exec", exec.Identity().ExecID, "error", err)
+	defer func() { _ = exec.Detach() }()
+	_, err := exec.Stop(ctx, acpStopGrace)
+	if err == nil {
+		return nil
 	}
-	_ = exec.Detach()
+	if state, statusErr := exec.Status(ctx); statusErr == nil && !state.Running {
+		return nil
+	}
+	return fmt.Errorf("stop the agent's ACP server (exec %s): %w", exec.Identity().ExecID, err)
 }
 
 // stopStaleExec stops an adapter a previous server process started: Docker
@@ -605,7 +620,9 @@ func (d *acpDriver) stopStaleExec(ctx context.Context, entry *supervised) {
 	}
 	if managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime); ok {
 		if exec, err := managed.RecoverExec(ctx, *stale); err == nil {
-			d.stopExec(exec)
+			if stopErr := d.stopExec(exec); stopErr != nil {
+				slog.Warn("scheduler: stop the earlier ACP server", "run", entry.runID, "error", stopErr)
+			}
 		} else {
 			slog.Info("scheduler: earlier ACP server is gone", "run", entry.runID, "error", err)
 		}

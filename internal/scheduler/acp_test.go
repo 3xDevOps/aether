@@ -101,6 +101,7 @@ type acpExec struct {
 	stdout   *io.PipeReader
 	agentIn  *io.PipeReader
 	done     chan struct{}
+	stopErr  error
 }
 
 func (e *acpExec) Identity() runtime.ExecIdentity { return e.identity }
@@ -115,6 +116,9 @@ func (e *acpExec) Close() error  { return nil }
 func (e *acpExec) Detach() error { return nil }
 
 func (e *acpExec) Status(context.Context) (runtime.ExecState, error) {
+	if e.stopErr != nil {
+		return runtime.ExecState{Running: true}, nil
+	}
 	select {
 	case <-e.done:
 		code := 0
@@ -134,6 +138,9 @@ func (e *acpExec) Wait(ctx context.Context) (runtime.ExitStatus, error) {
 }
 
 func (e *acpExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus, error) {
+	if e.stopErr != nil {
+		return runtime.ExitStatus{}, e.stopErr
+	}
 	_ = e.agentIn.Close()
 	return e.Wait(ctx)
 }
@@ -526,7 +533,9 @@ func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
 	e, _ := newACPEnv(t)
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
-	e.sched.acp.stopAdapter(t.Context(), run.ID)
+	if err := e.sched.acp.stopAdapter(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	log, err := acphost.OpenLog(e.pty.ItemLogPath(run.ID))
 	if err != nil {
@@ -567,7 +576,9 @@ func TestACPSubscribeWithoutSessionWaitsForTheNext(t *testing.T) {
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 	sess := e.sched.acp.session(run.ID)
-	e.sched.acp.stopAdapter(t.Context(), run.ID)
+	if err := e.sched.acp.stopAdapter(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	closed := func(ch <-chan struct{}) bool {
 		select {
@@ -607,7 +618,9 @@ func TestACPSubscribeWithoutSessionWaitsForTheNext(t *testing.T) {
 	}
 	closing.Cancel()
 
-	e.sched.acp.stopAdapter(t.Context(), run.ID)
+	if stopErr := e.sched.acp.stopAdapter(t.Context(), run.ID); stopErr != nil {
+		t.Fatal(stopErr)
+	}
 	idle, err := e.sched.ACPSubscribe(run.ID, 0)
 	if err != nil {
 		t.Fatal(err)
