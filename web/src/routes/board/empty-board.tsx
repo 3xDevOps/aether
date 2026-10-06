@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { api, ApiError } from '@/lib/api'
+import { useIsMobile } from '@/lib/breakpoints'
 import { canLaunch } from '@/lib/commands'
 import { message } from '@/lib/format'
 import type { AgentInfo } from '@/lib/types'
@@ -21,6 +22,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   const hasWorkspace = useStore((s) => Object.keys(s.workspaces).length > 0)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const openDialog = useStore((s) => s.openPaletteDialog)
+  const mobile = useIsMobile()
   const base = useBaseCheck(workspace?.id)
 
   const onboard = (step: OnboardingStep) => {
@@ -85,7 +87,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   return (
     <EmptyState
       title="No runs yet"
-      action={canLaunch({ cap: caps, role }) && <Button onClick={() => openDialog('launch')}>New run</Button>}
+      action={canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New run</Button>}
     >
       A run is one agent working on its own branch in its own container.
     </EmptyState>

@@ -98,6 +98,7 @@ export function ChangesView({ runID }: { runID: string }) {
         onRefresh={() => useStore.getState().refreshDiff(runID)}
         onJump={jump}
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
+        publishable={cumulative.length > 0}
       />
       {failed && (
         <Callout tone="failed" role="alert" className="m-2 shrink-0">

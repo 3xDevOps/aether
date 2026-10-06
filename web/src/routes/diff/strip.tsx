@@ -44,6 +44,7 @@ export function SummaryStrip({
   onRefresh,
   onJump,
   onCollapseAll,
+  publishable,
 }: {
   run: RunRecord
   files: PatchFile[]
@@ -57,6 +58,7 @@ export function SummaryStrip({
   onRefresh: () => void
   onJump: (path: string) => void
   onCollapseAll: (collapsed: boolean) => void
+  publishable: boolean
 }) {
   const caps = useCapability()
   const local = useCanReviewLocally(run)
@@ -134,7 +136,7 @@ export function SummaryStrip({
             )}
           </MenuContent>
         </Menu>
-        {caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} />}
+        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} />}
       </span>
       {local && <ReviewLocallyDialog run={run} open={reviewing} onOpenChange={setReviewing} returnFocus={more} />}
     </div>

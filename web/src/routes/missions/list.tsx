@@ -111,7 +111,7 @@ export function SwarmList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title="Swarms" actions={(!mobile && newSwarm) || undefined} />
+      <ViewHeader title="Swarms" actions={(!mobile && !empty && newSwarm) || undefined} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-3 px-4 py-6 sm:px-6">
           {error && <Callout tone="failed" role="alert">{error}</Callout>}

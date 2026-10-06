@@ -220,10 +220,12 @@ test('a binary file has no Open in Files link', () => {
   expect(screen.queryByRole('button', { name: 'logo.png' })).toBeNull()
 })
 
-test('nothing changed is an empty state, not a blank pane', async () => {
+test('nothing changed is an empty state with nothing to publish', async () => {
   seed({ ...ready, patch: '' })
+  useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
   renderDiff()
   expect(screen.getByRole('heading', { name: 'No changes yet.' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Publish…' })).toBeNull()
 })
 
 test('a diff snapshot refetches the patch and joins the interval menu', async () => {

@@ -192,7 +192,8 @@ update notice above it is one 12px muted line with an **Update** link.
 
 Under 768px the 48px top bar (`bg-chrome`) holds the sidebar button, with an
 amber dot while anything needs the viewer, the view title in 13/20 medium,
-**Search** and **New run**. The sidebar opens as a left side sheet. Content
+**Search** and **New run**. That is the screen's filled button, so a page's
+own **New run** or **New swarm** is secondary on a phone. The sidebar opens as a left side sheet. Content
 views draw `PaneHeader`: the title in `text-title`, one optional muted line
 under it, and actions on the right. A connection problem is a failed-tone
 `StateLine`, in the header on desktop and under the top bar on a phone.

@@ -2245,8 +2245,8 @@ both what it renders and the overlap set the conflict chips read.
   and the output of the last pull (`review-commands.tsx`). It is gated on the
   `pull` local verb: a gateway without it - a phone on the server's
   dashboard - has no repository for those commands to run in.
-- **Publish is two steps.** **Publish…** appears with `run.git.status` and
-  opens `publish-dialog.tsx`, a bottom sheet on a phone. The run checkout's
+- **Publish is two steps.** **Publish…** appears with `run.git.status` once
+  the diff has a file, and opens `publish-dialog.tsx`, a bottom sheet on a phone. The run checkout's
   branch, HEAD, agent account, GitHub identity and upstream sit above both
   steps, with **Refresh status**. **1 · Commit** selects changed paths,
   reviews their worktree and staged diffs and untracked contents, and runs
