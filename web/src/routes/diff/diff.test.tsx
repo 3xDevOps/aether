@@ -126,7 +126,7 @@ test('the strip sums the files and the patch shows line numbers', async () => {
   vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef1234567890', patch, truncated: false })
   renderDiff()
 
-  const strip = await screen.findByRole('toolbar', { name: 'Changes' })
+  const strip = await screen.findByRole('group', { name: 'Changes' })
   await waitFor(() => expect(strip.textContent).toContain('3 files'))
   expect(strip.textContent).toContain('+2')
   expect(strip.textContent).toContain('−3')
@@ -194,7 +194,7 @@ test('the 500-line rule counts content lines, not hunk headers', () => {
 test('a patch of many medium files mounts only the files near the screen', () => {
   seed({ ...ready, patch: Array.from({ length: 10 }, (_, i) => added(`part${i}.txt`, 400)).join('') })
   renderDiff()
-  expect(screen.getByRole('toolbar', { name: 'Changes' }).textContent).toContain('10 files')
+  expect(screen.getByRole('group', { name: 'Changes' }).textContent).toContain('10 files')
   expect(screen.queryAllByText(/^\+row /).length).toBeLessThan(1500)
 })
 

@@ -77,14 +77,14 @@ export function SummaryStrip({
 
   return (
     <div
-      role="toolbar"
+      role="group"
       aria-label="Changes"
       className="flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-x-1 gap-y-0.5 border-b border-seam bg-chrome px-2 py-0.5 text-ui-sm text-muted"
     >
-      <span className="hidden items-center gap-2 px-1 tabular-nums @min-[1000px]:flex">{counts}</span>
+      <span className="hidden items-center gap-2 px-1 tabular-nums @min-[780px]:flex">{counts}</span>
       <Menu>
         <MenuTrigger asChild>
-          <Button variant="ghost" size="sm" disabled={files.length === 0} className="tabular-nums @min-[1000px]:hidden">
+          <Button variant="ghost" size="sm" disabled={files.length === 0} className="tabular-nums @min-[780px]:hidden">
             {counts}
             <ChevronDown />
           </Button>

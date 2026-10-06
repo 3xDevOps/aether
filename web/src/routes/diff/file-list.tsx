@@ -20,29 +20,32 @@ export function FileList({
   onJump: (path: string) => void
 }) {
   return (
-    <nav aria-label="Changed files" className="hidden w-64 shrink-0 overflow-y-auto border-r border-seam bg-chrome p-1 @min-[1000px]:block">
-      {files.map((file) => {
-        const slash = file.path.lastIndexOf('/')
-        const { letter, tone, word } = glyph[file.status]
-        return (
-          <ListRow
-            key={file.path}
-            selected={file.path === current}
-            title={file.path}
-            onClick={() => onJump(file.path)}
-            leading={
-              <span aria-hidden className={cn('w-3 shrink-0 text-center font-code text-ui-sm', tone)}>
-                {letter}
-              </span>
-            }
-            trailing={<Counts additions={file.additions} deletions={file.deletions} />}
-          >
-            {file.path.slice(slash + 1)}
-            {slash > 0 && <span className="ml-1.5 text-ui-sm text-muted">{file.path.slice(0, slash)}</span>}
-            <span className="sr-only">, {word}</span>
-          </ListRow>
-        )
-      })}
+    <nav aria-label="Changed files" className="hidden w-56 shrink-0 overflow-y-auto border-r border-seam bg-chrome p-1 @min-[780px]:block">
+      <ul>
+        {files.map((file) => {
+          const slash = file.path.lastIndexOf('/')
+          const { letter, tone, word } = glyph[file.status]
+          return (
+            <li key={file.path}>
+              <ListRow
+                selected={file.path === current}
+                title={file.path}
+                onClick={() => onJump(file.path)}
+                leading={
+                  <span aria-hidden className={cn('w-3 shrink-0 text-center font-code text-ui-sm', tone)}>
+                    {letter}
+                  </span>
+                }
+                trailing={<Counts additions={file.additions} deletions={file.deletions} />}
+              >
+                {file.path.slice(slash + 1)}
+                {slash > 0 && <span className="ml-1.5 text-ui-sm text-muted">{file.path.slice(0, slash)}</span>}
+                <span className="sr-only">, {word}</span>
+              </ListRow>
+            </li>
+          )
+        })}
+      </ul>
     </nav>
   )
 }
