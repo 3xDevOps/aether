@@ -565,7 +565,10 @@ is gone and restoring it returns `-32000` not found. The retention period
 is fixed at 14 days - there is no flag to change it. The sweep compares
 `archived_at` against the server's wall clock at boot and hourly: a
 forward clock jump, or a boot after the server was down past several
-runs' `deletes_at`, deletes every one of them in that pass.
+runs' `deletes_at`, deletes every one of them in that pass. A worker run
+whose submission an existing swarm still references is not swept; an
+archived swarm is itself deleted 14 days after `archived_at`, within five
+seconds of the deadline, and its runs follow on the next run sweep.
 
 Below `--min-free-disk`, `run.launch` is refused with `-32004` (unavailable)
 and a message naming the numbers. Reopening an eligible retained TUI run

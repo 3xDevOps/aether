@@ -471,6 +471,20 @@ after that date (see
 Both calls publish a `run.archived` event carrying the same two fields -
 null on both means the run was restored - and a matching timeline note.
 
+`mission.archive`, `mission.unarchive` and `mission.delete` accept
+`{"mission_id":"..."}`. Archive and unarchive return `{"mission":Mission}`
+with `archived_at` set while archived; delete returns `{}`. They need
+`run.launch` and the swarm's accountable human or an admin, archive and
+delete cascade to the swarm's runs, and a swarm with a live run is refused
+with `-32002`; see
+[coordination.md](coordination.md#archiving-and-deleting-a-swarm).
+
+`member.rename` accepts `{"display_name":"..."}` (and `member_id`, admin
+only, to rename someone else) and returns `{"member":Member}`. The name is
+trimmed and must be 1 to 64 characters with no control characters; a bad
+name is `-32602` with the reason. Each rename publishes `member.changed`
+(`{"member_id":"...","display_name":"..."}`) in every workspace.
+
 `run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. A run that
 an agent's `coord.report` finished (see
 [coordination.md](coordination.md)) has `run.outcome_unseen` set until its

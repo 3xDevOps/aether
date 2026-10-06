@@ -852,6 +852,35 @@ in `active`; and stop in `completed` or `cancelled`. Open question count
 accompanies integrator phase guidance. Run `skill` again after the phase
 changes. Replace integrator is a human action, not an agent one.
 
+### Archiving and deleting a swarm
+
+A swarm that ended stays listed. The accountable human or an admin puts it
+away from the swarm page's **More swarm actions** menu. Like
+`mission.cancel`, the three methods need the `run.launch` permission, take
+`{"mission_id":"..."}`, and are refused with `-32002` and the reason while
+any run of the swarm is live: `run <id> is running; cancel the swarm and
+wait for its runs to stop`.
+
+- `mission.archive` (**Archive swarm…**) needs a `completed` or `cancelled`
+  swarm; a `planning` or `active` one is refused with `cancel it first`. It
+  closes each `completed` run - `merged` for the integrator of a completed
+  swarm and for workers whose submission was accepted, `abandoned` otherwise
+  - then archives every run of the swarm as `run.archive` does, and sets the
+  swarm's `archived_at`. The dashboard folds archived swarms under
+  **Archived (n)**. Archiving again is a no-op.
+- `mission.unarchive` (**Unarchive swarm**) clears `archived_at` and restores
+  the swarm's runs. Closed runs stay closed.
+- `mission.delete` (**Delete swarm…**) needs a `cancelled` or archived swarm;
+  a completed one is refused with `archive it first`. It removes the swarm,
+  its tasks, attempts, submissions, questions and agent messages, then
+  deletes each run as `run.delete` does. Published branches stay. It returns
+  `{}`.
+
+Each publishes `mission.changed`; after a delete its payload carries
+`"deleted":true`. An archived swarm is deleted 14 days after archiving, like
+an archived run; its runs, archived with it, follow on the next run sweep
+(see [failure-handling.md](failure-handling.md#disk-pressure)).
+
 ### Inspect and manage mission tasks and workers
 
 Task and worker commands use the authority attached to the run's socket. They

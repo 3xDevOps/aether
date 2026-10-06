@@ -711,6 +711,16 @@ does not silently reuse a cache.
 
 ### Attribution
 
+A member's display name is what teammates see on avatars, runs and
+messages. Change your own under **Display name** in **Profile** (the sidebar
+footer menu); the control-channel method is `member.rename`
+(`{"display_name":"..."}`, plus `member_id` for an admin renaming someone
+else). The name is trimmed, must not be empty, is at most 64 characters, and
+holds no control characters; anything else is refused with the reason, for
+example `display_name is longer than 64 characters`. A rename publishes a
+`member.changed` event in every workspace, so open dashboards show the new
+name at once and **Activity** records who renamed whom.
+
 Every member gets a stable color from a colorblind-safe palette at join time
 (`aether member color <#rrggbb> [member-id]` overrides it). That color is the
 same everywhere: run rows in `aether runs`, message banners in transcripts,
@@ -1122,7 +1132,7 @@ and delivers the verified candidate. Its success report moves the swarm to
 run and leaves the swarm `active` for **Replace integrator**. See
 [coordination.md](coordination.md#mission-phases).
 
-Two control-channel methods are the human's part. Each needs the `run.launch`
+Five control-channel methods are the human's part. Each needs the `run.launch`
 permission (collaborator or admin) and is refused unless the authenticated
 member is the swarm's accountable human or holds the `admin` role, so an
 accountable human demoted to viewer can no longer answer or cancel, and an
@@ -1133,6 +1143,8 @@ admin must take over:
   request field.
 - `mission.cancel` ends a swarm in `planning` or `active` by moving it to
   `cancelled`. It is refused on a swarm that already ended.
+- `mission.archive`, `mission.unarchive` and `mission.delete` put away a
+  swarm that ended; see [coordination.md](coordination.md#archiving-and-deleting-a-swarm).
 
 `mission.show` stays a View read: every member sees the questions and the
 answers.

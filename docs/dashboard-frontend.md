@@ -350,8 +350,8 @@ top to bottom:
 6. **Footer**: the member's avatar (a neutral glyph before the computer is
    linked) and name and a connection dot, whose word
    ("Live", "Reconnecting", "Offline") is in the button's name and tooltip.
-   Its menu holds **Profile** (a dialog: colour, git identity and agent
-   account sharing; see [Members, devices and
+   Its menu holds **Profile** (a dialog: display name, colour, git identity
+   and agent account sharing; see [Members, devices and
    Profile](#members-devices-and-profile)), **Keyboard shortcuts**, **Theme**,
    **Update…** when an update exists, and a **Team** line with who is online
    and the spend against workspace budgets.
@@ -2072,7 +2072,9 @@ stays `missions` and links are `?page=missions&id=<mission>`. The
 `MissionsSlice` is composed into the root store. Hydration reads
 `mission.list` for the active workspace; mission events refetch either the
 open `mission.show` projection or the first list page, merged so older pages
-loaded with **Show more** stay. The slice records which workspace the list
+loaded with **Show more** stay. A `mission.changed` with `deleted` removes
+the swarm from the store without a read, and leaves its page for the list.
+The slice records which workspace the list
 and cursor were read for (`missionListWorkspace`), so **Show more** only
 follows a cursor read for the active workspace.
 
@@ -2089,8 +2091,8 @@ two minutes, or `Integrator did not launch: <error>` while
 `integrator_launch_error` is set. When a Needs you reason leads, the unread
 sentence follows the counts in muted text. Swarms that need you sort first, then by last update; completed and
 cancelled swarms fold behind **Finished (n)**, listed openly when no swarm
-is open. The server has no archive or delete for a swarm, so Finished is the
-archive. With no swarms the page shows one sentence and **New swarm**. On a
+is open. Archived swarms (`archived_at` set) leave both and fold behind a
+second, always collapsed **Archived (n)**. With no swarms the page shows one sentence and **New swarm**. On a
 phone **New swarm** is a secondary button under the cards, since the top bar
 already has **New run**. Counts come from one pass over the run store
 (`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
@@ -2106,7 +2108,10 @@ title and **Open integrator** drawn secondary. One primary action: **Answer**
 viewer, else **Open integrator**. On a phone the header **Answer** is left
 out: the open question's own **Answer** is the screen's filled button, and
 the top bar's **New run** shrinks to an icon. **More swarm actions** holds
-**Replace integrator…** and **Cancel swarm…**.
+**Replace integrator…**, **Archive swarm…** (completed or cancelled, not
+archived), **Unarchive swarm** (archived), **Cancel swarm…**, and **Delete
+swarm…** (cancelled or archived). An archived swarm's state line adds
+`archived <time ago>`.
 
 The body is one column, in this order:
 
@@ -2171,8 +2176,18 @@ swarms show none of this; the server refuses a replacement there.
 from `execution_choices` and always sends mode `tui`, pins
 `expected_generation`, and reuses one idempotency key across retries.
 **Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
-when the confirmation opened. Both need the capability; cancel also needs
-the accountable human or an admin. Failures stay in the dialog, verbatim.
+when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
+the `Confirm` primitive and send `mission.archive` and `mission.delete`;
+**Unarchive swarm** sends `mission.unarchive` at once and toasts the result
+or the error. A delete removes the swarm from the store and returns to the
+list. Each item needs its capability; cancel, archive, unarchive and delete
+also need the accountable human or an admin. Failures stay in the dialog,
+verbatim, such as `run <id> is running; cancel the swarm and wait for its
+runs to stop`.
+
+The board's **Archive closed runs…** archives closed swarm runs one by one
+like any other run and says so: their swarms stay in **Swarms** until
+archived from the swarm page.
 
 ### Agent messages on a swarm
 
@@ -2750,12 +2765,16 @@ every server refusal verbatim.
 
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
-the member's name and role, **Colour**, **Git identity** (the name and email
+the member's name and role, **Display name** (an input with **Save**, sent
+as `member.rename`; the header, roster and every avatar take the new name
+from the saved member and a fresh `member.list`, and a refusal shows under
+the field verbatim), **Colour**, **Git identity** (the name and email
 the member's agents commit as, saved with `member.git`; the same form
 onboarding shows) and **Agent account sharing** (**Share account** or
 **Revoke access** per teammate, with the omp warning behind **Learn more**).
 Profile is the one place that edits the git identity; Agents links to it.
-Display names are set when a member joins; the dashboard has no rename.
+A `member.changed` event re-reads `member.list` in every other open
+dashboard, and updates the viewer's own name when it is theirs.
 
 ## Manage workspaces
 
