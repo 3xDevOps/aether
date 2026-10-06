@@ -322,8 +322,6 @@ type MissionCancelResult struct {
 	Mission Mission `json:"mission"`
 }
 
-// MissionIDParams are the params of mission.archive, mission.unarchive and
-// mission.delete.
 type MissionIDParams struct {
 	MissionID string `json:"mission_id"`
 }

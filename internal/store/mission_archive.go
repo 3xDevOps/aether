@@ -9,9 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// SetMissionArchived archives (at != nil) a completed or cancelled mission,
-// or restores (at == nil) an archived one. The reported bool is whether this
-// call changed the column.
 func (d *DB) SetMissionArchived(ctx context.Context, id domain.MissionID, at *time.Time) (bool, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -47,9 +44,8 @@ func (d *DB) SetMissionArchived(ctx context.Context, id domain.MissionID, at *ti
 	return true, nil
 }
 
-// DeleteMission removes a cancelled or archived mission with its tasks,
-// attempts, submissions, questions and the agent messages stamped with it.
-// Its runs stay; the caller deletes them through the scheduler.
+// DeleteMission leaves the mission's runs; the caller deletes them through
+// the scheduler.
 func (d *DB) DeleteMission(ctx context.Context, id domain.MissionID) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {

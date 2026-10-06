@@ -237,9 +237,8 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 // ListRunsArchivedBefore returns runs whose archived_at is set and at or
 // before cutoff, for the retention sweep. It does not filter by status: a
 // run restored or otherwise no longer eligible is caught by the sweep's
-// own re-read. A run a swarm's submission still references waits for the
-// swarm's own sweep to delete the swarm first. One query, no index: the
-// sweep runs hourly and the table is small.
+// own re-read. A run a swarm submission references waits for the swarm's
+// sweep. One query, no index: the sweep runs hourly and the table is small.
 func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*domain.Run, error) {
 	ts, err := encodeTime(cutoff)
 	if err != nil {

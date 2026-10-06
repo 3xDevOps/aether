@@ -14,18 +14,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// RunRetirer is the scheduler seam behind run.close, run.archive and
-// run.delete.
 type RunRetirer interface {
 	CloseRun(context.Context, domain.RunID, domain.MemberID, domain.RunStatus) error
 	SetArchived(context.Context, domain.RunID, domain.MemberID, bool) (*domain.Run, error)
 	DeleteRun(context.Context, domain.RunID, domain.MemberID) error
 }
 
-// Archive hides a completed or cancelled swarm. Each completed run is first
-// closed - merged when it is the integrator of a completed swarm or a worker
-// whose work was accepted, without merging otherwise - so every run can be
-// archived with it. A swarm with a live run is refused.
 func (s *Service) Archive(ctx context.Context, actor domain.MemberID, p protocol.MissionIDParams) (protocol.MissionArchiveResult, error) {
 	m, err := s.authorizedMission(ctx, actor, p.MissionID, "archive this swarm")
 	if err != nil {
@@ -64,8 +58,6 @@ func (s *Service) Archive(ctx context.Context, actor domain.MemberID, p protocol
 	return s.setArchived(ctx, m.ID, &now)
 }
 
-// Unarchive restores an archived swarm and every archived run of it. Closed
-// runs stay closed.
 func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protocol.MissionIDParams) (protocol.MissionArchiveResult, error) {
 	m, err := s.authorizedMission(ctx, actor, p.MissionID, "unarchive this swarm")
 	if err != nil {

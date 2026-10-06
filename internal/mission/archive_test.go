@@ -15,8 +15,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// storeRetirer applies the scheduler's close, archive and delete to the
-// store rows the way the scheduler ends up leaving them.
 type storeRetirer struct {
 	db      *store.DB
 	closed  map[domain.RunID]domain.RunStatus
@@ -55,8 +53,6 @@ type archiveFixture struct {
 	bus     *recordingBus
 }
 
-// newArchiveFixture builds an active swarm with one integrator run and one
-// worker run whose submission is accepted.
 func newArchiveFixture(t *testing.T) *archiveFixture {
 	t.Helper()
 	ctx := context.Background()
