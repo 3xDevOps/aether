@@ -18,7 +18,7 @@ import { AgentMessages } from '@/routes/missions/agent-messages'
 import { ClampedText } from '@/routes/missions/clamped-text'
 import { CancelSwarm, ReplaceIntegrator } from '@/routes/missions/dialogs'
 import { SwarmIntegration } from '@/routes/missions/integration'
-import { answerFieldID, SwarmQuestions } from '@/routes/missions/questions'
+import { answerFormID, SwarmQuestions } from '@/routes/missions/questions'
 import {
   integratorLabel,
   missionFinal,
@@ -170,7 +170,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   )
 
   const answer = () => {
-    const field = openQuestion && document.getElementById(answerFieldID(openQuestion))
+    const field = openQuestion && document.getElementById(answerFormID(openQuestion))?.querySelector('textarea')
     field?.scrollIntoView({ block: 'center' })
     field?.focus()
   }

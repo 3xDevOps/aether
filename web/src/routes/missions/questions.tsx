@@ -11,7 +11,7 @@ import { message } from '@/lib/format'
 import type { MissionQuestion } from '@/lib/types'
 import { useStore } from '@/store'
 
-export const answerFieldID = (question: MissionQuestion) => `swarm-answer-${question.id}`
+export const answerFormID = (question: MissionQuestion) => `swarm-answer-${question.id}`
 
 function useMemberName(memberID: string | undefined): string {
   return useStore((s) => (memberID ? s.members[memberID]?.display_name ?? memberID : 'a human'))
@@ -34,6 +34,7 @@ function OpenQuestion({
   client: Api
   onAnswered: () => void
 }) {
+  const answeredBy = useMemberName(question.answered_by_member_id)
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const answered = Boolean(question.answered_at)
@@ -62,6 +63,7 @@ function OpenQuestion({
       <p className="whitespace-pre-wrap">{question.body}</p>
       {canAnswer ? (
         <form
+          id={answerFormID(question)}
           className="mt-2 flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault()
@@ -69,10 +71,12 @@ function OpenQuestion({
           }}
         >
           <FormField label={`Answer question ${question.seq}`} error={error ?? undefined}>
-            <Textarea id={answerFieldID(question)} rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} />
+            <Textarea rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} />
           </FormField>
           {answered ? (
-            <p className="text-ui-sm text-muted">Answered while you were typing. Your draft is kept here.</p>
+            <p className="text-ui-sm text-muted">
+              Answered by {answeredBy} while you were typing: {question.answer}. Your draft is kept here.
+            </p>
           ) : (
             <div>
               <Button type="submit" size="sm" disabled={sending || draft.trim() === ''}>
