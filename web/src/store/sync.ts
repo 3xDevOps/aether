@@ -23,6 +23,7 @@ import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
+import { coalesce } from '@/store/coalesce'
 import { pausedFromTimeline } from '@/store/board'
 import type { BudgetPayload } from '@/store/cost'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
@@ -502,21 +503,28 @@ export async function applyEvent(
       break
     }
     case 'workspace.approval':
-      await applyApprovalEvent(store, client, ev)
+      applyApprovalEvent(store, client, ev)
       break
     case 'workspace.budget':
       if (ev.workspace_id) store.getState().applyBudgetEvent(ev.workspace_id, ev.payload as BudgetPayload)
       break
-    case 'run.cost':
-      // Budget events mark threshold crossings only; the spend the status
-      // bar shows moves with every metered result.
-      if (ev.workspace_id) {
-        await client.budgetGet(ev.workspace_id).then(store.getState().setBudget).catch(ignore)
+    case 'run.cost': {
+      // Budget events fire on threshold crossings, refusals and admin edits;
+      // the spend and unmetered count the status bar shows move with every
+      // result. The read does not hold up the events behind it.
+      const workspaceID = ev.workspace_id
+      if (workspaceID) {
+        coalesce(store, `budget:${workspaceID}`, () =>
+          client.budgetGet(workspaceID).then(store.getState().setBudget).catch(ignore),
+        )
       }
       break
+    }
     case 'workspace.presence':
       // The payload names one transition, not the roster it changes.
-      await client.presenceRoster().then(store.getState().setPresence).catch(ignore)
+      coalesce(store, 'presence', () =>
+        client.presenceRoster().then(store.getState().setPresence).catch(ignore),
+      )
       break
     case 'run.agent':
       // Activity is a hint for the state line: an event about a run this

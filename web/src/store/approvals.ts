@@ -2,6 +2,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { Approval, ApprovalDecision, Event } from '@/lib/types'
 import type { RootStore } from '@/store'
+import { coalesce } from '@/store/coalesce'
 import type { SliceCreator } from '@/store/slice'
 
 export interface ApprovalsSlice {
@@ -99,12 +100,18 @@ export function sortByCreated(approvals: Approval[]): Approval[] {
   return [...approvals].sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
+/** How long a failed single-workspace read waits before its one retry. */
+const retryMs = 5000
+/** The inbox error a single-workspace read set, so only that read's success clears it. */
+const readErrors = new WeakMap<RootStore, string>()
+
 /**
  * Applies one `workspace.approval` event. The payload names the request and
  * its decision but not its text, so a request the inbox does not hold yet is
- * read with its workspace's list; a known one is updated in place.
+ * read with its workspace's list, without holding up the events behind it;
+ * a known one is updated in place.
  */
-export async function applyApprovalEvent(store: RootStore, client: Api, ev: Event): Promise<void> {
+export function applyApprovalEvent(store: RootStore, client: Api, ev: Event): void {
   const p = (ev.payload ?? {}) as { request_id?: string; decision?: ApprovalDecision }
   if (!ev.workspace_id || !p.request_id || !p.decision) return
   const s = store.getState()
@@ -114,10 +121,32 @@ export async function applyApprovalEvent(store: RootStore, client: Api, ev: Even
     return
   }
   if (p.decision !== 'requested' && !s.showDecided) return
-  try {
-    store.getState().setInbox(ev.workspace_id, await client.approvalList(ev.workspace_id, s.showDecided))
-  } catch (err) {
-    // An unreadable queue must not render as empty; the next full read clears this.
-    store.getState().setInboxError(message(err))
-  }
+  readInbox(store, client, ev.workspace_id, true)
+}
+
+function readInbox(store: RootStore, client: Api, workspaceID: string, retry: boolean): void {
+  coalesce(store, `approvals:${workspaceID}`, async () => {
+    const before = store.getState()
+    try {
+      const list = await client.approvalList(workspaceID, before.showDecided)
+      const now = store.getState()
+      // An event applied meanwhile may be newer than this answer: read again.
+      if (
+        now.inboxEvents[workspaceID] !== before.inboxEvents[workspaceID] ||
+        now.showDecided !== before.showDecided
+      ) {
+        return false
+      }
+      now.setInbox(workspaceID, list)
+      if (now.inboxError !== null && now.inboxError === readErrors.get(store)) now.setInboxError(null)
+    } catch (err) {
+      // An unreadable queue must not render as empty. Full reads come only
+      // on connect, reconnect and wake, so one retry keeps a blip from
+      // pinning the error for the session.
+      const error = message(err)
+      readErrors.set(store, error)
+      store.getState().setInboxError(error)
+      if (retry) setTimeout(() => readInbox(store, client, workspaceID, false), retryMs)
+    }
+  })
 }

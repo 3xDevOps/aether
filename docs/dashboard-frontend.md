@@ -2282,13 +2282,21 @@ count, and neither creates a second action inbox.
   - `workspace.approval` names the request and its decision but not its
     text. A request the inbox holds is decided in place (and dropped while
     decided requests are hidden); an unknown one reads that one workspace's
-    `approval.list`. Each such event is counted per workspace, and a full
-    read that started before it does not overwrite its workspace.
+    `approval.list`. Each such event is counted per workspace, and a read
+    that started before it - full or single - does not overwrite its
+    workspace; a single read is then repeated. A failed single read sets
+    the inbox error and retries once after 5 s; its success clears the
+    error.
   - `workspace.budget` carries the state, cap and spend, applied as they
-    are. It only fires on a threshold crossing, so a metered `run.cost`
-    re-reads that workspace's `budget.get` to keep the spend current.
+    are. It fires on threshold crossings, refusals and admin edits, not on
+    every spend change, so each `run.cost` re-reads that workspace's
+    `budget.get` to keep the spend and unmetered count current.
   - `workspace.presence` names one transition, so it re-reads
     `presence.roster`.
+  These reads start without holding up the events queued behind them (only
+  a run fetch does, for the cursor rule), and each is coalesced in
+  `src/store/coalesce.ts`: per workspace, one in flight and one queued, so
+  a burst of results or attaches costs two requests.
   The hook is mounted from the status-bar contribution, the one surface that
   is always on screen, which is also where the presence heartbeat lives
   (every 15 s, with the disk gauge read beside it). It also reads and beats

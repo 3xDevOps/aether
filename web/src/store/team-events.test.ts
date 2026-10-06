@@ -34,7 +34,7 @@ describe('team state from events', () => {
 
     await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
     expect(approvalList).toHaveBeenCalledTimes(1)
-    expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_1', 'apr_2'])
+    await vi.waitFor(() => expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_1', 'apr_2']))
 
     await applyEvent(
       store,
@@ -97,14 +97,68 @@ describe('team state from events', () => {
 
     await applyEvent(store, event(2, 'run.cost', { input_tokens: 10, output_tokens: 5, cost_usd: 0.2, metered: true }), client)
     expect(budgetGet).toHaveBeenCalledWith(workspace.id)
-    expect(store.getState().budgets[workspace.id].state).toBe('exceeded')
+    await vi.waitFor(() => expect(store.getState().budgets[workspace.id].state).toBe('exceeded'))
+  })
+
+  it('does not hold later events behind a budget read, and folds a burst into two reads', async () => {
+    const store = seeded()
+    const pending: (() => void)[] = []
+    const budgetGet = vi.fn(
+      (id: string) => new Promise<ReturnType<typeof budget>>((resolve) => pending.push(() => resolve(budget(id)))),
+    )
+    const client = fakeApi({ budgetGet })
+    const cost = (seq: number) => event(seq, 'run.cost', { metered: true })
+
+    for (let seq = 1; seq <= 5; seq++) await applyEvent(store, cost(seq), client)
+    await applyEvent(store, event(6, 'run.status', { to: 'failed' }), client)
+    expect(store.getState().runs.run_1.status).toBe('failed')
+    expect(budgetGet).toHaveBeenCalledTimes(1)
+
+    pending.shift()?.()
+    await vi.waitFor(() => expect(budgetGet).toHaveBeenCalledTimes(2))
+    pending.shift()?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(budgetGet).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads the list again when an event lands while it is in flight', async () => {
+    const store = seeded()
+    const first = Promise.withResolvers<ReturnType<typeof approval>[]>()
+    const approvalList = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementation(async () => [])
+    const client = fakeApi({ approvalList })
+
+    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
+    await applyEvent(store, event(2, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'approved' }), client)
+    first.resolve([approval({ id: 'apr_2' })])
+
+    await vi.waitFor(() => expect(approvalList).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(store.getState().inbox[workspace.id]).toEqual([]))
+  })
+
+  it('clears the error a failed list read set once a later read succeeds', async () => {
+    const store = seeded()
+    const approvalList = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('approval.list: database is locked'))
+      .mockImplementation(async () => [approval({ id: 'apr_3' })])
+    const client = fakeApi({ approvalList })
+
+    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
+    await vi.waitFor(() => expect(store.getState().inboxError).toContain('locked'))
+
+    await applyEvent(store, event(2, 'workspace.approval', { request_id: 'apr_3', action: 'Bash', decision: 'requested' }), client)
+    await vi.waitFor(() => expect(store.getState().inboxError).toBeNull())
+    expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_3'])
   })
 
   it('re-reads the roster on a presence event', async () => {
     const store = seeded()
     const presenceRoster = vi.fn(async () => [{ member_id: alice.id, state: 'online' as const, last_seen: '2026-08-14T11:00:00Z' }])
     await applyEvent(store, event(1, 'workspace.presence', { state: 'online' }, { run_id: '', actor_id: alice.id }), fakeApi({ presenceRoster }))
-    expect(store.getState().presence.map((p) => p.member_id)).toEqual([alice.id])
+    await vi.waitFor(() => expect(store.getState().presence.map((p) => p.member_id)).toEqual([alice.id]))
   })
 
   it('adds live events to an open feed as its filters select them', async () => {
