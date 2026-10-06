@@ -187,6 +187,9 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 	if err := recordMutationReceipt(tx, ctx, t.MissionID, "task.create", key, payload, id, 1, n); err != nil {
 		return nil, false, err
 	}
+	if err := recordMissionChange(ctx, tx, t.MissionID, domain.MissionTaskProposed, t.Revision.ProposedByRunID); err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, false, err
 	}
@@ -499,6 +502,9 @@ func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.propose", key, payload, string(id), next, n); receiptErr != nil {
 		return nil, receiptErr
 	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionTaskProposed, r.ProposedByRunID); changeErr != nil {
+		return nil, changeErr
+	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		return nil, commitErr
 	}
@@ -589,6 +595,9 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.accept", key, payload, string(id), revision, n); receiptErr != nil {
 		return receiptErr
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionTaskAccepted, acceptedBy); changeErr != nil {
+		return changeErr
 	}
 	if previousOutput == 1 {
 		if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); versionErr != nil {
@@ -741,6 +750,9 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, revision int, ex
 		if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.abandon", key, payload, string(id), revision, n); receiptErr != nil {
 			return receiptErr
 		}
+		if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionTaskFinished, mission.CurrentIntegratorRunID); changeErr != nil {
+			return changeErr
+		}
 		return tx.Commit()
 	}
 	// Abandonment removes an output from the current accepted set only when
@@ -763,6 +775,9 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, revision int, ex
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.abandon", key, payload, string(id), 0, n); receiptErr != nil {
 		return receiptErr
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionTaskFinished, mission.CurrentIntegratorRunID); changeErr != nil {
+		return changeErr
 	}
 	if currentOutput == 1 {
 		if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); versionErr != nil {

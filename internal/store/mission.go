@@ -36,7 +36,6 @@ type MissionStore interface {
 	MissionControlStore
 	CreateMission(context.Context, *domain.Mission) error
 	GetMission(context.Context, domain.MissionID) (*domain.Mission, error)
-	RecordMissionChange(context.Context, domain.MissionID, domain.MissionChange, domain.RunID) error
 	GetMissionByRun(context.Context, domain.RunID) (*domain.Mission, error)
 	ListMissions(context.Context, domain.WorkspaceID) ([]*domain.Mission, error)
 	ListMissionsPage(context.Context, domain.WorkspaceID, int, string) ([]*domain.Mission, string, error)
@@ -56,6 +55,7 @@ type MissionStore interface {
 	BindAttemptRun(context.Context, domain.AttemptID, domain.RunID, uint64, uint64) error
 	RequestAttemptCancellation(context.Context, domain.AttemptID, domain.RunID, uint64, string) (*domain.Attempt, bool, error)
 	UpdateAttemptState(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
+	EndObservedAttempt(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
 	SubmitAttempt(context.Context, domain.AttemptID, uint64, uint64, domain.SubmissionRef, []domain.SubmissionEvidence, []string) (*domain.Submission, error)
 	GetSubmission(context.Context, domain.SubmissionID) (*domain.Submission, error)
 	ListSubmissions(context.Context, domain.MissionID, domain.TaskID) ([]*domain.Submission, error)
@@ -312,20 +312,17 @@ func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.M
 	return m, err
 }
 
-// A change by the mission's current integrator run is counted but not
-// added to Changes.
-func (d *DB) RecordMissionChange(ctx context.Context, id domain.MissionID, kind domain.MissionChange, by domain.RunID) error {
-	if id == "" || kind == "" {
-		return errors.New("store: record mission change: mission and kind are required")
-	}
-	res, err := d.db.ExecContext(ctx, `UPDATE missions SET change_seq = change_seq + 1,
-		change_kinds = CASE WHEN current_integrator_run_id = ? THEN change_kinds
+// change_kinds keeps, per kind, the change_seq of the latest change the
+// mission's current integrator run did not make itself.
+func recordMissionChange(ctx context.Context, tx *sql.Tx, id domain.MissionID, kind domain.MissionChange, by domain.RunID) error {
+	_, err := tx.ExecContext(ctx, `UPDATE missions SET change_seq = change_seq + 1,
+		change_kinds = CASE WHEN ? <> '' AND current_integrator_run_id = ? THEN change_kinds
 			ELSE json_set(change_kinds, '$.' || ?, change_seq + 1) END
-		WHERE id = ?`, by, kind, id)
+		WHERE id = ?`, by, by, kind, id)
 	if err != nil {
-		return fmt.Errorf("store: record mission %s change: %w", id, err)
+		return fmt.Errorf("store: record mission %s %s: %w", id, kind, err)
 	}
-	return notFoundOnZeroRows(res, nil)
+	return nil
 }
 
 func (d *DB) GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error) {

@@ -297,6 +297,35 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 }
 
 func (d *DB) UpdateAttemptState(ctx context.Context, id domain.AttemptID, runID domain.RunID, authority, integrator uint64, state domain.AttemptState, detail string) error {
+	return updateAttemptState(ctx, d.db, id, runID, authority, integrator, state, detail)
+}
+
+// EndObservedAttempt settles the attempt of a worker run that ended without
+// a report and counts it as worker_ended, made by whoever asked to cancel it.
+func (d *DB) EndObservedAttempt(ctx context.Context, id domain.AttemptID, runID domain.RunID, authority, integrator uint64, state domain.AttemptState, detail string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: end attempt %s: begin: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := updateAttemptState(ctx, tx, id, runID, authority, integrator, state, detail); err != nil {
+		return err
+	}
+	var missionID domain.MissionID
+	var cancelledBy domain.RunID
+	if err := tx.QueryRowContext(ctx, `SELECT mission_id, cancellation_actor_run_id FROM mission_attempts WHERE id=?`, id).Scan(&missionID, &cancelledBy); err != nil {
+		return fmt.Errorf("store: end attempt %s: %w", id, err)
+	}
+	if err := recordMissionChange(ctx, tx, missionID, domain.MissionWorkerEnded, cancelledBy); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: end attempt %s: commit: %w", id, err)
+	}
+	return nil
+}
+
+func updateAttemptState(ctx context.Context, q execer, id domain.AttemptID, runID domain.RunID, authority, integrator uint64, state domain.AttemptState, detail string) error {
 	if !state.Valid() {
 		return errors.New("store: invalid attempt state")
 	}
@@ -320,7 +349,7 @@ func (d *DB) UpdateAttemptState(ctx context.Context, id domain.AttemptID, runID 
 	default:
 		return errors.New("store: attempt state cannot transition to reserved or launching")
 	}
-	res, err := d.db.ExecContext(ctx, query, args...)
+	res, err := q.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -617,6 +646,9 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "submission.accept", key, payload, string(id), taskRevision, n); receiptErr != nil {
 		return nil, receiptErr
+	}
+	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionTaskFinished, acceptedBy); changeErr != nil {
+		return nil, changeErr
 	}
 	if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); versionErr != nil {
 		return nil, versionErr

@@ -125,7 +125,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if createErr := s.createTask(ctx, t, p.IdempotencyKey); createErr != nil {
 			return nil, dependencyRefusal(createErr)
 		}
-		if publishErr := s.missionChanged(ctx, mission.ID, domain.MissionTaskProposed, run); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, t.ID)
@@ -169,7 +169,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if err != nil {
 			return nil, dependencyRefusal(err)
 		}
-		if publishErr := s.missionChanged(ctx, mission.ID, domain.MissionTaskProposed, run); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
@@ -208,7 +208,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, run, p.IdempotencyKey); acceptErr != nil {
 			return nil, acceptErr
 		}
-		if publishErr := s.missionChanged(ctx, mission.ID, domain.MissionTaskAccepted, run); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
@@ -244,7 +244,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
 			return nil, abandonErr
 		}
-		if publishErr := s.missionChanged(ctx, mission.ID, domain.MissionTaskFinished, run); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
@@ -325,7 +325,7 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 	if err != nil {
 		return nil, err
 	}
-	if publishErr := s.missionChanged(ctx, accepted.MissionID, domain.MissionTaskFinished, run); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, accepted.MissionID); publishErr != nil {
 		return nil, publishErr
 	}
 	return protocol.TaskMutationResult{Acceptance: &protocol.Acceptance{

@@ -128,7 +128,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	switch report.Outcome {
 	case store.CoordOutcomeBlocked:
 		// The durable coord.report already exists; keep the worker running.
-		if publishErr := s.missionChanged(ctx, m.ID, domain.MissionWorkerReport, run); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
 			return publishErr
 		}
 		return nil
@@ -173,7 +173,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if err != nil {
 		return err
 	}
-	if publishErr := s.missionChanged(ctx, m.ID, domain.MissionWorkerReport, run); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
 		return publishErr
 	}
 	return nil
@@ -196,7 +196,7 @@ func (s *Service) reconcileIntegratorReport(ctx context.Context, m *domain.Missi
 	if err != nil {
 		return err
 	}
-	return s.missionChanged(ctx, m.ID, domain.MissionPhaseChanged, run)
+	return s.publishMissionChanged(ctx, m.ID)
 }
 
 func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
@@ -254,7 +254,7 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 			return stateErr
 		}
 	}
-	return s.missionChanged(ctx, m.ID, domain.MissionWorkerReport, attempt.RunID)
+	return s.publishMissionChanged(ctx, m.ID)
 }
 
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {

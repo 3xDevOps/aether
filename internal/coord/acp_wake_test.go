@@ -217,9 +217,9 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 		t.Fatalf("the first mission state seen woke the integrator %d times", n)
 	}
 
-	stub.change(domain.MissionWorkerReport, false)
+	stub.change(domain.MissionWorkerEnded, false)
 	h.publishMissionChanged(t)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerReport})
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded})
 	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
@@ -264,9 +264,9 @@ func TestEnhancedWakeSkipsTheIntegratorsOwnChanges(t *testing.T) {
 	}
 
 	stub.change(domain.MissionWorkerEnded, false)
-	stub.change(domain.MissionWorkerReport, false)
+	stub.change(domain.MissionTaskProposed, false)
 	h.svc.wakeEnhanced(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionWorkerReport})
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionTaskProposed})
 	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}

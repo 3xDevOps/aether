@@ -821,11 +821,14 @@ and with the same swarm-update instruction, naming what changed, as in
 
 A swarm carries `change_seq`, on `mission.show` and on every
 `mission.changed` event: a counter that every change an integrator reacts to
-advances. The kinds are `task_proposed` (a task or revision),
-`task_accepted`, `task_finished` (accepted submission or abandoned task),
-`question_asked`, `question_answered`, `worker_report`, `worker_ended` (a
-worker run ended without a report), `integrator_replaced` and
-`phase_changed`. The integrator's `coord.status` assignment carries
+advances in the same transaction as the change; a retried request with the
+same idempotency key does not advance it again. The kinds are
+`task_proposed` (a task or revision), `task_accepted`, `task_finished`
+(accepted submission or abandoned task), `question_asked`,
+`question_answered`, `worker_ended` (a worker run ended without a report)
+and `phase_changed`. A worker report is not a kind: its inbox message already
+prompts the integrator. A change by a cancellation the integrator asked for
+counts as its own. The integrator's `coord.status` assignment carries
 `change_seq` and `changes`, the counter of the latest change of each kind it
 did not make itself.
 The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):

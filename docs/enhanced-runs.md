@@ -239,21 +239,23 @@ reading its inbox is prompted again only when another message arrives. Mail
 is acknowledged only when the agent acks its inbox batch.
 
 An enhanced integrator is also prompted when its swarm changed in a way it
-did not cause itself: a human answers its question, a worker reports, proposes
-a task or ends, the phase changes, or the integrator is replaced. The swarm's
+did not cause itself: a human answers its question, a worker proposes a task
+or ends without a report, or a human cancels the swarm. A worker's report
+prompts it through its inbox. The swarm's
 `change_seq` counter ([coordination.md](coordination.md#mission-phases)) tells it
 apart, so a question asked and answered within one turn prompts it when that
 turn ends. The prompt is the instruction its hooks would give, naming the
 kinds of change since it was last prompted, oldest first:
 
 ```
-Mission update (question answered, worker report): run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id <mission-id> before waiting or declaring completion.
+Mission update (question answered, worker ended): run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id <mission-id> before waiting or declaring completion.
 ```
 
 The swarm state when the integrator's session first opens is its baseline
 and prompts nothing; a change during its first turn prompts it when that
-turn ends. Its own changes, such as proposing tasks or asking a question,
-prompt nothing. An enhanced
+turn ends. Its own changes, such as proposing tasks, asking a question or
+cancelling a worker, prompt nothing. A replacement integrator starts a fresh
+session whose baseline already includes the replacement. An enhanced
 container sets `AETHER_ENHANCED=1`, and every `aether-internal hook` an
 adapter loads from the member's own settings exits without output there, so
 these prompts are the run's only wake path and the hooks' overlap notice

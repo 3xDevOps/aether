@@ -53,10 +53,8 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	if status := postJSON(t, env.web+"/api/v1/"+protocol.MethodMissionQuestionAnswer, string(answer), &answered); status != http.StatusOK {
 		t.Fatalf("mission.question.answer status %d", status)
 	}
-	items := waitTurns(ctx, t, env.srv, integratorRun, 2)
-	if !prompted(items, protocol.CoordMissionUpdateContext(missionID, []domain.MissionChange{domain.MissionQuestionAnswered})) {
-		t.Fatalf("the answer did not wake the integrator: %+v", items)
-	}
+	waitTurns(ctx, t, env.srv, integratorRun, 2)
+	waitPrompted(ctx, t, env.srv, integratorRun, protocol.CoordMissionUpdateContext(missionID, []domain.MissionChange{domain.MissionQuestionAnswered}))
 
 	var proposed protocol.TaskMutationResult
 	if err := pacedCall(ctx, integrator, protocol.MethodTaskPropose, protocol.TaskProposeParams{
@@ -87,10 +85,8 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("coord.send: %v", err)
 	}
-	items = waitTurns(ctx, t, env.srv, worker, 2)
-	if !prompted(items, protocol.CoordInboxContext(1)) {
-		t.Fatalf("the worker's second turn is not the inbox wake: %+v", items)
-	}
+	waitTurns(ctx, t, env.srv, worker, 2)
+	waitPrompted(ctx, t, env.srv, worker, protocol.CoordInboxContext(1))
 
 	workerSocket := waitMissionSocket(t, filepath.Join(env.data, "coord", string(worker)))
 	if err := pacedCall(ctx, workerSocket, protocol.MethodCoordReport, protocol.CoordReportParams{
@@ -98,10 +94,7 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("worker coord.report: %v", err)
 	}
-	items = waitTurns(ctx, t, env.srv, integratorRun, 3)
-	if !prompted(items, protocol.CoordInboxContext(1)) {
-		t.Fatalf("the worker's report did not wake the integrator: %+v", items)
-	}
+	waitPrompted(ctx, t, env.srv, integratorRun, protocol.CoordInboxContext(1))
 
 	for _, run := range []domain.RunID{worker, integratorRun} {
 		if err := env.srv.sched.Kill(ctx, run, ada.ID); err != nil {
@@ -134,13 +127,22 @@ func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID,
 	}
 }
 
-// prompted reports a wake prompt that carries instruction; one wake can
-// carry both the inbox and the swarm-update instruction.
-func prompted(items []acphost.Item, instruction string) bool {
-	for _, it := range items {
-		if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.Contains(it.Message.Text, strings.TrimSpace(instruction)) {
-			return true
+func waitPrompted(ctx context.Context, t *testing.T, srv *Server, run domain.RunID, instruction string) {
+	t.Helper()
+	for {
+		items, err := srv.sched.ACPHistory(run, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range items {
+			if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.Contains(it.Message.Text, strings.TrimSpace(instruction)) {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("run %s was never prompted with %q: %+v", run, instruction, items)
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return false
 }
