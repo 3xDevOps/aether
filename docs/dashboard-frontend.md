@@ -2324,8 +2324,9 @@ questions and queued messages stay contextual to their run, in its Details
   message kind glyph, the type name with its description, and the run as a
   quiet link. On a phone the time moves to the row's end and the run link
   under the text. `coord.message` and `coord.message.acked` rows name sender
-  and recipient (`Backend → Planner`) and a delivery word, never the payload's
-  ids.
+  and recipient (`Backend → Planner`), never the payload's ids, and a
+  delivery word only once the message is in the messages slice; the event
+  alone does not say whether it was delivered.
 - **The feed is virtualized.** `virtua` mounts only the rows near the
   viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
   row carries `aria-setsize` and `aria-posinset`, so a screen reader still

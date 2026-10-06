@@ -27,8 +27,7 @@ function MessageEvent({ payload }: { payload: CoordMessagePayload }) {
   return (
     <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 align-top">
       <Participants from={payload.from_run_id} to={payload.to_run_id} />
-      <span className="text-muted">·</span>
-      <span className="text-muted">{stored ? deliveryWord(stored) : 'Sent'}</span>
+      {stored && <span className="text-muted">· {deliveryWord(stored)}</span>}
     </span>
   )
 }

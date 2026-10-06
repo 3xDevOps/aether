@@ -175,7 +175,7 @@ describe('activity feed', () => {
     expect(await screen.findByText('failed - v1.3.0 - checksum mismatch')).toBeDefined()
   })
 
-  it('names both runs of an agent message and its delivery word', async () => {
+  it('names both runs of an agent message and gives a delivery word only once it is known', async () => {
     const client = feedApi([
       {
         id: 'evt_msg',
@@ -193,8 +193,11 @@ describe('activity feed', () => {
     const row = (await screen.findByRole('img', { name: 'Question' })).closest('li') as HTMLElement
     expect(within(row).getByRole('button', { name: 'document the checkout API' })).toBeDefined()
     expect(within(row).getByRole('button', { name: 'rewrite the checkout flow' })).toBeDefined()
-    expect(row.textContent).toContain('Sent')
+    expect(row.textContent).not.toMatch(/Sent|Delivered|Acknowledged/)
     expect(row.textContent).not.toContain('message_id')
+
+    act(() => useStore.setState({ runMessages: { msg_2: message({ id: 'msg_2', kind: 'question', acked_at: '2026-08-14T10:08:00Z' }) } }))
+    expect(row.textContent).toContain('Acknowledged')
   })
 
   it('shows each event type and payload as sent under Raw events', async () => {
