@@ -125,8 +125,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.10.1
-          skip-cache: false
-          skip-save-cache: ${{ github.event_name != 'push' }}
+          skip-cache: true
 
   build-and-test:
     needs: changes
