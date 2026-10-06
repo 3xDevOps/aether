@@ -303,7 +303,7 @@ describe('Sidebar', () => {
         ),
     )
 
-    expect(screen.getByLabelText('1 run needs you').className).toContain('bg-state-needs-you/15')
+    expect(screen.getByLabelText('1 run needs you').className).toContain('bg-state-needs-you-soft')
     expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
     expect(screen.queryByRole('img', { name: /Requests:/ })).toBeNull()
   })
