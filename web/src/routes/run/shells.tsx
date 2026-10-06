@@ -13,9 +13,9 @@ import { initialRunShellDock } from '@/store/terminal'
 const maxShellTabs = 4
 const listPollMs = 10_000
 
-function shellLabel(terminal: DevTerminal): string {
-  const name = terminal.name || terminal.terminal_id
-  return terminal.process.state === 'running' ? name : `${name} · ${terminal.process.state}`
+function shellLabel(terminal: DevTerminal | undefined, position: number): string {
+  const name = terminal?.name || `Shell ${position}`
+  return !terminal || terminal.process.state === 'running' ? name : `${name} · ${terminal.process.state}`
 }
 
 export function useRunShells(runID: string) {
@@ -97,9 +97,9 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
   const select = (tab: string) => useStore.getState().selectShellTab(runID, tab)
   const tabs = [
     ...(agent ? [{ id: '', label: 'Agent' }] : []),
-    ...(shells.canOpen ? dock.tabs.map((id) => {
+    ...(shells.canOpen ? dock.tabs.map((id, position) => {
       const terminal = dock.terminals.find((item) => item.terminal_id === id)
-      return { id, label: terminal ? shellLabel(terminal) : id }
+      return { id, label: shellLabel(terminal, (terminal ? dock.terminals.indexOf(terminal) : position) + 1) }
     }) : []),
   ]
   const active = dock.shellShown ? dock.activeTab ?? '' : ''
@@ -121,7 +121,7 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
         <MenuItem disabled={!shells.canAdd} onSelect={() => void shells.open()}>New shell</MenuItem>
         <MenuSeparator />
         {hidden.map((item) => (
-          <MenuItem key={item.terminal_id} onSelect={() => select(item.terminal_id)}>Show {shellLabel(item)}</MenuItem>
+          <MenuItem key={item.terminal_id} onSelect={() => select(item.terminal_id)}>Show {shellLabel(item, dock.terminals.indexOf(item) + 1)}</MenuItem>
         ))}
       </MenuContent>
     </Menu>
@@ -163,7 +163,7 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
               <MenuSeparator />
               <MenuItem disabled={!shells.canAdd} onSelect={() => void shells.open()}>New shell</MenuItem>
               {hidden.map((item) => (
-                <MenuItem key={item.terminal_id} onSelect={() => select(item.terminal_id)}>Show {shellLabel(item)}</MenuItem>
+                <MenuItem key={item.terminal_id} onSelect={() => select(item.terminal_id)}>Show {shellLabel(item, dock.terminals.indexOf(item) + 1)}</MenuItem>
               ))}
             </>
           )}
