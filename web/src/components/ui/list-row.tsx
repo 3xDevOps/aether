@@ -41,8 +41,8 @@ export function ListRow({
         )}
       </button>
       {hoverAction && (
-        <div className="hidden shrink-0 items-center pr-1 group-focus-within/row:flex group-hover/row:flex has-[[data-state=open]]:flex coarse:flex">
-          {hoverAction}
+        <div className="w-0 shrink-0 overflow-hidden group-focus-within/row:w-auto group-focus-within/row:overflow-visible group-hover/row:w-auto has-[[data-state=open]]:w-auto coarse:w-auto coarse:overflow-visible">
+          <div className="flex items-center pr-1">{hoverAction}</div>
         </div>
       )}
     </div>

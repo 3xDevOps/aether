@@ -109,7 +109,7 @@ test('a run header is the taller two-line size', () => {
   expect(screen.queryByRole('toolbar')).toBeNull()
 })
 
-test('a list row is a button whose hover action shows on focus and always on a coarse pointer', () => {
+test('a list row is a button whose hover action stays focusable, shows on focus and always on a coarse pointer', () => {
   render(
     <ListRow selected trailing="3m" hoverAction={<Button size="icon-sm" label="Archive">x</Button>}>
       Fix login
@@ -118,8 +118,8 @@ test('a list row is a button whose hover action shows on focus and always on a c
   const row = screen.getByRole('button', { name: /Fix login/ })
   expect(row.getAttribute('aria-current')).toBe('true')
   expect(row.closest('[data-slot="list-row"]')?.className).toContain('coarse:h-11')
-  const action = screen.getByRole('button', { name: 'Archive' }).parentElement!
-  for (const token of ['hidden', 'group-focus-within/row:flex', 'group-hover/row:flex', 'coarse:flex']) {
+  const action = screen.getByRole('button', { name: 'Archive' }).parentElement!.parentElement!
+  for (const token of ['w-0', 'group-focus-within/row:w-auto', 'group-hover/row:w-auto', 'coarse:w-auto']) {
     expect(action.className).toContain(token)
   }
 })
