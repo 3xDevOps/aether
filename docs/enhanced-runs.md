@@ -113,12 +113,14 @@ Aether has 1 unacknowledged inbox item(s). Run /usr/local/bin/aether-internal in
 The prompt passes the same admission as a Standard run's native wake: a
 protected run, a human holding a swarm worker, or a finished swarm task
 suppresses it. A wake refused while the session stays idle, such as while a
-human holds the run's control, is retried after 1, 2, 4 and 8 seconds. A
-paused run is not prompted; Resume offers it the mail that arrived
-meanwhile. Messages that arrive together share one prompt, and each set of
-new unread messages starts at most one turn, so an agent that ends its turn
-without reading its inbox is prompted again only when another message
-arrives. Mail is acknowledged only when the agent acks its inbox batch.
+human holds a swarm worker, is retried after 1, 2, 4 and 8 seconds and then
+dropped until the next message or turn end, so releasing the hold does not
+re-offer the mail. Holding a run's control lease does not refuse a wake. A
+paused run is not prompted; Resume offers it the mail that arrived meanwhile.
+Messages that arrive together share one prompt, and each set of new unread
+messages starts at most one turn, so an agent that ends its turn without
+reading its inbox is prompted again only when another message arrives. Mail
+is acknowledged only when the agent acks its inbox batch.
 
 An enhanced integrator is also prompted when its mission's phase,
 open-question count or generation changes, for example when a human answers
