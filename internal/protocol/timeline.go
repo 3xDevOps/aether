@@ -13,6 +13,7 @@ const (
 type WorkspaceTimelineParams struct {
 	WorkspaceID string   `json:"workspace_id"`
 	RunID       string   `json:"run_id,omitempty"`
+	MissionID   string   `json:"mission_id,omitempty"`
 	MemberID    string   `json:"member_id,omitempty"`
 	Types       []string `json:"types,omitempty"`
 	AfterSeq    uint64   `json:"after_seq,omitempty"`

@@ -142,6 +142,18 @@ func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 		sb.WriteString(" AND run_id = ?")
 		args = append(args, string(f.Run))
 	}
+	if len(f.Runs) > 0 {
+		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
+		sb.WriteString(" AND (run_id IN " + set +
+			" OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))")
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+		args = append(args, string(TypeCoordMessage))
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+	}
 	if len(f.Types) > 0 {
 		sb.WriteString(" AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")")
 		for _, t := range f.Types {

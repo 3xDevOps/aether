@@ -387,6 +387,28 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var peerQuestion protocol.CoordAskResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodCoordAsk, protocol.CoordAskParams{
+		ToRunID: retried.Attempt.RunID, Body: "which files does the retry touch?", IdempotencyKey: "ask-retry-A",
+	}, &peerQuestion); err != nil {
+		t.Fatalf("integrator coord.ask: %v", err)
+	}
+	var workerMail protocol.CoordInboxResult
+	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{}, &workerMail); err != nil {
+		t.Fatalf("worker inbox: %v", err)
+	}
+	if !slices.ContainsFunc(workerMail.Messages, func(m protocol.CoordMessage) bool { return m.ID == peerQuestion.QuestionID }) {
+		t.Fatalf("worker inbox = %+v, want the integrator's question", workerMail.Messages)
+	}
+	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: workerMail.AckToken}, &workerMail); err != nil {
+		t.Fatalf("worker acknowledges the question: %v", err)
+	}
+	var replied protocol.CoordReplyResult
+	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordReply, protocol.CoordReplyParams{
+		QuestionID: peerQuestion.QuestionID, Body: "only the fixture file", IdempotencyKey: "reply-retry-A",
+	}, &replied); err != nil {
+		t.Fatalf("worker coord.reply: %v", err)
+	}
 	var report protocol.CoordReportResult
 	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordReport, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeSuccess, Summary: "fixture completed without required user evidence", IdempotencyKey: "report-retry-A",
@@ -411,6 +433,35 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: reportMail.AckToken}, &reportMail); err != nil {
 		t.Fatalf("acknowledge worker report: %v", err)
+	}
+	var history protocol.CoordMessagesListResult
+	if err := boCtrl.Call(protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{
+		WorkspaceID: string(e.ws.ID), MissionID: missionID, RunID: retried.Attempt.RunID,
+	}, &history); err != nil {
+		t.Fatalf("coord.messages.list: %v", err)
+	}
+	byID := make(map[string]protocol.RunMessage, len(history.Messages))
+	for _, m := range history.Messages {
+		if m.MissionID != missionID {
+			t.Fatalf("listed message %+v is not stamped with mission %s", m, missionID)
+		}
+		byID[m.ID] = m
+	}
+	question, reply := byID[peerQuestion.QuestionID], byID[replied.MessageID]
+	if question.Kind != protocol.CoordMessageKindQuestion || question.FromRunID != integratorRun ||
+		question.ToRunID != retried.Attempt.RunID || question.AckedAt == nil {
+		t.Fatalf("listed question = %+v, want the integrator's acknowledged question", question)
+	}
+	if reply.Kind != protocol.CoordMessageKindReply || reply.CorrelationID != peerQuestion.QuestionID || reply.Body != "only the fixture file" {
+		t.Fatalf("listed reply = %+v, want the worker's reply on the question thread", reply)
+	}
+	reportRow := slices.IndexFunc(history.Messages, func(m protocol.RunMessage) bool { return m.CorrelationID == report.ReportID })
+	if reportRow < 0 {
+		t.Fatalf("history %+v has no row for report %s", history.Messages, report.ReportID)
+	}
+	if got := history.Messages[reportRow]; got.Kind != protocol.CoordMessageKindReport || got.Outcome != protocol.CoordOutcomeSuccess ||
+		got.Summary != "fixture completed without required user evidence" || got.AckedAt == nil {
+		t.Fatalf("listed report = %+v, want the acknowledged success report", got)
 	}
 	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
 		t.Fatalf("mission.show after report: %v", err)

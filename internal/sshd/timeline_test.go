@@ -40,7 +40,7 @@ func TestHandoffAndWorkspaceTimeline(t *testing.T) {
 
 	e := newTestEnv(t, func(c *Config) {
 		c.Bus = bus
-		c.Services.Timeline = timeline.NewReader(log)
+		c.Services.Timeline = timeline.NewReader(log, c.Store)
 	})
 	_, grace := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 

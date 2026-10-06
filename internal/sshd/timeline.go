@@ -38,6 +38,7 @@ func (s *Server) workspaceTimeline(ctx context.Context, _ domain.MemberID, param
 	page, err := reader.Page(ctx, timeline.Filter{
 		Workspace: domain.WorkspaceID(p.WorkspaceID),
 		Run:       domain.RunID(p.RunID),
+		MissionID: domain.MissionID(p.MissionID),
 		Member:    domain.MemberID(p.MemberID),
 		Types:     types,
 	}, p.AfterSeq, p.Limit)

@@ -87,7 +87,8 @@ func rpcError(err error) *protocol.Error {
 			errors.Is(err, ptyhost.ErrSessionReplaced):
 			// Matches coord.missionRPCError for a reused mission idempotency key.
 			code = protocol.CodeConflict
-		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
+		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab),
+			errors.Is(err, store.ErrInvalidCursor):
 			code = protocol.CodeInvalidParams
 		case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit),
 			errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),

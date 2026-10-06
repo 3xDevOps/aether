@@ -45,6 +45,7 @@ type Run struct {
 	// Always present, including zero; web clients keep it optional for older
 	// gateways.
 	UnansweredQuestions int    `json:"unanswered_questions"`
+	UnackedMessages     int    `json:"unacked_messages"`
 	MissionID           string `json:"mission_id,omitempty"`
 	MissionRole         string `json:"mission_role,omitempty"`
 	IntegratorRunID     string `json:"integrator_run_id,omitempty"`
@@ -154,6 +155,7 @@ func RunFromDomain(r *domain.Run) Run {
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID:   string(r.ProfileSnapshotID),
 		UnansweredQuestions: r.UnansweredQuestions,
+		UnackedMessages:     r.UnackedMessages,
 		MissionID:           string(r.MissionID),
 		MissionRole:         r.MissionRole,
 		IntegratorRunID:     string(r.IntegratorRunID),

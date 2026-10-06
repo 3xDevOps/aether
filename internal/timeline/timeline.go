@@ -7,6 +7,7 @@ package timeline
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -37,12 +38,18 @@ var detailTypes = map[events.Type]bool{
 }
 
 // Filter narrows a timeline page. Member matches an event's actor - who
-// did it - not the owner of the run it concerns.
+// did it - not the owner of the run it concerns. Run matches agent messages
+// on either side; MissionID matches every run that has served the mission.
 type Filter struct {
 	Workspace domain.WorkspaceID
 	Run       domain.RunID
+	MissionID domain.MissionID
 	Member    domain.MemberID
 	Types     []events.Type
+}
+
+type MissionRuns interface {
+	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 }
 
 // Page is one slice of history. NextSeq is the cursor to pass as the next
@@ -55,11 +62,14 @@ type Page struct {
 
 // Reader pages a workspace's history out of the event log.
 type Reader struct {
-	log events.EventLog
+	log      events.EventLog
+	missions MissionRuns
 }
 
 // NewReader returns a Reader over log.
-func NewReader(log events.EventLog) *Reader { return &Reader{log: log} }
+func NewReader(log events.EventLog, missions MissionRuns) *Reader {
+	return &Reader{log: log, missions: missions}
+}
 
 // Page returns up to limit events matching f with Seq > afterSeq, oldest
 // first. Reads are bounded by the log head sampled at entry, so paging
@@ -80,7 +90,23 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 		return Page{NextSeq: head}, nil
 	}
 	batch := max(limit, minBatch)
-	logFilter := events.Filter{Workspace: f.Workspace, Run: f.Run, Types: f.Types}
+	logFilter := events.Filter{Workspace: f.Workspace, Types: f.Types}
+	if f.Run != "" {
+		logFilter.Runs = []domain.RunID{f.Run}
+	}
+	if f.MissionID != "" {
+		runs, merr := r.missions.ListMissionRunIDs(ctx, f.MissionID)
+		if merr != nil {
+			return Page{}, fmt.Errorf("timeline: resolve mission %s: %w", f.MissionID, merr)
+		}
+		if f.Run != "" {
+			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
+		}
+		if len(runs) == 0 {
+			return Page{NextSeq: head}, nil
+		}
+		logFilter.Runs = runs
+	}
 	out := make([]events.Event, 0, limit)
 	scanned := 0
 	for len(out) < limit && cursor < head && scanned < limit*scanBudget {

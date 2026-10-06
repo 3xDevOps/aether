@@ -8,7 +8,7 @@ import "github.com/3xDevOps/Aether/internal/timeline"
 func init() {
 	registerService("timeline", func(d Deps) (Service, error) {
 		if d.Events != nil {
-			d.SSH.Services.Timeline = timeline.NewReader(d.Events)
+			d.SSH.Services.Timeline = timeline.NewReader(d.Events, d.Store)
 		}
 		return nil, nil
 	})

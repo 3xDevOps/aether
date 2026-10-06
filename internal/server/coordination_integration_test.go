@@ -80,8 +80,22 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	attB.waitOutput(t, "inbox:"+bodyA)
 
 	// The exchange stays attributed to the original sending runs.
-	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
-	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
+	waitEvent(t, sub, &seen, "run A's coordination message", coordMessage(runA.ID, runB.ID))
+	waitEvent(t, sub, &seen, "run B's coordination message", coordMessage(runB.ID, runA.ID))
+
+	var history protocol.CoordMessagesListResult
+	if err := boCtrl.Call(protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{
+		WorkspaceID: string(e.ws.ID), RunID: runA.ID,
+	}, &history); err != nil {
+		t.Fatalf("coord.messages.list: %v", err)
+	}
+	bodies := make([]string, 0, len(history.Messages))
+	for _, m := range history.Messages {
+		bodies = append(bodies, m.Body)
+	}
+	if !slices.Contains(bodies, bodyA) || !slices.Contains(bodies, bodyB) {
+		t.Fatalf("history for run A = %q, want both directions", bodies)
+	}
 
 	// The taskless fixture intentionally did not message peers.
 	if out := attC.output(); strings.Contains(out, "inbox:") || strings.Contains(out, "sent:") {
@@ -125,7 +139,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	waitOverlap(t, adaCtrl, runA.ID, runB.ID)
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
-	assertNoCoordNote(t, seen)
+	assertNoCoordMessage(t, seen)
 	// A swarm needs the disabled mailbox authority.
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
 	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
@@ -168,7 +182,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	// No side effect anywhere, and the radar is still exactly as it was.
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID, runC.ID)
 	drain(sub, &seen)
-	assertNoCoordNote(t, seen)
+	assertNoCoordMessage(t, seen)
 	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 }
 
@@ -526,17 +540,13 @@ func waitOverlap(t *testing.T, ctrl *protocol.Client, run, peer string) {
 	t.Fatalf("the radar never reported run %s overlapping run %s", run, peer)
 }
 
-// coordNote matches the server-originated timeline entry a coordination
-// message leaves on the sending run.
-func coordNote(run, to string) func(events.Event) bool {
-	return timelineNote(run, "coordination message to run "+to+": ")
-}
-
-func timelineNote(run, prefix string) func(events.Event) bool {
+// coordMessage matches the server-originated event a coordination message
+// leaves on the sending run.
+func coordMessage(run, to string) func(events.Event) bool {
 	return func(e events.Event) bool {
-		p, ok := e.Payload.(events.TimelinePayload)
+		p, ok := e.Payload.(events.CoordMessagePayload)
 		return ok && string(e.RunID) == run && e.ActorID == "" &&
-			p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, prefix)
+			string(p.FromRunID) == run && string(p.ToRunID) == to
 	}
 }
 
@@ -555,13 +565,12 @@ func drain(sub events.Subscription, seen *[]events.Event) {
 	}
 }
 
-// assertNoCoordNote verifies the kill switch suppresses message audit entries.
-func assertNoCoordNote(t *testing.T, seen []events.Event) {
+// assertNoCoordMessage verifies the kill switch suppresses message events.
+func assertNoCoordMessage(t *testing.T, seen []events.Event) {
 	t.Helper()
 	for _, e := range seen {
-		p, ok := e.Payload.(events.TimelinePayload)
-		if ok && strings.HasPrefix(p.Message, "coordination ") {
-			t.Errorf("coordination reached the timeline with the kill switch off: %+v", p)
+		if p, ok := e.Payload.(events.CoordMessagePayload); ok {
+			t.Errorf("coordination published a message with the kill switch off: %+v", p)
 		}
 	}
 }
