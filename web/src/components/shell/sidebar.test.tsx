@@ -196,6 +196,19 @@ describe('update notice and footer', () => {
     expect(await screen.findByRole('heading', { name: 'Updates' })).toBeDefined()
   })
 
+  it('brings a dismissed update back from the footer menu', async () => {
+    const update = updateStatus()
+    useStore.setState({ update, dismissedUpdates: { cli: update.cli.latest ?? '', server: '', shell: '' } })
+    render(<AppShell />)
+    expect(nav().queryByText(/is available/)).toBeNull()
+
+    fireEvent.keyDown(nav().getByRole('button', { name: 'Alice, Connecting' }), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Update…' }))
+
+    expect(useStore.getState().updatesOpen).toBe(true)
+    expect(useStore.getState().dismissedUpdates.cli).toBe('')
+  })
+
   it('opens the shortcuts and switches the theme from the footer menu', async () => {
     render(<AppShell />)
     const footer = nav().getByRole('button', { name: 'Alice, Connecting' })

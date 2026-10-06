@@ -2957,8 +2957,8 @@ about itself and appears wherever the member is an admin.
   not an update already moving: a scheduled or applying server comes back
   regardless, because that banner is why the server is about to restart.
 - **The footer menu brings a dismissed prompt back.** **Update…** in the
-  sidebar footer menu appears while any update exists; it clears the
-  dismissals and opens the dialog.
+  sidebar footer menu appears while any update exists, dismissed or not; it
+  clears the dismissals and opens the dialog.
 - **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
   but the Electron shell around it is whatever `aether gui build` last
   produced. That build records the complete CLI version and its executable

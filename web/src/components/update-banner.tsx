@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import type { UpdateKind } from '@/store/ui'
 
 /** How often the CLI release check is repeated while the app stays open. */
 export const RECHECK_MS = 30 * 60 * 1000
@@ -74,7 +75,7 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   // Re-read whenever the connection changes state or server.info names a
   // different version. The reconnect is the one that matters: a server
   // that updates itself re-executes, the socket drops, and the fresh
-  // status is what ends the banner and the status bar's notice. A read
+  // status is what ends the banner and the sidebar's notice. A read
   // that failed is retried by the same rule, plus the banner's Retry.
   const serverVersion = useStore((s) => s.info?.server_version)
   const connection = useStore((s) => s.connection)
@@ -186,16 +187,18 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
 
 /**
  * The sidebar's one-line summary of what the dialog holds, or null when
- * nothing applies. A dismissed offer stays quiet; a server update already
- * moving is always named, because it is about to restart the server.
+ * nothing applies. A dismissed offer stays quiet unless `includeDismissed`;
+ * a server update already moving is always named, because it is about to
+ * restart the server.
  */
-export function useUpdateNotice(): { text: string; action: boolean } | null {
+export function useUpdateNotice(includeDismissed = false): { text: string; action: boolean } | null {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const update = useStore((s) => s.update)
   const status = useStore((s) => s.serverUpdate)
   const progress = useStore((s) => s.serverUpdateProgress)
-  const dismissed = useStore((s) => s.dismissedUpdates)
+  const stored = useStore((s) => s.dismissedUpdates)
+  const dismissed = includeDismissed ? noneDismissed : stored
   const cliVersion = useStore((s) => s.capabilities?.version)
   const serves = caps.hasLocal('update.check')
   const latest = update?.cli.latest ?? ''
@@ -216,6 +219,8 @@ export function useUpdateNotice(): { text: string; action: boolean } | null {
   }
   return null
 }
+
+const noneDismissed: Record<UpdateKind, string> = { cli: '', server: '', shell: '' }
 
 /**
  * The desktop app was built by a different CLI than the one serving this

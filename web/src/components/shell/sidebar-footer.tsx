@@ -56,7 +56,7 @@ export function SidebarFooter() {
   const openShortcuts = useStore((s) => s.setShortcutsOpen)
   const openUpdates = useStore((s) => s.setUpdatesOpen)
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
-  const update = useUpdateNotice()
+  const update = useUpdateNotice(true)
   const mobile = useIsMobile()
   const [profile, setProfile] = useState(false)
   const name = self?.display_name ?? 'Not signed in'
