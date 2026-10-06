@@ -33,9 +33,25 @@ function actionKey(): string {
   return crypto.randomUUID()
 }
 
-function remainingSeconds(deliverAfter: string | undefined, now: number): number {
+function remainingSeconds(deliverAfter: string | undefined): number {
   if (!deliverAfter) return 0
-  return Math.max(0, Math.ceil((new Date(deliverAfter).valueOf() - now) / 1000))
+  return Math.max(0, Math.ceil((new Date(deliverAfter).valueOf() - Date.now()) / 1000))
+}
+
+/** Ticks once a second until delivery; only this text re-renders. */
+function DeliveryCountdown({ deliverAfter }: { deliverAfter?: string }) {
+  const [remaining, setRemaining] = useState(() => remainingSeconds(deliverAfter))
+  useEffect(() => {
+    setRemaining(remainingSeconds(deliverAfter))
+    if (remainingSeconds(deliverAfter) === 0) return
+    const timer = window.setInterval(() => {
+      const next = remainingSeconds(deliverAfter)
+      setRemaining(next)
+      if (next === 0) window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [deliverAfter])
+  return <span className="text-state-warn">{remaining ? `${remaining}s before delivery` : 'Ready for delivery'}</span>
 }
 
 export interface RunRoomProps {
@@ -100,7 +116,6 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<PendingPost | undefined>()
   const [initialLoadFailed, setInitialLoadFailed] = useState(false)
-  const [clock, setClock] = useState(() => Date.now())
   const roomLoadKey = useRef<string | null>(null)
   const draftVersion = useRef(0)
   const composer = useRef<HTMLTextAreaElement>(null)
@@ -334,12 +349,6 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, runID, workspaceID])
 
-  useEffect(() => {
-    if (!open) return
-    const timer = window.setInterval(() => setClock(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [open])
-
   const markDraftEdited = () => {
     draftVersion.current += 1
   }
@@ -566,7 +575,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
               </div>
             )}
             <div className="space-y-2" aria-live="polite">
-              {messages.map((message) => <RoomMessageRow key={message.id} message={message} members={members} selfID={selfID} canModerate={isLive && ownsControl} now={clock} busy={busy} onAnswer={selectQuestion} onDecide={decide} />)}
+              {messages.map((message) => <RoomMessageRow key={message.id} message={message} members={members} selfID={selfID} canModerate={isLive && ownsControl} busy={busy} onAnswer={selectQuestion} onDecide={decide} />)}
             </div>
           </div>
           <footer className="shrink-0 border-t border-border bg-toolbar px-3 py-2">
@@ -645,8 +654,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   )
 }
 
-function RoomMessageRow({ message, members, selfID, canModerate, now, busy, onAnswer, onDecide }: { message: RoomMessage; members: Record<string, { display_name: string; color?: string }>; selfID: string | null; canModerate: boolean; now: number; busy: boolean; onAnswer: (message: RoomMessage) => void; onDecide: (id: string, decision: 'approve' | 'deny') => void }) {
-  const remaining = remainingSeconds(message.deliver_after, now)
+function RoomMessageRow({ message, members, selfID, canModerate, busy, onAnswer, onDecide }: { message: RoomMessage; members: Record<string, { display_name: string; color?: string }>; selfID: string | null; canModerate: boolean; busy: boolean; onAnswer: (message: RoomMessage) => void; onDecide: (id: string, decision: 'approve' | 'deny') => void }) {
   const isQuestion = message.kind === 'question'
   const isQueued = message.kind === 'steer_request' && message.state === 'queued'
   const anchor = message.anchor
@@ -662,7 +670,7 @@ function RoomMessageRow({ message, members, selfID, canModerate, now, busy, onAn
       <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
         <span className={message.state === 'sent' ? 'text-state-success' : message.state === 'uncertain' ? 'text-state-warn' : message.state === 'not_sent' || message.state === 'denied' ? 'text-state-failed' : 'text-muted-foreground'}>{message.state === 'sent' && message.kind !== 'steer_request' ? 'Posted' : message.state === 'uncertain' ? 'Delivery uncertain' : message.state === 'not_sent' ? 'Not sent' : message.state === 'sent' ? 'Sent' : message.state}</span>
         {message.failure?.message && <span className="text-muted-foreground">{message.failure.message}</span>}
-        {isQueued && <span className="text-state-warn">{remaining ? `${remaining}s before delivery` : 'Ready for delivery'}</span>}
+        {isQueued && <DeliveryCountdown deliverAfter={message.deliver_after} />}
         {isQuestion && message.state === 'sent' && <Button type="button" size="sm" variant="outline" onClick={() => onAnswer(message)}>Answer</Button>}
         {isQueued && canModerate && <><Button type="button" size="sm" onClick={() => onDecide(message.id, 'approve')} disabled={busy}>Approve now</Button><Button type="button" size="sm" variant="outline" onClick={() => onDecide(message.id, 'deny')} disabled={busy}>Deny</Button></>}
       </div>

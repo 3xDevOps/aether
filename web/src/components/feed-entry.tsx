@@ -5,8 +5,9 @@
 
 import { memo, type ReactNode } from 'react'
 import { Chip } from '@/components/ui/heroui'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { typeLabel, type EventType } from '@/lib/events'
-import { budgetStateLabel, money, timeAgo } from '@/lib/format'
+import { budgetStateLabel, money } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { BudgetState, Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
@@ -28,12 +29,11 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
       />
       <div className="@container/feed-entry min-w-0">
         <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @md/feed-entry:grid-cols-[auto_minmax(0,1fr)_minmax(8rem,14rem)]">
-          <time
+          <RelativeTime
+            at={event.time}
             className="shrink-0 pt-px text-xs tabular-nums text-muted-foreground"
             title={event.time}
-          >
-            {timeAgo(event.time)}
-          </time>
+          />
           <span title={event.type} className="min-w-0 max-w-full">
             <Chip
               color="default"

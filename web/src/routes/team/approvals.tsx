@@ -2,9 +2,9 @@ import { Check, ShieldQuestion, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { timeAgo } from '@/lib/format'
 import { useMediaQuery } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
@@ -251,7 +251,7 @@ function Row({
             {runLabel(run)}
           </button>
         )}
-        <time className="sm:ml-auto">{timeAgo(approval.created_at)}</time>
+        <RelativeTime at={approval.created_at} className="sm:ml-auto" />
       </div>
 
       {!open && (
@@ -263,7 +263,7 @@ function Row({
           />
           {approval.decision === 'approved' ? 'Approved' : 'Denied'} by{' '}
           <span className="min-w-0 break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
-          {approval.decided_at && ` ${timeAgo(approval.decided_at)}`}
+          {approval.decided_at && <> <RelativeTime at={approval.decided_at} /></>}
         </p>
       )}
       {error && (

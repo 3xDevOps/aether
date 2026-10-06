@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { timeAgo } from '@/lib/format'
@@ -353,7 +354,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                             <Chip color="default" variant="tertiary" size="sm" className="max-w-full">
                               <Chip.Label className="break-words">
                                 {lastSeen.has(member.id)
-                                  ? `offline - last seen ${timeAgo(lastSeen.get(member.id) ?? '')}`
+                                  ? <>offline - last seen <RelativeTime at={lastSeen.get(member.id) ?? ''} /></>
                                   : 'offline'}
                               </Chip.Label>
                             </Chip>

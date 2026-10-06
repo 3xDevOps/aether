@@ -20,9 +20,10 @@ import { Button } from '@/components/ui/button'
 import { Chip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { message, providerName, timeAgo } from '@/lib/format'
+import { message, providerName } from '@/lib/format'
 import type { Device, DeviceLookup } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
@@ -160,11 +161,11 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                     </div>
                     <p className="min-w-0 break-words text-xs text-muted-foreground">
                       {isAdmin && <>{owner(device)} · </>}
-                      <span title={device.created_at}>added {timeAgo(device.created_at)}</span>
+                      <span title={device.created_at}>added <RelativeTime at={device.created_at} /></span>
                       {' · '}
                       {device.last_seen_at ? (
                         <span title={device.last_seen_at}>
-                          last seen {timeAgo(device.last_seen_at)}
+                          last seen <RelativeTime at={device.last_seen_at} />
                         </span>
                       ) : (
                         'never seen'

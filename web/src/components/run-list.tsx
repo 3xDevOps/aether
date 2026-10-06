@@ -2,7 +2,7 @@ import type { MouseEvent } from 'react'
 import { StateIndicator } from '@/components/state-dot'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
-import { timeAgo } from '@/lib/format'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { useDelayed } from '@/lib/hooks'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
@@ -141,12 +141,11 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
                   <StatusChip state={state} />
                   <RunInputIndicator run={run} />
                 </span>
-                <time
+                <RelativeTime
+                  at={run.stateChangedAt}
                   className="col-start-2 row-start-1 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground md:col-auto md:row-auto"
                   title={run.stateChangedAt}
-                >
-                  {timeAgo(run.stateChangedAt)}
-                </time>
+                />
               </div>
             </li>
           ))}

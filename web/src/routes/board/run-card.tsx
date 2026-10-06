@@ -5,6 +5,7 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
 import { awaitingReview, runLabel, stateLabel, type PresentationState } from '@/lib/status'
@@ -152,14 +153,18 @@ export const RunCard = memo(function RunCard({
         <p className="flex items-start gap-1 text-muted-foreground">
           <GitCommit className="mt-0.5 size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0 break-all select-text">
-            {run.last_commit} · committed {timeAgo(run.last_commit_at ?? run.created_at)}
+            {run.last_commit} · committed <RelativeTime at={run.last_commit_at ?? run.created_at} />
           </span>
         </p>
       )}
       <p className="break-words text-muted-foreground">
         Owner: {owner?.display_name ?? run.member_id} · Harness: {run.harness} ({run.mode})
       </p>
-      <p className="text-muted-foreground">{timestamps(run, state)}</p>
+      <p className="text-muted-foreground">
+        Created <RelativeTime at={run.created_at} />
+        {run.started_at && <> · started <RelativeTime at={run.started_at} /></>}
+        {' · '}{stateLabel[state].toLowerCase()} <RelativeTime at={run.stateChangedAt} />
+      </p>
       <CardSlot name="card:chips" run={run} />
       <CardSlot name="card:footer" run={run} />
     </div>
@@ -242,9 +247,7 @@ export const RunCard = memo(function RunCard({
             <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
             <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
             <span className="min-w-0 truncate" title={owner?.display_name ?? run.member_id}>{owner?.display_name ?? run.member_id}</span>
-            <time className="ml-auto shrink-0 tabular-nums" title={timestamps(run, state)}>
-              {timeAgo(run.stateChangedAt)}
-            </time>
+            <RelativeTime at={run.stateChangedAt} className="ml-auto shrink-0 tabular-nums" title={timestamps(run, state)} />
           </div>
         </div>
         {variant === 'cards' && expanded && (

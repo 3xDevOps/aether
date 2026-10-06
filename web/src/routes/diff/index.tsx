@@ -9,8 +9,8 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Chip, Tooltip } from '@/components/ui/heroui'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
-import { timeAgo } from '@/lib/format'
 import { belowMd, coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
@@ -98,7 +98,7 @@ function DiffView({ params }: RouteProps) {
               </p>
               <p className="truncate">
                 {snapshot ? (
-                  <>What changed {timeAgo(snapshot.time)}</>
+                  <>What changed <RelativeTime at={snapshot.time} /></>
                 ) : (
                   <>
                     Against{' '}
@@ -275,7 +275,7 @@ function Timeline({
                       selected === snap.time && 'border-primary bg-selection text-selection-foreground',
                     )}
                   >
-                    <span className="block truncate font-medium">{timeAgo(snap.time)}</span>
+                    <RelativeTime at={snap.time} className="block truncate font-medium" />
                     <span
                       className={cn(
                         'mt-0.5 block text-[11px] text-muted-foreground',

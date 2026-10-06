@@ -239,6 +239,16 @@ Run rows and board cards are `React.memo` components; reducers replace only
 the record of the run that changed, so an event about one run re-renders
 that run's row and card and leaves the rest alone.
 
+**Relative times tick on one shared clock.** `<RelativeTime at>`
+(`src/components/ui/relative-time.tsx`) renders a `<time>` whose text comes
+from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
+30-second interval for the whole app, running only while something
+subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
+board card, a run list row, a feed entry, an approval, the members and
+devices views or the diff timeline keeps moving without re-rendering the
+row. A per-second countdown, such as a queued steer's delivery in the Run
+Room, is its own small component and re-renders only its text.
+
 **`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
