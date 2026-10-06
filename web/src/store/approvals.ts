@@ -140,12 +140,16 @@ export function readInbox(store: RootStore, client: Api, workspaceID: string, at
       now.setInbox(workspaceID, list)
       now.setInboxError(workspaceID, null)
     } catch (err) {
-      store.getState().setInboxError(workspaceID, message(err))
-      setTimeout(() => {
-        const now = store.getState()
-        if (attempt > 0 && (now.connection !== 'live' || now.inboxErrors[workspaceID] === undefined)) return
-        readInbox(store, client, workspaceID, attempt + 1)
-      }, readRetryDelay(attempt))
+      inboxReadFailed(store, client, workspaceID, err, attempt)
     }
   })
+}
+
+export function inboxReadFailed(store: RootStore, client: Api, workspaceID: string, err: unknown, attempt = 0): void {
+  store.getState().setInboxError(workspaceID, message(err))
+  setTimeout(() => {
+    const now = store.getState()
+    if (attempt > 0 && (now.connection !== 'live' || now.inboxErrors[workspaceID] === undefined)) return
+    readInbox(store, client, workspaceID, attempt + 1)
+  }, readRetryDelay(attempt))
 }

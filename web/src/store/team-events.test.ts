@@ -117,6 +117,28 @@ describe('team state from events', () => {
     }
   })
 
+  it('retries a failed full read while the stream stays live and quiet', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      store.setState({ connection: 'live' })
+      const approvalList = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('approval.list: database is locked'))
+        .mockResolvedValue([approval({ id: 'apr_1' })])
+
+      await refreshInbox(store, fakeApi({ approvalList }))
+      expect(store.getState().inboxError).toContain('locked')
+
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(approvalList).toHaveBeenCalledTimes(2)
+      expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_1'])
+      expect(store.getState().inboxError).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps one workspace's failed read retrying when a full read succeeds elsewhere", async () => {
     vi.useFakeTimers()
     try {

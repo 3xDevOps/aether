@@ -6,7 +6,7 @@ import { api, type Api } from '@/lib/api'
 import { onWake } from '@/lib/stream'
 import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
-import { readInbox } from '@/store/approvals'
+import { inboxReadFailed, readInbox } from '@/store/approvals'
 import type { FeedFilters } from '@/store/timeline'
 
 /** Presence expires after 45s server-side; a third of it keeps us online. */
@@ -62,7 +62,7 @@ export async function refreshInbox(store: RootStore, client: Api = api): Promise
           now.setInboxError(wsp, null)
         },
         (err) => {
-          if (store.getState().inboxRequest === id) store.getState().setInboxError(wsp, message(err))
+          if (store.getState().inboxRequest === id) inboxReadFailed(store, client, wsp, err)
         },
       ),
     ),

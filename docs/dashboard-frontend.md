@@ -2236,7 +2236,8 @@ count, and neither creates a second action inbox.
     `approval.list`. Each such event is counted per workspace, and a read
     that started before it - full or single - does not overwrite its
     workspace; that workspace is then read again on its own. A failed
-    single read sets the inbox error and retries after 5 s; while the
+    read, full or single, sets the inbox error and retries that workspace
+    after 5 s; while the
     stream stays live it keeps retrying, doubling the wait up to 60 s,
     until a read succeeds or a full read clears the error.
   - `workspace.budget` carries the state, cap and spend, applied as they
