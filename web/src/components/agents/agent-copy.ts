@@ -71,7 +71,10 @@ export function modeLines(agent: AgentInfo): { term: string; text: string }[] {
           : 'Installed with the agent in the next step',
     },
     { term: 'Switching', text: agent.switchable ? 'Switch a running agent from its header' : 'Chosen when the run starts' },
-    { term: 'Fallback', text: 'If the adapter fails to start, the run tells you why and offers the terminal' },
+    {
+      term: 'Fallback',
+      text: `If ${agent.enhanced === 'native' ? 'Enhanced' : 'the adapter'} fails to start, the run tells you why and offers the terminal`,
+    },
   ]
   if (agent.name === 'claude') {
     lines.push({ term: 'Billing', text: 'Uses your Claude login through the Claude Agent SDK; the run shows which account pays' })

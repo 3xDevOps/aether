@@ -69,8 +69,17 @@ describe('the Standard and Enhanced comparison', () => {
     render(<ModeComparison agent={{ ...codex, switchable: true }} value="acp" onChange={vi.fn()} />)
     const lines = screen.getByText('Support').closest('dl')!
     expect(lines.textContent).toContain('Switch a running agent from its header')
+    expect(lines.textContent).toContain('If the adapter fails to start')
     expect(lines.textContent).toContain('Already installed')
     expect(lines.textContent).not.toContain('Billing')
+  })
+
+  it('says Enhanced, not an adapter, can fail to start for a native agent', () => {
+    render(<ModeComparison agent={{ ...codex, name: 'opencode', display_name: 'OpenCode', enhanced: 'native' }} value="acp" onChange={vi.fn()} />)
+    const lines = screen.getByText('Support').closest('dl')!
+    expect(lines.textContent).toContain("OpenCode: supported by the agent's own CLI")
+    expect(lines.textContent).toContain('If Enhanced fails to start, the run tells you why and offers the terminal')
+    expect(lines.textContent).not.toContain('adapter')
   })
 
   it('disables Enhanced with the reason for an agent that has none', () => {
