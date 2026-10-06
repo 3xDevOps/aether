@@ -2323,9 +2323,12 @@ questions and queued messages stay contextual to their run, in its Details
 - **A budget warns, it never stops anything.** The Team line in the sidebar
   footer menu shows the spend and the worst state any workspace is in (`ok`,
   `warn`, `exceeded`) - every workspace, ones with nothing running included,
-  which is what the wide read above is for - and says so in those words. A
-  spend that includes unmetered runs renders as a floor (`$1.20+`), because
-  an agent with no adapter reports nothing.
+  which is what the wide read above is for - and says so in those words, for
+  example "1 online · $12.40 spent". The spend is every run's total, not a
+  month's. A spend that includes unmetered runs renders as a floor ("at least
+  $1.20 spent"), because an agent with no adapter reports nothing; a zero
+  spend reads "no spend yet", or "no spend reported" when only unmetered runs
+  exist.
 - Watcher avatars come from the roster's `watching` set, which the gateway
   fills from live PTY attaches - the browser's attaches included.
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write

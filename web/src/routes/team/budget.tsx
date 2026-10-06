@@ -15,8 +15,10 @@ export function TeamSummary({ heading }: { heading?: ReactNode }) {
   if (online.length > 0) parts.push(`${online.length} online`)
   if (Object.keys(budgets).length > 0) {
     const totals = costTotals(budgets)
-    const spend = money.format(totals.costUSD) + (totals.advisory ? '+' : '')
-    parts.push(totals.state === 'ok' ? `${spend} spent` : `${spend} spent, ${budgetStateLabel[totals.state]}`)
+    const spend = totals.costUSD === 0
+      ? totals.advisory ? 'no spend reported' : 'no spend yet'
+      : `${totals.advisory ? 'at least ' : ''}${money.format(totals.costUSD)} spent`
+    parts.push(totals.state === 'ok' ? spend : `${spend}, ${budgetStateLabel[totals.state]}`)
   }
   if (parts.length === 0 && !inboxError) return null
   const names = online.map((id) => members[id]?.display_name ?? id)

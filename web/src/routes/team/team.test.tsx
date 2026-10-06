@@ -235,8 +235,24 @@ describe('team refresh and summary', () => {
     })
     render(<TeamSummary />)
 
-    // The trailing + is because one run reported no usage: the total is a floor.
-    expect(screen.getByText('$1.50+ spent, past the cap')).toBeDefined()
+    // One run reported no usage, so the total is a floor.
+    expect(screen.getByText('at least $1.50 spent, past the cap')).toBeDefined()
+  })
+
+  it.each([
+    [0, 'no spend yet'],
+    [1, 'no spend reported'],
+  ])('words a zero spend with %i unmetered runs as "%s"', (unmetered, words) => {
+    seed({
+      budgets: {
+        [workspace.id]: budget(workspace.id, {
+          spend: { runs: unmetered, metered_runs: 0, unmetered_runs: unmetered, input_tokens: 0, output_tokens: 0, cost_usd: 0 },
+        }),
+      },
+    })
+    render(<TeamSummary />)
+
+    expect(screen.getByText(words)).toBeDefined()
   })
 
   it('lights the disk gauge from the read server.info cannot carry', async () => {
