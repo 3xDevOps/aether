@@ -597,7 +597,7 @@ commit captured at launch.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with conflict warnings. The `needs-attention` wire status prints as `needs-you`, and a notice counts those runs; `--attention` lists only them, not every run waiting on an input request. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
+| `aether runs` | Every run you can see, colored by owner, with conflict warnings. The `needs-attention` wire status prints as `needs-you`, and a notice counts those runs; `--needs-you` lists only them, not every run waiting on an input request. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
 | `aether message <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |
@@ -631,7 +631,7 @@ blocked worker in a swarm you are accountable for. The full list is in
 **Working** with "Waiting for Alice" for everyone else. Needs you lists every
 workspace; Working and Finished list the selected one. Native question
 coverage depends on the agent's reporter; see [harnesses.md](harnesses.md).
-Desktop **Run idle** notifications and `aether runs --attention` follow the
+Desktop **Run idle** notifications and `aether runs --needs-you` follow the
 `needs-attention` wire status, not Needs you.
 
 ### Handoff and finishing runs

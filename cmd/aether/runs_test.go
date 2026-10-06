@@ -21,10 +21,10 @@ func TestRenderRuns(t *testing.T) {
 	overlapOf := map[string]string{"r2": "a.go with bob"}
 
 	cases := []struct {
-		name      string
-		attention bool
-		archived  bool
-		want      string
+		name     string
+		needsYou bool
+		archived bool
+		want     string
 	}{
 		{
 			name: "default hides archived runs",
@@ -33,8 +33,8 @@ func TestRenderRuns(t *testing.T) {
 				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
 		},
 		{
-			name:      "--attention hides archived runs",
-			attention: true,
+			name:     "--needs-you hides archived runs",
+			needsYou: true,
 			want: "ID  STATUS     AGENT   MEMBER  OVERLAP        TITLE      TASK\n" +
 				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
 		},
@@ -48,7 +48,7 @@ func TestRenderRuns(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := renderRuns(&buf, runs, memberName, overlapOf, tc.attention, tc.archived); err != nil {
+			if err := renderRuns(&buf, runs, memberName, overlapOf, tc.needsYou, tc.archived); err != nil {
 				t.Fatalf("renderRuns: %v", err)
 			}
 			if got := buf.String(); got != tc.want {
@@ -58,12 +58,12 @@ func TestRenderRuns(t *testing.T) {
 	}
 }
 
-func TestRunsRejectsAttentionAndArchivedTogether(t *testing.T) {
-	err := runRuns([]string{"--attention", "--archived"})
+func TestRunsRejectsNeedsYouAndArchivedTogether(t *testing.T) {
+	err := runRuns([]string{"--needs-you", "--archived"})
 	if err == nil {
-		t.Fatal("--attention with --archived succeeded, want a usage error")
+		t.Fatal("--needs-you with --archived succeeded, want a usage error")
 	}
-	if !strings.Contains(err.Error(), "--attention and --archived cannot be used together") {
+	if !strings.Contains(err.Error(), "--needs-you and --archived cannot be used together") {
 		t.Errorf("error = %v, want the exact combination message", err)
 	}
 }
