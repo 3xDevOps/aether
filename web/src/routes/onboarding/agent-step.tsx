@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import { AddAgent } from '@/components/agents/add-agent'
+import { defaultMode } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList, useAgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
@@ -84,7 +85,7 @@ export function AgentStep({
                 agents={agents}
                 onSetUp={canSetUp ? (agent) => onSetup(agent.name) : undefined}
                 onRun={(agent) => {
-                  rememberLaunch(agent.name, useStore.getState().launchDefaults[agent.name]?.mode ?? 'tui')
+                  rememberLaunch(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
                   onNext()
                 }}
               />

@@ -1009,6 +1009,15 @@ describe('the agent the step set up', () => {
     expect(useStore.getState().launchDefaults.claude).toBeDefined()
   })
 
+  it('starts the first run on the default the server reports when nothing was chosen', async () => {
+    const client = fakeApi({
+      agentList: vi.fn(async () => [agentInfo({ name: 'codex', display_name: 'Codex', login_found: true, enhanced: 'adapter', enhanced_installed: true, default_mode: 'acp' })]),
+    })
+    renderStep(client)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Codex' }))
+    expect(useStore.getState().launchDefaults.codex?.mode).toBe('acp')
+  })
+
   it('adds a custom agent and opens its setup', async () => {
     const client = fakeApi()
     renderStep(client)
