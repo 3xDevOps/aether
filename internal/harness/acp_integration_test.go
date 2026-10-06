@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/acphost"
 )
 
 // TestACPAdapterInstall installs each pinned adapter the way InstallCommand
@@ -120,7 +123,52 @@ func testAdapterInstall(t *testing.T, image string, p Profile) {
 			t.Fatalf("initialize = %s", lines.Bytes())
 		}
 		t.Logf("%s@%s cold start: initialize answered in %d ms", install.Package, install.Version, time.Since(started).Milliseconds())
+		if os.Getenv("ACP_LIVE") == "1" {
+			testLiveSession(ctx, t, container, resolved, p)
+		}
 		return
 	}
 	t.Fatalf("%s exited without answering initialize: %v\nstderr: %s", install.Binary, lines.Err(), stderr.String())
+}
+
+// testLiveSession opens a session the way an enhanced run does: the session
+// host over the adapter's stdio in the standard image, initialize then
+// session/new. No prompt is sent, so no login is needed.
+func testLiveSession(ctx context.Context, t *testing.T, container, adapter string, p Profile) {
+	cmd := exec.CommandContext(ctx, "docker", append([]string{"exec", "-i",
+		"--env", "CLAUDE_CONFIG_DIR=/home/aether/.claude", "--env", "NO_BROWSER=1",
+		container, adapter}, p.ACPArgs[1:]...)...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	s, err := acphost.Start(ctx, stdout, stdin, acphost.Config{
+		LogPath: filepath.Join(t.TempDir(), "run.items.jsonl"),
+		Cwd:     "/home/aether",
+	})
+	if err != nil {
+		// A logged-out Codex fails session/new; initialize still ran.
+		if strings.Contains(err.Error(), "session/new") && strings.Contains(err.Error(), "Authentication required") {
+			t.Skipf("agent not logged in: %v", err)
+		}
+		t.Fatalf("open the session: %v\nstderr: %s", err, stderr.String())
+	}
+	if s.SessionID() == "" || s.State().Mode == "" {
+		t.Fatalf("session %q state %+v", s.SessionID(), s.State())
+	}
+	t.Logf("%s session %s in mode %s", p.Name, s.SessionID(), s.State().Mode)
+	_ = s.Close()
 }
