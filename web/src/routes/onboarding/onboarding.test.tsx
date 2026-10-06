@@ -112,6 +112,7 @@ function seed(extra: Partial<RootState> = {}) {
     linkStatus: { server_configured: true, linked: true, addr: 'host:2222', user: 'alice', repo: '/src/repo' },
     hydrated: true,
     hydrationError: null,
+    agentList: null,
     route: { name: 'onboarding', params: {} },
     onboarded: false,
     onboardingStep: 'Connect',

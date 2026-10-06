@@ -45,6 +45,7 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     info: { ...serverInfo, member: self },
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
+    agentList: null,
     pausedRuns: {},
     inbox: {},
     approvalsByRun: {},

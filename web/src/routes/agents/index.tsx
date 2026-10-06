@@ -45,7 +45,7 @@ function DefaultMode({ agent }: { agent: AgentInfo }) {
 
 export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
-  const { agents, error, reload } = useAgentList(client)
+  const { agents, error, reload } = useAgentList(client, true)
   const [screen, setScreen] = useState('')
   const [returnFocusTo, setReturnFocusTo] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)

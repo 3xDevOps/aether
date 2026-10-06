@@ -51,6 +51,7 @@ beforeEach(() => {
     approvalsByRun: {},
     runViewMemory: {},
     sessionLogs: {},
+    agentList: null,
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
   })
 })
@@ -100,6 +101,14 @@ describe('run frame', () => {
     fireEvent.mouseDown(within(views).getByRole('tab', { name: 'Terminal' }))
     expect(await screen.findByText('No agent terminal')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
+  })
+
+  it('reads agent.list once across run opens', async () => {
+    vi.mocked(api.agentList).mockClear()
+    open().unmount()
+    await waitFor(() => expect(useStore.getState().agentList).not.toBeNull())
+    open()
+    expect(api.agentList).toHaveBeenCalledTimes(1)
   })
 
   it('cycles the views on ] and [', () => {

@@ -35,7 +35,7 @@ export function AgentStep({
   onSetup: (subStep: string) => void
   onNext: () => void
 }) {
-  const { agents, error, reload } = useAgentList(client)
+  const { agents, error, reload } = useAgentList(client, true)
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
   const rememberLaunch = useStore((s) => s.rememberLaunch)
   const loading = useDelayed(agents === null && error === null)
