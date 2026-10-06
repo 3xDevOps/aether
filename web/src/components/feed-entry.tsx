@@ -29,11 +29,9 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
       />
       <div className="@container/feed-entry min-w-0">
         <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @md/feed-entry:grid-cols-[auto_minmax(0,1fr)_minmax(8rem,14rem)]">
-          <RelativeTime
-            at={event.time}
-            className="shrink-0 pt-px text-xs tabular-nums text-muted-foreground"
-            title={event.time}
-          />
+          <span className="shrink-0 pt-px text-xs tabular-nums text-muted-foreground">
+            <RelativeTime at={event.time} title={event.time} />
+          </span>
           <span title={event.type} className="min-w-0 max-w-full">
             <Chip
               color="default"
