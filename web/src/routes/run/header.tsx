@@ -93,7 +93,7 @@ function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, n
         return { label: 'Answer', act: () => nav.focusRequest() }
       }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
-      return { label, act: () => nav.reveal(card) }
+      return { label: !steer && input && run.acp ? 'Answer' : label, act: () => nav.reveal(card) }
     }
     case 'run':
       return openTerminal()
