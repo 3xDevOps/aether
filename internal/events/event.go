@@ -33,6 +33,8 @@ const (
 	TypeRunTitle Type = "run.title"
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected Type = "run.protected"
+	// TypeRunController carries the member holding a run's control lease.
+	TypeRunController Type = "run.controller"
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -152,6 +154,16 @@ type RunProtectedPayload struct {
 func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
+
+// RunControllerPayload names the member holding a run's control lease;
+// empty means nobody does.
+type RunControllerPayload struct {
+	MemberID domain.MemberID `json:"member_id"`
+}
+
+func (RunControllerPayload) EventType() Type { return TypeRunController }
+
+func init() { registerPayload[RunControllerPayload](TypeRunController) }
 
 // RunArchivedPayload reports a run's archive state, both RFC3339. A nil
 // ArchivedAt (and DeletesAt) means the run was restored.

@@ -207,6 +207,11 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
 	}
+	if s.cfg.Control != nil {
+		if holder, ok := s.cfg.Control.Status(string(run.ID)); ok {
+			out.ControllerMemberID = string(holder.MemberID)
+		}
+	}
 	return out
 }
 

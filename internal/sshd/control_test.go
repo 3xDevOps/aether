@@ -438,3 +438,41 @@ func readLineWithin(t *testing.T, r *bufio.Reader) error {
 		return nil
 	}
 }
+
+func TestRunSnapshotCarriesController(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) { c.Control = control.New(control.Config{}) })
+	_, other := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	c := controlClient(t, e)
+	get := func() protocol.Run {
+		t.Helper()
+		var rg protocol.RunResult
+		if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(e.run.ID)}, &rg); err != nil {
+			t.Fatalf("run.get: %v", err)
+		}
+		return rg.Run
+	}
+	if got := get().ControllerMemberID; got != "" {
+		t.Fatalf("controller before any lease = %q", got)
+	}
+	lease, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(other.ID), "grace-tab", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := get().ControllerMemberID; got != string(other.ID) {
+		t.Fatalf("run.get controller = %q, want %q", got, other.ID)
+	}
+	var rl protocol.RunListResult
+	if err := c.Call(protocol.MethodRunList, protocol.RunListParams{}, &rl); err != nil {
+		t.Fatalf("run.list: %v", err)
+	}
+	if len(rl.Runs) != 1 || rl.Runs[0].ControllerMemberID != string(other.ID) {
+		t.Fatalf("run.list = %+v", rl.Runs)
+	}
+	if err := e.srv.cfg.Control.Release(string(e.run.ID), other.ID, lease.SessionID, lease.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if got := get().ControllerMemberID; got != "" {
+		t.Fatalf("controller after release = %q", got)
+	}
+}

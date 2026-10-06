@@ -170,6 +170,10 @@ type Server struct {
 	tailnet  servergw.Tailnet
 	services []namedService
 
+	// controllerMu orders run.controller publishes: each reads the holder
+	// under it, so the last one published names the current holder.
+	controllerMu sync.Mutex
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -317,7 +321,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
-	s.control = control.New(control.Config{})
+	s.control = control.New(control.Config{OnHolderChange: s.publishController})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,

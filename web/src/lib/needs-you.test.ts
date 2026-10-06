@@ -251,6 +251,34 @@ describe('viewer scoping', () => {
     expect(needsYou(record(), ctx)?.id).toBe('permission')
   })
 
+  it("shows a controller the requests on another member's run before the room loads", () => {
+    const held = (pending: 'permission' | 'question', controller: string) =>
+      record({
+        mode: 'acp',
+        controller_member_id: controller,
+        pending_inputs: [{ id: 'req_1', session_id: 'sess_1', kind: pending }],
+      })
+    const ctx = stateContext(bobViewing)
+    expect(needsYou(held('permission', bob.id), ctx)?.id).toBe('permission')
+    expect(needsYou(held('question', bob.id), ctx)?.id).toBe('question')
+
+    // The snapshot names the current holder over a room status read earlier.
+    const stale = stateContext({
+      ...bobViewing,
+      roomStatus: {
+        run_1: {
+          workspace_id: 'wsp_1',
+          run_id: 'run_1',
+          protected: false,
+          watchers: [],
+          queued_steers: 0,
+          controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' },
+        },
+      },
+    })
+    expect(needsYou(held('permission', ''), stale)).toBeUndefined()
+  })
+
   it("does not ask the owner to answer their own room question", () => {
     const ctx = stateContext({ roomMessages: { run_1: [roomMessage({ kind: 'question' })] } })
     expect(needsYou(record(), ctx)).toBeUndefined()

@@ -794,7 +794,8 @@ Removal also repairs the selection and open route before any refresh awaits.
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
   `run.title`, `run.protected` and `run.archived` follow the same fetch-first
-  rule on a run the client has never seen.
+  rule on a run the client has never seen; `run.controller` skips an unknown
+  run, whose snapshot carries the holder.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
 - **`run.agent` events set a run's `activity`** (`{verb, target, at}` on
@@ -1057,6 +1058,14 @@ snapshot instead takes its finish, start or creation time
 (`stateChangedAtEstimated`): its idle reason drops the duration ("Agent
 idle") until the next status event, and it sorts and shows its change time
 by that estimate.
+
+**Terminal controller** comes from `controller_member_id`, which the
+gateway decorates from the control lease on `run.get` and `run.list` (empty
+when nobody holds it). A `run.controller` event, published whenever a lease
+is taken, taken over, released, fenced or runs out its reconnect window,
+keeps it current, so a teammate holding control of someone else's run sees
+its requests without opening the Run Room. Only a gateway too old to send
+the field falls back to the Run Room's cached status.
 
 **Paused** comes from the `paused` field the gateway decorates from the
 scheduler on `run.get` and `run.list`; a paused run still reads `running`.

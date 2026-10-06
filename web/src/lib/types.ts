@@ -58,6 +58,8 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** Holder of the run's control lease; '' means nobody, absent on older gateways. */
+  controller_member_id?: string
   /** An agent report finished the run and its owner has not opened it yet. */
   outcome_unseen?: boolean
   base_commit?: string
@@ -631,6 +633,10 @@ export interface RunTitlePayload {
 }
 export interface RunProtectedPayload {
   protected: boolean
+}
+/** An empty member_id means nobody holds the control lease. */
+export interface RunControllerPayload {
+  member_id: string
 }
 /** Both null means the run was restored. */
 export interface RunArchivedPayload {

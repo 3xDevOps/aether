@@ -61,6 +61,7 @@ export interface RunsSlice {
   applyRunTitle: (runID: string, title: string) => void
   applyUnackedMessages: (runID: string, count: number | undefined) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
+  applyRunController: (runID: string, memberID: string) => void
   applyRunArchived: (
     runID: string,
     archivedAt: string | null,
@@ -170,6 +171,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current || current.protected === isProtected) return {}
       return { runs: { ...s.runs, [runID]: { ...current, protected: isProtected } } }
+    }),
+  applyRunController: (runID, memberID) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.controller_member_id === memberID) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, controller_member_id: memberID } } }
     }),
   applyRunArchived: (runID, archivedAt, deletesAt) =>
     set((s) => {

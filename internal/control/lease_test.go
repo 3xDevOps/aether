@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 type testClock struct {
@@ -614,4 +616,85 @@ func TestInteractiveForceOnlyReplacesExactAuthenticatedSession(t *testing.T) {
 	default:
 		t.Fatal("released lease did not notify its observers")
 	}
+}
+
+func TestHolderChangeIsReported(t *testing.T) {
+	changes := make(chan domain.RunID, 16)
+	service := New(Config{ReconnectWindow: 300 * time.Millisecond, OnHolderChange: func(run domain.RunID) { changes <- run }})
+	expect := func(what string, want int) {
+		t.Helper()
+		got := 0
+		for {
+			select {
+			case run := <-changes:
+				if run != "run-1" {
+					t.Fatalf("%s: change for %q", what, run)
+				}
+				got++
+				continue
+			case <-time.After(50 * time.Millisecond):
+			}
+			break
+		}
+		if got != want {
+			t.Fatalf("%s: %d changes, want %d", what, got, want)
+		}
+	}
+
+	first, _, err := service.Acquire("run-1", "member-1", "tab-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect("acquire", 1)
+	if _, _, err := service.Acquire("run-1", "member-2", "tab-b", false); !errors.Is(err, ErrOccupied) {
+		t.Fatalf("occupied acquire: %v", err)
+	}
+	expect("refused acquire", 0)
+	second, _, err := service.Acquire("run-1", "member-2", "tab-b", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect("takeover", 1)
+	if err := service.Release("run-1", "member-1", first.SessionID, first.Generation); !errors.Is(err, ErrStale) {
+		t.Fatalf("stale release: %v", err)
+	}
+	expect("stale release", 0)
+	if err := service.Release("run-1", "member-2", second.SessionID, second.Generation); err != nil {
+		t.Fatal(err)
+	}
+	expect("release", 1)
+
+	third, _, err := service.Acquire("run-1", "member-1", "tab-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect("reacquire", 1)
+	service.Disconnect("run-1", third.SessionID, third.Generation)
+	expect("disconnect within the window", 0)
+	time.Sleep(300 * time.Millisecond)
+	expect("reconnect window ran out", 1)
+	if _, ok := service.Status("run-1"); ok {
+		t.Fatal("expired lease still reported")
+	}
+
+	if _, _, err := service.Acquire("run-1", "member-1", "tab-a", false); err != nil {
+		t.Fatal(err)
+	}
+	expect("acquire before fence", 1)
+	if service.Fence("run-1") == nil {
+		t.Fatal("fence displaced nobody")
+	}
+	expect("fence", 1)
+	if _, err := service.AdmitRevoke("run-1", RevocationRevoked, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	expect("revoke with no holder", 0)
+	if _, _, err := service.Acquire("run-1", "member-1", "tab-a", false); err != nil {
+		t.Fatal(err)
+	}
+	expect("acquire before revoke", 1)
+	if _, err := service.AdmitRevoke("run-1", RevocationRevoked, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	expect("revoke", 1)
 }
