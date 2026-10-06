@@ -16,7 +16,6 @@ import {
   shortcutLabel,
   useKeybindings,
 } from '@/lib/keybindings'
-import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 const scopeNames: Record<KeyScope, string> = {
@@ -146,16 +145,13 @@ export function ShortcutsDialog() {
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>
-            Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys. Every command is in the command palette ({shortcutLabel('palette')}).
+            Single keys work when no field is focused. Shortcuts with Ctrl or Cmd also work in the terminal. Every command is in the command palette ({shortcutLabel('palette')}).
             {!singleKeys && ' Single-key shortcuts are off in Settings > Appearance.'}
           </DialogDescription>
         </DialogHeader>
         <div
           tabIndex={0}
-          className={cn(
-            focusRing,
-            'focus-visible:-outline-offset-2 min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 sm:px-3',
-          )}
+          className="min-h-0 min-w-0 space-y-2 overflow-y-auto px-2 py-2 outline-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-seam sm:px-3"
         >
           {[...bindingGroups(singleKeys), ...localGroups].map((group) => (
             <ShortcutGroup key={group.name} {...group} />
