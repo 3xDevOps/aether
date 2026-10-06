@@ -41,11 +41,12 @@ test('the phone drawer closes onto the run it opened', async ({ page, aether }) 
     page.getByRole('heading', { name: 'read the deployment log', exact: true }),
   ).toBeVisible()
 
-  // Focus lands on the view the drawer closed onto, and the top bar names it
-  // with its controls finger-sized.
+  // Focus lands on the view the drawer closed onto. The top bar says Run, so
+  // the title shows once, in the run header, and its controls are finger-sized.
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
   const bar = page.getByRole('banner')
-  await expect(bar).toContainText('read the deployment log')
+  await expect(bar).toContainText('Run')
+  await expect(bar).not.toContainText('read the deployment log')
   const search = bar.getByRole('button', { name: 'Search', exact: true })
   expect((await search.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40)
 

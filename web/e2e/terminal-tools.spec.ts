@@ -123,7 +123,8 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
     await touchDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
     const copy = touchPage.getByRole('menuitem', { name: 'Copy selection' })
     await expect(copy).toBeVisible()
-    expect(Math.round((await copy.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44)
+    // Polled: the menu opens scaled to 0.98, so an early box is about 43px.
+    await expect.poll(async () => Math.round((await copy.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44)
     await touchPage.getByRole('menuitem', { name: /^Find/ }).click()
     const touchFind = touchDock.getByLabel('Find in terminal')
     await touchFind.fill('aether-found-me')
