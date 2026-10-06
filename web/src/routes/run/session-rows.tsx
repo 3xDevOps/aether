@@ -165,7 +165,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
         <AssistantRow
           meta={!row.streaming && (
             <>
-              <Button variant="ghost" size="icon-sm" label="Copy the reply" onClick={(event) => void copyText(row.text, event.currentTarget)}>
+              <Button variant="ghost" size="icon-sm" label="Copy the reply" className="coarse:hidden" onClick={(event) => void copyText(row.text, event.currentTarget)}>
                 <Copy />
               </Button>
               <RelativeTime at={row.at} />
