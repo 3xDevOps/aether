@@ -37,6 +37,10 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await page.keyboard.press('2')
   await expect(log.getByText(/Approved: run/)).toBeVisible()
   await expect(log.getByText('permission: allow')).toBeVisible()
+  await expect.poll(async () => {
+    const [row, view] = await Promise.all([log.getByText('permission: allow').boundingBox(), log.boundingBox()])
+    return Boolean(row && view && row.y >= view.y && row.y + row.height <= view.y + view.height)
+  }, { message: 'the answered reply sits inside the scrolled log' }).toBe(true)
 
   await box.fill('demo')
   await box.press('ControlOrMeta+Enter')

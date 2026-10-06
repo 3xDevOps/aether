@@ -26,6 +26,7 @@ import { loadOlderItems } from '@/store/session-stream'
 const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
 const bottomSlack = 24
+const userScrollWindow = 600
 const sameMessageWindow = 120_000
 
 function byTime(rows: SessionRow[], extra: SessionRow[]): SessionRow[] {
@@ -128,6 +129,8 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
   const pinned = useRef(true)
+  const lastInput = useRef(0)
+  const viewport = useRef<HTMLDivElement>(null)
   const [shift, setShift] = useState(false)
   const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)
@@ -144,9 +147,28 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
   }), [run.id, run.task, run.member_id, agent, nav, expanded, messageMap, runs])
 
   const count = flat.length + (older ? 1 : 0)
-  useLayoutEffect(() => {
+  const markInput = () => {
+    lastInput.current = performance.now()
+  }
+  const follow = useRef(() => {})
+  follow.current = () => {
     if (active && pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
-  }, [active, count])
+  }
+  useLayoutEffect(() => follow.current(), [active, count])
+  useEffect(() => {
+    const node = viewport.current
+    if (!node) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => follow.current())
+    })
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [])
   useEffect(() => {
     if (shift) setShift(false)
   }, [flat, shift])
@@ -186,7 +208,14 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="relative min-h-0 flex-1">
+      <div
+        ref={viewport}
+        className="relative min-h-0 flex-1"
+        onWheelCapture={markInput}
+        onTouchMoveCapture={markInput}
+        onKeyDownCapture={markInput}
+        onPointerDownCapture={markInput}
+      >
         {(log?.error || roomError || olderError) && (
           <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 pt-3">
             {log?.error && (
@@ -224,7 +253,10 @@ export function SessionView({ run, agent, room, nav, active, textarea, onComposi
           keepMounted={focused !== null && focused < count ? [focused] : undefined}
           onScroll={(offset) => {
             const handle = list.current
-            if (handle) pinned.current = offset + handle.viewportSize >= handle.scrollSize - bottomSlack
+            if (!handle) return
+            // Only the person's own scrolling unpins; resizes and row measurements move the offset too.
+            if (offset + handle.viewportSize >= handle.scrollSize - bottomSlack) pinned.current = true
+            else if (performance.now() - lastInput.current < userScrollWindow) pinned.current = false
           }}
         >
           {(item: FlatRow | null, index: number) => item === null ? (
