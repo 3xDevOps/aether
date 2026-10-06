@@ -151,6 +151,14 @@ describe('swarm list', () => {
     expect(missionList.mock.calls[1][0]).toEqual({ workspace_id: workspace.id, limit: 50, before: 'cursor-1' })
     expect(await screen.findByText('older swarm')).toBeDefined()
   })
+
+  it('lists finished swarms openly when none is open', async () => {
+    seed()
+    await mount(fakeApi({ missionList: vi.fn(async () => ({ missions: [mission({ objective: 'old spike', phase: 'completed' })] })) }), null)
+    expect(await screen.findByRole('heading', { level: 2, name: 'Finished (1)' })).toBeDefined()
+    expect(screen.getByText('old spike')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Finished (1)' })).toBeNull()
+  })
 })
 
 describe('swarm detail', () => {

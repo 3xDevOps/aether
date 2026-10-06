@@ -3259,10 +3259,11 @@ viewer, the unread reason when the integrator has left mail unread for over
 two minutes, or `Integrator did not launch: <error>` while
 `integrator_launch_error` is set. The unread case also adds an `n unread`
 badge. Swarms that need you sort first, then by last update; completed and
-cancelled swarms fold behind **Finished (n)**. The server has no archive or
-delete for a swarm, so Finished is the archive. With no swarms the page shows
-one sentence and **New swarm**. On a phone **New swarm** is a secondary
-button under the cards, since the top bar already has **New run**. Counts come from one pass over the run store
+cancelled swarms fold behind **Finished (n)**, listed openly when no swarm
+is open. The server has no archive or delete for a swarm, so Finished is the
+archive. With no swarms the page shows one sentence and **New swarm**. On a
+phone **New swarm** is a secondary button under the cards, since the top bar
+already has **New run**. Counts come from one pass over the run store
 (`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
 
 ### Swarm detail

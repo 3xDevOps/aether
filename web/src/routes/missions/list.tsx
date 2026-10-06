@@ -7,6 +7,7 @@ import { Callout } from '@/components/ui/callout'
 import { Card, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SectionLabel } from '@/components/ui/section-label'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StateLine } from '@/components/ui/status-dot'
@@ -98,6 +99,15 @@ export function SwarmList({
     </Button>
   )
   const empty = !loading && !error && open.length + finished.length === 0
+  const finishedList = (
+    <ul aria-label="Finished swarms" className="mt-2 grid gap-2 md:grid-cols-2">
+      {finished.map((mission) => (
+        <li key={mission.id} className="min-w-0">
+          <SwarmCard mission={mission} line={lines[mission.id]} agents={agents} />
+        </li>
+      ))}
+    </ul>
+  )
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -121,19 +131,17 @@ export function SwarmList({
             </ul>
           )}
           {mobile && !empty && newSwarm && <div>{newSwarm}</div>}
-          {finished.length > 0 && (
-            <Collapsible open={showFinished || open.length === 0} onOpenChange={setShowFinished}>
+          {finished.length > 0 && open.length > 0 && (
+            <Collapsible open={showFinished} onOpenChange={setShowFinished}>
               <CollapsibleTrigger>Finished ({finished.length})</CollapsibleTrigger>
-              <CollapsibleContent>
-                <ul aria-label="Finished swarms" className="mt-2 grid gap-2 md:grid-cols-2">
-                  {finished.map((mission) => (
-                    <li key={mission.id} className="min-w-0">
-                      <SwarmCard mission={mission} line={lines[mission.id]} agents={agents} />
-                    </li>
-                  ))}
-                </ul>
-              </CollapsibleContent>
+              <CollapsibleContent>{finishedList}</CollapsibleContent>
             </Collapsible>
+          )}
+          {finished.length > 0 && open.length === 0 && (
+            <section aria-labelledby="finished-swarms">
+              <SectionLabel as="h2" id="finished-swarms">Finished ({finished.length})</SectionLabel>
+              {finishedList}
+            </section>
           )}
           {hasMore && (
             <div className="flex justify-center">
