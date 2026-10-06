@@ -140,6 +140,7 @@ type Session struct {
 	queue      []queuedPrompt
 	subs       map[chan Item]struct{}
 	closed     bool
+	hostClosed bool
 	capped     bool
 	state      State
 	actAt      time.Time
@@ -258,7 +259,12 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 
 // Close closes the agent's stdin. The adapter exits on EOF; Done follows
 // once its output ends.
-func (s *Session) Close() error { return s.conn.Close() }
+func (s *Session) Close() error {
+	s.mu.Lock()
+	s.hostClosed = true
+	s.mu.Unlock()
+	return s.conn.Close()
+}
 
 // Prompt sends input to the agent. With no turn running it starts one and
 // returns once the agent accepted it; a refusal is an error. While a turn
@@ -432,14 +438,18 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	s.proj.endTurn()
 	reason := stop
 	var failed error
-	if err != nil {
-		if s.conn.closed() {
-			reason = "interrupted"
-			s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
-		} else {
-			reason, failed = "error", err
-			s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})
-		}
+	switch {
+	case err != nil && s.conn.closed():
+		reason = "interrupted"
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
+	case s.hostClosed && (err != nil || stop == "cancelled"):
+		// The agent answered its input closing; a restore must resume the
+		// turn, not take it as cancelled or failed.
+		reason = "interrupted"
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether closed the agent connection before the turn finished."}})
+	case err != nil:
+		reason, failed = "error", err
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})
 	}
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: reason})
 	s.turnActive = false

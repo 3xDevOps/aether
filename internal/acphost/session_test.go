@@ -698,6 +698,49 @@ func TestUpdatesBeforeExitAreKept(t *testing.T) {
 	}
 }
 
+// An agent may answer the running prompt when its input closes; that turn
+// was interrupted by the host, not cancelled or failed by the agent.
+func TestTurnAnsweredAfterCloseIsInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		answer func() (any, *acp.RequestError)
+	}{
+		{"cancelled", func() (any, *acp.RequestError) { return map[string]any{"stopReason": "cancelled"}, nil }},
+		{"error", func() (any, *acp.RequestError) { return nil, acp.NewRequestCancelled(nil) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMockAgent(t, loadFixture(t, "claude"))
+			m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+				m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+				<-call.ctx.Done()
+				return tc.answer()
+			}
+			s, rec := startMock(t, m, Config{})
+			if _, err := s.Prompt(context.Background(), textPrompt("work"), false, nil); err != nil {
+				t.Fatal(err)
+			}
+			_ = s.Close()
+			if reason := rec.waitIdle(t); reason != "interrupted" {
+				t.Fatalf("idle reason %q, want interrupted", reason)
+			}
+			_ = m.stdout.Close()
+			<-s.Done()
+			log, err := OpenLog(s.cfg.LogPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = log.Close() }()
+			its, err := log.ReadAfter(0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ends := ofKind(its, KindTurnEnd); len(ends) != 1 || ends[0].StopReason != "interrupted" {
+				t.Fatalf("items %+v", its)
+			}
+		})
+	}
+}
+
 func TestRestartClosesAnOpenTurn(t *testing.T) {
 	path := t.TempDir() + "/run.items.jsonl"
 	log, err := OpenLog(path)
