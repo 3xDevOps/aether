@@ -4,7 +4,8 @@
 // Every test gets its own server, its own loopback ports and its own scratch
 // directory, so the suite has no shared state to order tests around.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { test as base } from '@playwright/test'
 
@@ -17,7 +18,7 @@ import {
 } from './harness/docker'
 import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
-import { scratchDir } from './harness/paths'
+import { repoRoot, scratchDir } from './harness/paths'
 import { dockerReachable, type Server, type ServerOptions, startServer } from './harness/server'
 
 export interface Member {
@@ -66,6 +67,28 @@ export interface Aether {
   installStubNpm: (memberID: string) => void
   /** Writes the file agent.list reads as a member's codex login. */
   giveCodexLogin: (memberID: string) => void
+  /**
+   * Builds the acpmock agent (internal/acphost/acpmock/agent) and registers
+   * it as the member agent `mock`, whose Enhanced mode runs it in the run
+   * container. Prompts it understands: `demo`, `ask permission`, `ask
+   * form`, `wait`, `refuse`.
+   */
+  installACPMock: (member: Member, memberID: string) => Promise<void>
+}
+
+let acpMock: string | undefined
+
+/** Static, so it runs in the busybox image; built once per worker. */
+function buildACPMock(): string {
+  if (!acpMock) {
+    acpMock = path.join(scratchDir(), 'acp-mock')
+    execFileSync('go', ['build', '-o', acpMock, './internal/acphost/acpmock/agent'], {
+      cwd: repoRoot,
+      env: { ...process.env, CGO_ENABLED: '0' },
+      stdio: 'inherit',
+    })
+  }
+  return acpMock
 }
 
 /**
@@ -205,6 +228,14 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
         const bin = path.join(server.memberHome(memberID), '.local', 'bin')
         mkdirSync(bin, { recursive: true })
         writeFileSync(path.join(bin, 'npm'), stubNpm, { mode: 0o755 })
+      },
+      installACPMock: async (member, memberID) => {
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        copyFileSync(buildACPMock(), path.join(bin, 'acp-mock'))
+        await member.api.rpc('agent.register', {
+          definition: { name: 'mock', executable: 'acp-mock', tui_args: ['acp-mock'], headless_args: ['acp-mock'], acp_args: ['acp-mock'] },
+        })
       },
       giveCodexLogin: (memberID) => {
         const dir = path.join(server.memberHome(memberID), '.codex')
