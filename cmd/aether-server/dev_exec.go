@@ -14,15 +14,15 @@ import (
 // basename is aether-internal. It is not a public agent-selected run API.
 func devExec(args []string) int {
 	if len(args) < 2 {
-		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run <key> <claim> <argv...> or control <key> <exec-id> <claim> <action> [grace-ms]")
+		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run|run-pipe <key> <claim> <argv...> or control <key> <exec-id> <claim> <action> [grace-ms]")
 		return 125
 	}
 	switch args[0] {
-	case "run":
+	case "run", "run-pipe":
 		if len(args) < 4 {
 			return 125
 		}
-		code, err := devexec.Run(args[1], args[2], args[3:])
+		code, err := devexec.Run(args[1], args[2], args[0] == "run", args[3:])
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "dev-exec:", err)
 		}

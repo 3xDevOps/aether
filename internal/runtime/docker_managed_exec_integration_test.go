@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -16,8 +17,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 )
 
-func TestDockerManagedExecLifecycle(t *testing.T) {
-	d := newTestDocker(t)
+// buildStagedHelper builds the server binary the container runs as
+// aether-internal dev-exec.
+func buildStagedHelper(t *testing.T) string {
+	t.Helper()
 	binary := filepath.Join(t.TempDir(), "aether-server")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/aether-server")
 	build.Dir = "../.."
@@ -25,6 +28,12 @@ func TestDockerManagedExecLifecycle(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build staged helper: %v (%s)", err, output)
 	}
+	return binary
+}
+
+func TestDockerManagedExecLifecycle(t *testing.T) {
+	d := newTestDocker(t)
+	binary := buildStagedHelper(t)
 	for _, user := range []string{"0:0", "65534:65534"} {
 		t.Run(user, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
@@ -108,4 +117,95 @@ func TestDockerManagedExecLifecycle(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDockerManagedExecPipe(t *testing.T) {
+	d := newTestDocker(t)
+	binary := buildStagedHelper(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	id := createContainer(t, d, Spec{
+		Name:  fmt.Sprintf("it-pipe-exec-%d", time.Now().UnixNano()),
+		Image: testImage, TTY: true,
+		Command: []string{"/bin/sh", "-c", "exec sleep 300"},
+		Mounts:  []Mount{{HostPath: binary, ContainerPath: coordtransport.CLIPath, ReadOnly: true}},
+	})
+	if err := d.Start(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+
+	echo, err := d.StartExecPipe(ctx, id, ExecSpec{
+		CreationKey: "echo",
+		Argv:        []string{"/bin/sh", "-c", "test ! -t 0 && echo no-tty >&2; exec cat"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer echo.Detach()
+	att := echo.Attachment()
+	waitLine(t, readStream(att.Stderr()), 10*time.Second, "no-tty")
+	lines := readLines(att)
+	if _, err := att.Stdin().Write([]byte("hello pipe\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitLine(t, lines, 10*time.Second, "hello pipe")
+	if err := echo.Resize(ctx, 80, 24); err == nil {
+		t.Fatal("a pipe execution accepted a terminal resize")
+	}
+	status, err := echo.Stop(ctx, time.Second)
+	if err != nil || status.Code != 143 {
+		t.Fatalf("stop = %+v, %v; want SIGTERM exit 143", status, err)
+	}
+
+	// The command reads EOF once the server's stream goes away.
+	eof, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: "eof", Argv: []string{"cat"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eof.Detach(); err != nil {
+		t.Fatal(err)
+	}
+	status, err = eof.Wait(ctx)
+	if err != nil || status.Code != 0 {
+		t.Fatalf("detached cat = %+v, %v; want exit 0 on stdin EOF", status, err)
+	}
+
+	// A command that ignores stdin outlives a server restart; the next
+	// server instance proves ownership from the persisted identity and stops it.
+	stale, err := d.StartExecPipe(ctx, id, ExecSpec{CreationKey: "stale", Argv: []string{"sleep", "300"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := stale.Identity()
+	if err := stale.Detach(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newTestDocker(t)
+	recovered, err := restarted.RecoverExec(ctx, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := recovered.Status(ctx)
+	if err != nil || !state.Running || state.Attached || recovered.Attachment() != nil {
+		t.Fatalf("recovered pipe execution = %+v, %v", state, err)
+	}
+	status, err = recovered.Stop(ctx, time.Second)
+	if err != nil || status.Code != 143 {
+		t.Fatalf("recovered stop = %+v, %v; want SIGTERM exit 143", status, err)
+	}
+	if _, err := restarted.StartExecPipe(ctx, id, ExecSpec{CreationKey: "stale", Argv: []string{"sleep", "300"}}); err == nil {
+		t.Fatal("a stopped creation key was reused")
+	}
+}
+
+func readStream(r io.Reader) <-chan string {
+	lines := make(chan string, 16)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	return lines
 }

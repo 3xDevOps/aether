@@ -13,7 +13,7 @@ import (
 
 func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "exec", client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close() })
 	go func() {
 		_, _ = io.WriteString(writer, "final command output\n")
@@ -44,7 +44,7 @@ func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 	reader, writer := net.Pipe()
 	defer func() { _ = writer.Close() }()
-	attachment := newExecAttachment(nil, "exec", client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	readDone := make(chan error, 1)
 	go func() {
 		_, err := io.ReadAll(attachment.Stdout())

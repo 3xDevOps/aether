@@ -595,7 +595,7 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 		}
 		return nil, fmt.Errorf("runtime: exec attach: %w", err)
 	}
-	att := newExecAttachment(d.cli, created.ID, resp.HijackedResponse)
+	att := newExecAttachment(d.cli, created.ID, true, resp.HijackedResponse)
 	if cols != 0 && rows != 0 {
 		if err := att.Resize(ctx, cols, rows); err != nil {
 			_ = att.Close()
