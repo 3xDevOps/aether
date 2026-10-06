@@ -283,11 +283,8 @@ func dockerEnv(env map[string]string) []string {
 	return out
 }
 
-// trustCheckout marks the checkout as git's safe.directory: an unprivileged
-// server owns it on the host, and git refuses a repository the container user
-// does not own. GIT_CONFIG_* reaches every git process, execs included. A
-// workspace's own entries are kept; a malformed count is left for git to
-// report.
+// Execs inherit the container env, so this also covers every git the server
+// runs inside the container.
 func trustCheckout(env map[string]string, checkout string) map[string]string {
 	if checkout == "" {
 		return env
