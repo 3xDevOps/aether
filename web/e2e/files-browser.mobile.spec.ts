@@ -17,8 +17,7 @@ test('mobile Files returns from one viewer to the repository tree', async ({
 
   await page.goto(alice.url)
 
-  // At a phone width the real shell starts with its mobile sidebar rail, and
-  // the drawer it opens closes itself on the navigation it makes.
+  // The phone drawer closes itself on the navigation it makes.
   await page.getByRole('button', { name: /^Open sidebar/ }).tap()
   await page
     .getByRole('dialog', { name: 'Aether' })
