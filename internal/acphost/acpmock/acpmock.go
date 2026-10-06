@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -30,6 +31,9 @@ const (
 	PromptAskForm = "ask form"
 	// PromptRefuse makes the agent refuse the prompt with authRequired.
 	PromptRefuse = "refuse"
+	// PromptDemo plays a paced turn with a thought, a plan, reads, a
+	// command with output, an edit with a diff and a markdown answer.
+	PromptDemo = "demo"
 )
 
 type Fixture struct {
@@ -212,6 +216,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		content, _ := json.Marshal(res.Content)
 		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptDemo:
+		return a.demo(ctx)
 	case PromptWait:
 		select {
 		case <-a.cancelled:
@@ -223,4 +229,84 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		a.update(ctx, u)
 	}
 	return a.fix.Prompt.Result, nil
+}
+
+const demoAnswer = "The totals now round to cents before they are returned.\n\n" +
+	"- `total` rounds with `Math.round` on the cent value\n" +
+	"- the existing tests pass\n\n" +
+	"```js\nexport function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n```\n\n" +
+	"Run `npm test` again after you change the rounding rule."
+
+func demoPlan(done int) json.RawMessage {
+	steps := []string{"Read the billing module", "Run the tests", "Round totals to cents"}
+	entries := make([]map[string]any, len(steps))
+	for i, step := range steps {
+		status := "pending"
+		if i < done {
+			status = "completed"
+		} else if i == done {
+			status = "in_progress"
+		}
+		entries[i] = map[string]any{"content": step, "priority": "medium", "status": status}
+	}
+	b, _ := json.Marshal(map[string]any{"sessionUpdate": "plan", "entries": entries})
+	return b
+}
+
+func demoTool(id, kind, title, status string, extra map[string]any) json.RawMessage {
+	u := map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "kind": kind, "title": title, "status": status}
+	if status != "pending" && status != "in_progress" {
+		u["sessionUpdate"] = "tool_call_update"
+	}
+	for k, v := range extra {
+		u[k] = v
+	}
+	b, _ := json.Marshal(u)
+	return b
+}
+
+func (a *Agent) demo(ctx context.Context) (any, *acp.RequestError) {
+	thought, _ := json.Marshal(map[string]any{
+		"sessionUpdate": "agent_thought_chunk",
+		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
+	})
+	read := func(id, path string) []json.RawMessage {
+		loc := map[string]any{"locations": []any{map[string]any{"path": path}}}
+		return []json.RawMessage{demoTool(id, "read", "Read "+path, "in_progress", loc), demoTool(id, "read", "Read "+path, "completed", loc)}
+	}
+	steps := [][]json.RawMessage{
+		{thought},
+		{demoPlan(0)},
+		read("demo-read-1", "src/billing.js"),
+		read("demo-read-2", "src/logging.js"),
+		{demoPlan(1), demoTool("demo-test", "execute", "npm test", "in_progress", nil)},
+		{demoTool("demo-test", "execute", "npm test", "completed", map[string]any{"_meta": map[string]any{
+			"terminal_output": map[string]any{"data": "> project@1.0.0 test\n> node --test\n\nok 1 - total adds two amounts\nok 2 - total keeps cents\n# pass 2\n"},
+			"terminal_exit":   map[string]any{"exit_code": 0},
+		}})},
+		{demoPlan(2), demoTool("demo-edit", "edit", "Edit src/billing.js", "in_progress", map[string]any{"locations": []any{map[string]any{"path": "src/billing.js"}}})},
+		{demoTool("demo-edit", "edit", "Edit src/billing.js", "completed", map[string]any{"content": []any{map[string]any{
+			"type": "diff", "path": "src/billing.js",
+			"oldText": "export function total(a, b) {\n  return a + b\n}\n",
+			"newText": "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n",
+		}}})},
+		{demoPlan(3)},
+	}
+	for _, step := range steps {
+		select {
+		case <-a.cancelled:
+			return map[string]any{"stopReason": "cancelled"}, nil
+		case <-ctx.Done():
+			return map[string]any{"stopReason": "cancelled"}, nil
+		case <-time.After(400 * time.Millisecond):
+		}
+		for _, u := range step {
+			a.update(ctx, u)
+		}
+	}
+	for _, word := range strings.SplitAfter(demoAnswer, " ") {
+		a.text(ctx, word)
+		time.Sleep(15 * time.Millisecond)
+	}
+	return map[string]any{"stopReason": "end_turn"}, nil
 }
