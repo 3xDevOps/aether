@@ -93,6 +93,8 @@ func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
 	}
 }
 
+func (f *fakeCoordinator) EnhancedSessionOpened(context.Context, domain.RunID) {}
+
 func (f *fakeCoordinator) idleWakeRuns() []domain.RunID {
 	f.mu.Lock()
 	defer f.mu.Unlock()

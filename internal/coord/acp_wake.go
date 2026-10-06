@@ -143,6 +143,16 @@ func (s *Service) missionNoticeChanged(run domain.RunID, notice missionNotice) b
 	return announced.key != notice.key
 }
 
+// EnhancedSessionOpened takes the baseline before the session's first turn,
+// so a change during that turn wakes it when the turn ends.
+func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
+	if s.cfg.Disabled || !s.enterRun(run) {
+		return
+	}
+	defer s.leaveRun(run)
+	s.missionNoticeChanged(run, s.integratorNotice(ctx, run))
+}
+
 // Only integrators a wake has already seen are offered the change.
 func (s *Service) wakeMissionIntegrators(mission domain.MissionID) {
 	s.mu.Lock()

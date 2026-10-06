@@ -40,6 +40,7 @@ type Coordinator interface {
 	WriteCoAuthors(run domain.RunID, trailers []string) error
 	Release(run domain.RunID) error
 	WakeIdle(run domain.RunID)
+	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls

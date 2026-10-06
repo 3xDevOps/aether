@@ -325,6 +325,9 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
+	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
+		c.svc.EnhancedSessionOpened(ctx, runID)
+	}
 	switch {
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)

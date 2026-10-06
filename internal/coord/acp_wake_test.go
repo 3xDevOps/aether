@@ -210,3 +210,29 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 		t.Fatalf("an unchanged mission woke the integrator again: %d wakes", n)
 	}
 }
+
+func TestEnhancedWakeAnnouncesAnAnswerBeforeTheFirstTurnEnd(t *testing.T) {
+	waker := newFakeACPWaker()
+	stub := &questionMissionStub{open: 1}
+	h := newHarness(t, 2, func(c *Config) {
+		c.WakeAdmission = allowHookWake
+		c.ACPWaker = waker
+		c.Mission = stub
+	})
+	worker, integrator := h.run(0), h.run(1)
+	stub.mission, stub.integrator = []domain.RunID{worker, integrator}, integrator
+	h.start()
+
+	h.svc.EnhancedSessionOpened(context.Background(), integrator)
+	stub.setOpen(0)
+	if _, err := h.bus.Publish(context.Background(), events.Event{
+		WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waker.endTurn(integrator)
+	h.svc.WakeIdle(integrator)
+	if got, want := waker.next(t), protocol.CoordMissionUpdateContext("mission-1"); got != want {
+		t.Fatalf("mission wake prompt %q, want %q", got, want)
+	}
+}
