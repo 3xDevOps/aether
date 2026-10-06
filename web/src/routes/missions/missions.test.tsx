@@ -127,10 +127,10 @@ describe('swarm list', () => {
     expect(cards.map((card) => within(card).getByRole('button').textContent)).toEqual(['audit the logs', 'coordinate checkout work'])
     expect(cards[0].textContent).toContain('The integrator has a question')
     expect(cards[0].textContent).toContain('Claude Code · Enhanced')
-    expect(cards[1].textContent).toContain('3 agent messages unread for 12 min')
+    expect(cards[1].textContent).toContain('Integrator has not read 3 messages (12 min)')
     expect(cards[1].textContent).toContain('Claude Code · Standard')
     expect(cards[1].textContent).toContain('1 working · 1 done')
-    expect(cards[1].textContent).toContain('3 unread')
+    expect(within(cards[1]).queryByText(/unread/)).toBeNull()
     expect(screen.queryByText('old spike')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Finished (1)' }))
     expect(screen.getByText('old spike')).toBeDefined()
@@ -294,7 +294,7 @@ describe('swarm detail', () => {
   it('says how long the integrator has left mail unread', async () => {
     seed({ runs: { run_integrator: toRecord(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })) } })
     await mount(showing())
-    expect(screen.getAllByText(/3 agent messages unread for 12 min · Claude Code · Standard/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Integrator has not read 3 messages \(12 min\) · Claude Code · Standard/).length).toBeGreaterThan(0)
   })
 
   it('cancels from More after confirmation, under one key across retries', async () => {

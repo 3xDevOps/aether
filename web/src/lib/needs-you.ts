@@ -164,7 +164,7 @@ export function unreadMail(run: Pick<Run, 'mission_role' | 'unacked_messages' | 
 }
 
 export function unreadReason(count: number, since: string, now: number): string {
-  return `${count} agent message${count === 1 ? '' : 's'} unread for ${waited(since, now)}`
+  return `Integrator has not read ${count === 1 ? '1 message' : `${count} messages`} (${waited(since, now)})`
 }
 
 const nativeRequests = (run: RunRecord, kinds: string[]) =>

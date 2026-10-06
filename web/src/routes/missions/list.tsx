@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Plus } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Card, CardTitle } from '@/components/ui/card'
@@ -36,9 +35,10 @@ function SwarmCard({ mission, line, agents }: { mission: Mission; line?: SwarmLi
   const final = missionFinal(mission)
   const failedLaunch = !final && mission.integrator_launch_error
   const needsYou = line?.needsYou ?? false
+  const stalled = !needsYou && Boolean(line?.unread)
   const reason = failedLaunch
     ? `Integrator did not launch: ${mission.integrator_launch_error}`
-    : (needsYou || line?.unread) && line?.reason ? line.reason : planningWord(mission)
+    : (needsYou || stalled) && line?.reason ? line.reason : planningWord(mission)
   return (
     <Card data-mission-id={mission.id}>
       <StateLine
@@ -53,7 +53,12 @@ function SwarmCard({ mission, line, agents }: { mission: Mission; line?: SwarmLi
         <span className="min-w-0 truncate">{integratorLabel(mission, agents)}</span>
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate">{line?.counts ?? 'No workers yet'}</span>
-        {line && line.unread > 0 && <Badge tone="needs-you" className="ml-auto">{line.unread} unread</Badge>}
+        {needsYou && line?.unreadText && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="min-w-0 truncate">{line.unreadText}</span>
+          </>
+        )}
       </div>
     </Card>
   )

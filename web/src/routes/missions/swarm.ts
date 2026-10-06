@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { modeLabel } from '@/components/launch/modes'
 import type { Tone } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
-import type { StateContext } from '@/lib/needs-you'
+import { type StateContext, unreadMail, unreadReason } from '@/lib/needs-you'
 import type { AgentInfo, Mission, MissionPhase } from '@/lib/types'
 import { useStore } from '@/store'
 import { runRows, stateContextOf } from '@/store/selectors'
@@ -50,6 +50,7 @@ export interface SwarmLine {
   needsYou: boolean
   reason?: string
   unread: number
+  unreadText?: string
 }
 
 function countsLabel(counts: { working: number; needsYou: number; done: number; failed: number }): string {
@@ -74,9 +75,11 @@ export function swarmLines(ctx: StateContext): Record<string, SwarmLine> {
       line.reason = row.reason
     }
     if (row.run.mission_role === 'integrator') {
-      if (ctx.missions[missionID]?.current_integrator_run_id === row.run.id && row.unread) {
-        line.unread = row.unread
-        line.reason ??= row.reason
+      const unread = unreadMail(row.run, ctx.now)
+      if (ctx.missions[missionID]?.current_integrator_run_id === row.run.id && unread > 0) {
+        line.unread = unread
+        line.unreadText = unreadReason(unread, row.run.oldest_unacked_at!, ctx.now)
+        line.reason ??= line.unreadText
       }
       continue
     }

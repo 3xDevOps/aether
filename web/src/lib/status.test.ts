@@ -61,7 +61,7 @@ describe('run presentation', () => {
     const integrator = (over: Parameters<typeof run>[0]) =>
       presentRun(toRecord(run({ mission_id: 'mission_1', mission_role: 'integrator', ...over })), ctx)
     expect(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })).toEqual({
-      state: 'working', reason: '3 agent messages unread for 12 min', unread: 3,
+      state: 'working', reason: 'Integrator has not read 3 messages (12 min)', unread: 3,
     })
     expect(integrator({ unacked_messages: 1, oldest_unacked_at: '2026-08-14T10:19:00Z' }).reason).toBe('Agent working')
     expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')

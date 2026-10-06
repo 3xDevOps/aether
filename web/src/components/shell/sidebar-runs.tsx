@@ -240,7 +240,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, unread, nested
   const selected = useStore((s) =>
     swarm ? s.route.name === 'missions' && s.route.params.missionId === run.mission_id : isRunRoute(s.route, run.id))
   const title = swarm ? mission?.objective.split('\n')[0] || runLabel(run) : runLabel(run)
-  const counts = swarm ? (unread ? `${unread} unread` : swarmCounts(swarm)) : ''
+  const counts = swarm ? swarmCounts(swarm) : ''
   const open = () => {
     if (state === 'needs-you') {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
