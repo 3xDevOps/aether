@@ -297,8 +297,8 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 				report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 			}
 			d.report(runID, report)
-			if c := d.s.coordinationSeam(); !working && c != nil && c.enabled {
-				c.svc.WakeIdle(runID)
+			if !working {
+				d.wakeIdle(runID)
 			}
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
@@ -332,6 +332,10 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false); err != nil {
 			slog.Warn("scheduler: send the task to the agent", "run", runID, "error", err)
 		}
+	case !fresh:
+		// The restore's idle report can run before setRun, when the run
+		// does not look idle yet.
+		d.wakeIdle(runID)
 	}
 }
 
@@ -628,8 +632,12 @@ func (d *acpDriver) resumeAfterPause(ctx context.Context, entry *supervised) {
 		d.connect(ctx, entry, false)
 		return
 	}
+	d.wakeIdle(entry.runID)
+}
+
+func (d *acpDriver) wakeIdle(run domain.RunID) {
 	if c := d.s.coordinationSeam(); c != nil && c.enabled {
-		c.svc.WakeIdle(entry.runID)
+		c.svc.WakeIdle(run)
 	}
 }
 

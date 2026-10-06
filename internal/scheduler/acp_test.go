@@ -405,6 +405,41 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 1))
 }
 
+func TestEnhancedRunRestartWakesUnreadMail(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, binDir := withCoordination(t, e)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	var mail sync.Once
+	coord.mu.Lock()
+	coord.onWake = func(r domain.RunID) {
+		if r == run.ID && s2.IdleEnhanced(r) {
+			mail.Do(func() { go func() { _ = s2.WakeEnhanced(context.Background(), r, "unread mail") }() })
+		}
+	}
+	coord.mu.Unlock()
+	s2.UseCoordination(coord, binDir)
+	startScheduler(t, s2)
+	waitItems(t, s2, run.ID, "the wake for mail that arrived before the restart", func(items []acphost.Item) bool {
+		return slices.ContainsFunc(items, func(it acphost.Item) bool {
+			return it.Kind == acphost.KindMessage && it.Message.Role == "user" && it.Message.Text == "unread mail"
+		})
+	})
+}
+
 func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
