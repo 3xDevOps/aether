@@ -1786,8 +1786,10 @@ text.
 The socket closes **1012** `session stream ended; resubscribe with
 after_seq` when the session ends or restarts, when the run has no session
 and one starts, or when the client falls 1024 items behind: reconnect with
-your last `seq`. It closes **1008** when membership or Steer is withdrawn. A
-run accepts at most 32 of these sockets at once; the next is refused with
+your last `seq`. It closes **1008** when membership is withdrawn. Losing
+Steer only drops the lease, as on an interactive attach: the server sends a
+`control` frame with `revocation_reason:"permission"` and the socket stays
+open as a viewer. A run accepts at most 32 of these sockets at once; the next is refused with
 `-32003`.
 
 ### `GET /ws/terminal?tab=<tab>`
