@@ -123,4 +123,19 @@ describe('session log', () => {
     expect(store.getState().sessionLogs.run_1!.events.map((e) => e.seq)).toEqual([first.seq, second.seq, live.seq])
     expect(store.getState().sessionLogs.run_other).toBeUndefined()
   })
+
+  it('reads from the start again after the server event log restarts', async () => {
+    const store = createRootStore()
+    const old = event('run.agent', { kind: 'tool_call', tool: 'Read' }, '2026-08-14T10:03:00Z')
+    const workspaceTimeline = vi.fn().mockResolvedValue({ events: [old], next_seq: 500, more: false })
+    await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
+
+    store.getState().resetSeq()
+    const restored = { ...old, id: 'ev_restored', seq: 3 }
+    workspaceTimeline.mockResolvedValue({ events: [restored], next_seq: 3, more: false })
+    await readSessionLog(store, fakeApi({ workspaceTimeline }), { id: 'run_1', workspace_id: 'wsp_1' })
+
+    expect(workspaceTimeline).toHaveBeenLastCalledWith(expect.objectContaining({ after_seq: 0 }))
+    expect(store.getState().sessionLogs.run_1!.events.map((e) => e.id)).toEqual(['ev_restored'])
+  })
 })

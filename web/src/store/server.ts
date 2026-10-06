@@ -168,6 +168,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       set((s) => ({
         lastSeq: 0,
         terminalCacheEpoch: s.terminalCacheEpoch + 1,
+        sessionLogs: {},
       })),
     setHydrated: (hydrated, error = null) =>
       set({ hydrated, hydrationError: error }),

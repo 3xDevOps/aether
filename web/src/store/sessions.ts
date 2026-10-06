@@ -260,6 +260,7 @@ export async function readSessionLog(store: RootStore, client: Api, run: { id: s
   const state = store.getState()
   if (state.sessionLogs[run.id]?.loading) return
   state.beginSessionLog(run.id)
+  const epoch = state.terminalCacheEpoch
   let cursor = state.sessionLogs[run.id]?.cursor ?? 0
   try {
     for (;;) {
@@ -270,13 +271,14 @@ export async function readSessionLog(store: RootStore, client: Api, run: { id: s
         after_seq: cursor,
         limit: pageSize,
       })
+      if (store.getState().terminalCacheEpoch !== epoch) return
       store.getState().addSessionEvents(run.id, page.events, page.next_seq)
       cursor = page.next_seq
       if (!page.more) break
     }
     store.getState().setSessionLogError(run.id, null)
   } catch (err) {
-    store.getState().setSessionLogError(run.id, message(err))
+    if (store.getState().terminalCacheEpoch === epoch) store.getState().setSessionLogError(run.id, message(err))
   }
 }
 
