@@ -29,6 +29,32 @@ aether agent add codex --enhanced
 [harnesses.md](harnesses.md#enhanced-mode-adapters) covers the pinned
 versions, how updates reach them, and `agent.list`'s `enhanced_installed`.
 
+## Choosing Enhanced
+
+The dashboard's agent setup (**Set up** on onboarding's **Agent** step or the
+**Agents** page) puts the two modes side by side before anything installs.
+Both cards draw the same moment of one run, the same task and the same
+`go test` call: **Standard** shows it running in the agent's terminal with no
+prompt, **Enhanced** shows the permission request as a card with **Approve**
+and **Deny**.
+
+| | Standard | Enhanced |
+| --- | --- | --- |
+| What you see | The agent's own terminal, exactly as on your machine | Messages, tool activity, file changes, approvals and progress as native controls |
+| Trade-off | No structured view; the agent acts without asking, and anything it asks is answered in the terminal | Runs through an adapter, not the agent's own screen; some agent-specific commands and screens are missing; starts a few seconds slower |
+| Permissions | Never asks | Asks before risky actions by default; changeable in the run |
+
+Under the cards one line each comes from `agent.list`: how the agent serves
+ACP (`enhanced`), whether its adapter is installed (`enhanced_installed`),
+whether a running agent can switch modes (`switchable`, otherwise "Chosen
+when the run starts"), what a failed adapter start does, and for Claude Code
+that it uses your Claude login through the Claude Agent SDK. An agent whose
+`enhanced` is `none` shows the Enhanced card disabled with the reason. The
+selection starts on the agent's `default_mode` and becomes that agent's
+default in **New run**; **Install <agent>** with Enhanced selected installs
+the adapter in the same `agent.install` call. The **Agents** page keeps a
+**Default mode** per agent.
+
 ## Launch one
 
 ```sh

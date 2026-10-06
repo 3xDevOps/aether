@@ -4,6 +4,7 @@
 import type {
   AccountAccess,
   AgentDefinition,
+  AgentInstallResult,
   AgentInfo,
   Approval,
   BudgetReport,
@@ -820,6 +821,8 @@ export const api = {
     }).then((r) => r.agents),
   agentRegister: (definition: AgentDefinition) =>
     call<unknown>('agent.register', { definition }),
+  agentInstall: (name: string, enhanced: boolean) =>
+    call<AgentInstallResult>('agent.install', { name, ...(enhanced ? { enhanced } : {}) }),
   runProtect: (runID: string, protect: boolean) =>
     call<unknown>('run.protect', { run_id: runID, protected: protect }),
   runArchive: (runID: string, archived: boolean) =>

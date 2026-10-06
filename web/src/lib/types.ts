@@ -891,6 +891,8 @@ export interface AgentInfo {
   login_found?: boolean
   /** The launch mode the agent starts in unless asked otherwise. */
   default_mode?: 'tui' | 'acp'
+  /** Whether a running run can switch between Standard and Enhanced. */
+  switchable?: boolean
   /** Shared account: refused because its owner has no login for this agent. */
   login_missing?: boolean
   /** Shared account: refused because the caller's own definition runs only on their account. */
@@ -902,6 +904,14 @@ export interface AgentInfo {
   install_script?: string
   /** install_script followed by the pinned enhanced-mode adapter's install. */
   enhanced_install_script?: string
+}
+
+/** agent.install: a failed command is a result with `error`, not a refusal. */
+export interface AgentInstallResult {
+  log_tail: string
+  installed: boolean
+  enhanced_installed: boolean
+  error?: string
 }
 
 /** A member-supplied custom harness launch definition (agent.register). */
