@@ -178,12 +178,12 @@ func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 	return log, err
 }
 
-func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string) error {
+func (s *Scheduler) ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error {
 	sess, err := s.acp.live(run)
 	if err != nil {
 		return err
 	}
-	return sess.Answer(requestID, optionID, nil)
+	return sess.Answer(requestID, optionID, values)
 }
 
 func (s *Scheduler) ACPCancel(ctx context.Context, run domain.RunID) error {

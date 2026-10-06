@@ -31,6 +31,8 @@ type RunInputAnswerParams struct {
 	RunID     string `json:"run_id"`
 	RequestID string `json:"request_id"`
 	OptionID  string `json:"option_id"`
+	// Values is the form answer for an accepted question.
+	Values map[string]any `json:"values,omitempty"`
 	ACPLease
 }
 

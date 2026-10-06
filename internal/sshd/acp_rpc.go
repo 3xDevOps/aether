@@ -40,7 +40,7 @@ func (s *Server) runInputAnswer(ctx context.Context, member domain.MemberID, raw
 		return nil, perr
 	}
 	return struct{}{}, s.admitACP(ctx, member, run, p.ACPLease, func() error {
-		return s.cfg.Runs.ACPAnswer(run, p.RequestID, p.OptionID)
+		return s.cfg.Runs.ACPAnswer(run, p.RequestID, p.OptionID, p.Values)
 	})
 }
 

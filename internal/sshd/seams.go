@@ -76,8 +76,8 @@ type RunController interface {
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error)
 	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
-	// first answer wins.
-	ACPAnswer(run domain.RunID, requestID, optionID string) error
+	// first answer wins. values is the form answer for an accepted question.
+	ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error
 	ACPCancel(ctx context.Context, run domain.RunID) error
 	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
 	// ACPHistory reads up to limit items before beforeSeq, oldest first;

@@ -25,6 +25,9 @@ const (
 	PromptAskPermission = "ask permission"
 	// PromptWait makes the turn run until session/cancel arrives.
 	PromptWait = "wait"
+	// PromptAskForm makes the agent ask a form question and reply with the
+	// answer: "form: <action> <content as JSON>".
+	PromptAskForm = "ask form"
 )
 
 type Fixture struct {
@@ -189,6 +192,20 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 			answer = "cancelled"
 		}
 		a.text(ctx, "permission: "+answer)
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptAskForm:
+		res, err := acp.SendRequest[struct {
+			Action  string         `json:"action"`
+			Content map[string]any `json:"content"`
+		}](a.conn, ctx, acp.ClientMethodElicitationCreate, map[string]any{
+			"requestId": 1, "mode": "form", "message": "Which database?",
+			"requestedSchema": map[string]any{"type": "object", "properties": map[string]any{"db": map[string]any{"type": "string"}}},
+		})
+		if err != nil {
+			return nil, acp.NewInternalError(map[string]any{"error": err.Error()})
+		}
+		content, _ := json.Marshal(res.Content)
+		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {

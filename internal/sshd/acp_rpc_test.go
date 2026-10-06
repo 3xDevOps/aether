@@ -29,7 +29,7 @@ func TestACPInputNeedsTheControlLease(t *testing.T) {
 	e.runs.acpStream = scheduler.ACPStream{Items: make(chan acphost.Item)}
 	answer := func(member domain.MemberID, lease protocol.ACPLease) *protocol.Error {
 		_, perr := callJSON(t, e, member, protocol.MethodRunInputAnswer, protocol.RunInputAnswerParams{
-			RunID: string(run.ID), RequestID: "r1", OptionID: "allow", ACPLease: lease,
+			RunID: string(run.ID), RequestID: "r1", OptionID: "allow", Values: map[string]any{"db": "postgres"}, ACPLease: lease,
 		})
 		return perr
 	}
@@ -67,7 +67,7 @@ func TestACPInputNeedsTheControlLease(t *testing.T) {
 		t.Fatal(perr)
 	}
 	want := []string{
-		fmt.Sprintf("acp.answer:%s:r1:allow", run.ID),
+		fmt.Sprintf("acp.answer:%s:r1:allow:map[db:postgres]", run.ID),
 		fmt.Sprintf("acp.cancel:%s", run.ID),
 		fmt.Sprintf("acp.set_option:%s:mode:plan", run.ID),
 	}
@@ -141,8 +141,8 @@ func (f *fakeRuns) ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACP
 	return stream, nil
 }
 
-func (f *fakeRuns) ACPAnswer(run domain.RunID, requestID, optionID string) error {
-	return f.record(fmt.Sprintf("acp.answer:%s:%s:%s", run, requestID, optionID))
+func (f *fakeRuns) ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error {
+	return f.record(fmt.Sprintf("acp.answer:%s:%s:%s:%v", run, requestID, optionID, values))
 }
 
 func (f *fakeRuns) ACPCancel(_ context.Context, run domain.RunID) error {

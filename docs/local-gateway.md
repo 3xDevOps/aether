@@ -554,7 +554,7 @@ call is refused with `-32602`, and with a lease another session holds with
 
 | Method | Request body | Success result |
 | --- | --- | --- |
-| `run.input.answer` | `{run_id, request_id, option_id, control_session_id, control_generation}` | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
+| `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
 | `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
 | `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...]}`, oldest first, cut like stream frames |

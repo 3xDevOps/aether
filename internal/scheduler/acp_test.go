@@ -267,14 +267,34 @@ func TestEnhancedRunPermissionAnsweredOnce(t *testing.T) {
 	if pending[0].Kind != "permission" {
 		t.Fatalf("pending %+v", pending)
 	}
-	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "allow"); err != nil {
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "allow", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "reject"); !errors.Is(err, acphost.ErrAlreadyAnswered) {
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "reject", nil); !errors.Is(err, acphost.ErrAlreadyAnswered) {
 		t.Fatalf("second answer: %v, want ErrAlreadyAnswered", err)
 	}
 	waitItems(t, e.sched, run.ID, "the agent's use of the answer", assistantSaid("permission: allow"))
 	waitFor(t, "inputs cleared", func() bool { return len(e.sched.PendingInputs(run.ID)) == 0 })
+}
+
+func TestEnhancedRunFormAnswerCarriesValues(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskForm, false); err != nil {
+		t.Fatal(err)
+	}
+	var pending []domain.RunInputRequest
+	waitFor(t, "form question", func() bool {
+		pending = e.sched.PendingInputs(run.ID)
+		return len(pending) == 1
+	})
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "accept", map[string]any{"db": "postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the agent's use of the form answer", assistantSaid(`form: accept {"db":"postgres"}`))
 }
 
 func TestEnhancedRunCancel(t *testing.T) {
