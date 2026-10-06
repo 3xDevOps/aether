@@ -208,3 +208,18 @@ it('lists shells once on open and reads control for the tab that list selects', 
   expect(api.devControlStatus).toHaveBeenCalledTimes(1)
   view.unmount()
 })
+
+it('reads the tab owner on each poll even when the shell list fails', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    const view = render(<RunDock runID="run_1" onEvidenceAnswer={vi.fn()} />)
+    await waitFor(() => expect(api.devControlStatus).toHaveBeenCalledTimes(1))
+    vi.mocked(api.devTerminalList).mockRejectedValue(new Error('dev.terminal.list: run is not running'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    await waitFor(() => expect(api.devControlStatus).toHaveBeenCalledTimes(2))
+    expect((await screen.findByRole('alert')).textContent).toContain('run is not running')
+    view.unmount()
+  } finally {
+    vi.useRealTimers()
+  }
+})

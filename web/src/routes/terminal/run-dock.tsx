@@ -104,18 +104,17 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     readOwner().catch(reportError)
     return () => { ownerTarget.current = { runID: '', tab: '' } }
   }, [runID, activeTab, incarnation, readOwner, reportError])
-  // One status pass while the run is open: the shell list, then the owner.
-  // The dock's own actions refresh at once, so the interval only has to
-  // catch what other members and the agent did.
+  // The shell list goes first: it can change the tab whose owner is read.
   useEffect(() => {
     let cancelled = false
     let timer: number | undefined
     const poll = async (owner: boolean) => {
       if (document.visibilityState === 'visible') {
-        try {
-          await refresh()
-          if (owner) await readOwner()
-        } catch (cause) { if (!cancelled) reportError(cause) }
+        for (const read of owner ? [refresh, readOwner] : [refresh]) {
+          try {
+            await read()
+          } catch (cause) { if (!cancelled) reportError(cause) }
+        }
       }
       if (!cancelled) timer = window.setTimeout(() => void poll(true), statusPollMs)
     }
