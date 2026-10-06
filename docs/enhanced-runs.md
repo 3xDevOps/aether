@@ -97,8 +97,10 @@ the previous ACP server and starts a fresh one, then restores the agent
 session with `session/resume`, or `session/load` with the replayed history
 dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
-interrupted** notice. A session that cannot be restored starts a new one
-and says so in the log.
+interrupted** notice, its unanswered permission requests are dropped, and
+the run parks at `needs-attention` until the next prompt. The restored
+session is switched back to the last mode the log recorded. A session that
+cannot be restored starts a new one and says so in the log.
 
 An adapter that fails to start, or exits on its own, never fails the run.
 The shell stays up, a notice with the real error and the end of the
