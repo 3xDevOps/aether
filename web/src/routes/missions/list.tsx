@@ -86,33 +86,37 @@ export function SwarmList({
   const mobile = useIsMobile()
   const lines = useSwarmLines()
   const [showFinished, setShowFinished] = useState(false)
-  const { open, finished } = useMemo(() => {
+  const [showArchived, setShowArchived] = useState(false)
+  const { open, finished, archived } = useMemo(() => {
     const missions = Object.values(records)
       .filter((mission) => !workspaceID || mission.workspace_id === workspaceID)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     const waiting = (m: Mission) => Number(lines[m.id]?.needsYou ?? false)
     return {
       open: missions.filter((m) => !missionFinal(m)).sort((a, b) => waiting(b) - waiting(a)),
-      finished: missions.filter(missionFinal),
+      finished: missions.filter((m) => missionFinal(m) && !m.archived_at),
+      archived: missions.filter((m) => m.archived_at),
     }
   }, [records, workspaceID, lines])
-  const skeleton = useDelayed(loading && open.length + finished.length === 0)
+  const total = open.length + finished.length + archived.length
+  const skeleton = useDelayed(loading && total === 0)
   const newSwarm = canLaunch && (
     <Button size="sm" variant={mobile ? 'secondary' : 'primary'} onClick={() => useStore.getState().openPaletteDialog('launch')}>
       <Plus />
       New swarm
     </Button>
   )
-  const empty = !loading && !error && open.length + finished.length === 0
-  const finishedList = (
-    <ul aria-label="Finished swarms" className="mt-2 grid gap-2 md:grid-cols-2">
-      {finished.map((mission) => (
+  const empty = !loading && !error && total === 0
+  const cards = (label: string, missions: Mission[]) => (
+    <ul aria-label={label} className="mt-2 grid gap-2 md:grid-cols-2">
+      {missions.map((mission) => (
         <li key={mission.id} className="min-w-0">
           <SwarmCard mission={mission} line={lines[mission.id]} agents={agents} />
         </li>
       ))}
     </ul>
   )
+  const finishedList = cards('Finished swarms', finished)
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -147,6 +151,12 @@ export function SwarmList({
               <SectionLabel as="h2" id="finished-swarms">Finished ({finished.length})</SectionLabel>
               {finishedList}
             </section>
+          )}
+          {archived.length > 0 && (
+            <Collapsible open={showArchived} onOpenChange={setShowArchived}>
+              <CollapsibleTrigger>Archived ({archived.length})</CollapsibleTrigger>
+              <CollapsibleContent>{cards('Archived swarms', archived)}</CollapsibleContent>
+            </Collapsible>
           )}
           {hasMore && (
             <div className="flex justify-center">

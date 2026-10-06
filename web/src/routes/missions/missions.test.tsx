@@ -159,6 +159,22 @@ describe('swarm list', () => {
     expect(screen.getByText('old spike')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Finished (1)' })).toBeNull()
   })
+
+  it('folds archived swarms behind Archived, apart from Finished', async () => {
+    seed()
+    await mount(fakeApi({
+      missionList: vi.fn(async () => ({
+        missions: [
+          mission({ objective: 'old spike', phase: 'completed' }),
+          mission({ id: 'mission_2', objective: 'shelved work', phase: 'cancelled', archived_at: '2026-08-14T10:00:00Z' }),
+        ],
+      })),
+    }), null)
+    expect(await screen.findByRole('heading', { level: 2, name: 'Finished (1)' })).toBeDefined()
+    expect(screen.queryByText('shelved work')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
+    expect(within(screen.getByRole('list', { name: 'Archived swarms' })).getByText('shelved work')).toBeDefined()
+  })
 })
 
 describe('swarm detail', () => {
@@ -329,6 +345,49 @@ describe('swarm detail', () => {
     await userEvent.click(screen.getByRole('button', { name: 'More swarm actions' }))
     expect(screen.getByRole('menuitem', { name: 'Replace integrator…' })).toBeDefined()
     expect(screen.queryByRole('menuitem', { name: 'Cancel swarm…' })).toBeNull()
+  })
+
+  it('archives a finished swarm from More after confirmation, then offers Unarchive and Delete', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator({ status: 'completed' })) } })
+    const client = showing({ phase: 'completed' })
+    vi.mocked(client.missionArchive).mockRejectedValueOnce(new Error('mission.archive: run run_w1 is running; cancel the swarm and wait for its runs to stop'))
+    await mount(client)
+    await userEvent.click(screen.getByRole('button', { name: 'More swarm actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Delete swarm…' })).toBeNull()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Archive swarm…' }))
+    const confirm = screen.getByRole('alertdialog')
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Archive swarm' }))
+    expect(await within(confirm).findByText(/run run_w1 is running; cancel the swarm/)).toBeDefined()
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Archive swarm' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(client.missionArchive).toHaveBeenLastCalledWith('mission_1')
+
+    vi.mocked(client.missionShow).mockResolvedValue({
+      mission: mission({ phase: 'completed', archived_at: '2026-08-14T10:19:00Z' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [],
+    })
+    await mount(client)
+    await userEvent.click(screen.getAllByRole('button', { name: 'More swarm actions' }).at(-1)!)
+    expect(screen.queryByRole('menuitem', { name: 'Archive swarm…' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Unarchive swarm' })).toBeDefined()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete swarm…' }))
+    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete swarm' }))
+    await waitFor(() => expect(useStore.getState().route).toEqual({ name: 'missions', params: {} }))
+    expect(client.missionDelete).toHaveBeenCalledWith('mission_1')
+    expect(useStore.getState().missions.mission_1).toBeUndefined()
+  })
+
+  it('offers Archive and Delete on a cancelled swarm', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator({ status: 'abandoned' })) } })
+    await mount(showing({ phase: 'cancelled' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More swarm actions' }))
+    expect(screen.getByRole('menuitem', { name: 'Archive swarm…' })).toBeDefined()
+    expect(screen.getByRole('menuitem', { name: 'Delete swarm…' })).toBeDefined()
+  })
+
+  it('hides archive and delete from a member who is neither accountable nor admin', async () => {
+    seed({ info: { ...serverInfo, member: bob }, runs: { run_integrator: toRecord(integrator({ status: 'abandoned' })) } })
+    await mount(showing({ phase: 'cancelled' }))
+    expect(screen.queryByRole('button', { name: 'More swarm actions' })).toBeNull()
   })
 
   it('replaces an integrator from its execution choices as Standard', async () => {

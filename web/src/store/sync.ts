@@ -304,6 +304,14 @@ export async function applyEvent(
     await client.memberList().then(store.getState().setMembers).catch(ignore)
   }
 
+  if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
+    const missionID = (ev.payload as { mission_id: string }).mission_id
+    const state = store.getState()
+    state.removeMission(missionID)
+    if (state.route.name === 'missions' && state.route.params.missionId === missionID) state.navigate('missions')
+    return true
+  }
+
   // Mission events are scoped projection hints. Never let an event from a
   // background workspace refresh the mission currently visible in this tab.
   if (ev.type.startsWith('mission.') && ev.workspace_id) {

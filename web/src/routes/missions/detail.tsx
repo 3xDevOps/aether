@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
+import { Confirm } from '@/components/confirm'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -139,7 +141,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const mobile = useIsMobile()
   const self = useSelf()
   const cap = useCapability()
-  const [dialog, setDialog] = useState<'replace' | 'cancel' | null>(null)
+  const [dialog, setDialog] = useState<'replace' | 'cancel' | 'archive' | 'delete' | null>(null)
   const closeDialog = () => setDialog(null)
   const mission = detail?.mission.id === missionID ? detail.mission : undefined
   const integratorRunID = mission?.current_integrator_run_id || undefined
@@ -166,6 +168,10 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const canReplace = !final && cap.hasMethod('mission.replace-integrator') && launcher
   const canCancel = !final && cap.hasMethod('mission.cancel') && humanAuthority
   const canRelease = cap.hasMethod('mission.worker.release') && launcher
+  const archived = Boolean(mission.archived_at)
+  const canArchive = final && !archived && cap.hasMethod('mission.archive') && humanAuthority
+  const canUnarchive = archived && cap.hasMethod('mission.unarchive') && humanAuthority
+  const canDelete = (mission.phase === 'cancelled' || archived) && cap.hasMethod('mission.delete') && humanAuthority
   const openQuestion = canAnswer ? detail.questions.find((question) => !question.answered_at) : undefined
   const state = stateLineOf(mission, line, missing)
   const title = objectiveTitle(mission.objective)
@@ -174,8 +180,19 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const stateLine = (
     <StateLine tone={state.tone}>
       {state.text} · {integratorLabel(mission, agents)} · created <RelativeTime at={mission.created_at} />
+      {mission.archived_at && <> · archived <RelativeTime at={mission.archived_at} /></>}
     </StateLine>
   )
+
+  const unarchive = async () => {
+    try {
+      useStore.getState().upsertMission(await client.missionUnarchive(mission.id))
+      toast.success('Swarm restored')
+      onChanged()
+    } catch (err) {
+      toast.error(message(err))
+    }
+  }
 
   const answer = () => {
     const field = openQuestion && document.getElementById(answerFormID(openQuestion))?.querySelector('textarea')
@@ -194,7 +211,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           </Button>
         )
       )}
-      {(canReplace || canCancel) && (
+      {(canReplace || canCancel || canArchive || canUnarchive || canDelete) && (
         <Menu>
           <MenuTrigger asChild>
             <Button variant="ghost" size="icon-sm" label="More swarm actions">
@@ -203,7 +220,10 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           </MenuTrigger>
           <MenuContent align="end">
             {canReplace && <MenuItem onSelect={() => setDialog('replace')}>Replace integrator…</MenuItem>}
+            {canArchive && <MenuItem onSelect={() => setDialog('archive')}>Archive swarm…</MenuItem>}
+            {canUnarchive && <MenuItem onSelect={() => void unarchive()}>Unarchive swarm</MenuItem>}
             {canCancel && <MenuItem tone="danger" onSelect={() => setDialog('cancel')}>Cancel swarm…</MenuItem>}
+            {canDelete && <MenuItem tone="danger" onSelect={() => setDialog('delete')}>Delete swarm…</MenuItem>}
           </MenuContent>
         </Menu>
       )}
@@ -279,6 +299,39 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
             closeDialog()
             onChanged()
           }}
+        />
+      )}
+      {dialog === 'archive' && (
+        <Confirm
+          title="Archive this swarm?"
+          description={
+            <>
+              Hides the swarm and its runs from the board and the swarm list until you unarchive it. Completed runs are
+              closed first: merged when their work reached the delivered result, without merging otherwise. Archiving
+              schedules the swarm and its runs for deletion after the retention period.
+            </>
+          }
+          action="Archive swarm"
+          onConfirm={async () => useStore.getState().upsertMission(await client.missionArchive(mission.id))}
+          onDone={() => {
+            toast.success('Swarm archived')
+            onChanged()
+          }}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog === 'delete' && (
+        <Confirm
+          title="Delete this swarm?"
+          description="Removes the swarm with its tasks, submissions and agent messages, and deletes its runs with their checkouts and transcripts. Published branches stay. This cannot be undone."
+          action="Delete swarm"
+          onConfirm={() => client.missionDelete(mission.id)}
+          onDone={() => {
+            useStore.getState().removeMission(mission.id)
+            toast.success('Swarm deleted')
+            navigate('missions')
+          }}
+          onClose={closeDialog}
         />
       )}
     </div>

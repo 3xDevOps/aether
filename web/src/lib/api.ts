@@ -37,6 +37,7 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  Mission,
   MissionCancelResult,
   MissionCreateResult,
   MissionListResult,
@@ -533,6 +534,11 @@ export const api = {
   }) => call<MissionQuestionResult>('mission.question.answer', params),
   missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
     call<MissionCancelResult>('mission.cancel', params),
+  missionArchive: (missionID: string) =>
+    call<{ mission: Mission }>('mission.archive', { mission_id: missionID }).then((r) => r.mission),
+  missionUnarchive: (missionID: string) =>
+    call<{ mission: Mission }>('mission.unarchive', { mission_id: missionID }).then((r) => r.mission),
+  missionDelete: (missionID: string) => call<unknown>('mission.delete', { mission_id: missionID }),
   missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
     call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),

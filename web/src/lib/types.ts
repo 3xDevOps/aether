@@ -121,6 +121,7 @@ export interface Mission {
   integrator_run_launched?: boolean
   created_at: string
   updated_at: string
+  archived_at?: string
 }
 
 export interface MissionQuestion {
