@@ -29,14 +29,15 @@ const (
 )
 
 // detailTypes are the firehoses the feed leaves out by default: diff
-// snapshots, adapter activity, mail acknowledgements and swarm refresh hints
-// are detail, not workspace history. Asking for one by type still returns it.
+// snapshots, adapter activity, mail acknowledgements, swarm refresh hints
+// and presence are detail, not workspace history. Asking for one by type still returns it.
 var detailTypes = map[events.Type]bool{
 	events.TypeRunDiff:           true,
 	events.TypeRunTitle:          true,
 	events.TypeAgentEvent:        true,
 	events.TypeCoordMessageAcked: true,
 	events.TypeMissionChanged:    true,
+	events.TypePresence:          true,
 }
 
 // Filter narrows a timeline page. Member matches an event's actor - who

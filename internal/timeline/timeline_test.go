@@ -135,7 +135,7 @@ func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
 }
 
 func TestDetailEventsAreExcludedFromDefaultFeed(t *testing.T) {
-	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged} {
+	for _, typ := range []events.Type{events.TypeRunTitle, events.TypeMissionChanged, events.TypePresence} {
 		if !detailTypes[typ] {
 			t.Fatalf("%s should be a detail event in the default feed", typ)
 		}

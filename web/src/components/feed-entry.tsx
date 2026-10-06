@@ -6,6 +6,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { typeLabel, type EventType } from '@/lib/events'
 import { budgetStateLabel, money } from '@/lib/format'
 import { runLabel } from '@/lib/status'
+import { modeLabel } from '@/routes/run/agent-name'
 import type { BudgetState, Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -65,6 +66,8 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
     : 'input requests resolved',
   'run.deleted': () => 'record removed',
   'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
+  'run.controller': (p) => (p.member_id ? <span><MemberName id={p.member_id} /> took control</span> : 'control released'),
+  'run.mode': (p) => modeLine(p),
   'run.archived': (p) => (p.archived_at ? 'archived' : 'restored'),
   'run.outcome_seen': () => 'owner opened the finished run',
   'run.title': (p) => String(p.title ?? ''),
@@ -108,6 +111,17 @@ function RunName({ id }: { id: unknown }) {
       {runLabel(run)}
     </button>
   )
+}
+
+function MemberName({ id }: { id: unknown }) {
+  const memberID = typeof id === 'string' ? id : ''
+  return useStore((s) => s.members[memberID]?.display_name) ?? memberID
+}
+
+function modeLine(p: Record<string, unknown>): string {
+  const mode = modeLabel[String(p.mode)] ?? String(p.mode ?? '')
+  if (p.switching) return `switching to ${mode}`
+  return p.reason ? `stayed ${mode}: ${String(p.reason)}` : `now ${mode}`
 }
 
 function MissionName({ id }: { id: unknown }) {

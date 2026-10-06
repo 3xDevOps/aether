@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { FeedEntry } from '@/components/feed-entry'
 import { typeLabel } from '@/lib/events'
 import type { Event } from '@/lib/types'
@@ -37,6 +37,13 @@ describe('feed rows', () => {
     const text = renderRow('run.outcome_seen', {}).textContent ?? ''
     expect(text).toContain('Outcome seen')
     expect(text).toContain('owner opened the finished run')
+  })
+
+  it('names who took a run\'s control and when it was released', () => {
+    useStore.setState({ members: { [alice.id]: alice } })
+    expect(renderRow('run.controller', { member_id: alice.id }).textContent).toContain(`Run control${alice.display_name} took control`)
+    cleanup()
+    expect(renderRow('run.controller', { member_id: '' }).textContent).toContain('control released')
   })
 
   it('names both runs of an agent message and opens the sender', () => {
