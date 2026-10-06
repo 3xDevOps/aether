@@ -328,7 +328,7 @@ describe('swarm detail', () => {
 })
 
 describe('swarm detail on a phone', () => {
-  it('shows the objective and state line in the body, and leaves Answer to the question card', async () => {
+  it('puts the objective, state line and More in the body, and leaves Answer to the question card', async () => {
     const original = window.matchMedia
     vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
       Object.assign(new EventTarget(), { matches: query.includes('max-width'), media: query }) as unknown as MediaQueryList)
@@ -340,7 +340,9 @@ describe('swarm detail on a phone', () => {
     const overview = within(screen.getByRole('region', { name: 'Swarm' }))
     expect(overview.getByText('coordinate checkout work')).toBeDefined()
     expect(overview.getByText(/Planning · 1 question for you/)).toBeDefined()
-    expect(within(screen.getByRole('toolbar')).queryByRole('button', { name: 'Answer' })).toBeNull()
+    expect(screen.queryByRole('toolbar')).toBeNull()
+    expect(overview.queryByRole('button', { name: 'Answer' })).toBeNull()
+    expect(overview.getByRole('button', { name: 'More swarm actions' })).toBeDefined()
     expect(screen.getByLabelText('Answer question 1')).toBeDefined()
   })
 })

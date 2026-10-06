@@ -3261,7 +3261,8 @@ two minutes, or `Integrator did not launch: <error>` while
 badge. Swarms that need you sort first, then by last update; completed and
 cancelled swarms fold behind **Finished (n)**. The server has no archive or
 delete for a swarm, so Finished is the archive. With no swarms the page shows
-one sentence and **New swarm**. Counts come from one pass over the run store
+one sentence and **New swarm**. On a phone **New swarm** is a secondary
+button under the cards, since the top bar already has **New run**. Counts come from one pass over the run store
 (`swarmLines` in `routes/missions/swarm.ts`), not a request per card.
 
 ### Swarm detail
@@ -3269,7 +3270,8 @@ one sentence and **New swarm**. Counts come from one pass over the run store
 The header's title is the objective's first line cut to 80 characters; its
 state line reads the phase or reason, the integrator ("Claude Code ·
 Standard") and the creation time. On a phone the top bar keeps `Swarms`, so
-the body repeats the title and state line. One primary action: **Answer**
+the body repeats the title and state line, with the actions beside the
+title and **Open integrator** drawn secondary. One primary action: **Answer**
 (focuses the first open question's composer) while a question waits on the
 viewer, else **Open integrator**. **More** holds **Replace integrator…** and
 **Cancel swarm…**.

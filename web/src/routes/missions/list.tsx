@@ -11,6 +11,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StateLine } from '@/components/ui/status-dot'
 import { ViewHeader } from '@/components/view-header'
+import { useIsMobile } from '@/lib/breakpoints'
 import { useDelayed } from '@/lib/hooks'
 import type { AgentInfo, Mission } from '@/lib/types'
 import {
@@ -76,6 +77,7 @@ export function SwarmList({
 }) {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const records = useStore((s) => s.missions)
+  const mobile = useIsMobile()
   const lines = useSwarmLines()
   const [showFinished, setShowFinished] = useState(false)
   const { open, finished } = useMemo(() => {
@@ -90,7 +92,7 @@ export function SwarmList({
   }, [records, workspaceID, lines])
   const skeleton = useDelayed(loading && open.length + finished.length === 0)
   const newSwarm = canLaunch && (
-    <Button size="sm" onClick={() => useStore.getState().openPaletteDialog('launch')}>
+    <Button size="sm" variant={mobile ? 'secondary' : 'primary'} onClick={() => useStore.getState().openPaletteDialog('launch')}>
       <Plus />
       New swarm
     </Button>
@@ -99,7 +101,7 @@ export function SwarmList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title="Swarms" actions={newSwarm || undefined} />
+      <ViewHeader title="Swarms" actions={(!mobile && newSwarm) || undefined} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-3 px-4 py-6 sm:px-6">
           {error && <Callout tone="failed" role="alert">{error}</Callout>}
@@ -118,6 +120,7 @@ export function SwarmList({
               ))}
             </ul>
           )}
+          {mobile && !empty && newSwarm && <div>{newSwarm}</div>}
           {finished.length > 0 && (
             <Collapsible open={showFinished || open.length === 0} onOpenChange={setShowFinished}>
               <CollapsibleTrigger>Finished ({finished.length})</CollapsibleTrigger>

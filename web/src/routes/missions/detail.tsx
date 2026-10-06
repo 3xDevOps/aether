@@ -193,7 +193,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
         !mobile && <Button size="sm" onClick={answer}>Answer</Button>
       ) : (
         integratorRunID && !missing && (
-          <Button size="sm" variant={final ? 'secondary' : 'primary'} onClick={() => navigate('run', { runId: integratorRunID })}>
+          <Button size="sm" variant={final || mobile ? 'secondary' : 'primary'} onClick={() => navigate('run', { runId: integratorRunID })}>
             Open integrator
           </Button>
         )
@@ -216,13 +216,16 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title={title} subtitle={stateLine} actions={actions} />
+      <ViewHeader title={title} subtitle={stateLine} actions={mobile ? undefined : actions} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-6 px-4 py-6 sm:px-6">
           <section aria-label="Swarm" className="flex flex-col gap-2">
             {mobile && (
               <>
-                <p className="text-title">{title}</p>
+                <div className="flex items-start gap-2">
+                  <p className="min-w-0 flex-1 text-title">{title}</p>
+                  {actions}
+                </div>
                 {stateLine}
               </>
             )}
