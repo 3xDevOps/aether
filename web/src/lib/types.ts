@@ -868,6 +868,8 @@ export interface WorkspaceSelector {
   name?: string
 }
 
+/** The wire names of Standard, Enhanced and Background. */
+export type LaunchMode = 'tui' | 'acp' | 'headless'
 
 /** One entry of agent.list; source is who supplied the harness. */
 export interface AgentInfo {

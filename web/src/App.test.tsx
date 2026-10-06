@@ -81,7 +81,7 @@ describe('App', () => {
 
     fireEvent.click(launch)
 
-    expect(await screen.findByText('Launch a run')).toBeDefined()
+    expect(await screen.findByRole('dialog', { name: 'New run' })).toBeDefined()
     expect(await screen.findByLabelText('Target workspace')).toBeDefined()
     expect(useStore.getState().paletteOpen).toBe(false)
   })

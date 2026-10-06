@@ -4,6 +4,7 @@ import { initialRoute } from '@/lib/url-state'
 import type {
   ConfigExclusion,
   ConfigImportResult,
+  LaunchMode,
   LinkRepoResult,
   RepoFastForwardResult,
   RepoPushResult,
@@ -159,8 +160,8 @@ export interface UiSlice {
   mineOnly: boolean
   boardView: BoardView
   boardMapViewports: Record<string, BoardMapViewport>
-  /** A preference, not run state: it survives run cleanup. */
-  lastHarnessByAccount: Record<string, string>
+  /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
+  launchDefaults: Record<string, { mode: LaunchMode; at: number }>
   route: Route
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
@@ -185,7 +186,7 @@ export interface UiSlice {
   setMineOnly: (mineOnly: boolean) => void
   setBoardView: (view: BoardView) => void
   setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
-  rememberHarness: (accountID: string, harness: string) => void
+  rememberLaunch: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
@@ -216,7 +217,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   mineOnly: false,
   boardView: 'cards',
   boardMapViewports: {},
-  lastHarnessByAccount: {},
+  launchDefaults: {},
   route: initialRoute(),
   dismissedUpdates: { cli: '', server: '', shell: '' },
   updatesOpen: false,
@@ -268,12 +269,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
       boardMapViewports: { ...s.boardMapViewports, [scope]: viewport },
     }))
   },
-  rememberHarness: (accountID, harness) => {
-    if (!accountID || !harness) return
-    set((s) => ({
-      lastHarnessByAccount: { ...s.lastHarnessByAccount, [accountID]: harness },
-    }))
-  },
+  rememberLaunch: (agent, mode) =>
+    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: Date.now() } } })),
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },

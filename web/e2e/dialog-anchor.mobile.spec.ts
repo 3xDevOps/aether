@@ -58,7 +58,7 @@ test('the launch form keeps its footer on screen with the keyboard up', async ({
     .getByRole('button', { name: 'New run' })
     .tap()
 
-  const dialog = page.getByRole('dialog', { name: 'Launch a run' })
+  const dialog = page.getByRole('dialog', { name: 'New run' })
   await expect(dialog).toBeVisible()
 
   const height = await page.evaluate(() => window.innerHeight)

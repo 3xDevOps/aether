@@ -51,16 +51,14 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   const surfaces = page.getByRole('navigation', { name: 'Aether' })
   await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('button', { name: 'Create swarm', exact: true }).click()
-  const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
+  const launch = page.getByRole('dialog', { name: 'New swarm' })
   await expect(launch).toBeVisible()
-  await launch.getByPlaceholder('What outcome should the integrator coordinate?').fill(missionObjective)
-  // The integrator is always interactive; the worker the fixture starts
-  // below needs its own headless choice.
-  await expect(launch.getByText(/^Integrator · .* · claude · tui$/)).toBeVisible()
-  const workerChoice = launch.locator('label').filter({ hasText: '· claude' })
-  await workerChoice.getByRole('checkbox').check()
-  await workerChoice.getByRole('combobox').click()
-  await page.getByRole('option', { name: 'headless', exact: true }).click()
+  await launch.getByLabel('Objective').fill(missionObjective)
+  await expect(launch.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
+  // The worker the fixture starts below needs a Background choice, the
+  // default worker mode.
+  await expect(launch.getByRole('radiogroup', { name: 'Worker mode' }).getByRole('radio', { name: 'Background' })).toBeChecked()
+  await launch.getByRole('checkbox', { name: /Claude Code/ }).check()
   await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
   await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()
   const { missions } = await alice.api.rpc<{

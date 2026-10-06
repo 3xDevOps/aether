@@ -74,7 +74,7 @@ const persistedUi = (s: RootState) => ({
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
   mineOnly: s.mineOnly,
-  lastHarnessByAccount: s.lastHarnessByAccount,
+  launchDefaults: s.launchDefaults,
   boardView: s.boardView,
   boardMapViewports: s.boardMapViewports,
   dismissedUpdates: s.dismissedUpdates,
@@ -142,6 +142,7 @@ export function createRootStore() {
           }
           if (version < 5) delete (state as { groupBy?: unknown }).groupBy
           if (version < 6) delete state.sidebarWidth
+          if (version < 6) delete (state as { lastHarnessByAccount?: unknown }).lastHarnessByAccount
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate

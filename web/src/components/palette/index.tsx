@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'
-import { TemplateDialog } from '@/components/palette/template-dialog'
+import { TemplateDialog } from '@/components/launch/template-dialog'
 import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
 import { useCommandRunner, type Command } from '@/lib/commands'

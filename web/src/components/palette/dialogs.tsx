@@ -4,7 +4,7 @@
 import { ClearDoneDialog, ReleaseFinishedDialog } from '@/components/palette/clear-done-dialog'
 import { CloseDialog } from '@/components/palette/close-dialog'
 import { ForwardDialog } from '@/components/palette/forward-dialog'
-import { LaunchDialog } from '@/components/palette/launch-dialog'
+import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { InjectDialog } from '@/components/palette/inject-dialog'
 import { useStore } from '@/store'
 

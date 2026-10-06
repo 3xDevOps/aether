@@ -14,6 +14,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { Locator } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -55,18 +56,22 @@ test('a member shares their agent account and a teammate launches on it', async 
   try {
     const openLaunch = async () => {
       await bobPage.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New run' }).click()
-      const dialog = bobPage.getByRole('dialog', { name: 'Launch a run' })
+      const dialog = bobPage.getByRole('dialog', { name: 'New run' })
       await expect(dialog).toBeVisible()
       return dialog
     }
+    const chooseAliceAccount = async (dialog: Locator) => {
+      await dialog.getByRole('button', { name: /^Options/ }).click()
+      await dialog.getByRole('combobox', { name: 'Account', exact: true }).click()
+      await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
+    }
 
-    // Before the share, Bob's Account picker offers only his own account.
+    // Before the share, Bob has only his own account, so there is no
+    // account to choose.
     await bobPage.goto(bob.url)
     let dialog = await openLaunch()
-    await dialog.getByRole('combobox', { name: 'Account', exact: true }).click()
-    await expect(bobPage.getByRole('option', { name: `${bobName} (you)` })).toBeVisible()
-    await expect(bobPage.getByRole('option', { name: `${aliceName} (shared)` })).toHaveCount(0)
-    await bobPage.keyboard.press('Escape')
+    await expect(dialog.getByRole('radio', { name: /^custom/ })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^Options/ })).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
 
@@ -102,32 +107,28 @@ test('a member shares their agent account and a teammate launches on it', async 
     // After the share, Alice's account is offered with the agents installed
     // in her home, both refused until Alice has a login.
     dialog = await openLaunch()
-    const account = dialog.getByRole('combobox', { name: 'Account', exact: true })
-    await account.click()
-    await bobPage.getByRole('option', { name: `${aliceName} (shared)` }).click()
+    await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to claude, codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+      `${aliceName} is not logged in to claude, codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
     )
-    await dialog.getByRole('combobox', { name: 'Agent', exact: true }).click()
-    for (const agent of ['claude', 'codex']) {
-      await expect(bobPage.getByRole('option', { name: `${agent} (not logged in)` })).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      )
+    for (const agent of [/^Claude Code/, /^Codex/]) {
+      await expect(dialog.getByRole('radio', { name: agent })).toBeDisabled()
     }
-    await bobPage.keyboard.press('Escape')
 
     // The login a vendor flow would leave in Alice's home.
     const login = path.join(aether.server.memberHome(aliceID), '.claude', '.credentials.json')
     mkdirSync(path.dirname(login), { recursive: true })
     writeFileSync(login, `${ownerLogin}\n`, { mode: 0o600 })
 
-    await dialog.getByRole('button', { name: 'Refresh agents' }).click()
-    await expect(dialog.getByRole('combobox', { name: 'Agent', exact: true })).toHaveText('claude')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+    dialog = await openLaunch()
+    await chooseAliceAccount(dialog)
+    await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then press Refresh agents.`,
+      `${aliceName} is not logged in to codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
     )
-    await dialog.getByLabel(/^Task/).fill(task)
+    await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
 
     await expect(bobPage.getByRole('heading', { name: task, exact: true })).toBeVisible()

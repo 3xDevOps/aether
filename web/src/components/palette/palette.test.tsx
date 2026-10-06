@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
-import { openSelect, pickOption } from '@/test/select'
+import { pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
@@ -51,11 +51,9 @@ function open() {
   fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
 }
 
-/** Until its roster lands the agent field is disabled and cannot open. */
-async function agentField(): Promise<HTMLElement> {
-  const agent = await screen.findByLabelText('Agent')
-  await waitFor(() => expect(agent.textContent).not.toBe('Choose an agent'))
-  return agent
+/** Until its roster lands nothing is launchable. */
+async function launchReady(): Promise<void> {
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false))
 }
 
 function overlay(markup: string): void {
@@ -509,8 +507,7 @@ describe('command palette', () => {
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
 
-    // Nothing is launchable until the roster names the harness it will send.
-    await agentField()
+    await launchReady()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
@@ -527,8 +524,8 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Create swarm...'))
-    expect(await screen.findByRole('dialog', { name: 'Launch a swarm' })).toBeDefined()
-    expect(screen.getByLabelText(/^Objective/)).toBeDefined()
+    expect(await screen.findByRole('dialog', { name: 'New swarm' })).toBeDefined()
+    expect(screen.getByLabelText('Objective')).toBeDefined()
   })
 
   it('offers Create swarm only where the gateway carries mission.create', async () => {
@@ -555,10 +552,9 @@ describe('command palette', () => {
 
     fireEvent.click(await screen.findByText('Launch a run...'))
     // agent.list is the source of truth, not the shipped names.
-    await openSelect(await agentField())
-    await screen.findByRole('option', { name: 'myagent' })
+    expect(await screen.findByRole('radio', { name: /^myagent/ })).toBeDefined()
     expect(api.agentList).toHaveBeenCalled()
-    expect(screen.getByRole('option', { name: 'custom' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: /^custom/ })).toBeDefined()
   })
 
   it('launches with the selected shared account and its agent roster', async () => {
@@ -574,13 +570,11 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch a run...'))
-    await pickOption(await screen.findByLabelText('Account'), 'Bob (shared)')
-    const agent = await agentField()
-    await openSelect(agent)
-    await screen.findByRole('option', { name: 'bob-agent' })
-    // Radix hides the rest of the document while a list is open.
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(agent.textContent).toBe('bob-agent'))
+    const options = await screen.findByRole('button', { name: /^Options/ })
+    if (options.getAttribute('aria-expanded') === 'false') await userEvent.click(options)
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await waitFor(() => expect(screen.getByRole('radio', { name: /^bob-agent/ }).getAttribute('aria-checked')).toBe('true'))
+    await launchReady()
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
