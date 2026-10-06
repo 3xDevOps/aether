@@ -185,6 +185,12 @@ export function RunHeader({
             className={`${focusRing} col-span-2 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonClass[state]}`}
           >
             <span className="whitespace-pre-wrap break-words select-text">{reason}</span>
+            {run.reason && !reason.toLowerCase().includes(run.reason.toLowerCase()) && (
+              <span className="block">
+                <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
+                <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
+              </span>
+            )}
           </div>
         </div>
         <div className="flex min-h-9 min-w-0 items-stretch justify-between overflow-hidden border-t border-border bg-sidebar">

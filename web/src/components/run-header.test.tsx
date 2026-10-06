@@ -81,6 +81,14 @@ describe('run header', () => {
     expect(within(bar).getByText('Waiting for Bob')).toBeDefined()
   })
 
+  it('shows the server reason under the state reason', () => {
+    seed({ status: 'needs-attention', reason: 'StopFailure: rate limit exceeded' })
+    const bar = runHeader('events')
+
+    expect(within(bar).getByText(/^Agent idle for/)).toBeDefined()
+    expect(within(bar).getByText('StopFailure: rate limit exceeded')).toBeDefined()
+  })
+
   it('updates outstanding native requests and ignores a stale route snapshot', () => {
     const question = { id: 'same', session_id: 'foreground', kind: 'question' as const }
     const permission = { id: 'same', session_id: 'background', kind: 'permission' as const }
