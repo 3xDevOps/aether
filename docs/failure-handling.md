@@ -801,7 +801,7 @@ could not update codex from codex-cli 0.155.1: the updater exited 1: <updater ou
 
 The server log has the same failure as `scheduler: harness update failed`.
 The next launch from that home tries again after 15 minutes.
-`--harness-update=false` turns updates off.
+`--agent-update=false` turns updates off.
 
 An interrupted `codex` or `pi` exchange leaves either complete version
 launchable. If an older updater left the installed package missing and a

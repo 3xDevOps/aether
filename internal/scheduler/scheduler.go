@@ -703,7 +703,7 @@ func (s *Scheduler) adapterInstalled(member, account domain.MemberID, profile ha
 // errMemberDefinitionOnly refuses member's own harness definition on
 // another member's account. A member definition declares no login the
 // owner agreed to share, so only server-wide definitions can.
-var errMemberDefinitionOnly = errors.New("is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares")
+var errMemberDefinitionOnly = errors.New("is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --agent-definitions) can declare the login it shares")
 
 // launchProfile resolves the profile and argv templates. Precedence: the
 // server-wide admin spec, then member's stored definition, then the shipped

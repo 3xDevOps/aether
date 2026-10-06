@@ -13,7 +13,7 @@ export function launchable(agent: AgentInfo): boolean {
   return agent.installed === true && agent.login_missing !== true && agent.own_account_only !== true && !agent.unavailable
 }
 
-/** Never listed by agent.list; launches only where the deployment pinned it with --harness-definitions. */
+/** Never listed by agent.list; launches only where the deployment pinned it with --agent-definitions. */
 export const customAgent = 'custom'
 
 function rank(agent: AgentInfo): number {

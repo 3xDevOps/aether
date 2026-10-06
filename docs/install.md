@@ -1133,13 +1133,13 @@ uses the default; negative values have the semantics in the table.
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
-| `--harness-update` | on | Update a shipped agent installed in the member home before launching it; see [harnesses.md](harnesses.md#updates-before-launch). |
+| `--agent-update` | on | Update a shipped agent installed in the member home before launching it; see [harnesses.md](harnesses.md#updates-before-launch). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long a closed Standard or Enhanced run, one its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
-| `--harness-definitions` | none | Inline JSON custom agent definitions via this flag or `AETHER_HARNESS_DEFINITIONS`; see [harnesses.md](harnesses.md). |
+| `--agent-definitions` | none | Inline JSON custom agent definitions via this flag or `AETHER_AGENT_DEFINITIONS`; see [harnesses.md](harnesses.md). |
 
 Swarms run over conflict coordination, so `--conflict-coordination=false` also
 turns them off. The dashboard still offers **Swarm**, but `mission.create`
@@ -1287,7 +1287,7 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees. A retained TUI run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk usage reports. |
+| `checkouts/` | Per-run worktrees. A retained Standard or Enhanced run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk usage reports. |
 | `transcripts/` | Per-run PTY transcripts (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |

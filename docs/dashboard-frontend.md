@@ -1112,7 +1112,7 @@ working session; a server that does not report it shows nothing). An agent
 that is not installed stays listed, disabled, with **Set up**, which closes
 the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
-an agent definition with `--harness-definitions`. With nothing installed,
+an agent definition with `--agent-definitions`. With nothing installed,
 nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
 the per-row links. The list is read each time the dialog opens; a failed read

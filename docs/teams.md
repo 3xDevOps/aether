@@ -881,7 +881,7 @@ account. On a shared account the launch dialog shows it disabled as **Your
 account only**; a launch from the CLI is refused:
 
 ```
-scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
+scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --agent-definitions) can declare the login it shares
 ```
 
 An agent whose owner has no login for it, or only an empty file at its login

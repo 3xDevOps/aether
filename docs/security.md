@@ -138,7 +138,7 @@ member's own definition (`aether agent add`) runs only on that member's own
 account; a launch of it on a shared account is refused:
 
 ```
-scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
+scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --agent-definitions) can declare the login it shares
 ```
 
 A launch is also refused when a definition's login path is the home itself,

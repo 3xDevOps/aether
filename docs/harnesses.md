@@ -121,7 +121,7 @@ package that drives the CLI. Aether pins one version of each, taken from the
 [ACP registry](https://agentclientprotocol.com) and recorded in
 `internal/harness/acpregistry.json`, a snapshot of only the entries Aether
 uses. A custom definition is enhanced only when it names its ACP server's
-argv: `ACPArgs` in `--harness-definitions`, `acp_args` in `agent.register`, or
+argv: `ACPArgs` in `--agent-definitions`, `acp_args` in `agent.register`, or
 `--acp` on `aether agent add`.
 
 An adapter installs into the member home like an npm agent:
@@ -814,7 +814,7 @@ The following disable or exclude automatic reporting:
   reports both ends of every turn itself ([enhanced-runs.md](enhanced-runs.md)).
 - **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
   the run identity socket, canonical CLI and discovery remain available.
-- **An argv override.** A `--harness-definitions` entry that redefines a
+- **An argv override.** A `--agent-definitions` entry that redefines a
   shipped agent drops the status arguments, status environment, and
   taskless discovery mechanism - nothing checks the overridden command is
   still that CLI.
@@ -1019,7 +1019,7 @@ arguments, the installed CLI has drifted from the registry.
 Update the registry or install a compatible CLI in the member's
 Environment. The installed executable lives in that member's home.
 An argv override replaces the shipped template wholesale, so a registry fix
-never reaches it: a deployment's `--harness-definitions` entry that redefines
+never reaches it: a deployment's `--agent-definitions` entry that redefines
 a shipped agent has to be updated on its own. It keeps the registry's key
 passthrough and launch env for that name, since neither is part of the
 command line.
@@ -1209,8 +1209,8 @@ the end-to-end tests drive.
 
 Custom launch definitions come from two places, resolved in this order:
 
-1. **Server configuration** (administrator): `--harness-definitions` or the
-   `AETHER_HARNESS_DEFINITIONS` environment variable. These pin a name for
+1. **Server configuration** (administrator): `--agent-definitions` or the
+   `AETHER_AGENT_DEFINITIONS` environment variable. These pin a name for
    every member and always win.
 2. **Member registration**: `aether agent add <name>` stores a definition
    scoped to the registering member, over the normal control channel; no
@@ -1305,7 +1305,7 @@ Nothing else is touched: no agent configuration, plugins, extensions, or
 release channel. These are never updated:
 
 - an agent defined by a member, or a shipped name an administrator overrides
-  with `--harness-definitions`;
+  with `--agent-definitions`;
 - `opencode`, because an upgrade can cross a major version that the managed
   OpenCode wrapper refuses (see [Managed native loading](#managed-native-loading));
 - an agent installed in the image rather than in `~/.local/bin` of the member
@@ -1342,7 +1342,7 @@ container and does not update. `omp` and Claude Code keep the files of
 previous versions in the member home; Aether does not prune them.
 
 To turn updates off for the whole server, start it with
-`aether-server serve --harness-update=false`.
+`aether-server serve --agent-update=false`.
 
 ## Agent configuration: import and Files
 
