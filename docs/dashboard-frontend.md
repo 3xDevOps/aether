@@ -2329,7 +2329,9 @@ questions and queued messages stay contextual to their run, in its Details
 - **The feed is virtualized.** `virtua` mounts only the rows near the
   viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
   row carries `aria-setsize` and `aria-posinset`, so a screen reader still
-  hears the list's real length.
+  hears the list's real length. When live events land above a reader who
+  has scrolled down, the list shifts by their height so the rows in view
+  stay put; at the very top the new rows show.
 - **Agent messages is the workspace's message history.** Choosing it in
   **Show** swaps the feed for `coord.messages.list` rows, newest first, drawn
   by `components/messages/message-row.tsx`: kind glyph, sender → recipient
