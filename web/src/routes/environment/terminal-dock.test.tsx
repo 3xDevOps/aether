@@ -663,7 +663,7 @@ describe('environment terminal dock', () => {
   it('keeps its actions in the tab row when it fills a view without a header', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock containment="fill" />)
-    const dock = within(await screen.findByRole('region', { name: 'Terminal dock' }))
+    const dock = within(await screen.findByRole('region', { name: 'Environment terminal' }))
     expect(await dock.findByRole('button', { name: 'Save environment' })).toBeDefined()
     expect(dock.getByText('Installs here reach agents after you save.')).toBeDefined()
   })
@@ -783,7 +783,7 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
 
     expect(screen.queryByText('Your environment starts on first open')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal dock' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand terminal' }))
 
     expect(await screen.findByText('Your environment starts on first open')).toBeDefined()
   })
@@ -795,9 +795,9 @@ describe('environment terminal dock', () => {
 
     await waitFor(() => expect(useStore.getState().envTerminal.collapsed).toBe(false))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal dock' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse terminal' }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Expand terminal dock' })).toBeDefined(),
+      expect(screen.getByRole('button', { name: 'Expand terminal' })).toBeDefined(),
     )
     expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })

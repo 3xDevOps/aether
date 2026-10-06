@@ -154,7 +154,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     expect(screen.getByRole('region', { name: 'Connect GitHub' })).toBeDefined()
     await open()
 
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Environment terminal' })).toBeDefined()
     // Ctrl-U, the kill-line every shell the terminal opens honors, so the
     // command cannot land on top of whatever the member typed at the
     // prompt while the check was out.
@@ -233,7 +233,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     const status = screen
       .getAllByRole('status')
       .map((node) => node.textContent)
-    expect(status).toContain('Checking your environment terminal for gh…')
+    expect(status).toContain('Checking your Environment for gh…')
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(socket.send).not.toHaveBeenCalled()
   })
@@ -340,7 +340,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     expect(socket.send).not.toHaveBeenCalled()
     expect(
       screen.getByText(
-        /gh 2\.45\.0 in your environment terminal cannot answer the login check; 2\.81\.0 is the oldest that can\./,
+        /gh 2\.45\.0 in your Environment cannot answer the login check; 2\.81\.0 is the oldest that can\./,
       ),
     ).toBeDefined()
     // A release-tagged standard image never moves in the registry, so
@@ -408,7 +408,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     await open()
 
     expect(
-      screen.getByText('gh is in your environment terminal but would not run.'),
+      screen.getByText('gh is in your Environment but would not run.'),
     ).toBeDefined()
     expect(screen.getByText(/permission denied/)).toBeDefined()
     // Connecting would only collect the matching refusal.
@@ -451,7 +451,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi())
     await open()
     expect(
-      await screen.findByText('The login command is ready in your environment terminal:'),
+      await screen.findByText('The login command is ready in your Environment:'),
     ).toBeDefined()
 
     // Stopping the environment makes the standing answer describe a
@@ -461,7 +461,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     })
     expect(screen.queryByText(githubLoginCommand)).toBeNull()
     expect(
-      screen.getByText('Waiting for your environment terminal to start…'),
+      screen.getByText('Waiting for your Environment to start…'),
     ).toBeDefined()
   })
 
@@ -469,7 +469,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     renderStep(runningApi(), { ...localCaps, ws: ['events', 'attach'] })
     await open()
 
-    expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Environment terminal' })).toBeNull()
     expect(screen.getByText('aether terminal')).toBeDefined()
     expect(screen.getByText(githubLoginCommand)).toBeDefined()
     expect(screen.getByText('aether github connect')).toBeDefined()
@@ -487,7 +487,7 @@ describe('connect GitHub', { timeout: 20_000 }, () => {
     await toAgentsStep()
     await open()
 
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Environment terminal' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 

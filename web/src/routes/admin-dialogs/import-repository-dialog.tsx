@@ -96,7 +96,7 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
           <p className="text-xs text-muted-foreground">Use credential-free URLs. Origin is a separate checkout push destination, never inferred from the read-only source. Publishing requires your own native Git/gh credentials and upstream permission; a deploy key here grants read access only. Use a writable fork or leave Origin blank.</p>
           <Label className="block space-y-1">Source authentication<select className="h-9 w-full rounded border bg-background px-2" value={auth} onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}><option value="public">Public HTTPS</option><option value="deploy-key">Read-only deploy key</option></select></Label>
           {auth === 'deploy-key' && <>
-            <p className="text-xs text-muted-foreground">Use GitHub HTTPS or a generic ssh:// source. Import generates a public deploy key without fetching. A repository administrator must install it read-only at the source, then Verify / Refresh in Source control and explicitly adopt the candidate. Generic SSH requires known_hosts verified with the host administrator, not a blindly trusted scan. Do not reconfigure after installing the key: reconfiguration rotates it.</p>
+            <p className="text-xs text-muted-foreground">Use GitHub HTTPS or a generic ssh:// source. Import generates a public deploy key without fetching. A repository administrator must install it read-only at the source, then Verify / Refresh on the Repository page and explicitly adopt the candidate. Generic SSH requires known_hosts verified with the host administrator, not a blindly trusted scan. Do not reconfigure after installing the key: reconfiguration rotates it.</p>
             <Label className="block space-y-1">Pinned known_hosts (required for generic SSH)<Textarea value={knownHosts} onChange={(event) => setKnownHosts(event.target.value)} className="font-mono text-xs" /></Label>
           </>}
         </fieldset>
@@ -108,15 +108,15 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
           <p>Source state: {result.mirror.status ?? (result.mirror.enabled ? 'Unknown' : 'Not configured')}</p>
           <p className="break-all">Observed candidate: <code>{result.mirror.observed_commit || 'None'}</code></p>
           <p>Candidate generation: {result.mirror.generation ?? 'Unavailable'}</p>
-          <p className="break-all">Accepted base: <code>{result.mirror.accepted_commit || 'None — adoption required before launch'}</code></p>
-          {result.mirror.public_key && <><p>Install this read-only deploy key at the source, then continue to Source control to verify it:</p><pre className="overflow-auto whitespace-pre-wrap break-all">{result.mirror.public_key}</pre></>}
+          <p className="break-all">Accepted base: <code>{result.mirror.accepted_commit || 'None - adoption required before launch'}</code></p>
+          {result.mirror.public_key && <><p>Install this read-only deploy key at the source, then continue to the Repository page to verify it:</p><pre className="overflow-auto whitespace-pre-wrap break-all">{result.mirror.public_key}</pre></>}
           {result.error && <p role="alert" className="whitespace-pre-wrap break-words text-state-failed">{result.error}</p>}
-          {result.created && <p>The workspace is retained even if fetch failed. Continue with this workspace's Source control to repair or refresh the source and explicitly adopt the reviewed generation; do not import again.</p>}
+          {result.created && <p>The workspace is retained even if fetch failed. Continue on this workspace's Repository page to repair or refresh the source and explicitly adopt the reviewed generation; do not import again.</p>}
         </section>}
       </form>
       <DialogFooter className="border-t pt-3">
         <Button variant="secondary" disabled={busy} onClick={onClose}>{result?.created ? 'Close' : 'Cancel'}</Button>
-        {result?.created ? <Button onClick={() => setSourceOpen(true)}>Continue to Source control</Button> : <Button type="submit" form="import-repository" disabled={busy || uncertain || !name.trim() || !source.trim() || !base.trim()}>{busy ? 'Importing…' : 'Import repository'}</Button>}
+        {result?.created ? <Button onClick={() => setSourceOpen(true)}>Continue to Repository</Button> : <Button type="submit" form="import-repository" disabled={busy || uncertain || !name.trim() || !source.trim() || !base.trim()}>{busy ? 'Importing…' : 'Import repository'}</Button>}
       </DialogFooter>
     </DialogContent>
   </Dialog>

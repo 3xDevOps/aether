@@ -193,7 +193,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
     <>
           <DialogHeader>
             <DialogTitle>Captures</DialogTitle>
-            <DialogDescription>Screenshots and retained evidence for this run. They record what was seen, not that it was verified.</DialogDescription>
+            <DialogDescription>Screenshots and retained captures for this run. They record what was seen, not that it was verified.</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-3">
@@ -201,13 +201,13 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
             </div>
             <div className="border-b border-border px-3 py-2 text-ui-xs text-muted-foreground">
               Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
-              Retained copies use evidence access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
+              Retained copies use capture access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
             </div>
             {captureRetention}
-            {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-ui-sm text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry evidence</Button>}</div>}
+            {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-ui-sm text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry captures</Button>}</div>}
             {!selectedID ? (
               <div className="p-3">
-                {loading && <p className="text-ui-sm text-muted-foreground">Loading evidence…</p>}
+                {loading && <p className="text-ui-sm text-muted-foreground">Loading captures…</p>}
                 {!loading && !packets.length && <p className="text-ui-sm text-muted-foreground">No retained packets for this run.</p>}
                 <div className="divide-y divide-border">
                   {packets.map((item) => (
@@ -244,10 +244,10 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
                         <div><dt className="inline font-medium">Sources: </dt><dd className="inline">{sourceSummary(packet)}</dd></div>
                       </dl>
                       <p className="mt-1 text-ui-xs text-muted-foreground">The packet-retain revision is a later snapshot, not the Git boundary of an earlier capture.</p>
-                      {packet.expires_at && <p className="mt-1 text-ui-xs text-muted-foreground">Evidence expires {when(packet.expires_at)}.</p>}
+                      {packet.expires_at && <p className="mt-1 text-ui-xs text-muted-foreground">Capture expires {when(packet.expires_at)}.</p>}
                       {packet.availability === 'expired' && <p role="status" className="mt-1 text-ui-sm text-state-failed">This packet has expired. Retained bytes are no longer available.</p>}
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Evidence views">
+                    <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Capture views">
                       <Button type="button" size="sm" variant={view === 'summary' ? 'secondary' : 'ghost'} role="tab" aria-selected={view === 'summary'} onClick={() => setView('summary')}>Summary</Button>
                       <Button type="button" size="sm" variant={view === 'patch' ? 'secondary' : 'ghost'} role="tab" aria-selected={view === 'patch'} onClick={() => void loadPatch()}>Patch</Button>
                       <Button type="button" size="sm" variant={view === 'transcript' ? 'secondary' : 'ghost'} role="tab" aria-selected={view === 'transcript'} onClick={() => void loadTranscript()}>Transcript</Button>
@@ -420,7 +420,7 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
   return (
     <details open={expanded} className="border-b border-border px-3 py-2">
       <summary onClick={(event) => { event.preventDefault(); setExpanded((value) => !value) }} className="cursor-pointer text-ui-sm font-medium">Select transient captures to retain</summary>
-      <p className="mt-2 text-ui-xs text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not durable evidence.</p>
+      <p className="mt-2 text-ui-xs text-muted-foreground">Verify first, then deliberately retain before report or cleanup. A transient capture ID alone is not a durable record.</p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-ui-xs text-muted-foreground">{selected.length}/64 selected</span>
         <Button type="button" size="sm" variant="ghost" disabled={loading || retaining} onClick={() => void loadCaptures()}>Refresh captures</Button>
@@ -461,7 +461,7 @@ function useCaptureRetention({ runID, client, onRetained }: CaptureRetentionProp
       <p className={`text-ui-xs ${noteBytes > 4096 ? 'text-state-failed' : 'text-muted-foreground'}`}>{noteBytes}/4096 UTF-8 bytes. Notes are observations, not an automatic verification claim.</p>
       <Button type="button" size="sm" className="mt-2" disabled={retaining || !selected.length || noteBytes > 4096} onClick={() => void retain()}>{retaining ? 'Retaining…' : 'Retain selected captures'}</Button>
       {idempotencyKey && <p className="mt-2 break-all text-ui-xs text-muted-foreground">Idempotency key: {idempotencyKey}</p>}
-      {retainError && <div role="alert" className="mt-2 text-ui-sm text-state-failed"><p className="break-words">{retainError}</p><p>No automatic retry was made. Retrying the unchanged selection and notes reuses this key; inspect retained evidence if the outcome is uncertain.</p></div>}
+      {retainError && <div role="alert" className="mt-2 text-ui-sm text-state-failed"><p className="break-words">{retainError}</p><p>No automatic retry was made. Retrying the unchanged selection and notes reuses this key; inspect retained captures if the outcome is uncertain.</p></div>}
       {retainedID && <p role="status" className="mt-2 break-words text-ui-sm">Retained packet <code>{retainedID}</code>. Use this packet ID with the existing report <code>--evidence-ref</code>; retaining does not report an outcome.</p>}
     </details>
   )

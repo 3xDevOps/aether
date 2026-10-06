@@ -82,13 +82,13 @@ describe('Dock controls', () => {
     }
 
     render(createElement(FocusableDock))
-    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize terminal dock' }), {
+    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize terminal' }), {
       key: 'Enter',
     })
 
     expect(screen.queryByRole('tabpanel')).toBeNull()
     expect(document.activeElement).toBe(
-      screen.getByRole('button', { name: 'Expand terminal dock' }),
+      screen.getByRole('button', { name: 'Expand terminal' }),
     )
   })
 })

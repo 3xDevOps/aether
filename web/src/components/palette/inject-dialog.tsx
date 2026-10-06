@@ -90,7 +90,7 @@ export function InjectDialog() {
             autoFocus
             rows={5}
             aria-describedby="inject-help"
-            placeholder="Steer the agent…"
+            placeholder="Message the agent…"
             value={text}
             onChange={(e) => {
               const nextText = e.target.value

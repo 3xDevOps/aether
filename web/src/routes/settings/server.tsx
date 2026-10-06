@@ -82,7 +82,7 @@ function RetainedContainersRow() {
     <SettingRow
       label="Retained containers"
       help={count > 0
-        ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Freeing them reclaims disk; those runs cannot be relaunched.`
+        ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Freeing them reclaims disk; those runs cannot be reopened.`
         : `No finished run keeps a container${where}.`}
       control={(
         <Button size="sm" variant="secondary" disabled={count === 0} onClick={() => openDialog('release-finished')}>

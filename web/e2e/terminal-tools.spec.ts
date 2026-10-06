@@ -24,7 +24,7 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
   await wizard.agent.skip().click()
   const nav = (target: Page) => target.getByRole('navigation', { name: 'Aether' })
   await nav(page).getByRole('button', { name: 'Board', exact: true }).click()
-  const dock = page.getByRole('region', { name: 'Terminal dock' })
+  const dock = page.getByRole('region', { name: 'Environment terminal' })
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
   await expect(dock).toHaveCount(0)
 
@@ -117,7 +117,7 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
   try {
     const touchPage = await touchContext.newPage()
     await touchPage.goto(alice.url)
-    const touchDock = touchPage.getByRole('region', { name: 'Terminal dock' })
+    const touchDock = touchPage.getByRole('region', { name: 'Environment terminal' })
     await nav(touchPage).getByRole('button', { name: 'Environment', exact: true }).click()
     await expect(touchDock.locator('.xterm-rows')).toBeVisible({ timeout: 60_000 })
     await touchDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()

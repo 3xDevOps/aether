@@ -205,7 +205,7 @@ export function FileEditor({
             <Tabs value={mode} onValueChange={(value) => onMode(value as ViewerMode)}>
               <TabsList look="segmented" aria-label="File view">
                 <TabsTrigger value="file">File</TabsTrigger>
-                <TabsTrigger value="diff">Diff vs base</TabsTrigger>
+                <TabsTrigger value="diff">Changes vs base</TabsTrigger>
               </TabsList>
             </Tabs>
           )}

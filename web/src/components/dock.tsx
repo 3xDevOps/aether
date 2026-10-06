@@ -237,13 +237,13 @@ export function Dock({
         fill ? 'h-full flex-1' : 'shrink-0 border-t border-border',
       )}
       style={collapsed || fill ? undefined : { height: currentHeight }}
-      aria-label="Terminal dock"
+      aria-label="Environment terminal"
     >
       {!collapsed && !coarse && !fill && (
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize terminal dock"
+          aria-label="Resize terminal"
           aria-controls={dockID}
           aria-valuenow={Math.round(currentHeight)}
           aria-valuemin={Math.round(min)}
@@ -386,8 +386,8 @@ export function Dock({
             size="icon"
             label={
               full
-                ? 'Shrink terminal dock to half the screen'
-                : 'Expand terminal dock to the full screen'
+                ? 'Shrink terminal to half the screen'
+                : 'Expand terminal to the full screen'
             }
             aria-controls={dockID}
             onClick={() => onHeightChange(full ? halfHeight : max)}
@@ -401,7 +401,7 @@ export function Dock({
           type="button"
           variant="ghost"
           size="icon"
-          label={collapsed ? 'Expand terminal dock' : 'Collapse terminal dock'}
+          label={collapsed ? 'Expand terminal' : 'Collapse terminal'}
           aria-expanded={!collapsed}
           onClick={onToggleCollapse}
         >

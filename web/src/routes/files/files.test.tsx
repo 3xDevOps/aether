@@ -176,7 +176,7 @@ describe('Files editor', () => {
       expect(client.filesWrite).toHaveBeenCalledWith(expect.objectContaining({ run_id: 'run_1', path: 'README.md' })),
     )
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Diff vs base' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'Changes vs base' })).toBeDefined()
   })
 
   it('offers reload and discard when the server refuses a stale revision', async () => {

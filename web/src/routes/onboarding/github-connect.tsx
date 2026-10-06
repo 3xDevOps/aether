@@ -222,25 +222,25 @@ function screenLine({
   checkFailed: boolean
   running: boolean
 }): string {
-  if (ghUnusable) return 'Your environment terminal cannot run the login yet:'
-  if (ghUsable) return 'The login command is ready in your environment terminal:'
-  if (checkFailed) return 'Could not check your environment terminal for gh:'
+  if (ghUnusable) return 'Your Environment cannot run the login yet:'
+  if (ghUsable) return 'The login command is ready in your Environment:'
+  if (checkFailed) return 'Could not check your Environment for gh:'
   return running
-    ? 'Checking your environment terminal for gh…'
-    : 'Waiting for your environment terminal to start…'
+    ? 'Checking your Environment for gh…'
+    : 'Waiting for your Environment to start…'
 }
 
 /** Only called for a gh that cannot log in, so the last arm is the outdated one. */
 function describeGitHubCli(probe: GitHubProbeResult): string {
   switch (probe.status) {
     case 'missing':
-      return 'There is no gh in your environment terminal: it predates the standard image that ships one.'
+      return 'There is no gh in your Environment: it predates the standard image that ships one.'
     case 'broken':
-      return 'gh is in your environment terminal but would not run.'
+      return 'gh is in your Environment but would not run.'
     default:
       // Only a version that was read can be judged old, so there is
       // always one to name here.
-      return `gh ${probe.version}${probe.path ? ` at ${probe.path}` : ''} in your environment terminal cannot answer the login check; ${probe.minimum} is the oldest that can.`
+      return `gh ${probe.version}${probe.path ? ` at ${probe.path}` : ''} in your Environment cannot answer the login check; ${probe.minimum} is the oldest that can.`
   }
 }
 
@@ -265,10 +265,10 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
       {probe.remedy && (
         <p className="text-sm text-muted-foreground">
           {probe.path
-            ? `That file is in your own environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
+            ? `That file is in your own Environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
             : savedIsTheProblem
               ? `Install a current gh in the terminal below and press Save environment, or press Reset to standard - which removes your saved ${probe.saved_image}. From your own machine that reset is:`
-              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your environment terminal with Stop environment below and open it again, because a container keeps the image it started from. From your own machine that is:`}
+              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your Environment with Stop environment below and open it again, because a container keeps the image it started from. From your own machine that is:`}
         </p>
       )}
       {probe.remedy && <CopyableCommand command={probe.remedy} />}

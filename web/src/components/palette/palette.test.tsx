@@ -842,10 +842,10 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Release resources…'))
+    fireEvent.click(await screen.findByText('Free container…'))
     const dialog = within(await screen.findByRole('alertdialog'))
     expect(api.runRelease).not.toHaveBeenCalled()
-    fireEvent.click(dialog.getByRole('button', { name: 'Release resources' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Free container' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(active.id))
   })
 })

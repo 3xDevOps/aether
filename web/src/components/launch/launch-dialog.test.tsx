@@ -444,7 +444,7 @@ describe('swarm', () => {
   })
 
   it('keeps one key per swarm contents until a create succeeds', async () => {
-    const failure = new Error('mission mission_1 exists but its integrator run run_1 did not launch')
+    const failure = new Error('swarm mission_1 exists but its integrator run run_1 did not launch')
     vi.mocked(api.missionCreate)
       .mockRejectedValueOnce(failure)
       .mockRejectedValueOnce(failure)

@@ -352,7 +352,7 @@ function timelineRow(event: Event, name: (id: string) => string): SessionRow | n
     case 'handoff':
       return { ...base, kind: 'event', text: `${who} handed the run to ${name(p.message ?? '')}` }
     case 'co-author':
-      return { ...base, kind: 'event', text: `${who} steered the run and is now a co-author` }
+      return { ...base, kind: 'event', text: `${who} messaged the agent and is now a co-author` }
     case 'report':
       return { ...base, kind: 'event', text: ['Agent report', p.outcome, p.summary].filter(Boolean).join(': ') }
     default:

@@ -185,7 +185,7 @@ export function RunHeader({
         title={
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate">{runLabel(run)}</span>
-            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can steer or stop this run" className="size-3.5 shrink-0 text-muted" />}
+            {run.protected && <Lock role="img" aria-label="Protected: only the owner or an admin can message, control or stop this run" className="size-3.5 shrink-0 text-muted" />}
           </span>
         }
         stateLine={!composing && <StateLine run={run} agentName={agentName} />}

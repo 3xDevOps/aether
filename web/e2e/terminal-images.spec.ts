@@ -23,7 +23,7 @@ test('uploads a chosen image and verifies it from the target shell', async ({ pa
   await wizard.agent.skip().click()
   await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Environment', exact: true }).click()
 
-  const dock = page.getByRole('region', { name: 'Terminal dock' })
+  const dock = page.getByRole('region', { name: 'Environment terminal' })
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
 

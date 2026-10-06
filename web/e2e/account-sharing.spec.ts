@@ -80,7 +80,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await page.goto(alice.url)
     await page.getByRole('navigation', { name: 'Aether' })
       .getByRole('button', { name: 'Environment', exact: true }).click()
-    const dock = page.getByRole('region', { name: 'Terminal dock' })
+    const dock = page.getByRole('region', { name: 'Environment terminal' })
     await dock.getByRole('button', { name: 'Open', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Save environment' })).toBeVisible({
       timeout: 60_000,

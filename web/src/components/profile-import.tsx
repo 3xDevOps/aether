@@ -306,7 +306,7 @@ function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: 
           <li key={`${entry.path}-${index}`}>
             <span className="font-mono">{entry.path}</span>
             <span className="text-muted-foreground">
-              {' '}— {entry.detail ? `${entry.reason}: ${entry.detail}` : entry.reason}
+              {' '}- {entry.detail ? `${entry.reason}: ${entry.detail}` : entry.reason}
             </span>
           </li>
         ))}
@@ -771,7 +771,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                   <p className="text-sm font-medium">Failed or unattempted paths: {status.remaining.length}</p>
                   <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
                     {status.remaining.map(({ destinationPath, problem }) => (
-                      <li key={destinationPath}><span className="font-mono">{destinationPath}</span>{problem?.detail && ` — ${problem.detail}`}</li>
+                      <li key={destinationPath}><span className="font-mono">{destinationPath}</span>{problem?.detail && ` - ${problem.detail}`}</li>
                     ))}
                   </ul>
                   {!recovering && <Button size="sm" variant="secondary" disabled={roots === null} onClick={reviewRemaining}>Review remaining files</Button>}

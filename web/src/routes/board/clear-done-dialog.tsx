@@ -35,8 +35,8 @@ export function ClearDoneConfirm({
             ) : (
               <>
                 Archive hides these runs and schedules their deletion after the retention
-                period. It does not free container memory; release resources separately
-                before archiving if you want to free them now.
+                period. It does not free their containers; free them separately before
+                archiving if you want the memory back now.
               </>
             )}
           </DialogDescription>
@@ -99,7 +99,7 @@ export function ReleaseFinishedConfirm({
               'This acts on finished runs you may act on that still keep their container.'
             ) : (
               <>
-                Their retained containers will be removed and cannot be relaunched.
+                Their retained containers will be removed and the runs cannot be reopened.
                 Run records and history remain visible; this does not archive or delete them.
               </>
             )}

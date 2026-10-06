@@ -101,7 +101,7 @@ export function CommandPalette() {
           target.focus()
         }}
         title="Command palette"
-        description={`Jump to a run or workspace, steer a run. Active workspace: ${context}.`}
+        description={`Jump to a run or workspace, message a run. Active workspace: ${context}.`}
       >
         <PaletteBody
           onDone={(restore = true) => {

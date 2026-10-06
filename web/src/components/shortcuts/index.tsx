@@ -45,11 +45,11 @@ const localGroups: { name: string; entries: [string, string][] }[] = [
     entries: [
       [
         'Left / Right, Home / End',
-        'Move along a run or dock tab strip; Enter or Space opens the focused tab',
+        'Move along a tab strip; Enter or Space opens the focused tab',
       ],
       [
         'Arrow keys',
-        'Resize the sidebar or a dock 16px a press; Home and End are its limits, Enter collapses it',
+        'Resize the sidebar or a terminal 16px a press; Home and End are its limits, Enter collapses it',
       ],
     ],
   },

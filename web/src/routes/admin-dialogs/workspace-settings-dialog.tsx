@@ -90,7 +90,7 @@ export function WorkspaceSettingsDialog({
           </div>
           {onRepository && <section className="space-y-2 border-b pb-3 text-xs">
             <p>Manage the public/private read source, or link and relink a local clone. Deploy-key read access is separate from checkout Origin and your native Git/gh publishing credentials.</p>
-            <Button type="button" size="sm" variant="secondary" onClick={onRepository}>Repository settings</Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onRepository}>Repository</Button>
           </section>}
           <div className="min-w-0 space-y-1 text-[13px]">
             <Label htmlFor="workspace-steer">Who may message others&apos; runs</Label>

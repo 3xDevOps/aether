@@ -358,14 +358,14 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (cap.hasMethod('run.release') && mayKill && isRetainedRun(run)) {
     list.push({
       id: 'release',
-      label: 'Release resources…',
-      short: 'Release',
+      label: 'Free container…',
+      short: 'Free container',
       Icon: PackageX,
-      done: 'Released resources',
+      done: 'Freed container',
       confirm: {
-        title: 'Release this run’s resources?',
-        body: 'Its container is removed and cannot be relaunched. The run and its history remain visible; this does not archive it.',
-        action: 'Release resources',
+        title: 'Free this run’s container?',
+        body: 'Its container is removed and the run cannot be reopened. The run and its history remain visible; this does not archive it.',
+        action: 'Free container',
       },
       perform: (d) => d.api.runRelease(id),
     })

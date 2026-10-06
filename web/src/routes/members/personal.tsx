@@ -155,8 +155,8 @@ function AccountSharing({ client, self }: { client: Api; self: Member }) {
           actions={<Button size="sm" variant="secondary" onClick={() => setStopping(true)}>Stop environment</Button>}
         >
           {terminalRunning
-            ? 'Your environment terminal was started before you shared, so a'
-            : 'Your environment terminal could not be checked. If it is open, it was started before you shared, so a'}{' '}
+            ? 'Your Environment was started before you shared, so a'
+            : 'Your Environment could not be checked. If it is open, it was started before you shared, so a'}{' '}
           Claude Code login written there will not reach {firstShare.display_name}&apos;s runs until you stop it and open it again from
           Environment. Runs you already have running keep the mounts they started with until they end.
         </Callout>

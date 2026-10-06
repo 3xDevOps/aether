@@ -391,11 +391,11 @@ describe('dock', () => {
 
   it('resizes from the keyboard, up to its own bounds', () => {
     const { onHeightChange, onToggleCollapse } = dock()
-    const handle = screen.getByRole('separator', { name: 'Resize terminal dock' })
+    const handle = screen.getByRole('separator', { name: 'Resize terminal' })
 
     expect(handle.tabIndex).toBe(0)
     expect(handle.getAttribute('aria-controls')).toBe(
-      screen.getByRole('region', { name: 'Terminal dock' }).id,
+      screen.getByRole('region', { name: 'Environment terminal' }).id,
     )
 
     fireEvent.keyDown(handle, { key: 'ArrowUp' })

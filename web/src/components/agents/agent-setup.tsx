@@ -140,8 +140,8 @@ export function AgentSetup({
         ) : (
           <p className="text-ui text-text">
             {typedInstall
-              ? 'The install command is typed into your environment terminal below. Press Enter to run it.'
-              : `Install the ${agent.name} executable into ~/.local/bin from your environment terminal below.`}
+              ? 'The install command is typed into your Environment terminal below. Press Enter to run it.'
+              : `Install the ${agent.name} executable into ~/.local/bin from your Environment terminal below.`}
           </p>
         )}
         {installError && (

@@ -244,29 +244,29 @@ export function WorkspaceMirrorDialog({
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Source</dt>
                       <dd className="mt-0.5 break-all font-mono" title={result.source_url}>
-                        {result.source_url || '—'}
+                        {result.source_url || '-'}
                       </dd>
                     </div>
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Source identity</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.source_identity || '—'}</dd>
+                      <dd className="mt-0.5 break-all font-mono">{result.source_identity || '-'}</dd>
                     </div>
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Branch</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.branch || '—'}</dd>
+                      <dd className="mt-0.5 break-all font-mono">{result.branch || '-'}</dd>
                     </div>
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Observed SHA</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.observed_commit || '—'}</dd>
+                      <dd className="mt-0.5 break-all font-mono">{result.observed_commit || '-'}</dd>
                     </div>
                     <div className="min-w-0">
                       <dt className="text-muted-foreground">Accepted SHA</dt>
-                      <dd className="mt-0.5 break-all font-mono">{result.accepted_commit || '—'}</dd>
+                      <dd className="mt-0.5 break-all font-mono">{result.accepted_commit || '-'}</dd>
                     </div>
                     <div className="min-w-0 sm:col-span-2">
                       <dt className="text-muted-foreground">Last checked</dt>
                       <dd className="mt-0.5 break-all font-mono">
-                        {result.last_attempt_at ?? result.updated_at ?? '—'}
+                        {result.last_attempt_at ?? result.updated_at ?? '-'}
                       </dd>
                     </div>
                   </dl>
@@ -333,7 +333,7 @@ export function WorkspaceMirrorDialog({
                     onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}
                   >
                     <option value="public">Public HTTPS</option>
-                    <option value="deploy-key">Private repository — read-only deploy key</option>
+                    <option value="deploy-key">Private repository - read-only deploy key</option>
                   </select>
                 </div>
                 {auth === 'deploy-key' && (
