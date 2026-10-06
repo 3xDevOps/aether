@@ -28,6 +28,7 @@ function seed(over: Partial<Run> = {}) {
     runs: { run_1: toRecord(run(over)) },
     info: serverInfo,
     inbox: {},
+    approvalsByRun: {},
   })
 }
 
@@ -61,7 +62,7 @@ describe('run header', () => {
 
   it.each(tabs)('keeps execution and pending approval independent on the %s tab', (name) => {
     seed()
-    useStore.setState({ inbox: { [workspace.id]: [approval()] } })
+    useStore.getState().setInbox(workspace.id, [approval()])
     const bar = runHeader(name)
 
     expect(within(bar).getByText('Working')).toBeDefined()

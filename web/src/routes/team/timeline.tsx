@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { FeedEntry } from '@/components/feed-entry'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,6 +23,7 @@ import { runLabel } from '@/lib/status'
 import type { RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
 import { useStore } from '@/store'
+import { useRunIDs } from '@/store/hooks'
 
 /** The event types worth offering as a filter; empty means everything. */
 const filterTypes: EventType[] = [
@@ -61,7 +63,6 @@ const types: [string, string][] = [
 export function TimelineFeed({ params, client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
   const filters = useStore((s) => s.feedFilters)
   const setFilters = useStore((s) => s.setFeedFilters)
@@ -100,8 +101,9 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   // Tailwind's `sm`: below it the four selects stack, one labelled row each.
   const narrow = useMediaQuery(belowSm)
 
-  const workspaceRuns = Object.values(runs).filter(
-    (r) => r.workspace_id === filters.workspaceID,
+  const runIDs = useRunIDs(filters.workspaceID)
+  const runLabels = useStore(
+    useShallow((s) => runIDs.map((id) => (s.runs[id] ? runLabel(s.runs[id]) : id))),
   )
   const narrowed = [filters.runID, filters.memberID, filters.type].filter(Boolean)
     .length
@@ -122,7 +124,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
         label="Run"
         value={filters.runID}
         onChange={(runID) => setFilters({ runID })}
-        options={[['', 'Every run'], ...workspaceRuns.map((r) => [r.id, runLabel(r)])]}
+        options={[['', 'Every run'], ...runIDs.map((id, i) => [id, runLabels[i]])]}
       />
       <FilterSelect
         label="Member"

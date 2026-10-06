@@ -1,5 +1,5 @@
 import { Archive, ChevronDown, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
-import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { memo, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Chip } from '@/components/ui/heroui'
@@ -12,9 +12,7 @@ import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
 import { mapCardHeight } from '@/routes/board/map-layout'
 import { MemberAvatar } from '@/routes/board/member-avatar'
-import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { approvalsForRun } from '@/store/approvals'
 import { useRunInput } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
@@ -39,15 +37,24 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
  * while the title block is a real button for keyboard users. Branch text and
  * slot controls opt out of the article surface so selecting or copying a
  * branch never reveals the run.
+ *
+ * Memoised on its props: a reducer replaces only the record of the run that
+ * changed, so an event about another run leaves this card alone.
  */
-export function RunCard({
-  card,
+export const RunCard = memo(function RunCard({
+  run,
+  state,
+  unseen,
+  paused,
   variant = 'cards',
 }: {
-  card: BoardCard
+  run: RunRecord
+  state: PresentationState
+  unseen: boolean
+  paused: boolean
   variant?: 'cards' | 'map'
 }) {
-  const { run, state, owner, unseen, paused } = card
+  const owner = useStore((s) => s.members[run.member_id])
   const navigate = useStore((s) => s.navigate)
   const branchRef = useRef<HTMLSpanElement>(null)
   const [expanded, setExpanded] = useState(false)
@@ -74,7 +81,7 @@ export function RunCard({
   // run can also carry a lifecycle reason, but that reason belongs below the
   // action rather than replacing it.
   const summary = useStore((s) =>
-    questionAction || approvalsForRun(s.inbox, run.id)[0]?.action || input.summary || run.reason || '',
+    questionAction || s.approvalsByRun[run.id]?.[0]?.action || input.summary || run.reason || '',
   )
   const handleCardClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target
@@ -152,7 +159,7 @@ export function RunCard({
       <p className="break-words text-muted-foreground">
         Owner: {owner?.display_name ?? run.member_id} · Harness: {run.harness} ({run.mode})
       </p>
-      <p className="text-muted-foreground">{timestamps(card)}</p>
+      <p className="text-muted-foreground">{timestamps(run, state)}</p>
       <CardSlot name="card:chips" run={run} />
       <CardSlot name="card:footer" run={run} />
     </div>
@@ -235,7 +242,7 @@ export function RunCard({
             <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
             <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
             <span className="min-w-0 truncate" title={owner?.display_name ?? run.member_id}>{owner?.display_name ?? run.member_id}</span>
-            <time className="ml-auto shrink-0 tabular-nums" title={timestamps(card)}>
+            <time className="ml-auto shrink-0 tabular-nums" title={timestamps(run, state)}>
               {timeAgo(run.stateChangedAt)}
             </time>
           </div>
@@ -254,7 +261,7 @@ export function RunCard({
       )}
     </Dialog>
   )
-}
+})
 
 const stateChipColor: Record<
   PresentationState,
@@ -290,7 +297,7 @@ function CardSlot({ name, run }: { name: CardSlotName; run: RunRecord }): ReactN
   )
 }
 
-function timestamps({ run, state }: BoardCard): string {
+function timestamps(run: RunRecord, state: PresentationState): string {
   return [
     `Created ${timeAgo(run.created_at)}`,
     run.started_at ? `started ${timeAgo(run.started_at)}` : null,

@@ -10,7 +10,7 @@ import {
   Users,
 } from 'lucide-react'
 import { Dialog as DialogPrimitive, DropdownMenu as DropdownMenuPrimitive } from 'radix-ui'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Button } from '@/components/ui/button'
@@ -33,7 +33,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed, useDrag } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
-import { runLabel } from '@/lib/status'
+import { runLabel, runState } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
 import { cn, focusRing } from '@/lib/utils'
 import { isRunRoute } from '@/routes/terminal/tabs'
@@ -43,10 +43,12 @@ import { isUnseen } from '@/store/board'
 import {
   useAttentionCount,
   useCapability,
+  useRun,
   useRunInput,
   useSidebarGroups,
 } from '@/store/hooks'
-import type { SidebarGroup, SidebarRun } from '@/store/selectors'
+import type { RunRecord } from '@/store/runs'
+import type { SidebarGroup } from '@/store/selectors'
 import { maxSidebarWidth, minSidebarWidth, type GroupBy } from '@/store/ui'
 
 /**
@@ -729,12 +731,12 @@ function Group({
       <ul id={regionId} hidden={!expanded}>
         {expanded && group.runs.map((run) => (
           <li key={run.run.id}>
-            <RunRow entry={run} />
+            <RunRow runID={run.run.id} />
             {run.children.length > 0 && (
               <ul aria-label={`Subsessions of ${runLabel(run.run)}`}>
                 {run.children.map((child, index) => (
                   <li key={child.run.id}>
-                    <RunRow entry={child} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
+                    <RunRow runID={child.run.id} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
                   </li>
                 ))}
               </ul>
@@ -746,26 +748,33 @@ function Group({
   )
 }
 
-function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'last' }) {
+/** Subscribes to its own run, so an event about another run leaves it alone. */
+const RunRow = memo(function RunRow({ runID, branch }: { runID: string; branch?: 'middle' | 'last' }) {
+  const run = useRun(runID)
+  return run ? <RunRowButton run={run} branch={branch} /> : null
+})
+
+function RunRowButton({ run, branch }: { run: RunRecord; branch?: 'middle' | 'last' }) {
   const navigate = useStore((s) => s.navigate)
-  const route = useStore((s) => s.route)
+  const selected = useStore((s) => isRunRoute(s.route, run.id))
+  const ownerColor = useStore((s) => s.members[run.member_id]?.color)
   // Acks are app-wide, so a row mutes at the same moment its board card does.
-  const unseen = useStore((s) => isUnseen(s.acked, entry.run))
-  const selected = isRunRoute(route, entry.run.id)
-  const label = runLabel(entry.run)
-  const input = useRunInput(entry.run)
-  const role = entry.run.mission_role === 'integrator'
+  const unseen = useStore((s) => isUnseen(s.acked, run))
+  const state = runState(run.status)
+  const label = runLabel(run)
+  const input = useRunInput(run)
+  const role = run.mission_role === 'integrator'
     ? 'Integrator'
-    : entry.run.mission_role === 'worker' ? 'Subsession' : undefined
-  const description = [label, role, entry.run.harness, input.count > 0 && `Needs input: ${input.summary}`].filter(Boolean).join(' · ')
+    : run.mission_role === 'worker' ? 'Subsession' : undefined
+  const description = [label, role, run.harness, input.count > 0 && `Needs input: ${input.summary}`].filter(Boolean).join(' · ')
   return (
     <button
       type="button"
       aria-current={selected ? 'page' : undefined}
       aria-label={description}
       title={description}
-      onClick={() => navigate('terminal', { runId: entry.run.id })}
-      style={{ borderLeftColor: entry.owner?.color }}
+      onClick={() => navigate('terminal', { runId: run.id })}
+      style={{ borderLeftColor: ownerColor }}
       className={cn(
         focusRing,
         // Full bleed inside a scroll container: an outline drawn outside the
@@ -787,11 +796,11 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
         </span>
       )}
       <StateDot
-        state={entry.state}
-        className={cn(entry.state === 'working' && 'state-pulse')}
+        state={state}
+        className={cn(state === 'working' && 'state-pulse')}
       />
       <span className="min-w-0 truncate">{label}</span>
-      <RunInputIndicator run={entry.run} compact />
+      <RunInputIndicator run={run} compact />
       {role && !branch && (
         <span className={cn(
           'shrink-0 rounded-sm border px-1 text-[10px] font-medium leading-4',
@@ -801,7 +810,7 @@ function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'las
         </span>
       )}
       <span className={cn('ml-auto shrink-0', !selected && 'text-muted-foreground')}>
-        {entry.run.harness}
+        {run.harness}
       </span>
     </button>
   )

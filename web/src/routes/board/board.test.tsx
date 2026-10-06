@@ -261,10 +261,7 @@ describe('board', () => {
       },
     })
     render(
-      <RunCard
-        variant={variant}
-        card={{ run: toRecord(working), state: 'working', owner: alice, unseen: false, paused: false }}
-      />,
+      <RunCard variant={variant} run={toRecord(working)} state="working" unseen={false} paused={false} />,
     )
 
     const disclosure = screen.getByRole('button', { name: `Show details for ${working.task}` })
@@ -321,10 +318,7 @@ describe('board', () => {
     })
     seed([detailed])
     render(
-      <RunCard
-        variant="map"
-        card={{ run: toRecord(detailed), state: 'working', owner: alice, unseen: false, paused: false }}
-      />,
+      <RunCard variant="map" run={toRecord(detailed)} state="working" unseen={false} paused={false} />,
     )
     const disclosure = screen.getByRole('button', { name: 'Show details for Map checkout' })
     disclosure.focus()

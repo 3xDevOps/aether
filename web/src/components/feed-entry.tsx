@@ -3,7 +3,7 @@
 // and the description. The team view also asks for a jump-to-run button;
 // the Events tab is already pinned to one run and leaves it off.
 
-import type { ReactNode } from 'react'
+import { memo, type ReactNode } from 'react'
 import { Chip } from '@/components/ui/heroui'
 import { typeLabel, type EventType } from '@/lib/events'
 import { budgetStateLabel, money, timeAgo } from '@/lib/format'
@@ -12,7 +12,7 @@ import type { BudgetState, Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
-export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
+export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
   const actor = useStore((s) => s.members[event.actor_id])
   const run = useStore((s) => (runLink ? s.runs[event.run_id] : undefined))
   const navigate = useStore((s) => s.navigate)
@@ -65,7 +65,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
       </div>
     </li>
   )
-}
+})
 
 /**
  * The one line of an event that belongs in a feed. Keyed by `EventType`, so a

@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { pendingApprovalKey } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
-import { approvalsForRun } from '@/store/approvals'
-import { isArchivable } from '@/store/runs'
+import { isArchivable, type RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -56,8 +56,24 @@ export function useAttentionCount(): number {
   }, [input, pending, roomMessages])
 }
 
+/** One run's record; re-renders only when that run changes. */
+export function useRun(runID: string): RunRecord | undefined {
+  return useStore((s) => s.runs[runID])
+}
+
+/** The IDs of a workspace's runs, every run when it is empty; stable while that set is. */
+export function useRunIDs(workspace: string): string[] {
+  return useStore(
+    useShallow((s) =>
+      Object.values(s.runs)
+        .filter((run) => !workspace || run.workspace_id === workspace)
+        .map((run) => run.id),
+    ),
+  )
+}
+
 export function useRunInput(run: Run) {
-  const approvals = useStore((s) => approvalsForRun(s.inbox, run.id).length)
+  const approvals = useStore((s) => s.approvalsByRun[run.id]?.length ?? 0)
   const questions = useStore((s) => run.unanswered_questions ??
     unansweredQuestions(s.roomMessages[run.id] ?? []).length)
   const requests = run.pending_inputs ?? []

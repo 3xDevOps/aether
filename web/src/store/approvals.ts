@@ -6,6 +6,11 @@ export interface ApprovalsSlice {
   inbox: Record<string, Approval[]>
   /** The inbox view also lists already-decided requests when set. */
   showDecided: boolean
+  /**
+   * Run ID to that run's pending requests, oldest first, rebuilt whenever
+   * the inbox changes so a row reads its count without walking every queue.
+   */
+  approvalsByRun: Record<string, Approval[]>
   /** The last read's failure, so an unreadable queue cannot render as empty. */
   inboxError: string | null
   /** Bumped per read, so a slow one cannot overwrite a newer one's answer. */
@@ -18,11 +23,15 @@ export interface ApprovalsSlice {
 
 export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get) => ({
   inbox: {},
+  approvalsByRun: {},
   showDecided: false,
   inboxError: null,
   inboxRequest: 0,
   setInbox: (workspaceID, approvals) =>
-    set((s) => ({ inbox: { ...s.inbox, [workspaceID]: approvals } })),
+    set((s) => {
+      const inbox = { ...s.inbox, [workspaceID]: approvals }
+      return { inbox, approvalsByRun: indexByRun(inbox) }
+    }),
   setInboxError: (inboxError) => set({ inboxError }),
   startInboxRead: () => {
     const inboxRequest = get().inboxRequest + 1
@@ -41,12 +50,14 @@ export function pendingApprovals(inbox: Record<string, Approval[]>): Approval[] 
   )
 }
 
-/** One run's share of the queue, pending first. */
-export function approvalsForRun(
-  inbox: Record<string, Approval[]>,
-  runID: string,
-): Approval[] {
-  return pendingApprovals(inbox).filter((a) => a.run_id === runID)
+function indexByRun(inbox: Record<string, Approval[]>): Record<string, Approval[]> {
+  const index: Record<string, Approval[]> = {}
+  for (const approval of pendingApprovals(inbox)) {
+    const listed = index[approval.run_id]
+    if (listed) listed.push(approval)
+    else index[approval.run_id] = [approval]
+  }
+  return index
 }
 
 export function sortByCreated(approvals: Approval[]): Approval[] {

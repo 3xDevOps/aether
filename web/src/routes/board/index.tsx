@@ -312,7 +312,7 @@ function Column({
       />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
-          <RunCard key={card.run.id} card={card} />
+          <RunCard key={card.run.id} run={card.run} state={card.state} unseen={card.unseen} paused={card.paused} />
         ))}
         {column.cards.length === 0 && placeholder === 'skeleton' && (
           <>

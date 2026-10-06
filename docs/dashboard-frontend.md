@@ -227,6 +227,18 @@ map camera, dismissed update versions, terminal zoom) are persisted;
 `persistedUi` in `store/index.ts` is the list that decides. Server data is
 always re-fetched.
 
+**Selectors return primitives or stable references.** A selector that builds
+a new array or object on every call re-renders its component on every store
+write, and under React 19 can loop. Lists of IDs go through `useShallow`
+(`useRunIDs(workspace)` in `src/store/hooks.ts`); one entity is read by ID
+(`useRun(id)`); a row asks for a boolean (`selected`, `unseen`) rather than
+the whole `route` or `acked` map. Derived maps live in the reducer that
+changes their inputs: `setInbox` rebuilds `approvalsByRun` (each run's
+pending requests, oldest first), so a row's approval count is one lookup.
+Run rows and board cards are `React.memo` components; reducers replace only
+the record of the run that changed, so an event about one run re-renders
+that run's row and card and leaves the rest alone.
+
 **`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
