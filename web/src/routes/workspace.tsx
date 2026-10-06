@@ -16,11 +16,6 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useListedRuns } from '@/store/hooks'
 
-/**
- * One workspace: its runs, its base branch, and the two settings that used
- * to hide in the Templates header. The spend cap and the steering policy
- * belong beside the thing they govern.
- */
 export function WorkspaceView({ params }: RouteProps) {
   const workspaceID = params.workspaceId
   const workspace = useStore((s) => s.workspaces[workspaceID])

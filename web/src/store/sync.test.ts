@@ -473,12 +473,11 @@ describe('hydrate', () => {
       }),
     )
 
-    // No timeline event has arrived, yet the snapshot already knows.
+    // No timeline event has arrived; the snapshot alone carries the state.
     const s = store.getState()
     expect(s.pausedRuns).toEqual({ run_1: true, run_2: false })
     expect(s.pausedRuns.run_3).toBeUndefined()
 
-    // And the board card shows Paused straight from the snapshot.
     const { columns } = board({ workspace: s.activeWorkspace, mineOnly: false, ctx: stateContextOf(s, Date.now()) })
     const working = columns.find((c) => c.key === 'working')
     expect(working?.cards.find((c) => c.run.id === 'run_1')?.state).toBe('paused')
@@ -1891,7 +1890,6 @@ describe('connect', () => {
     pending[0](run({ id: 'run_9', status: 'running' }))
 
     await vi.waitFor(() => expect(store.getState().lastSeq).toBe(12))
-    // The later transition won, and the fetch ran once for both of them.
     expect(store.getState().runs.run_9.status).toBe('running')
     expect(client.runGet).toHaveBeenCalledTimes(1)
     stop()
@@ -1958,9 +1956,8 @@ describe('connect', () => {
   })
 
   it('reports a rejected credential rather than an unreachable server', async () => {
-    // The gateway's own 401 body. A stale or missing token would be rejected
-    // the same way on the WebSocket upgrade, where the failure has no voice
-    // at all, so the probe is the only place that can say what went wrong.
+    // The WebSocket upgrade rejects a bad token with no body, so the probe is
+    // the only place that can say what went wrong.
     const denial = 'a valid gateway token is required; restart `aether gui` for a fresh URL'
     const store = createRootStore()
     const stop = connect(
@@ -1972,7 +1969,6 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(store.getState().streamDead).toBe(true))
     expect(store.getState().connection).toBe('offline')
-    // The gateway's words, not a guess about the network.
     expect(store.getState().hydrationError).toBe(denial)
     // Every reconnect would carry the same credential, so nothing is tried.
     await new Promise((resolve) => setTimeout(resolve, 700))
@@ -1996,9 +1992,8 @@ describe('connect', () => {
   })
 
   it('knows which gateway serves the page before the first hydration fails', async () => {
-    // Only the probe read the descriptor; hydration never got far enough to
-    // store it, and without it a phone would be told to restart a desktop
-    // app it does not have.
+    // Hydration never stored the descriptor; without it a phone would be told
+    // to restart a desktop app it does not have.
     const store = createRootStore()
     const stop = connect(
       store,
@@ -2064,10 +2059,8 @@ describe('connect', () => {
       const stop = connect(store, fakeApi({ serverInfo }))
 
       await subscribe()
-      // Three failures put the next retry seconds out. That timer is the one
-      // a frozen tab stops, and the reopened sockets cannot restart it: the
-      // stream goes live again with a cursor to replay from, so nothing else
-      // re-fetches.
+      // Three failures put the next retry seconds out, on the timer a frozen tab
+      // stops; a stream that goes live with a cursor re-fetches nothing else.
       await vi.waitFor(
         () => expect(serverInfo.mock.calls.length).toBeGreaterThanOrEqual(3),
         { timeout: 6_000 },

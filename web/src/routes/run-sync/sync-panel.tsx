@@ -1,7 +1,4 @@
-// The live sync overlay for one run: the local gateway mirrors the run's
-// worktree into the linked repository in the background. This panel owns the
-// sync.* verbs for a single run and mirrors sync.status into the store, so the
-// board badge and this view agree on what is running.
+// Mirrors sync.status into the store so the board badge and this panel agree.
 
 import { CircleAlert, CheckCircle2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -14,7 +11,6 @@ import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-/** A run card's marker: this run's worktree is being mirrored right now. */
 export function SyncBadge({ run }: CardSlotProps) {
   const state = useStore((s) => s.syncSessions[run.id]?.state)
   const navigate = useStore((s) => s.navigate)
@@ -40,12 +36,8 @@ export function SyncBadge({ run }: CardSlotProps) {
   )
 }
 
-/**
- * One run's sync session: its state, its conflict if paused, and the
- * start/stop verbs. A refused start keeps the server's message on screen
- * next to a Force retry - sync.start's escape hatch for an overlay checkout
- * with local changes.
- */
+/** A refused start keeps the server's message next to a Force retry, the
+ * escape hatch for an overlay checkout with local changes. */
 export function SyncPanel({
   runID,
   client = api,
@@ -61,11 +53,8 @@ export function SyncPanel({
   )
   const [busy, setBusy] = useState(false)
 
-  // The interval tick and the verbs' own refreshes all resolve async: after
-  // unmount none of them may write the store, or a stale snapshot could
-  // overwrite what a freshly-mounted panel just fetched. Same cancelled
-  // convention as the LinkCard/DaemonCard/members effects, held in a ref
-  // because the verbs share it with the polling effect.
+  // After unmount no async refresh may write the store, or a stale snapshot
+  // could overwrite a freshly-mounted panel's. A ref so the verbs share it.
   const cancelled = useRef(false)
   useEffect(() => {
     cancelled.current = false

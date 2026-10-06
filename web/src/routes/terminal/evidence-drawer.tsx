@@ -82,8 +82,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
 
   useEffect(() => {
     if (open && !packets.length && !loading && !error) void loadList()
-    // The drawer deliberately owns its first read. Events update an already
-    // populated list in the sync layer and do not make closed drawers noisy.
+    // The drawer owns its first read; events only update an already populated list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, runID, workspaceID])
 

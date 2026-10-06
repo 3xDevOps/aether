@@ -1,7 +1,5 @@
-// An explicit, repeatable import of a configuration directory, shared by
-// onboarding and Configuration. The browser reads the chosen directory; the
-// server remains responsible for validation and secret scanning. Nothing here
-// watches the local directory or depends on a local gateway capability.
+// The browser only reads the chosen directory; the server validates and
+// secret-scans the import.
 
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
@@ -400,7 +398,6 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     })
   }, [basename, rawFiles, roots])
 
-  // Recompute metadata when the destination's exclusion policy changes.
   useEffect(() => {
     if (!rawFiles || roots === null || !destination || importing || (status && !recovering) || importStarted.current) return
     const version = ++generation.current

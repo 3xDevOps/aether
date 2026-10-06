@@ -14,7 +14,6 @@ export interface RunActivity {
   running?: Record<string, ToolCall>
 }
 
-/** The `run.agent` payload fields the activity line reads. */
 export interface AgentPayload {
   kind?: string
   tool?: string

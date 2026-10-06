@@ -10,10 +10,7 @@ export interface ApprovalsSlice {
   inbox: Record<string, Approval[]>
   /** The inbox view also lists already-decided requests when set. */
   showDecided: boolean
-  /**
-   * Run ID to that run's pending requests, oldest first, rebuilt whenever
-   * the inbox changes so a row reads its count without walking every queue.
-   */
+  /** Run ID to its pending requests, oldest first; rebuilt whenever the inbox changes. */
   approvalsByRun: Record<string, Approval[]>
   /** The last read's failure, so an unreadable queue cannot render as empty. */
   inboxError: string | null
@@ -77,7 +74,7 @@ export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get) => 
   setShowDecided: (showDecided) => set({ showDecided }),
 })
 
-/** Everything still waiting on somebody, oldest request first. */
+/** Oldest request first. */
 export function pendingApprovals(inbox: Record<string, Approval[]>): Approval[] {
   return sortByCreated(
     Object.values(inbox)
@@ -106,10 +103,8 @@ const maxRetryMs = 60_000
 const readErrors = new WeakMap<RootStore, string>()
 
 /**
- * Applies one `workspace.approval` event. The payload names the request and
- * its decision but not its text, so a request the inbox does not hold yet is
- * read with its workspace's list, without holding up the events behind it;
- * a known one is updated in place.
+ * The payload carries no request text, so an unknown request is read with its
+ * workspace's list without holding up the events behind it.
  */
 export function applyApprovalEvent(store: RootStore, client: Api, ev: Event): void {
   const p = (ev.payload ?? {}) as { request_id?: string; decision?: ApprovalDecision }

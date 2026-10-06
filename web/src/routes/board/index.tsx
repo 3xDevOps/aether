@@ -27,7 +27,6 @@ import { useCapability, useSelf, useSelfRole, useStateContext } from '@/store/ho
 import type { RunRecord } from '@/store/runs'
 import '@/components/palette'
 
-/** The active workspace's runs, as status columns or a spatial workbench. */
 export function Board() {
   const data = useBoard()
   const ctx = useStateContext()
@@ -51,7 +50,6 @@ export function Board() {
   // An all-archived scope still needs the archive toggle in either layout.
   const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
-  // Nothing to sort into buckets, and nothing still on its way.
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
@@ -60,13 +58,9 @@ export function Board() {
   const releasePlan = releaseFinishedPlan(workspaceRuns(activeWorkspace, ctx), caps, self)
 
   const [showArchived, setShowArchived] = useState(false)
-  // The toggle only exists while there is something behind it; once the
-  // last archived run leaves (restored, or later swept), fall back to Finished.
   useEffect(() => {
     if (archivedCards.length === 0) setShowArchived(false)
   }, [archivedCards.length])
-  // A workspace switch starts the new board on Finished, not on whatever the
-  // previous workspace's toggle was left showing.
   useEffect(() => {
     setShowArchived(false)
   }, [activeWorkspace])
@@ -189,7 +183,6 @@ export function Board() {
   )
 }
 
-/** The empty-board CTA opens the app-wide launch form when permitted. */
 function NewRunButton() {
   const openDialog = useStore((s) => s.openPaletteDialog)
   const cap = useCapability()
@@ -210,7 +203,6 @@ function NewRunButton() {
   )
 }
 
-/** What an empty workspace says, in place of the columns. */
 function EmptyNotice() {
   const navigate = useStore((s) => s.navigate)
   const caps = useCapability()
@@ -236,7 +228,6 @@ function EmptyNotice() {
   )
 }
 
-/** The Finished header's toggle between finished runs and its archived ones. */
 interface ArchivedToggle {
   count: number
   showing: boolean
@@ -356,10 +347,7 @@ function ColumnHeader({
   )
 }
 
-/**
- * Archives eligible Finished runs behind a snapshot confirmation. `plan` tracks
- * Finished while idle; the open dialog remains stable if runs change beneath it.
- */
+/** The open dialog acts on a snapshot of `plan`, so runs changing beneath it do not move it. */
 function ClearDoneButton({
   plan,
   onRun,
@@ -370,9 +358,7 @@ function ClearDoneButton({
   const [snapshot, setSnapshot] = useState<ClearDonePlan | null>(null)
   const wasOpen = useRef(false)
 
-  // Fires once the render that closes the dialog has committed, so
-  // `onClosed` finds the DOM - the Archived toggle included - already
-  // reflecting whatever this run archived.
+  // Runs after the closing render commits, so `onClosed` sees the updated DOM.
   useEffect(() => {
     if (wasOpen.current && !open) onClosed()
     wasOpen.current = open

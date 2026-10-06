@@ -1,8 +1,3 @@
-// The onboarding steps. Each step talks to the gateway through the injected
-// Api client and reports completion to the wizard. Step and workspace choices
-// are stored in the UI slice, while link status is checked against the local
-// gateway whenever this route is entered or refocused.
-
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { edgeHost, linkTarget, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -33,25 +28,13 @@ import { onboardingStepIndex } from '@/store/ui'
 import { useCapability, useIsAdmin, useSelfRole, type Capability } from '@/store/hooks'
 import { canLaunch } from '@/lib/commands'
 
-/**
- * The row a step ends with, Back included. It sticks to the bottom of the
- * wizard's scroller because the step above it can be taller than the window
- * - Agents with the terminal dock open is - and a control that scrolls out
- * of reach is the reason Back moved here.
- */
+/** Sticky because a step can be taller than the window, and Back must stay in reach. */
 export const actionRow =
   'sticky bottom-0 z-10 mt-4 flex flex-wrap items-center gap-2 border-t bg-card pb-3 pt-3'
 
-// Raw command output - git's, and gh's on the Connect GitHub screen:
-// scrollable, wrapped, never truncated.
 export const pane =
   'max-h-64 min-w-0 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
-/**
- * The Link step: link this machine to a server, through an edge sign-in or
- * by address. The gateway's local link status determines whether those two
- * choices or the linked summary are shown.
- */
 export function LinkStep({
   client,
   onNext,
@@ -375,13 +358,7 @@ export function WorkspaceStep({
 
 
 
-/**
- * The First run step: the first run, in the workspace the Workspace step
- * settled on. Only agents agent.list reports as installed in this account
- * are offered: a name the account has no executable for would fail in the
- * container, so the step sends the reader back to Agents instead of letting
- * them launch it. `defaultHarness` is the one the Agents step just set up.
- */
+/** Offers only agents agent.list reports installed: one with no executable would fail in the container. */
 export function FirstRunStep({
   client,
   workspace,
@@ -441,9 +418,7 @@ export function FirstRunStep({
 
   const loadAgents = useCallback(() => {
     let live = true
-    // Back to loading, not to an empty account: a retry that left the list at
-    // [] would tell the member nothing is installed while the call it is
-    // waiting on is the only thing that knows.
+    // Back to loading, not to []: an empty list would claim nothing is installed.
     setAgents(null)
     setAgentsError(null)
     client
@@ -452,10 +427,8 @@ export function FirstRunStep({
         if (!live) return
         const installed = list.filter((a) => a.installed === true)
         setAgents(installed)
-        // The draft is persisted, so it can name an agent this account no
-        // longer has: an offer the picker cannot show and the server would
-        // refuse. What the member chose wins over the one the Agents step
-        // just set up.
+        // The persisted draft can name an agent this account no longer has.
+        // What the member chose wins over the one the Agents step just set up.
         const current = useStore.getState().onboardingFirstRun
         const kept = installed.some((a) => a.name === current.harness)
           ? current.harness
@@ -518,9 +491,8 @@ export function FirstRunStep({
     navigate('board')
   }
 
-  // The escape hatch for a reader with no agent subscription. It is a CLI
-  // flow: `fake` is a scheduler registration, so it is never installed in an
-  // account and never appears in the picker above.
+  // `fake` is a scheduler registration, never installed in an account, so it
+  // never appears in the picker above.
   const withoutASubscription = (
     <div className="border-t border-border/70 py-3 text-xs text-muted-foreground">
       <p className="font-medium text-foreground">No agent subscription yet?</p>

@@ -3,8 +3,7 @@ import type * as React from 'react'
 import { cn } from '@/lib/utils'
 
 export function Label({ className, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
-  // Bare text is not a space-y child. Wrapped fields need their own gap only
-  // when there is no caption element; block captions use the caller's spacing.
+  // Bare text is not a space-y child, so a field wrapped without a caption needs its own gap.
   return (
     <LabelPrimitive.Root
       data-slot="label"

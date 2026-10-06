@@ -9,8 +9,7 @@ export function Collapsible({
   return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
 }
 
-/** Carries the marker a native disclosure used to draw for itself: without
- * one, the caption reads as a heading nobody thinks to click. */
+/** Draws its own disclosure marker: without one the caption reads as a heading, not a control. */
 export function CollapsibleTrigger({
   className,
   children,

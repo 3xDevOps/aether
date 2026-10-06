@@ -1,6 +1,4 @@
-// A real two-human Run Room: separate gateways and browser contexts watch one
-// long-running run, with comments, queued steering, moderation and control
-// transfer all travelling through the server's durable room and attach paths.
+// Two humans with separate gateways and browser contexts share one real run.
 
 import type { Locator } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -47,9 +45,8 @@ test('two members share comments, moderated steering, and explicit control trans
   const aliceDisplayName = aliceMember.display_name
 
   const bob = await aether.member(requestedBobName)
-  // Keep Bob's independent browser ready before linking so this human goes
-  // through the real onboarding state rather than only changing gateway
-  // configuration behind the dashboard.
+  // Open Bob's browser before linking so he goes through real onboarding, not
+  // just a gateway config change behind the dashboard.
   const bobContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const bobPage = await bobContext.newPage()
   try {
@@ -98,7 +95,6 @@ test('two members share comments, moderated steering, and explicit control trans
         }
       })
     })
-    // The run id is the dashboard deep link used by both independent shells.
     await page.goto(`${alice.url}&run=${run.id}`)
     await bobPage.goto(`${bob.url}&run=${run.id}`)
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
@@ -228,8 +224,7 @@ test('two members share comments, moderated steering, and explicit control trans
     await expect(aliceDeniedRow).toContainText('denied')
     await expect(messageRow(bobRoom, deniedSteer)).toContainText('denied')
 
-    // A second request is approved by Alice while her live controller lease
-    // still owns the PTY, producing a durable Sent receipt on both browsers.
+    // Alice approves while her controller lease still owns the PTY.
     await bobRoom.getByRole('button', { name: 'Send to agent' }).click()
     await bobRoom.getByRole('textbox', { name: 'Run Room message' }).fill(approvedSteer)
     await bobRoom.getByRole('button', { name: 'Queue steer', exact: true }).click()
@@ -267,7 +262,6 @@ test('two members share comments, moderated steering, and explicit control trans
     await bobPage.keyboard.up('Space')
     await takeover.getByRole('button', { name: 'Accept', exact: true }).click()
 
-    // The host controls follow the new lease while both docked rooms stay open.
     await expect(bobControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     await expect(aliceControls.getByTitle(`Controller: ${bobDisplayName}`, { exact: true })).toBeVisible()
     // Alice remains an observer after the server fences her stale writable
@@ -289,9 +283,8 @@ test('two members share comments, moderated steering, and explicit control trans
       idempotency_key: 'run-room-e2e-unanswered-question',
     })
 
-    // Wait for both authoritative run snapshot paths before reloading the
-    // dashboard. This distinguishes server-side count propagation from SPA
-    // hydration timing when the question event lands just after the post.
+    // Wait for both server snapshots before reloading, so a failure separates
+    // server-side propagation from SPA hydration timing.
     await expect
       .poll(
         async () => {

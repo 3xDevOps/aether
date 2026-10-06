@@ -1,6 +1,5 @@
-// Invitations for edge accounts: an admin names the GitHub login or email a
-// person signs in to the edge with. No code changes hands, unlike the Invite
-// button's one-time codes for SSH-key joins.
+// Edge-account invitations name a GitHub login or email; unlike the Invite
+// button's one-time codes for SSH-key joins, no code changes hands.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -33,7 +32,6 @@ import { useStore } from '@/store'
 
 const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
 
-/** Who an invitation admits, as the person reading the list knows them. */
 function invitee(invitation: Invitation): string {
   if (invitation.login) return `${invitation.login} on GitHub`
   if (!invitation.provider) return invitation.email ?? ''

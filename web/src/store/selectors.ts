@@ -10,10 +10,7 @@ import type { Member } from '@/lib/types'
 import type { RootState } from '@/store'
 import { isArchivable, type RunRecord } from '@/store/runs'
 
-/**
- * An empty workspace scopes nothing: that is what every surface falls back
- * to before hydration has named one.
- */
+/** An empty workspace scopes nothing, as before hydration names one. */
 export interface RunsInput {
   workspace: string
   mineOnly: boolean
@@ -74,8 +71,7 @@ export function stateContextOf(s: RootState, now: number): StateContext {
 export function runRows(ctx: StateContext): RunRow[] {
   const rows: RunRow[] = []
   for (const run of Object.values(ctx.runs)) {
-    // A live run can never be hidden, so the archive check only applies
-    // once the run has actually stopped.
+    // A live run can never be hidden.
     if (run.archived_at && isArchivable(run.status)) continue
     const shown = presentRun(run, ctx)
     rows.push({

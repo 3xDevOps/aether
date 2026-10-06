@@ -16,10 +16,9 @@ document.addEventListener(
 )
 document.addEventListener('pointerdown', () => (navigating = false), true)
 
-// An open tooltip is the top Radix layer, and only the top layer hears Escape. Closing it synchronously
-// before the key reaches the document makes the dialog or drawer under it the top layer again, so one
-// Escape closes both; a closing tooltip must not animate, or Radix keeps it mounted and on top. Marking
-// the key handled after those layers have run keeps a shell binding on Escape from firing too.
+// Only the top Radix layer hears Escape. Closing the tooltip synchronously first lets one Escape also
+// close the dialog under it; a closing tooltip must not animate, or Radix keeps it mounted on top.
+// Marking the key handled afterwards keeps a shell Escape binding from firing too.
 const openTooltips = new Set<() => void>()
 window.addEventListener(
   'keydown',

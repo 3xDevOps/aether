@@ -1,7 +1,7 @@
 import type { Event } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
-/** What the feed is narrowed to. Empty strings mean no filter. */
+/** Empty strings mean no filter. */
 export interface FeedFilters {
   workspaceID: string
   runID: string
@@ -17,33 +17,25 @@ export const emptyFilters: FeedFilters = {
 }
 
 export interface TimelineSlice {
-  /** The window of history the feed is showing, oldest first. */
+  /** Oldest first. */
   feed: Event[]
   feedFilters: FeedFilters
   /**
-   * Where the window starts and how far it has read. `feedFloor` is the
-   * `after_seq` the window opened at - "load older" walks it back - and
-   * `feedCursor` is the seq the next page resumes from, which the live
-   * tail also uses.
+   * `feedFloor` is the `after_seq` the window opened at ("load older" walks it
+   * back); `feedCursor` is where the next page and the live tail resume.
    */
   feedFloor: number
   feedCursor: number
   /** History remains before the floor. */
   feedOlder: boolean
-  /**
-   * Stamps the current read. Every open bumps it, and a read whose stamp
-   * has gone stale writes nothing: without it a read still paging under
-   * the old filters would append its results into the new feed and drag
-   * the cursor past a range the new filters were never asked about.
-   */
+  /** Bumped per open; a read with a stale stamp writes nothing, so old-filter pages never land in the new feed. */
   feedRequest: number
   feedLoading: boolean
   feedError: string | null
   /** The read stopped on its page budget with history still unread. */
   feedTruncated: boolean
-  /** How many mounted views show the feed; live events are added only while one does. */
+  /** Live events are added only while a feed view is mounted. */
   feedViews: number
-  /** Marks a feed view mounted; the returned function unmarks it. */
   holdFeed: () => () => void
   /** Adds a live event the filters select, as the server's reader would page it. */
   appendLiveEvent: (event: Event) => void
@@ -107,9 +99,7 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set, get) => ({
       const seen = new Set(s.feed.map((e) => e.seq))
       const fresh = events.filter((e) => !seen.has(e.seq))
       return {
-        // "Load older" delivers pages from before the window, so arrival
-        // order is not log order: sorting keeps the oldest-first invariant
-        // the view renders from.
+        // "Load older" pages arrive out of log order; keep the feed oldest first.
         feed: fresh.length
           ? [...s.feed, ...fresh].sort((a, b) => a.seq - b.seq)
           : s.feed,

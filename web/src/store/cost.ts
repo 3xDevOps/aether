@@ -15,7 +15,7 @@ export interface BudgetPayload {
 }
 
 export interface CostSlice {
-  /** Workspace ID to its budget report: the cap, its state, and the spend. */
+  /** Workspace ID to its budget report. */
   budgets: Record<string, BudgetReport>
   /** `workspace.budget` events per workspace, so a read one overtook is dropped. */
   budgetEvents: Record<string, number>
@@ -90,13 +90,8 @@ const severity: BudgetState[] = ['exceeded', 'warn', 'ok']
 
 export interface CostTotals {
   costUSD: number
-  /** The worst state any budgeted workspace is in. */
   state: BudgetState
-  /**
-   * True while any part of the spend is unmetered - a harness with no
-   * adapter reports nothing - which makes the total a floor, not a
-   * measurement.
-   */
+  /** Some spend is unmetered, so the total is a floor, not a measurement. */
   advisory: boolean
   /** Workspaces carrying a budget, worst state first. */
   budgeted: BudgetReport[]

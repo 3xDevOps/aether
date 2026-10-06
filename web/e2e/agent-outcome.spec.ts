@@ -1,15 +1,9 @@
-// An agent that reports its own outcome finishes the run, and the run waits
-// in Needs you until its owner opens it. The agent is a shell fixture that
-// calls the real `aether-internal report` over the run's coordination socket.
-
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-// The executable starts while the container is still provisioning, so the
-// report retries until the socket answers. The idempotency key makes a retry
-// after an ambiguous failure safe. The Stop hook ends the turn the way Claude
-// Code's own hook does: the finish waits for that, not for a deadline.
+// The container may still be provisioning, so the report retries until the
+// socket answers. The finish waits for the Stop hook, not for a deadline.
 const reportSuccess = `i=0
 until aether-internal report --outcome success --summary 'outcome review fixture' --idempotency-key outcome-review-fixture >/dev/null; do
   i=$((i + 1))

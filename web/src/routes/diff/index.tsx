@@ -33,14 +33,8 @@ import {
   type RunDiffState,
 } from '@/store/diff'
 
-/**
- * The run-detail Diff tab: the run's current diff against its fork point,
- * plus the times its files changed. The server records a git tree per
- * snapshot, so selecting one shows the diff between the tree before it and
- * the tree at it - what that interval alone changed, not a filter over the
- * current diff. A snapshot from a server that recorded no tree cannot be
- * shown that way, and is not selectable.
- */
+/** A snapshot shows the diff between its parent tree and its tree, not a filter
+ * over the current diff; a snapshot with no recorded tree is not selectable. */
 function DiffView({ params }: RouteProps) {
   const caps = useCapability()
   const runID = params.runId
@@ -49,15 +43,11 @@ function DiffView({ params }: RouteProps) {
   // Keyed on the snapshot's time, not its index: new snapshots are prepended,
   // so an index would silently retarget whenever one arrived.
   const [selected, setSelected] = useState<string | null>(null)
-  // Null until the member says otherwise, so the default follows the pointer;
-  // the choice itself lives on the UI slice, because only one run-detail
-  // route is mounted at a time and component state would forget it on every
-  // trip to the Terminal tab.
+  // Null follows the pointer default. Kept on the UI slice: component state
+  // would be lost on every trip to the Terminal tab.
   const wrapping = useStore((s) => s.diffWrap)
   const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
-  // The timeline sits above the patch once the grid stacks, so below `md` it
-  // is a disclosure rather than 208px of chrome before the first line.
   const stacked = useIsMobile()
   const wrap = wrapping ?? coarse
   usePatch(run ? runID : '')
@@ -75,10 +65,6 @@ function DiffView({ params }: RouteProps) {
   const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
   const note = emptyNote(snapshot, interval, state)
-  // Beside the patch an empty list is worth its own notice: it is the only
-  // thing that says why there are no intervals. Above the patch that notice
-  // is two lines between the member and the first line of code, so there an
-  // empty list is nothing at all.
   const hidden = stacked && state.snapshots.length === 0
 
   if (!run) {
@@ -204,8 +190,7 @@ function DiffView({ params }: RouteProps) {
   )
 }
 
-/** What to say when there is nothing to render. A failed fetch says nothing
- * here: the banner above already carries the server's own message. */
+/** A failed fetch returns null: the banner above already shows the server's message. */
 function emptyNote(
   snapshot: DiffSnapshot | null,
   interval: IntervalPatch | undefined,
@@ -221,23 +206,15 @@ function emptyNote(
   return 'Nothing has changed against the fork point yet.'
 }
 
-/** Why a snapshot cannot be opened. Shown on the row itself, since there is
- * nothing to select. */
 const noTree =
   'This server did not record a tree for this snapshot, so what changed ' +
   'then cannot be shown.'
 
-/** The trees bounding the interval a snapshot ended, or null when the server
- * that sent it recorded none. */
 function range(snapshot: DiffSnapshot): { from: string; to: string } | null {
   if (!snapshot.tree || !snapshot.parentTree) return null
   return { from: snapshot.parentTree, to: snapshot.tree }
 }
 
-/** When files changed: one entry per diff snapshot the server took. Selecting
- * one shows the diff of that interval. Beside the patch it is a list; above
- * it, where every row of chrome pushes the first line further down, it is a
- * disclosure that starts closed. */
 function Timeline({
   snapshots,
   selected,
@@ -255,10 +232,8 @@ function Timeline({
         const shownable = range(snap) !== null
         return (
           <li key={snap.time + i}>
-            {/* Disabled rather than content-less on a row that opens: an
-                open tooltip with nothing in it still points the button's
-                `aria-describedby` at a missing element and still swallows
-                the first Escape. */}
+            {/* Disabled, not empty: an empty open tooltip still sets a dangling
+                `aria-describedby` and swallows the first Escape. */}
             <Tooltip disabled={shownable} content={noTree}>
               <button
                 type="button"
@@ -330,18 +305,12 @@ function total<K extends string>(items: Record<K, number>[], key: K): number {
   return items.reduce((sum, item) => sum + item[key], 0)
 }
 
-/**
- * Fetches the patch whenever the run's revision has moved past the one the
- * stored patch answers for. The store, not this component, holds the answer,
- * so leaving the tab and coming back re-renders what was already fetched.
- */
+/** The store holds the patch, so returning to the tab reuses what was fetched. */
 function usePatch(runID: string): void {
   const revision = useStore((s) => s.diffs[runID]?.revision ?? 0)
   const fetched = useStore((s) => s.diffs[runID]?.fetched ?? -1)
-  // The run whose patch is in flight. A snapshot landing mid-request must
-  // neither cancel it nor start a second one: the response records the
-  // revision it answered for, and the re-render that follows asks again if a
-  // newer one arrived meanwhile.
+  // A snapshot landing mid-request must neither cancel it nor start a second one:
+  // the response records its revision and the next render asks again if needed.
   const inFlight = useRef<string | null>(null)
 
   useEffect(() => {
@@ -360,8 +329,7 @@ function usePatch(runID: string): void {
       })
       .catch((err: unknown) => {
         done()
-        // Recorded as answered so a failure cannot spin. The next snapshot
-        // and the Refresh button both ask again.
+        // Recorded as answered so a failure cannot spin.
         useStore.getState().setDiff(runID, {
           status: 'error',
           fetched: at,
@@ -371,14 +339,8 @@ function usePatch(runID: string): void {
   }, [runID, revision, fetched])
 }
 
-/**
- * The selected snapshot's interval patch, fetched the first time it is asked
- * for. The two trees name the answer, so an interval that loaded is never
- * refetched. Refresh drops the failed ones, which is what lets a fetch that
- * failed be tried again. The interval response's `base` is the `from` tree,
- * so it is deliberately not written into the run's `base`, which names the
- * fork point.
- */
+/** The interval response's `base` is the `from` tree, so it must not be written
+ * into the run's `base`, which names the fork point. */
 function useInterval(
   runID: string,
   snapshot: DiffSnapshot | null,

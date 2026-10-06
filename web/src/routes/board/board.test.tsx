@@ -123,11 +123,7 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
   )
 }
 
-/**
- * One real run.archived event, through the same path the server publishes
- * it on. Bulk archive relies on this, not the RPC response, to move a run
- * in the store.
- */
+/** Bulk archive moves a run on this event, not on the RPC response. */
 function archived(
   runID: string,
   seq: number,
@@ -448,8 +444,7 @@ describe('board', () => {
     render(<Board />)
     expect(column('Working').queryByLabelText('Paused')).toBeNull()
 
-    // The whole point of the derivation: the run still reads `running`, and
-    // only the steering entry says otherwise. Drive the real event path.
+    // The run still reads `running`; only the steering entry says otherwise.
     act(() => timeline('pause', 1))
     expect(column('Working').getByLabelText('Paused')).toBeDefined()
     expect(useStore.getState().runs[working.id].status).toBe('running')
@@ -507,7 +502,6 @@ describe('board', () => {
     fireEvent.click(column('Needs you').getByRole('button', { name: /Requests: 1 approval/ }))
     expect(useStore.getState().route).toEqual({ name: 'approvals', params: {} })
 
-    // Deciding the request moves the card back.
     act(() =>
       useStore
         .getState()
@@ -639,9 +633,7 @@ describe('board', () => {
     seed([])
     render(<Board />)
 
-    // The notice replaces the column row rather than sitting above it: three
-    // empty buckets each saying "Nothing here." add nothing to the one notice
-    // that says what a run is and offers the way to start one.
+    // The notice replaces the column row: three empty buckets add nothing to it.
     const notice = screen.getByText(/No runs yet/).closest('div') as HTMLElement
     expect(within(notice).getByRole('button', { name: 'New run' })).toBeDefined()
     expect(screen.queryAllByText('Nothing here.')).toHaveLength(0)
@@ -651,9 +643,7 @@ describe('board', () => {
   })
 
   it('says nothing in a bucket it has not heard about yet', () => {
-    // A cold load: not hydrated, and useDelayed holds the skeletons back
-    // 200ms, so this is the window where the buckets used to print the same
-    // "Nothing here." three times that the one notice exists to replace.
+    // A cold load: not hydrated, and useDelayed holds the skeletons back 200ms.
     seed([])
     useStore.setState({ hydrated: false })
     render(<Board />)
@@ -665,8 +655,7 @@ describe('board', () => {
   })
 
   it('says "Nothing here." only in the buckets a filled board left empty', () => {
-    // The other two placeholder states. One run means the notice is gone, so
-    // the empty buckets are worth labelling: they are empty, not unknown.
+    // With one run the notice is gone, so empty buckets are known-empty, not unknown.
     seed([working])
     render(<Board />)
 
@@ -696,8 +685,6 @@ describe('board', () => {
   })
 
   it('returns to the notice when the last run is deleted', () => {
-    // The other way a member reaches the notice, and the transition the
-    // empty-to-populated test above does not cover.
     seed([working])
     render(<Board />)
     expect(screen.queryByText(/No runs yet/)).toBeNull()
@@ -779,10 +766,8 @@ describe('board', () => {
   })
 
   it('renders the grid and its toggle when every run in scope is archived', () => {
-    // Nothing lands in a bucket, so `total` must still count the archived
-    // runs behind the toggle - otherwise the board falls into the
-    // empty-workspace notice and the toggle (the only way back to them)
-    // never mounts.
+    // `total` must still count archived runs, or the board shows the
+    // empty-workspace notice and the toggle back to them never mounts.
     seed([archivedMerged])
     render(<Board />)
 
@@ -1089,7 +1074,6 @@ describe('archive closed runs', () => {
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
 
-    // The gone run leaves the board without waiting on the pending archive.
     await waitFor(() => expect(useStore.getState().runs[gone.id]).toBeUndefined())
     expect(useStore.getState().runs[kept.id]).toBeDefined()
     expect(toast.success).not.toHaveBeenCalled()
@@ -1101,9 +1085,7 @@ describe('archive closed runs', () => {
 
   it('moves focus to the Done heading once a not-found removal leaves nothing archived to fall back on', async () => {
     const gone = run({ id: 'run_gone_focus', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
-    // A run left in Working, so removing `gone` leaves Done empty rather
-    // than emptying the whole board - the Done heading has to stay mounted
-    // for this to be a meaningful fallback target.
+    // Keeps the board non-empty so the Done heading stays mounted as the fallback.
     const other = run({ id: 'run_other_focus', status: 'running' })
     seedAs(alice, [gone, other])
     render(<Board />)

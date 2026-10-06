@@ -1,8 +1,3 @@
-// The onboarding step that settles who an agent's commits are authored as.
-// The identity lives on the server, so every run this member starts carries
-// it; this step only collects it, offering the machine's own git config as
-// the default.
-
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,12 +10,7 @@ import { actionRow } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
-/**
- * The Git identity step: the identity commits made in this member's runs
- * carry. What the member already saved wins; the machine's `git config`
- * fills whatever is still empty, and skipping leaves the server's fallback
- * in place.
- */
+/** Saved values win; the machine's `git config` fills only what is still empty. */
 export function GitIdentityStep({
   client,
   caps,
@@ -70,11 +60,8 @@ export function GitIdentityStep({
     setError(null)
     try {
       const member = await client.memberGit(name.trim(), email.trim())
-      // Nothing on the wire announces a member's own change, so the store's
-      // copy is what walking back into this step reads. Left stale, the
-      // machine probe would overwrite what was just saved. The info read
-      // here is the one at write time, not the render's: a disk-usage
-      // refresh can land while the call is in flight.
+      // No event announces a member's own change; a stale store would let the
+      // probe overwrite it. Read info now: a refresh can land mid-call.
       const s = useStore.getState()
       if (s.info) s.setInfo({ ...s.info, member })
       onNext()

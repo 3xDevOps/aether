@@ -1,8 +1,3 @@
-// The keyboard shortcut reference. Like the palette it has no home of its
-// own, so it rides the status bar slot: a small "?" trigger there, and the
-// reference itself is a dialog portalled to the document. `?` opens it
-// from anywhere, unless a field has focus or a dialog is already up.
-
 import { CircleHelp } from 'lucide-react'
 import { useState } from 'react'
 import { registerSlot } from '@/components/slots'

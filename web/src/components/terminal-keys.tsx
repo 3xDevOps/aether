@@ -1,8 +1,5 @@
-// The keys a soft keyboard does not have. A phone keyboard sends characters,
-// so an agent TUI's Esc, Tab, arrows and Ctrl are unreachable without this
-// bar. Every key goes through `terminal.input`, the same entry xterm's own
-// textarea uses, so the replay gate and `disableStdin` apply to a tap exactly
-// as they apply to a keystroke.
+// Every key goes through `terminal.input`, the entry xterm's own textarea uses,
+// so the replay gate and `disableStdin` apply to a tap as to a keystroke.
 
 import type { Terminal } from '@xterm/xterm'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from 'lucide-react'

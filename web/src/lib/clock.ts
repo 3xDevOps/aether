@@ -23,11 +23,8 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => tick
 
-/**
- * Re-renders the caller every 30 seconds, from one interval shared by every
- * subscriber. The value is when the clock last ticked; text should still be
- * computed from the real time, so a row mounted between ticks is not stale.
- */
+/** Returns the last tick time. Compute text from the real time instead, so a
+ * row mounted between ticks is not stale. */
 export function useClock(): number {
   return useSyncExternalStore(subscribe, snapshot, snapshot)
 }

@@ -9,8 +9,7 @@ export async function hintOn(control: HTMLElement): Promise<string> {
   act(() => control.focus())
 
   const hint = await screen.findByRole('tooltip')
-  // This control's hint, not whichever one happens to be open: in a test that
-  // renders the whole shell those are not the same question.
+  // With the whole shell rendered, another control's tooltip may be the open one.
   expect(control.getAttribute('aria-describedby')).toBe(hint.id)
   return hint.textContent ?? ''
 }

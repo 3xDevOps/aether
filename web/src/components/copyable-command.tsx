@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button'
 import { cn, focusRing } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 
-/** One exact command, shown as it must be typed, with a button that copies it. */
 export function CopyableCommand({ command }: { command: string }) {
   const codeRef = useRef<HTMLElement>(null)
 

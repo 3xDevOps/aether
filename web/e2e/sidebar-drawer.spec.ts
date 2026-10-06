@@ -1,7 +1,5 @@
-// The narrow-window sidebar drawer and the keyboard. The drawer is a modal
-// dialog, so it stands the shell's global keys down while it is open - the
-// same contract every other dialog has. Mod+B is the exception it answers
-// itself, because it is the key that opened it.
+// The drawer is a modal, so it stands the shell's global keys down while open.
+// Mod+B is the exception, because it is the key that opened it.
 
 import { expect, test } from './fixtures'
 import { seedWorkspace } from './harness/setup'
@@ -14,8 +12,7 @@ test('the drawer answers the key that opened it and gives the rest back', async 
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
 
-  // Narrow enough for the drawer, wide enough to be a desktop window with a
-  // real keyboard attached.
+  // Narrow enough for the drawer, wide enough to be a desktop with a keyboard.
   await page.setViewportSize({ width: 600, height: 800 })
   await page.goto(alice.url)
 
@@ -35,7 +32,6 @@ test('the drawer answers the key that opened it and gives the rest back', async 
 
   await page.keyboard.press('ControlOrMeta+b')
   await expect(drawer).toBeVisible()
-  // Every other shell key belongs to the drawer while it is open.
   await page.keyboard.press('ControlOrMeta+k')
   await expect(palette).toHaveCount(0)
 

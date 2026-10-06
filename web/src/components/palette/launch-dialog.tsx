@@ -41,11 +41,8 @@ function idempotencyKey(): string {
     : `mission-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-// One key per submitted swarm contents, for this tab. The dialog unmounts on
-// close, and a failed create may already have stored the mission: resending
-// the same contents under the same key replays it instead of making another,
-// while changed contents under a used key are refused as an idempotency
-// conflict.
+// Outlives the dialog: a failed create may already have stored the mission,
+// and resending the same contents under the same key replays it.
 const swarmKeys = new Map<string, string>()
 
 export function LaunchDialog() {
@@ -100,9 +97,8 @@ export function LaunchDialog() {
   const sharedAccount = account !== '' && account !== ownAccountID
   const harnessLoading = agents === null
   const noAgents = !harnessLoading && installedAgents.length === 0
-  // Availability can drop while the dialog is open: a re-hydration that
-  // could not read the capabilities, or a role change. The form stays on
-  // Swarm and says why, rather than switching under the reader.
+  // Availability can drop while open; stay on Swarm and say why rather than
+  // switching under the reader.
   const swarmUnavailable = kind !== 'swarm' || swarmAvailable
     ? null
     : capabilities === null
@@ -218,9 +214,8 @@ export function LaunchDialog() {
           objective: trimmed,
           accountable_human_id: accountableHumanID,
           integrator: integratorChoice,
-          // Sorted so the same set always serializes, and is sent, identically:
-          // the key follows the serialization and the server's receipt check
-          // compares the encoded list.
+          // Sorted: the idempotency key and the server's receipt check both
+          // follow the serialized list.
           execution_choices: [integratorChoice, ...workerChoices.filter((choice) => choice.account_member_id !== account || choice.harness !== harness || choice.mode !== integratorChoice.mode)]
             .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode)),
         }

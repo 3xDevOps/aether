@@ -36,12 +36,7 @@ const destinationCommandIDs: Record<string, true> = {
   close: true,
 }
 
-/**
- * Everything the palette can do. The verbs themselves live in
- * `src/lib/commands.ts` so the visible buttons offer exactly the same list;
- * jumping is local to the palette. Rendered inside CommandDialog, which
- * supplies the cmdk root.
- */
+/** Rendered inside CommandDialog, which supplies the cmdk root. */
 export function PaletteBody({
   onDone,
   onTemplates,
@@ -71,12 +66,8 @@ export function PaletteBody({
   }
   const perform = useCommandRunner({ onDone: complete, onTemplates })
 
-  // Steering acts on the run the centre view is showing, whichever of the run
-  // detail routes is showing it - the terminal tab is exactly where a human
-  // decides to steer. From the board no run is in view: reveal one first.
-  // Resolved from the run map rather than the run list: an archived
-  // run's own page still needs its commands (Restore among them), and
-  // the list excludes archived runs once they are also final.
+  // The run map, not the run list: the list drops archived final runs, whose
+  // own page still needs its commands (Restore among them).
   const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
   const goTo = surfaces(cap).map((surface) => ({

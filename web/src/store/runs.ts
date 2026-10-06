@@ -181,12 +181,8 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
 })
 
 /**
- * Whether a run's disposition is final enough to archive: merged, abandoned,
- * failed or interrupted. A completed run still awaits a human disposition
- * (Close), so it stays off this list even though it has stopped. The archive
- * command gate and every hide guard (board selectors, sidebar selectors,
- * the attention count) share this one predicate - see "Archiving hides a
- * finished run" in docs/dashboard-frontend.md.
+ * A completed run still awaits Close, so it is not archivable. The archive gate
+ * and every hide guard share this predicate; see docs/dashboard-frontend.md.
  */
 export function isArchivable(status: RunStatus): boolean {
   return (
@@ -197,12 +193,7 @@ export function isArchivable(status: RunStatus): boolean {
   )
 }
 
-/**
- * Whether a run has stopped for good: every archivable status (above) plus
- * `completed`, which has also stopped but still awaits a human disposition
- * and so is not itself archivable. Used to freeze `finished_at` once a run's
- * outcome is settled - never for a hide guard, which wants `isArchivable`.
- */
+/** Freezes `finished_at`; never a hide guard, which wants `isArchivable`. */
 export function isTerminal(status: RunStatus): boolean {
   return status === 'completed' || isArchivable(status)
 }

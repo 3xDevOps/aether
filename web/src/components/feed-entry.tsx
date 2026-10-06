@@ -1,7 +1,4 @@
-// One event as a feed row, shared by the team activity view and the run
-// detail's Events tab so the two feeds cannot drift: actor dot, age, type,
-// and the description. The team view also asks for a jump-to-run button;
-// the Events tab is already pinned to one run and leaves it off.
+// Shared by the team activity view and the run Events tab so the two feeds cannot drift.
 
 import { memo, type ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
@@ -60,11 +57,7 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
   )
 })
 
-/**
- * The one line of an event that belongs in a feed. Keyed by `EventType`, so a
- * describer without a name in `eventLabel`, or a name without a describer, is a
- * compile error rather than a row that renders half of itself.
- */
+// Keyed by `EventType` so a missing describer is a compile error.
 const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> = {
   'run.status': (p) => join([p.to, p.reason]),
   'run.input': (p) => Array.isArray(p.pending_inputs) && p.pending_inputs.length > 0

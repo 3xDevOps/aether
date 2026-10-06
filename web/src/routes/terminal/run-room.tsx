@@ -220,10 +220,8 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     }
   }
 
-  // Reconcile the newest page periodically while open. If a burst is larger
-  // than one page, walk the server's cursors until this cached history is
-  // reached or the server reports exhaustion. Each cursor is visited once so
-  // a malformed response cannot create an unbounded loop.
+  // A burst can exceed one page, so walk cursors back to cached history. Each
+  // cursor is visited once so a malformed response cannot loop forever.
   const refreshMessages = async () => {
     const current = scope.current
     const cached = useStore.getState().roomMessages[runID] ?? []
@@ -330,8 +328,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     if (!open) return
     const timer = window.setInterval(() => void refreshMessages(), 10_000)
     return () => window.clearInterval(timer)
-    // Reconciliation merges the newest page and never resets room history or
-    // local composer state.
+    // Reconciliation never resets room history or composer state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, runID, workspaceID, client])
 
@@ -362,9 +359,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   }
 
   const upload = async (file: File) => {
-    // Keep the client-side cap identical to the server contract. The input is
-    // disabled at the same boundary, but this guard also covers a queued
-    // change event that lands before React commits the disabled state.
+    // Also covers a queued change event that lands before the input disables.
     if (uploading || attachments.length >= maxRoomAttachments) return
     markDraftEdited()
     setUploading(true)

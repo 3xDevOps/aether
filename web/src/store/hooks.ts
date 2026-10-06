@@ -100,19 +100,14 @@ export function useListedRuns(workspace: string): RunRow[] {
   return useMemo(() => listedRuns(workspace, ctx), [workspace, ctx])
 }
 
-/** What the connected gateway can do, queryable per method, verb and socket. */
 export interface Capability {
   hasMethod: (method: string) => boolean
   hasLocal: (verb: string) => boolean
   hasWS: (name: string) => boolean
 }
 
-/**
- * The fallback allowlist for a gateway whose /capabilities endpoint did not
- * answer. It is the read-and-steer set every gateway serves; the admin
- * surfaces stay hidden rather than rendering buttons that would fail, so an
- * unknown gateway degrades to monitoring instead of to "everything".
- */
+/** For a gateway whose /capabilities did not answer: the read-and-steer set
+ * every gateway serves, so an unknown gateway degrades to monitoring. */
 const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'server.info': true,
   'workspace.list': true,
@@ -139,13 +134,8 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'template.launch': true,
 }
 
-/**
- * Answers from a capabilities result. Null means a legacy remote monitor
- * that predates the endpoint: it serves exactly the pre-capabilities
- * allowlist and both gateway sockets; the admin methods behind the newer
- * surfaces would 403, and local verbs are a desktop-gateway feature it
- * cannot have. A "*" methods entry means every method.
- */
+/** Null means a legacy remote monitor that predates /capabilities: the
+ * fallback allowlist, both sockets, no local verbs. "*" means every method. */
 export function capability(caps: GatewayCapabilities | null): Capability {
   if (caps === null) {
     return {
@@ -167,20 +157,13 @@ export function useCapability(): Capability {
   return useMemo(() => capability(caps), [caps])
 }
 
-/**
- * The caller's own role, or null before hydration. The gateway capability
- * descriptor answers what the transport can carry; this answers what this
- * member may do. An admin affordance needs both, because the local gateway
- * advertises every method regardless of who is behind it.
- */
+/** Null before hydration. An admin affordance needs this as well as the
+ * gateway capability: the local gateway advertises every method to anyone. */
 export function useSelfRole(): Member['role'] | null {
   return useStore((s) => s.info?.member.role ?? null)
 }
 
-/**
- * The caller's own id and role in one object, which is what the permission
- * mirror in `lib/permissions.ts` asks for. Both are null before hydration.
- */
+/** Both null before hydration. */
 export function useSelf(): { id: string | null; role: Member['role'] | null } {
   const id = useStore((s) => s.info?.member.id ?? null)
   const role = useStore((s) => s.info?.member.role ?? null)

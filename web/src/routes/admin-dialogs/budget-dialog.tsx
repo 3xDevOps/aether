@@ -1,5 +1,4 @@
-// Budget administration for one workspace, over budget.set. The server owns
-// the arithmetic and the refusal; this form only carries the numbers.
+// The server owns the arithmetic and the refusal; this form only carries the numbers.
 
 import { useState } from 'react'
 import { toast } from 'sonner'

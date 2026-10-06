@@ -1,6 +1,3 @@
-// The agents surface lists shipped and member-registered harnesses. Adding an
-// agent records a member definition after setup in the environment terminal.
-
 import { useCallback, useEffect, useState } from 'react'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'

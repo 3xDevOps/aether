@@ -1,7 +1,4 @@
-// The member roster: who is on the deployment, who is waiting on approval,
-// and the admin verbs over both. Every mutation goes through the gateway and
-// re-reads member.list afterwards; a refusal is the server's message, shown
-// verbatim, never a prediction this view makes.
+// A refusal is the server's message, shown verbatim, never a prediction this view makes.
 
 import { Copy, UserPlus } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -50,8 +47,7 @@ import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import { onlineMembers } from '@/store/presence'
 
-// The attribution palette. These are colours, passed to member.color as
-// data; the inline style below is the sanctioned member-colour exception.
+// Passed to member.color as data; the inline style below is the sanctioned member-colour exception.
 const presetColors = [
   '#e6194b',
   '#3cb44b',
@@ -72,8 +68,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const isAdmin = useIsAdmin()
   const [inviting, setInviting] = useState(false)
   const [removing, setRemoving] = useState<Member | null>(null)
-  // The role the caller picked for themselves, held until they confirm the
-  // self-lockout; null when no such change is pending.
+  // The caller's own new role, held until they confirm the self-lockout.
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sharedWith, setSharedWith] = useState<Member[]>([])
@@ -82,14 +77,12 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   const [firstShare, setFirstShare] = useState<Member | null>(null)
   const [stoppingTerminal, setStoppingTerminal] = useState(false)
   const [terminalUnread, setTerminalUnread] = useState(false)
-  // Counts terminal reads so one answered after a stop is dropped: it
-  // describes the terminal the stop ended.
+  // Drops a terminal read answered after a stop: it describes the ended terminal.
   const terminalRead = useRef(0)
   const terminalRunning = useStore((s) => s.envTerminal.status?.running === true)
   const setTerminalStatus = useStore((s) => s.setEnvTerminalStatus)
 
-  // The roster the store holds came from hydration; this view is the one
-  // place approvals happen, so opening it re-reads the list.
+  // Approvals happen only here, so opening re-reads the hydrated roster.
   useEffect(() => {
     let cancelled = false
     client
@@ -185,9 +178,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
   }
 
   const changeRole = (member: Member, role: Member['role']) => {
-    // Losing your own admin role locks you out of this surface at once, so
-    // it is the one change worth confirming. Everything else, including the
-    // last-admin guard, is the server's refusal to make and ours to show.
+    // Losing your own admin role locks you out at once; the server guards the rest.
     if (member.id === self?.id && role !== 'admin') {
       setDemoting(role)
       return
@@ -311,9 +302,7 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                             Role
                           </span>
                           {caps.hasMethod('member.role') && isAdmin ? (
-                            // No client-side prediction of who may be demoted: the
-                            // server refuses to demote the last admin and says so,
-                            // and that invariant is not recomputed here.
+                            // The server refuses to demote the last admin; not recomputed here.
                             <Select
                               value={member.role}
                               onValueChange={(role) =>
@@ -559,9 +548,8 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
 }
 
 /**
- * member.invite mints a one-time code the server shows exactly once, so the
- * dialog holds it until dismissed and offers the clipboard. jsdom and older
- * engines have no navigator.clipboard; the fallback selects the text.
+ * The server shows the invite code exactly once. jsdom and older engines lack
+ * navigator.clipboard, so the fallback selects the text.
  */
 function InviteDialog({ client, onClose }: { client: Api; onClose: () => void }) {
   const [result, setResult] = useState<{ code: string; expires_at: string } | null>(null)
@@ -713,11 +701,6 @@ function RemoveDialog({
   )
 }
 
-/**
- * Giving up your own admin role is the one member change worth confirming:
- * it takes effect at once and no other affordance here can undo it. Any
- * other refusal, the last-admin guard included, arrives from the server.
- */
 function DemoteSelfDialog({
   member,
   role,

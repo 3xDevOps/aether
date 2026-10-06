@@ -1,8 +1,4 @@
-// Devices: the computers members reach this server through an edge with. A
-// member sees their own and an admin sees everyone's; both approve a
-// device by the code it shows on its own screen, which no list carries,
-// after seeing which member and role the code admits it as, and revoke
-// one. Every refusal is the server's message, shown verbatim.
+// Approval needs the code the device shows on its own screen; no list carries it.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -37,7 +33,6 @@ const statusTone: Record<Device['status'], Tone> = {
   revoked: 'neutral',
 }
 
-/** What stops working when a device is revoked, said before it happens. */
 const revokeEffect =
   'The server refuses its device key on every path, direct and through the edge, and closes its open connections. aether on that computer stops reaching this server.'
 

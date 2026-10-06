@@ -22,7 +22,6 @@ import { api } from '@/lib/api'
 import type { Template } from '@/lib/types'
 import { useStore } from '@/store'
 
-/** Launches a saved task template into the active workspace. */
 export function TemplateDialog({ onClose }: { onClose: () => void }) {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])

@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dialog'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 
-/** The shared archive confirmation for Cards, Map and the palette. */
 export function ClearDoneConfirm({
   plan,
   running,
@@ -74,7 +73,6 @@ export function ClearDoneConfirm({
   )
 }
 
-/** The same confirmation surface for retained containers, archived or visible. */
 export function ReleaseFinishedConfirm({
   plan,
   running,

@@ -100,8 +100,7 @@ function pack<T extends MapRect & { key: string }>(rects: T[], gap: number, aspe
   }
   for (const target of candidates) {
     const bounds = arrange(target, false)
-    // Score the occupied bounds, not the guessed shelf width. Prefer compact
-    // owner boxes, then a landscape world; equal-fit ties use less empty area.
+    // Score the occupied bounds, not the guessed shelf width; ties use less empty area.
     const score = Math.max(bounds.width / aspect, bounds.height)
     const occupiedArea = bounds.width * bounds.height
     if (score < bestScore || (score === bestScore && occupiedArea < bestArea)) {
@@ -229,8 +228,7 @@ export function layoutRunMap(cards: RunRow[]): RunMapLayout {
           { x: source.unit.x - 12, y: busY }, { x: end.x, y: busY }, end,
         ]
     } else {
-      // Exit each unit into shelf gutters. The world-left trunk never crosses
-      // another owner's box, even when the source and target occupy different rows.
+      // The world-left trunk never crosses another owner's box, even across rows.
       const sourceLane = source.unit.x - 12
       const sourceTop = source.unit.y - 12
       const targetTop = destination.unit.y - 12

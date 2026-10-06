@@ -69,17 +69,13 @@ describe('team status bar', () => {
 
     expect(await screen.findByText('1 waiting')).toBeDefined()
     expect(screen.getByText('$0.50')).toBeDefined()
-    // A budget warns and reports being past its cap. It never stops a run,
-    // so nothing here may say that it did.
+    // A budget never stops a run, so nothing here may say that it did.
     expect(screen.getByText('nearing the cap')).toBeDefined()
     expect(screen.getByLabelText('Bob')).toBeDefined()
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(workspace.id)
   })
 
-  // Workspaces are few and long-lived, and both of these readouts claim a
-  // whole-deployment fact - the worst budget state anywhere, and the size of
-  // the shared queue - so the refresh covers every workspace, including the
-  // ones with nothing running in them.
+  // Both readouts claim a whole-deployment fact, so idle workspaces count too.
   it('refreshes every workspace, not just the ones with live runs', async () => {
     const client = fakeApi()
     seed({
@@ -138,9 +134,8 @@ describe('team status bar', () => {
     const beats = presenceHeartbeat.mock.calls.length
     const mounted = Date.now()
 
-    // Straight after a refresh the fan-out keeps its floor: flipping between
-    // two apps must not become a request per workspace each time. The
-    // heartbeat is one request and the reason the wake exists, so it goes.
+    // Within the floor, flipping between apps must not fan out a request per
+    // workspace; the single heartbeat still goes.
     await act(async () => {
       fire('visibilitychange')
     })
@@ -169,7 +164,6 @@ describe('team status bar', () => {
     expect(client.presenceHeartbeat).not.toHaveBeenCalled()
   })
 
-  // A workspace does not stop being over its cap when its last run finishes.
   it('keeps an over-cap workspace in the readout after its last run finishes', async () => {
     const client = fakeApi({
       budgetGet: vi.fn(async (id: string) =>
@@ -238,8 +232,7 @@ describe('team status bar', () => {
     })
     render(<BudgetStatus />)
 
-    // $0.50 + $1.00, and the trailing + because one run reported no usage
-    // at all: the total is a floor, not a measurement.
+    // The trailing + is because one run reported no usage: the total is a floor.
     expect(screen.getByText('$1.50+')).toBeDefined()
     expect(screen.getByText('past the cap')).toBeDefined()
   })
@@ -270,8 +263,6 @@ describe('team status bar', () => {
       await refreshTeam(useStore, client)
     })
 
-    // The four directories that grow without bound; a bare filesystem
-    // total says the disk is filling but not what is filling it.
     const detail = screen.getByLabelText('Disk usage').getAttribute('title')
     expect(detail).toContain('Worktrees 256 MB')
     expect(detail).toContain('Transcripts 128 MB')
@@ -279,9 +270,7 @@ describe('team status bar', () => {
     expect(detail).toContain('Repos 512 MB')
   })
 
-  // An upgraded server starts reporting a component while the filesystem
-  // totals sit unchanged. Comparing only the totals would keep the stored
-  // reading and leave the tooltip a component short until the disk moved.
+  // An upgraded server can add a component while the filesystem totals stay put.
   it('takes a new breakdown even when the totals have not moved', async () => {
     const client = fakeApi()
     const stale = await client.disk()
@@ -301,8 +290,6 @@ describe('team status bar', () => {
     )
   })
 
-  // The readout itself can only fit "queue unreadable"; the server's own
-  // refusal is what an operator needs, so the hint carries it verbatim.
   it('keeps the server refusal on the queue readout', async () => {
     atViewport(390)
     seed({ inboxError: 'approval.list: database is locked' })
@@ -351,8 +338,6 @@ describe('approval inbox', () => {
     })
   })
 
-  // The row names the scope the request belongs to, so a shared queue says
-  // which workspace each decision is about.
   it('names the workspace each request came from', async () => {
     const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
     seed({ inbox: { [workspace.id]: [approval()] } })
@@ -362,8 +347,6 @@ describe('approval inbox', () => {
   })
 
   it('reports a failed read instead of saying nothing is waiting', async () => {
-    // A swallowed 403 used to render as an empty queue, which reads as "no
-    // agent is blocked" on the surface a member now watches for exactly that.
     const client = fakeApi({
       approvalList: vi.fn(async () => {
         throw new ApiError(403, 'approval.list: permission denied')
@@ -428,7 +411,6 @@ describe('approval inbox', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
 
     expect(await screen.findByText(/permission denied/)).toBeDefined()
-    // The request is still open, so the buttons are still there.
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
   })
 })

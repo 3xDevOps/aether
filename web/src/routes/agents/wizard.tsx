@@ -1,8 +1,5 @@
-// `agent add` as a wizard: collect the name and launch templates, then give
-// concise instructions for setup in the member's persistent environment home.
-// Confirming the install also saves the environment, because an executable
-// that only exists in the running container is not in the image runs start
-// from.
+// Confirming the install also saves the environment: an executable that only
+// exists in the running container is not in the image runs start from.
 
 import { useState } from 'react'
 import { message } from '@/lib/format'
@@ -15,18 +12,13 @@ import type { AgentInfo } from '@/lib/types'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-/**
- * An argv template split on single spaces. Deliberately naive - no quoting,
- * no escapes - because these are argv templates like `claude {task}`, not
- * shell commands; a name with a space in it belongs to the CLI's flag form.
- */
+/** Deliberately naive - no quoting or escapes: these are argv templates like `claude {task}`, not shell commands. */
 export function splitArgv(template: string): string[] {
   return template.split(' ').filter((w) => w !== '')
 }
 
 type Step = 'form' | 'instructions' | 'done'
 
-/** What the confirm button is doing, and what it says while it does it. */
 type Phase = 'idle' | 'checking' | 'saving'
 
 export function AgentWizard({
@@ -36,15 +28,11 @@ export function AgentWizard({
   onCancel,
   client = api,
 }: {
-  /** The current list, for shipped-name detection and installer details. */
   agents: AgentInfo[]
-  /** The harness to set up, when the caller already knows it (onboarding).
-   * The form is skipped and the setup instructions show straight away. */
+  /** Skips the form and shows the setup instructions straight away (onboarding). */
   harness?: string
-  /** Installation was verified; the caller refetches. */
   onRegistered: () => void
   onCancel: () => void
-  /** API client used by an embedded wizard or test fixture. */
   client?: Api
 }) {
   const [step, setStep] = useState<Step>(harness ? 'instructions' : 'form')
@@ -64,8 +52,7 @@ export function AgentWizard({
   const selected = agents.find((a) => a.name === trimmed)
   const existing = !!harness || !!selected
   const installScript = selected?.install_script
-  // The CLI's argv template defaults: `{task}` is the placeholder the server
-  // substitutes at launch.
+  // `{task}` is the placeholder the server substitutes at launch.
   const hasTerminal = caps.hasWS('terminal')
   const base = trimmed || 'agent'
   const tuiValue = tui ?? `${base} {task}`

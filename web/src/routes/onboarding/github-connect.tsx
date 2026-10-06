@@ -1,9 +1,5 @@
-// Connecting GitHub, as the Agents step's third section and its sub-screen.
-//
-// The half a server cannot do sits in the member's environment terminal:
-// `gh auth login` is a device flow that ends in a browser. Everything after
-// it is non-interactive, so the screen types the login command into the
-// terminal and then hands the rest to `github.connect`.
+// `gh auth login` is a device flow that ends in a browser, so the screen types
+// it into the environment terminal and hands the rest to `github.connect`.
 
 import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
@@ -17,15 +13,10 @@ import { pane } from '@/routes/onboarding/steps'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
-/**
- * The sub-screen name the Agents step opens this under. The step's other
- * sub-screens are named by harness, and `env.harnesses` reports only the
- * shipped registry names, none of which start with `@`.
- */
+/** Other sub-screens are named by harness, and no registry name starts with `@`. */
 export const githubSubStep = '@github'
 
-/** The closed section, between "Set up an agent" and the configuration
- * import. `connection` is set once this session's connect succeeded. */
+/** `connection` is set once this session's connect succeeded. */
 export function GitHubSection({
   connection,
   onOpen,
@@ -58,8 +49,6 @@ export function GitHubSection({
   )
 }
 
-/** The open sub-screen: the login in the terminal, then the confirmation
- * that runs the non-interactive rest. */
 export function GitHubConnect({
   client,
   caps,
@@ -68,7 +57,6 @@ export function GitHubConnect({
 }: {
   client: Api
   caps: Capability
-  /** Reports the connection to the step, which shows it once closed. */
   onConnected: (connection: GitHubConnectResult) => void
   onClose: () => void
 }) {
@@ -82,11 +70,8 @@ export function GitHubConnect({
   const running = useStore((st) => st.envTerminal.status?.running ?? false)
   const terminalError = useStore((st) => st.envTerminal.statusError)
 
-  // The login command only works in an environment that has a gh able to
-  // run it, and environments from before the standard image shipped gh
-  // have none. The probe runs inside the container, so it waits for the
-  // dock to have one: opening it can take an image pull, which is longer
-  // than the gateway gives a control call.
+  // Older environments have no gh. The probe runs inside the container, so it
+  // waits for the dock: an image pull can outlast a gateway control call.
   useEffect(() => {
     // A new container is a new answer, and the standing one describes a
     // container that is gone; clear it before the wait, not after.
@@ -111,10 +96,8 @@ export function GitHubConnect({
 
   const ghUsable = probe?.status === 'ok'
   const ghUnusable = probe !== null && probe.status !== 'ok'
-  // Fail open, never silent, and never on the member's behalf: a check
-  // that could not run - or a dock that could not give it a terminal at
-  // all - puts the command back on screen without running it. A dock that
-  // has a terminal and merely refused a write is not that.
+  // Fail open, never silent, never on the member's behalf: a check that could
+  // not run shows the command without running it. A refused write is not that.
   const checkFailed = probeError !== null || (terminalError !== null && !running)
 
   const connect = async () => {
@@ -152,9 +135,7 @@ export function GitHubConnect({
     )
   }
 
-  // Without a terminal socket there is nothing to type the login into, so
-  // the whole flow - including the `github.connect` this screen would call -
-  // is the CLI's.
+  // Without a terminal socket the whole flow, `github.connect` included, is the CLI's.
   if (!hasTerminal) {
     return (
       <section
@@ -240,11 +221,7 @@ export function GitHubConnect({
   )
 }
 
-/**
- * What the screen is doing. Opening the container comes first and is the
- * long part, so the wait for it is named rather than folded into the
- * check that follows it.
- */
+/** The container wait is named on its own, because it is the long part. */
 function screenLine({
   ghUsable,
   ghUnusable,
@@ -264,10 +241,7 @@ function screenLine({
     : 'Waiting for your environment terminal to start...'
 }
 
-/**
- * The gh the probe found, as one sentence. Only ever called for a gh that
- * cannot do the login, which is why the last arm is the outdated one.
- */
+/** Only called for a gh that cannot log in, so the last arm is the outdated one. */
 function describeGitHubCli(probe: GitHubProbeResult): string {
   switch (probe.status) {
     case 'missing':
@@ -281,14 +255,8 @@ function describeGitHubCli(probe: GitHubProbeResult): string {
   }
 }
 
-/**
- * What to do about a gh that cannot log in: what is wrong, the exact
- * commands, and the container's own answer underneath.
- *
- * A container keeps the image it started from, so every remedy that is not
- * a reset ends in reopening the terminal - which is a button on the dock
- * right below this, as is the reset.
- */
+/** A container keeps the image it started from, so every remedy but a reset
+ * ends in reopening the terminal. */
 function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
   // A member with a saved image owns the whole way out; the server never
   // sends an admin command alongside one.

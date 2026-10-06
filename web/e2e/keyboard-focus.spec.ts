@@ -1,18 +1,9 @@
-// Browser-only shell claims that need painted focus or rendered geometry. The
-// tests below end on a state that proves the claim is not passing for the
-// wrong reason.
+// Escape: Radix dismisses dialogs from a capturing document listener without
+// stopping propagation, so the same Escape reaches the shell's window keydown.
+// jsdom does not reproduce that ordering.
 //
-// Escape: the shell leaves a run-detail route for the board from a `keydown`
-// on `window`, and Radix dismisses its dialogs from a capturing document
-// listener without stopping propagation, so that same Escape still reaches
-// the shell. Ordering is the whole problem, and jsdom does not reproduce it:
-// React commits the close in a microtask that runs first, so a guard asking
-// "is a dialog open?" finds none and the run is left behind with the dialog.
-//
-// Focus: every unit test in the suite asserts Tailwind class strings, which
-// say a class is on an element and nothing about what is painted. This reads
-// the computed outline, and resolves the outline and the background to real
-// pixels so a token that lands on the background colour fails here.
+// Focus: unit tests only assert class strings; this resolves the computed
+// outline and background to painted pixels.
 
 import type { Locator, Page } from '@playwright/test'
 
@@ -21,19 +12,13 @@ import { dockerReachable } from './harness/server'
 import { memberID } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
 
-/** What the installed `claude` shim runs: the seed repository's own script,
- * from the run checkout the scheduler mounts at /workspace. */
+/** The seed repository's own script, from the run checkout mounted at /workspace. */
 const agentShim = 'sh /workspace/agent.sh'
 
 const task = 'write the result file'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-/**
- * The wizard, up to the moment a run screen is on the page. The shell claims
- * below need the interactive run screen, and the helper waits for the fake
- * agent's marker before asserting that its supervised shell remains Working.
- */
 async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -53,13 +38,11 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await wizard.firstRun.launch('claude', task)
 
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-  // The fake agent exits, but this interactive run keeps its supervised shell
-  // and remains usable until the member explicitly closes it.
+  // The fake agent exits, but the interactive run keeps its supervised shell.
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready')
   await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
 }
 
-/** Close the live TUI run through the same controls a member uses. */
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
   await expect(header).toContainText('Working')
@@ -77,13 +60,11 @@ async function closeFirstRun(page: Page): Promise<void> {
 interface Indicator {
   outlineStyle: string
   outlineWidth: number
-  /** The outline colour and the colour behind it, as painted RGBA bytes. */
+  /** Painted RGBA bytes. */
   outline: number[]
   background: number[]
 }
 
-/** What the focused element actually shows: the computed outline, and the
- * first ancestor background that is not see-through. */
 async function indicator(el: Locator): Promise<Indicator> {
   return el.evaluate((node: HTMLElement) => {
     const paint = (color: string): number[] => {
@@ -127,12 +108,8 @@ function contrast(a: number[], b: number[]): number {
   return (light + 0.05) / (dark + 0.05)
 }
 
-/**
- * Asserts a rendered app focus indicator, not any indicator. Chromium's
- * fallback focus ring is `auto` at 1px in the foreground colour and would
- * satisfy anything looser than this, so deleting the app's indicator would
- * leave the assertion green while proving nothing.
- */
+// Chromium's fallback focus ring is `auto` at 1px, so anything looser than
+// this stays green with the app's indicator deleted.
 function expectVisibleFocus(what: string, seen: Indicator): void {
   expect(seen.outlineStyle, `${what}: outline-style`).toBe('solid')
   expect(seen.outlineWidth, `${what}: outline-width`).toBeGreaterThanOrEqual(2)
@@ -149,8 +126,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
 }) => {
   await openFirstRun(page, aether)
 
-  // The shortcut stands down inside the terminal, and the terminal takes the
-  // focus when it mounts. Clicking the title is how a reader gets out of it.
+  // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
   await page.keyboard.press('?')
 
@@ -160,9 +136,6 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   await page.keyboard.press('Escape')
 
   await expect(dialog).toHaveCount(0)
-  // Still on the run the dialog was opened from: the strip and the title only
-  // exist on a run-detail route, and the Terminal tab is the one that was
-  // open before the dialog.
   const tabs = page.getByRole('tablist', { name: 'Run tabs' })
   await expect(tabs).toBeVisible()
   await expect(tabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
@@ -173,9 +146,7 @@ test('Escape closes a dialog on a run without leaving the run', async ({
 
   await closeFirstRun(page)
 
-  // The same key with nothing over the run does leave it. Without this the
-  // assertions above would also pass on a build where the shortcut never
-  // registered, which is not what they are meant to prove.
+  // Proves the shell shortcut registered at all.
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
   await expect(tabs).toHaveCount(0)
@@ -185,13 +156,11 @@ test('Escape closes the status popup without leaving the run', async ({
   page,
   aether,
 }) => {
-  // Wide enough for the expanded sidebar, narrow enough that the secondary
-  // readouts are behind the popup rather than inline in the bar.
+  // Narrow enough that the secondary readouts sit behind the popup.
   await page.setViewportSize({ width: 1100, height: 700 })
   await openFirstRun(page, aether)
 
-  // The shortcut stands down inside the terminal, and the terminal takes the
-  // focus when it mounts. Clicking the title is how a reader gets out of it.
+  // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
 
   const trigger = page.getByRole('button', { name: 'Show status details' })
@@ -200,16 +169,13 @@ test('Escape closes the status popup without leaving the run', async ({
 
   await page.keyboard.press('Escape')
 
-  // Escape dismisses the topmost thing and only that. The popup is a pair of
-  // window listeners rather than a Radix layer, so which one sees the key
-  // first is real ordering that jsdom cannot reproduce.
+  // The popup uses window listeners, not a Radix layer: ordering jsdom cannot reproduce.
   await expect(trigger).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   await closeFirstRun(page)
 
-  // The same key with nothing over the run does leave it, so the assertions
-  // above cannot pass on a build where the shell shortcut never registered.
+  // Proves the shell shortcut registered at all.
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()
 })
@@ -220,20 +186,15 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
 }) => {
   await openFirstRun(page, aether)
 
-  // `:focus-visible` follows the last input the browser saw, and the wizard
-  // above is all mouse clicks: an `element.focus()` from script after one of
-  // those does not match in Chromium. Every focus below therefore ends on a
-  // real key press - an arrow along the run strip, which is the only way its
-  // roving tabindex moves focus at all, and a Tab into the next surface.
+  // `:focus-visible` follows the last input, and the wizard used the mouse, so
+  // a scripted focus() does not match in Chromium. Every focus ends on a key press.
   const tabs = page.getByRole('tablist', { name: 'Run tabs' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
   const events = tabs.getByRole('tab', { name: 'Events' })
   await expect(events).toBeFocused()
   expectVisibleFocus('the run tab', await indicator(events))
-  // Keep the live run on screen while checking its sidebar row. The Working
-  // group is expanded by default; closing first would move the row under the
-  // collapsed Finished group and leave nothing for focus() to target.
+  // Closing the run first would move its row under the collapsed Finished group.
   const row = page
     .getByRole('complementary', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })
@@ -251,13 +212,10 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await expect(missions).toBeFocused()
   expectVisibleFocus('the Missions activity-rail button', await indicator(missions))
 
-  // Close only after the live run and all focus targets have been exercised.
   await closeFirstRun(page)
   await page.keyboard.press('Escape')
 
-  // The neighbouring control, reached by mouse instead: no outline. Without
-  // this the checks above would also pass on a control that is outlined all
-  // the time, which is a different bug and not the one they are proving.
+  // Mouse focus must not outline, or the checks above pass on an always-outlined control.
   await board.click()
   await expect(board).toBeFocused()
   expect((await indicator(board)).outlineStyle).toBe('none')

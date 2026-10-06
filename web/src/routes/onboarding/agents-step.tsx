@@ -34,13 +34,10 @@ export function AgentsStep({
   caps: Capability
   workspace: Workspace | null
   back?: ReactNode
-  /** The open sub-screen: a harness's setup instructions, `githubSubStep`,
-   * or empty for the step's own screen. The step renders nothing else while
-   * one is open. The wizard owns it so Back closes this screen before it
-   * leaves the step. */
+  /** A harness name, `githubSubStep`, or empty. The wizard owns it so Back
+   * closes the sub-screen before it leaves the step. */
   setup: string
   onSetup: (subStep: string) => void
-  /** Advances the wizard; every state here can reach it. */
   onNext: () => void
   /** Names the harness whose setup was just confirmed, so the First run
    * step can preselect it. */
@@ -66,10 +63,8 @@ export function AgentsStep({
   const loading = useDelayed(agents === null && agentsError === null)
   const canSetUp = caps.hasMethod('agent.register') && caps.hasMethod('env.save')
 
-  // Every part is optional, so the way on is always here - including
-  // while a setup shell is open and after a scan failed. Once something
-  // has been set up, the primary Continue joins it rather than replacing
-  // it, so "skip" never reads as "undo what I just did".
+  // Continue joins Skip rather than replacing it, so "skip" never reads as
+  // "undo what I just did".
   const onward = (
     <div className="sticky bottom-0 z-10 mt-1 flex flex-wrap items-center gap-2 border-t bg-card pb-3 pt-3">
       {(done.length > 0 || github !== null) && (

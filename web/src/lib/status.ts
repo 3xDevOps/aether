@@ -71,7 +71,6 @@ export function groupOf(state: PresentationState): RunGroup {
 
 const fallbackLabelLength = 120
 
-/** A run's human title. An untitled run is named by its bounded first prompt line. */
 export function runLabel(run: { task: string; title?: string }): string {
   const title = run.title?.trim()
   if (title) return title

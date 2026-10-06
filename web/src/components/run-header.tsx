@@ -28,7 +28,6 @@ const reasonClass: Record<PresentationState, string> = {
   failed: 'border-state-failed bg-state-failed/10',
 }
 
-/** Shared title, state, task and metadata for every run-detail tab. */
 export function RunHeader({
   run,
   subtitle,

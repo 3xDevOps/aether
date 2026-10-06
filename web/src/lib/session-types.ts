@@ -1,6 +1,5 @@
-// Wire types of an enhanced run's agent session: the item log the
-// /ws/acp/{run} stream and the run.acp.* methods carry (internal/acphost,
-// internal/protocol/acp.go). Clients skip item kinds they do not know.
+// Wire types of /ws/acp/{run} and run.acp.* (internal/protocol/acp.go).
+// Clients skip item kinds they do not know.
 
 export type SessionItemKind =
   | 'message'
@@ -99,9 +98,8 @@ export interface SessionItem {
   raw?: unknown
 }
 
-/** One /ws/acp line: an item, or a reset after which the client drops what
- * it holds. truncated means the item was cut to fit the wire; run.acp.item
- * returns it whole. */
+/** After a reset the client drops what it holds. A truncated item was cut to
+ * fit the wire; run.acp.item returns it whole. */
 export interface SessionFrame {
   seq?: number
   item?: SessionItem
@@ -146,8 +144,7 @@ export interface SessionStreamAck {
   error?: string
 }
 
-/** The control lease proof run.input.answer, run.acp.cancel and
- * run.acp.set_option carry. */
+/** Carried by run.input.answer, run.acp.cancel and run.acp.set_option. */
 export interface SessionLease {
   control_session_id: string
   control_generation: number

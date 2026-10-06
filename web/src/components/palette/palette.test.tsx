@@ -29,8 +29,7 @@ beforeEach(() => {
     paletteRunID: null,
     route: { name: 'board', params: {} },
     hydrated: true,
-    // Null is the legacy remote monitor: the pre-capabilities allowlist
-    // (steering, launch, templates), no admin methods, no local verbs.
+    // Null is the legacy remote monitor: the pre-capabilities allowlist only.
     capabilities: null,
   })
   vi.clearAllMocks()
@@ -42,8 +41,7 @@ beforeEach(() => {
 })
 
 function open() {
-  // The launch and inject forms are the shell's, not the palette's; render
-  // the host beside it the way AppShell does.
+  // The launch and inject forms are the shell's; host them as AppShell does.
   render(
     <>
       <CommandPalette />
@@ -53,15 +51,13 @@ function open() {
   fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
 }
 
-/** The agent field, once its roster has landed: until then it is disabled and
- * still reads its placeholder, so no list can be dropped from it. */
+/** Until its roster lands the agent field is disabled and cannot open. */
 async function agentField(): Promise<HTMLElement> {
   const agent = await screen.findByLabelText('Agent')
   await waitFor(() => expect(agent.textContent).not.toBe('Choose an agent'))
   return agent
 }
 
-/** Appends markup the guard has to notice, removed however the test ends. */
 function overlay(markup: string): void {
   const host = document.createElement('div')
   host.setAttribute('data-probe', '')
@@ -71,17 +67,15 @@ function overlay(markup: string): void {
 }
 
 describe('command palette', () => {
-  // Every way into a run lands on the Terminal tab, the terminal takes the
-  // focus when it mounts, and xterm swallows Tab. This shortcut is the way
-  // out, so a terminal has no claim on it; a modal does.
+  // xterm swallows Tab, so this shortcut is the way out of a terminal; a modal
+  // still claims it.
   it.each([
     ['a terminal', '<div class="xterm"><span></span></div>', true],
     ['a dialog', '<div role="dialog"><button type="button">ok</button></div>', false],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>', false],
     ['a confirm', '<div role="alertdialog"><button type="button">ok</button></div>', false],
-    // A select list is portalled out of the dialog that hosts it, so there is
-    // no dialog above it to stand the chord down. It says it is open, which is
-    // what tells it apart from cmdk's own list inside the palette.
+    // A select list is portalled out of its dialog; data-state="open" tells it
+    // apart from cmdk's own list.
     [
       'an open list',
       '<div role="listbox" data-state="open"><div role="option">claude</div></div>',
@@ -128,10 +122,8 @@ describe('command palette', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
-  // A control that disables itself mid-flight - the Send button on the form
-  // this key would stack over - drops the keyboard on the body without a
-  // focusout, and Radix's focus scope watches children rather than attributes,
-  // so it does not take it back.
+  // A control that disables itself mid-flight drops focus on the body without
+  // a focusout, and Radix's focus scope does not watch attributes to take it back.
   it.each([
     ['a dialog', '<div role="dialog"><button type="button" disabled>ok</button></div>'],
     ['a menu', '<div role="menu"><div role="menuitem">Kill run</div></div>'],
@@ -153,8 +145,7 @@ describe('command palette', () => {
     expect(standDown).toBe(false)
   })
 
-  // The forms this component hosts are store state, so they are asked of the
-  // store: they may be mid-render, or have dropped the keyboard entirely.
+  // Hosted forms are read from the store: they may be mid-render or have dropped focus.
   it('stays shut while it is hosting a form of its own', () => {
     useStore.setState({ paletteDialog: 'launch' })
     render(<CommandPalette />)
@@ -469,8 +460,7 @@ describe('command palette', () => {
 
     fireEvent.click(await screen.findByText(otherWorkspace.name))
 
-    // Scope and view move together: everything else in the app follows the
-    // active id, not the route.
+    // The rest of the app follows the active id, not the route.
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
     expect(useStore.getState().route).toEqual({
       name: 'workspace',
@@ -479,7 +469,6 @@ describe('command palette', () => {
   })
 
   it('steers the run the centre view is showing, on any of its tabs', async () => {
-    // The terminal tab is a route of its own; it carries the same runId.
     useStore.setState({
       route: { name: 'terminal', params: { runId: 'run_1' } },
       pausedRuns: { run_1: false },
@@ -492,9 +481,8 @@ describe('command palette', () => {
   })
 
   it('offers neither pause nor resume while the paused state is unknown', async () => {
-    // Hydration seeds pausedRuns from the run list's `paused` field, but a
-    // legacy gateway sends none: with no entry the client cannot tell which
-    // verb the server would accept, so it offers neither.
+    // A legacy gateway sends no `paused` field, so the client cannot tell which
+    // verb the server would accept.
     useStore.setState({ route: { name: 'terminal', params: { runId: 'run_1' } } })
     open()
 
@@ -513,7 +501,6 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch a run...'))
-    // Where it lands is stated, not asked: there is no workspace picker.
     const target = await screen.findByLabelText('Target workspace')
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
@@ -528,7 +515,6 @@ describe('command palette', () => {
         harness: 'claude',
       })),
     )
-    // A launch drops the user straight into the agent terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
   })
 
@@ -564,13 +550,10 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch a run...'))
-    // agent.list is the source of truth for who this server can run, so a
-    // member's registered harness must be selectable here, not just the
-    // shipped names.
+    // agent.list is the source of truth, not the shipped names.
     await openSelect(await agentField())
     await screen.findByRole('option', { name: 'myagent' })
     expect(api.agentList).toHaveBeenCalled()
-    // The deployment escape hatch stays reachable alongside the roster.
     expect(screen.getByRole('option', { name: 'custom' })).toBeTruthy()
   })
 
@@ -610,7 +593,6 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch from a template...'))
-    // The workspace's templates arrive from template.list.
     const template = await screen.findByLabelText('Template')
     await waitFor(() => expect(template.textContent).toBe('nightly triage'))
     expect(api.templateList).toHaveBeenCalledWith(workspace.id)
@@ -647,9 +629,7 @@ describe('command palette', () => {
   })
 
   it('keeps the roster reachable behind the remote allowlist', async () => {
-    // A remote gateway advertises its allowlist; the admin verbs are not on
-    // it, but member.list is, and the roster is worth reading, so the one
-    // Go-to entry that survives is Members.
+    // The remote allowlist omits the admin verbs but keeps member.list.
     useStore.setState({
       capabilities: {
         gateway: 'remote',
@@ -661,8 +641,6 @@ describe('command palette', () => {
 
     await screen.findByText('rewrite the checkout flow')
     expect(screen.getByText('Members')).toBeDefined()
-    // The gate lives in the shared list, so a palette that stopped using it
-    // would start offering these again.
     expect(screen.queryByText('Approvals')).toBeNull()
     expect(screen.queryByText('Activity')).toBeNull()
     expect(screen.queryByText('Files')).toBeNull()
@@ -720,9 +698,7 @@ describe('command palette', () => {
   )
 
   it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
-    // capabilities stays null (the beforeEach default): the endpoint 404ed,
-    // so only the pre-capabilities allowlist may render. member.list is on
-    // it; the methods behind the other entries would all answer 403.
+    // capabilities null: only the pre-capabilities allowlist, which has member.list.
     open()
 
     await screen.findByText('rewrite the checkout flow')
@@ -732,9 +708,6 @@ describe('command palette', () => {
   })
 
   it('jumps to the approval inbox, the activity feed and the files tree', async () => {
-    // The three surfaces that were reachable only from an 11px status-bar
-    // button or the sidebar nav. The palette renders the same gated list the
-    // nav does, so they arrive together.
     useStore.setState({
       capabilities: {
         gateway: 'local',
@@ -751,8 +724,7 @@ describe('command palette', () => {
       ['Activity', 'timeline'],
       ['Files', 'files'],
     ]) {
-      // Selecting an item closes the palette; reopen it for the next one
-      // rather than mounting a second copy of it.
+      // Selecting closes the palette; reopen it rather than mount a second copy.
       act(() => useStore.setState({ paletteOpen: true }))
       fireEvent.click(await screen.findByText(label))
       expect(useStore.getState().route).toEqual({ name: route, params: {} })
@@ -778,8 +750,7 @@ describe('command palette', () => {
   })
 
   it('offers handoff targets who can own a run, never a viewer', async () => {
-    // The run belongs to alice; bob may take it, vera may not, because the
-    // server refuses to hand a run to someone who cannot own one.
+    // The server refuses to hand a run to someone who cannot own one.
     useStore.setState({
       members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
       route: { name: 'terminal', params: { runId: 'run_1' } },
@@ -795,8 +766,7 @@ describe('command palette', () => {
   })
 
   it('offers restore on an archived run, reached from its own page', async () => {
-    // The run lists exclude an archived, final run, so the palette must
-    // resolve the focused run from the run map instead.
+    // Run lists exclude an archived final run, so it resolves from the run map.
     useStore.setState({
       runs: {
         [active.id]: toRecord(

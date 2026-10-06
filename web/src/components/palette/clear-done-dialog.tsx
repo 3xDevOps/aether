@@ -16,7 +16,6 @@ function scope(): [string, StateContext] {
   return [s.activeWorkspace, stateContextOf(s, Date.now())]
 }
 
-/** Hosts the archive confirmation the palette opens. */
 export function ClearDoneDialog() {
   const cap = useCapability()
   const self = useSelf()

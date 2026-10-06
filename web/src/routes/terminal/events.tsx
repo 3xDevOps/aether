@@ -1,9 +1,3 @@
-// The run detail's Events tab: the shared workspace feed pinned to one run.
-// It drives the same store feed slice and readers the team activity view
-// uses, so the window, live tail and page budget behave identically. The
-// pin is borrowed, not kept: unmounting hands the filters back, so the
-// activity view opens with whatever it had chosen.
-
 import { useEffect } from 'react'
 import { FeedEntry } from '@/components/feed-entry'
 import { MissingRun } from '@/components/missing-run'

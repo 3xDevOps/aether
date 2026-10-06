@@ -31,17 +31,9 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
 }
 
 /**
- * One run, as it appears on the board. Another feature contributes to the
- * card through the slots (`card:badges`, `card:warnings`, `card:chips`, `card:footer`); the
- * card's own content is written here.
- *
- * The article is a forgiving pointer surface for its noninteractive metadata,
- * while the title block is a real button for keyboard users. Branch text and
- * slot controls opt out of the article surface so selecting or copying a
- * branch never reveals the run.
- *
- * Memoised on its props: a reducer replaces only the record of the run that
- * changed, so an event about another run leaves this card alone.
+ * Branch text and slot controls opt out of the article's pointer surface so
+ * selecting or copying a branch never opens the run. Memoised: a reducer
+ * replaces only the record of the run that changed.
  */
 export const RunCard = memo(function RunCard({
   run,
@@ -80,9 +72,7 @@ export const RunCard = memo(function RunCard({
       run.status === 'interrupted')
   const deletesLabel =
     run.archived_at && run.deletes_at ? deletesInLabel(run.deletes_at) : ''
-  // An unanswered question is the action the member needs to take. A failed
-  // run can also carry a lifecycle reason, but that reason belongs below the
-  // action rather than replacing it.
+  // A failed run's lifecycle reason goes below an unanswered question, never in its place.
   const summary = useStore((s) =>
     questionAction || s.approvalsByRun[run.id]?.[0]?.action || input.summary || run.reason || '',
   )

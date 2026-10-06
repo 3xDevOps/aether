@@ -62,8 +62,7 @@ function newIdempotencyKey(): string {
 
 const objectiveTitleLimit = 80
 
-// The header sits above the scroll area, so it gets one short line; the full
-// objective is rendered inside the scroll area by MissionObjective.
+// The header gets one short line; MissionObjective renders the full objective.
 function objectiveTitle(objective: string): string {
   const lines = objective.split('\n').map((line) => line.trim()).filter(Boolean)
   const first = lines[0] ?? 'Mission'
@@ -562,9 +561,8 @@ function TaskCard({
   attempts: MissionAttempt[]
   submissions: MissionSubmission[]
   diagnostics: MissionScopeDiagnostic[]
-  /** In planning every task waits for the integrator to start the swarm,
-   * which the phase banner already says; repeating it as a blocker reads as
-   * a fault. */
+  /** In planning the phase banner already says every task waits on the integrator;
+   * repeating it as a blocker reads as a fault. */
   showProposalBlocker: boolean
   canRelease: boolean
   onRelease: (attempt: MissionAttempt) => void
@@ -902,7 +900,6 @@ function MissionConflictWarning({ run }: CardSlotProps) {
   )
 }
 
-/** Compact mission marker contributed to ordinary run cards through the slot registry. */
 function MissionRunChip({ run }: CardSlotProps) {
   const summaryRecords = useStore((state) => state.missions)
   const summaries = useMemo(() => Object.values(summaryRecords), [summaryRecords])

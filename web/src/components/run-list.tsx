@@ -21,8 +21,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
 
   if (runs.length === 0) {
     if (unreachable) {
-      // A dead token is not an unreachable server: nothing retries, and only
-      // a fresh token helps, so the pane says what the error recorded.
+      // A dead token is not an unreachable server: nothing retries, only a fresh token helps.
       return (
         <div
           role="alert"

@@ -10,7 +10,6 @@ import { useKeyboardInset } from '@/lib/keyboard-inset'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
-/** Clear of the status bar and of the home indicator below it. */
 const toastOffset = {
   bottom: 'calc(var(--status-bar-height) + 8px + env(safe-area-inset-bottom))',
   right: 'calc(8px + env(safe-area-inset-right))',
@@ -39,24 +38,19 @@ export function App() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [drafts, importPending])
   const theme = useStore((s) => s.theme)
-  // Bumping this remounts the connection effect, which is what a retry is:
-  // a fresh subscribe and hydrate, not a page reload that would lose the
-  // session token held in memory.
+  // A retry remounts the connection effect; a page reload would lose the
+  // in-memory session token.
   const [attempt, setAttempt] = useState(0)
   useKeyboardInset()
 
   useEffect(() => connect(useStore), [attempt, epoch])
 
-  // Nothing has loaded and the failure is total: the page below says what
-  // broke and how to fix it, and there is no shell left to toast over. An
-  // in-app update makes the gateway exit and come back on purpose, so that
-  // is not this failure even when it briefly looks like one.
+  // An in-app update restarts the gateway on purpose, so it is not a total failure.
   const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
 
   useEffect(() => {
     if (!hydrationError || blocked) return
-    // A dead token is not an unreachable server; the recorded error already
-    // says what happened and how to recover.
+    // A dead token is not an unreachable server; its error already says how to recover.
     if (streamDead) toast.error(hydrationError)
     else toast.error(`Could not reach the server: ${hydrationError}`)
   }, [hydrationError, streamDead, blocked])
@@ -70,9 +64,8 @@ export function App() {
     <>
       <ThemeEffect />
       <LaunchSplash />
-      {/* The desktop window is frameless, so the title bar has to outrank the
-          branch below it: without it the error page would leave an offline user
-          no way to move or close the window. */}
+      {/* Frameless desktop window: the title bar stays outside the error branch
+          so an offline user can still move or close the window. */}
       <div className="flex min-w-0 h-full flex-col">
         <TitleBar commandPaletteDisabled={blocked} />
         <div className="min-h-0 min-w-0 flex-1">
@@ -93,12 +86,8 @@ export function App() {
                 expand={false}
                 visibleToasts={4}
                 gap={4}
-                // Above the status bar, whatever height the pointer gives
-                // it, and clear of the home indicator; the inset is 0 on a
-                // device without one. Sonner swaps to `mobileOffset` under
-                // 600px and falls back to its own 16px default when none is
-                // given, which is inside the bar on a phone, so both take
-                // the same value.
+                // Sonner uses `mobileOffset` under 600px and its 16px default
+                // would sit inside the status bar on a phone.
                 offset={toastOffset}
                 mobileOffset={toastOffset}
               />

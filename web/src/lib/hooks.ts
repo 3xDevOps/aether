@@ -6,11 +6,7 @@ import {
   useSyncExternalStore,
 } from 'react'
 
-/**
- * Styleguide rule: match in-flight feedback to perceived duration - a spinner
- * that flashes for 60ms is worse than none. True only once `active` has held
- * for `delayMs`.
- */
+/** True only once `active` has held for `delayMs`, so a fast operation never flashes a spinner. */
 export function useDelayed(active: boolean, delayMs = 200): boolean {
   const [shown, setShown] = useState(false)
   useEffect(() => {
@@ -24,11 +20,6 @@ export function useDelayed(active: boolean, delayMs = 200): boolean {
   return active && shown
 }
 
-/**
- * The viewport height, tracked. The dock derives its ceiling from it, and a
- * value read once at mount leaves both the clamp and the bound it announces
- * wrong after the window is resized.
- */
 export function useWindowHeight(): number {
   const [height, setHeight] = useState(() => window.innerHeight)
   useEffect(() => {
@@ -39,11 +30,7 @@ export function useWindowHeight(): number {
   return height
 }
 
-/**
- * Starts a pointer drag. Every listener the caller registers on the returned
- * signal is dropped when the drag ends or when the component goes away, which
- * a `pointerup` handler alone cannot promise.
- */
+/** Listeners registered on the returned signal are dropped when the drag ends or the component unmounts. */
 export function useDrag(): () => AbortController {
   const drag = useRef<AbortController | null>(null)
   useEffect(() => () => drag.current?.abort(), [])
@@ -54,7 +41,6 @@ export function useDrag(): () => AbortController {
   }, [])
 }
 
-/** The CSS variant of the same name, asked from JavaScript. */
 export const coarsePointer = '(pointer: coarse)'
 
 export const belowSm = '(max-width: 639px)'
@@ -62,11 +48,7 @@ export const belowSm = '(max-width: 639px)'
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`
 
-/**
- * Answers a media query, and keeps answering it. CSS is where a layout that
- * only changes size belongs; this is for the ones that mount different
- * elements for a finger than for a mouse, which a class cannot express.
- */
+/** For layouts that mount different elements for touch; size-only changes belong in CSS. */
 export function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {

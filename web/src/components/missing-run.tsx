@@ -5,11 +5,7 @@ import { useDelayed } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { useStore } from '@/store'
 
-/**
- * What a run-detail tab shows when its run id is not in the store. Only a
- * hydrated store with a live connection can tell a deleted run from one it
- * has not read yet, so every other state has to say something weaker.
- */
+/** Only a hydrated store with a live connection can tell a deleted run from an unread one. */
 export function MissingRun() {
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
@@ -20,8 +16,7 @@ export function MissingRun() {
   const loading = useDelayed(!hydrated && !unreachable)
 
   if (unreachable) {
-    // A dead token is not an unreachable server: nothing retries, and only
-    // a fresh token helps, so the tab says what the error recorded.
+    // A dead token is not an unreachable server: nothing retries, so show the recorded error.
     return (
       <section
         aria-label="Run unavailable"

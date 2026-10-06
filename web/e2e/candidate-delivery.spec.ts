@@ -1,6 +1,4 @@
-// A real candidate review over two retained ordinary runs. The server, Git
-// repositories, fake-agent containers, verification runtime, and delivery
-// receipt are all real; only fixture setup uses the public gateway API.
+// Everything is real except fixture setup, which uses the public gateway API.
 
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -58,9 +56,8 @@ function git(repo: string, ...args: string[]): string {
 }
 
 /**
- * The server's fake harness runs this committed script without a task argv.
- * The real run branch is the stable fixture input that keeps the two ordinary
- * runs non-conflicting while preserving one target base revision.
+ * The fake harness runs this script without a task argv, so it keys off the run
+ * branch to keep the two runs non-conflicting on one base revision.
  */
 function installCandidateAgent(repo: string): void {
   writeFileSync(

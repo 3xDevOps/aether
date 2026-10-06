@@ -6,7 +6,7 @@ import { focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunInput } from '@/store/hooks'
 
-/** Existing answer surfaces only; no prompt contents or answers travel in this metadata. */
+/** No prompt contents or answers travel in this metadata. */
 export function RunInputIndicator({ run, compact = false }: { run: Run; compact?: boolean }) {
   const input = useRunInput(run)
   const navigate = useStore((s) => s.navigate)

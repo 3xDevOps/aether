@@ -42,8 +42,7 @@ export function TerminalControlBorder({
     if (reducedMotion || appearance === 'hidden' || !svg.animate) return
 
     const distance = Math.abs(target - from)
-    // The curve starts at 1.5x normalized speed: 720ms keeps the former
-    // 480ms linear starting velocity, then decelerates toward the endpoint.
+    // The curve starts at 1.5x speed, so 720ms matches a 480ms linear start velocity.
     const closingCurve = 'cubic-bezier(0.333333, 0.5, 0.666667, 1)'
     const travel = distance * (appearance === 'takeover' ? 1440 : 720)
     const fade = appearance === 'takeover' && from < 1 ? 540 : 0
@@ -58,8 +57,7 @@ export function TerminalControlBorder({
     frames.push({ strokeDashoffset: target, color: targetColor, offset: 1 })
     const animation = svg.animate(frames, { duration, easing: 'linear' })
     return () => {
-      // Freeze the visible point before reversing or reacquiring. There are no
-      // timers or completion callbacks that can outlive the current lease.
+      // Freeze the visible point before reversing or reacquiring.
       const current = getComputedStyle(svg)
       svg.style.strokeDashoffset = current.strokeDashoffset
       svg.style.color = current.color

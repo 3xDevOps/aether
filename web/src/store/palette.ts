@@ -1,8 +1,6 @@
 import type { SliceCreator } from '@/store/slice'
 
-/** The palette's forms, each needing input the palette cannot take. */
-/** Every form the shell hosts, so a caller sweeping all of them cannot keep
- * its own list and let it drift. */
+/** Every form the shell hosts; sweep this list rather than keep a copy. */
 export const paletteDialogs = ['launch', 'swarm', 'inject', 'forward', 'close', 'clear-done', 'release-finished'] as const
 
 export type PaletteDialog = (typeof paletteDialogs)[number]

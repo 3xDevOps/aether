@@ -1,6 +1,4 @@
-// The one question a needs-attention run ends on: was the work merged, or
-// abandoned? Either answer records the outcome and removes the run from the
-// board; a still-live container is stopped by the server.
+// Recording either outcome also makes the server stop a still-live container.
 
 import { Archive, GitMerge } from 'lucide-react'
 import { useState } from 'react'

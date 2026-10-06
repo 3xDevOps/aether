@@ -19,17 +19,13 @@ export interface DockProps {
   activeTab: string
   onSelectTab: (id: string) => void
   onAddTab?: () => void
-  /** The dock's own tab ceiling; the limit text names this number. */
   maxTabs: number
   onCloseTab?: (id: string) => void
   height: number
   onHeightChange: (height: number) => void
   collapsed: boolean
   onToggleCollapse: () => void
-  /**
-   * Use the immediate parent as a fixed-size boundary, or keep the dock
-   * independent of intrinsic parent sizing and use the viewport cap.
-   */
+  /** 'parent' bounds the dock by its immediate parent; 'viewport' by the window. */
   containment?: DockContainment
   actions?: React.ReactNode
   persistentActions?: React.ReactNode
@@ -41,7 +37,7 @@ const minDockHeight = 120
 const minDockBodyHeight = 96
 const defaultDockHeaderHeight = 36
 
-/** What is left of the window once the shell's own chrome has its share. */
+// 200px stays reserved for the shell's own chrome.
 function maxDockHeight(viewport: number): number {
   return Math.max(minDockHeight, viewport - 200)
 }
@@ -78,8 +74,7 @@ export function Dock({
   const headerRef = useRef<HTMLDivElement>(null)
   const [headerHeight, setHeaderHeight] = useState(defaultDockHeaderHeight)
   const [parentHeight, setParentHeight] = useState<number | null>(null)
-  // Parent-contained callers give the primary sibling a CSS minimum. Reserve
-  // that declared constraint, rather than its changing flex height.
+  // Reserve the primary sibling's declared CSS minimum, not its changing flex height.
   const [primaryMinHeight, setPrimaryMinHeight] = useState(0)
   useLayoutEffect(() => {
     const dockElement = dockRef.current
@@ -119,9 +114,7 @@ export function Dock({
           )
   const min = Math.min(requiredMinimum, max)
   const currentHeight = Math.min(max, Math.max(min, height))
-  // A finger cannot drag an edge, so touch gets the two heights the drag was
-  // ever used for - half the room and all of it - as one toggle beside the
-  // collapse control. Half is measured, not stored, so it follows the screen.
+  // A finger cannot drag the edge, so touch toggles between half and full height.
   const halfHeight = Math.min(max, Math.max(min, Math.round(max / 2)))
   const full = currentHeight >= max
   const index = Math.max(
@@ -190,8 +183,7 @@ export function Dock({
     [onCloseTab],
   )
   const stop = Math.min(focused, tabs.length - 1)
-  // Enter collapses, which unmounts this handle, so focus moves to the toggle
-  // before the pane goes: that button is in the header either way.
+  // Enter collapses and unmounts this handle, so focus moves to the toggle first.
   const collapse = useRef<HTMLButtonElement>(null)
 
   const startResize = useCallback(

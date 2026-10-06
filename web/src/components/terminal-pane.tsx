@@ -1,8 +1,3 @@
-// The rendered half of a terminal: the element xterm draws into, plus the
-// find bar that searches its scrollback. Every terminal surface - the run
-// terminal, the run-shell dock and the environment dock - renders this, so
-// find behaves the same in all three.
-
 import {
   ClipboardCopy,
   ClipboardPaste,
@@ -50,7 +45,6 @@ export interface TerminalReadSurface {
   focus(): void
 }
 
-/** A terminal toolbar button and the shortcut its tooltip names. */
 function ToolButton({
   hint,
   onClick,
@@ -76,12 +70,7 @@ function ToolButton({
   )
 }
 
-/**
- * What a touch screen reads instead of a tooltip. A tooltip opens on hover,
- * which a finger never produces, so two actions that differ only by icon -
- * copying a selection and copying the screen - need the word beside them
- * where there is no pointer to hover with.
- */
+/** Touch has no hover to open a tooltip, so icon-only actions need a visible word. */
 function ToolLabel({ children }: { children: React.ReactNode }) {
   return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline group-data-[expanded=true]/terminal-tools:hidden">{children}</span>
 }
@@ -319,17 +308,13 @@ export function TerminalPane({
   takeoverProgress,
 }: {
   controller: XtermController
-  /** Extra classes for the terminal element itself. */
   className?: string
-  /** Additional content drawn over the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
-  /** Controls and state placed after the terminal tools in their shared strip. */
   toolbarEnd?: React.ReactNode
   /** Run ID for a run terminal or shell; omit for the member environment. */
   imageTarget?: string
   /** Active terminal identity, used to reject late uploads after tab changes. */
   imageTargetKey?: string
-  /** Whether this attached terminal may accept an uploaded path. */
   imageUploadEnabled?: boolean
   /** Whether what is typed here reaches the shell. A mirror shows no keys. */
   writable?: boolean
@@ -353,10 +338,8 @@ export function TerminalPane({
   const coarse = useMediaQuery(coarsePointer)
   const phone = useMediaQuery(phoneScreen)
   useTerminalPan(controller.terminal, phone && !replaying && !readingSurface)
-  // A terminal that cannot take input holds no modifier: the key bar goes
-  // with the write access it needed, and a Ctrl left armed across that
-  // would turn the first character of the next turn at the keyboard into a
-  // control code nobody pressed.
+  // A Ctrl left armed after losing write access would turn the next typed
+  // character into a control code nobody pressed.
   const armCtrl = controller.armCtrl
   const terminal = controller.terminal
   useEffect(() => {
@@ -473,11 +456,7 @@ export function TerminalPane({
   )
 }
 
-/**
- * What covers a terminal that has nothing to draw yet, because the xterm host
- * is blank until an attach acks. Shared so the run terminal and the
- * environment dock wait the same way and only the words differ.
- */
+/** Covers the xterm host, which stays blank until an attach acks. */
 export function TerminalSpinner({ label }: { label: string }) {
   return (
     <div

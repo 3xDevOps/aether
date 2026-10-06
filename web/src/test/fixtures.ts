@@ -48,7 +48,6 @@ export function stateContext(over: Partial<StateContext> = {}): StateContext {
   }
 }
 
-/** Runs as the store keys them. */
 export function runRecords(...runs: Run[]): Record<string, RunRecord> {
   return Object.fromEntries(runs.map((r) => [r.id, toRecord(r)]))
 }
@@ -288,8 +287,7 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
   }
 }
 
-/** One server.update_status answer: a current server that could replace
- * its own binaries if it had to. The banner tests override it. */
+/** A current server that could replace its own binaries. */
 export function serverUpdateStatus(
   over: Partial<ServerUpdateStatus> = {},
 ): ServerUpdateStatus {
@@ -334,7 +332,6 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 }
 
 
-/** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
   const terminals = new Map<string, Map<string, DevTerminal>>()
   const controllers = new Map<string, DevController>()
@@ -632,7 +629,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       git_email: email,
     })),
     memberRole: vi.fn(async () => bob),
-    // No edge devices or invitations unless a test says so.
     memberDeviceList: vi.fn(async () => []),
     memberDeviceLookup: vi.fn(async () => needsOverride('memberDeviceLookup')),
     memberDeviceApprove: vi.fn(async () => needsOverride('memberDeviceApprove')),
@@ -644,8 +640,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceDelete: vi.fn(async () => ({ ok: true as const })),
     workspaceSettings: vi.fn(async () => workspace),
-    // Local-only is the default in the mirror control plane; tests that
-    // exercise configuration override the relevant response.
     workspaceMirrorStatus: vi.fn(async () => ({ enabled: false })),
     workspaceMirrorConfigure: vi.fn(async () => ({ enabled: false })),
     workspaceMirrorRefresh: vi.fn(async () => ({ enabled: false })),
@@ -716,8 +710,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       user: 'alice',
       repo: '/src/repo',
     })),
-    // The machine's own git config, which the wizard offers as the
-    // default identity.
     localGitIdentity: vi.fn(async () => ({
       name: 'Alice Local',
       email: 'alice@example.invalid',
@@ -732,12 +724,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       remote: 'aether',
       url: 'ssh://alice@host:2222/wsp_1',
     })),
-    // Mirrors the gateway: link.switch always refuses with the restart
-    // instruction; the SSH identity is process-lifetime.
+    // Like the gateway: the SSH identity is process-lifetime, so link.switch always refuses.
     localLinkSwitch: vi.fn(async (name: string) => {
       throw new Error(`restart aether gui --server ${name} to switch servers`)
     }),
-    // Signed in to no edge.
     localEdgeStatus: vi.fn(async () => ({ edges: [] })),
     localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
     localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),
@@ -816,8 +806,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       requested_by: alice.id,
       requested_at: '2026-08-14T10:06:00Z',
     })),
-    // The gateway knows one linked repo, so the verb suggests its folder
-    // for the wizard's from-repo input.
     envHarnesses: vi.fn(async () => ({
       harnesses: [
         { name: 'claude', installed: true },

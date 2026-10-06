@@ -13,8 +13,6 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useStore } from '@/store'
 
-/** The confirmation that stops the member's environment terminal, shared by
- * the terminal dock and the Members page's notice after a first share. */
 export function StopEnvironmentDialog({
   client,
   onClose,

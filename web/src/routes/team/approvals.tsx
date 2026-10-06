@@ -54,12 +54,7 @@ export function ApprovalStatus() {
   )
 }
 
-/**
- * The shared inbox: every workspace's pending permission requests and plan
- * pauses in one queue. Decisions go through `approval.decide`, so the
- * server attributes them and the refusal a member without steer gets is the
- * server's, never the form's.
- */
+/** Decisions go through `approval.decide`, so the server attributes them and owns the refusal for a member without steer. */
 export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
   const inbox = useStore((s) => s.inbox)
   const error = useStore((s) => s.inboxError)
@@ -74,9 +69,8 @@ export function ApprovalInbox({ client = api }: RouteProps & { client?: Api }) {
     void refreshInbox(useStore, client)
   }, [client, showDecided])
 
-  // The queue as the last fetch saw it, with our own decisions laid over the
-  // top: a request we just decided reports its outcome instead of vanishing
-  // the moment we click, even though the next fetch no longer returns it.
+  // Our own decisions overlay the last fetch, so a request we just decided
+  // shows its outcome instead of vanishing when the next fetch drops it.
   const byID = new Map(Object.values(inbox).flat().map((a) => [a.id, a]))
   for (const done of Object.values(decisions)) byID.set(done.id, done)
   const rows = sortByCreated([...byID.values()]).filter(

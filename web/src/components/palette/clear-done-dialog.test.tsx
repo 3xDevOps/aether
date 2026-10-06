@@ -31,9 +31,6 @@ beforeEach(() => {
   })
 })
 
-// The palette's archive entry shares the board confirmation and executor,
-// over the board's Finished column, failures first, as it stands when the
-// dialog opens.
 describe('archive confirmation dialog', () => {
   it('archives every eligible run in order and closes the palette form', async () => {
     render(<ClearDoneDialog />)

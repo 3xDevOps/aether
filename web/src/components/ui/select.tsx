@@ -10,12 +10,8 @@ export function Select({
   return (
     <SelectPrimitive.Root
       data-slot="select"
-      // Inside a form Radix mirrors the value into a hidden native select and
-      // reports every change back through it. When a value and the option
-      // carrying it arrive in the same render - a roster landing and its first
-      // entry being chosen - the mirror has no such option yet, so it reports
-      // the empty string and wipes what was just chosen. No item may carry an
-      // empty value, so an empty report is never a real choice.
+      // Radix's hidden native select reports '' when a value and its option
+      // arrive in the same render. No item has an empty value, so drop it.
       onValueChange={(value) => {
         if (value) onValueChange?.(value)
       }}
@@ -54,9 +50,7 @@ export function SelectTrigger({
   )
 }
 
-/** The scroll affordances the viewport needs once a list outruns the popup.
- * Radix hides the viewport's own scrollbar, so these two chevrons are the only
- * sign a list has more in it. Not exported: a caller never places them. */
+/** Radix hides the viewport's scrollbar, so these chevrons are the only sign of more items. */
 function SelectScrollButton({
   direction,
   ...props

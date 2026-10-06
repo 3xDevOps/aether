@@ -71,8 +71,7 @@ function MapViewport({
     if (!next) return
     camera.current = next
     initialized.current = true
-    // Apply before the board's parent layout effect measures layout-switch
-    // destinations. React state keeps the controls and subsequent renders in sync.
+    // Apply before the board's parent layout effect measures layout-switch destinations.
     if (world.current) {
       world.current.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.zoom})`
     }

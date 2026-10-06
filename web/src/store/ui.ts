@@ -47,32 +47,18 @@ export function normalizeBoardMapViewports(value: unknown): Record<string, Board
   return Object.fromEntries(viewports)
 }
 
-/** The three things an update banner can be about. */
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
-/** Where the center view is pointed. */
 export interface Route {
   name: string
   params: Record<string, string>
 }
 
-/**
- * What the onboarding Repository step settled: the clone it pointed at, the
- * remote the gateway wrote, git's answer to the seeding push once one has
- * run, and the fast-forward that answered a workspace ahead of the clone.
- * It outlives the step so walking back into Repository shows the settled
- * answer rather than an empty form or a button that was already pressed.
- * The workspace it was settled for is part of it, because a remote points at
- * one workspace: picking a different one leaves this stale, and the step
- * must ask again.
- */
+/** Outlives the step so walking back shows the settled answer. A remote
+ * points at one workspace, so picking another one leaves this stale. */
 export interface OnboardingRepo {
-  /**
-   * Identifies this connection, not the clone it points at. Re-pointing
-   * and reconnecting the same path to the same workspace is a different
-   * connection, and a push still in flight from the previous one has to be
-   * told apart from it; path and workspace alone cannot do that.
-   */
+  /** Identifies this connection, not the clone: a push still in flight from
+   * an earlier connection of the same path and workspace must be told apart. */
   link: string
   workspace: string
   path: string
@@ -81,11 +67,8 @@ export interface OnboardingRepo {
   fastForward: RepoFastForwardResult | null
 }
 
-/**
- * The onboarding wizard's steps, in order. The resume point is persisted as
- * one of these names rather than as a position, so inserting a step never
- * relocates someone who is mid-wizard.
- */
+/** The resume point is persisted by name, not position, so inserting a step
+ * never relocates someone mid-wizard. */
 export const onboardingSteps = [
   'Link',
   'Git identity',
@@ -97,7 +80,6 @@ export const onboardingSteps = [
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
-/** The First run step's unlaunched draft. */
 export interface OnboardingFirstRun {
   harness: string
   task: string
@@ -155,51 +137,30 @@ export interface UiSlice {
   /** Off makes character shortcuts (`n`, `?`, `g b`) inert, for speech
    * input that types words the dashboard would read as commands. */
   singleKeyShortcuts: boolean
-  /**
-   * Whether the Diff tab wraps long lines, or null while it still follows
-   * the pointer. One run-detail route is mounted at a time, so component
-   * state would reset the toggle every time the member left Diff and came
-   * back - several times a minute on a phone.
-   */
+  /** Null while it follows the pointer. Stored here because component state
+   * would reset whenever the member leaves Diff and comes back. */
   diffWrap: boolean | null
   onboarded: boolean
   onboardingStep: OnboardingStep
-  /**
-   * The furthest step reached, which never falls back on its own. The header
-   * marks these done and lets the member jump between them: without it a
-   * jump backwards would make every later step unreachable, and Link has no
-   * Back of its own to escape with.
-   */
+  /** Never falls back on its own: a backwards jump would otherwise make later
+   * steps unreachable, and Link has no Back to escape with. */
   onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
   onboardingSource: 'local' | 'remote'
   onboardingRepo: OnboardingRepo | null
   configImportPending: boolean
   configImportStatus: ConfigImportStatus | null
-  /** What the First run step has typed but not launched. It lives here so a
-   * jump to another step and back does not throw the draft away. */
+  /** Here so a jump to another step and back keeps the draft. */
   onboardingFirstRun: OnboardingFirstRun
-  /**
-   * The workspace every scoped surface acts on: the sidebar's run list, the
-   * board, launches, templates, budgets and the activity feed. Empty until
-   * hydration names one, which is why every consumer treats empty as "all".
-   */
+  /** Empty until hydration names one; every consumer treats empty as "all". */
   activeWorkspace: string
   mineOnly: boolean
   boardView: BoardView
   boardMapViewports: Record<string, BoardMapViewport>
-  /**
-   * The last harness successfully used for each agent account. This is a
-   * preference, not run state: it survives run cleanup and gives a launch
-   * form with no run history the same default the member chose last time.
-   */
+  /** A preference, not run state: it survives run cleanup. */
   lastHarnessByAccount: Record<string, string>
   route: Route
-  /**
-   * Which version of each update banner the member has already dismissed,
-   * keyed by kind. Holding the version rather than a boolean is the point:
-   * dismissing v1.3.0 silences v1.3.0 only, and v1.3.1 shows up again.
-   */
+  /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
   setTheme: (theme: Theme) => void
   setSidebarWidth: (width: number) => void
@@ -223,7 +184,6 @@ export interface UiSlice {
   rememberHarness: (accountID: string, harness: string) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
-  /** Brings every dismissed banner back; the status bar's badge calls it. */
   clearDismissedUpdates: () => void
 }
 
@@ -281,9 +241,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setOnboardingSource: (onboardingSource) => set({ onboardingSource }),
   setOnboardingRepo: (onboardingRepo) => set({ onboardingRepo }),
   setOnboardingFirstRun: (onboardingFirstRun) => set({ onboardingFirstRun }),
-  // Switching scope carries the workspace route with it. Otherwise the
-  // switcher would say one workspace while the open view, its budget dialog
-  // and its settings dialog still acted on another.
+  // Carry the workspace route along, or the open view would act on a
+  // different workspace than the switcher shows.
   setActiveWorkspace: (workspaceID) =>
     set((s) => ({
       activeWorkspace: workspaceID,

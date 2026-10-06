@@ -1,6 +1,4 @@
-// Workspace settings, over workspace.settings (admin only on the wire).
-// steer_others mirrors protocol.WorkspaceSettingsParams: "" is the permissive
-// default (everyone with steer may act), "admins_only" restricts it.
+// steer_others mirrors protocol.WorkspaceSettingsParams: "" is the permissive default.
 
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -25,8 +23,7 @@ import {
 import { api, type Api } from '@/lib/api'
 import { useStore } from '@/store'
 
-/** What the permissive default travels as; see the Styleguide in
- * docs/dashboard-frontend.md. */
+/** The permissive default's form value; see the Styleguide in docs/dashboard-frontend.md. */
 const everyone = 'everyone'
 
 export function WorkspaceSettingsDialog({

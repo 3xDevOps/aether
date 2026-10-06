@@ -8,16 +8,8 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
-/**
- * The conflict radar's front side (): the other active runs touching
- * files this run also touches. Advisory only - nothing here blocks or queues
- * anything. Each chip names a file and the member on the other side, and
- * takes you to their run.
- *
- * The whole overlapping list is a hover tooltip for a pointer. A finger has
- * no hover, so on a coarse pointer the same list is written out beside the
- * chip: a tooltip is a hint, never the only copy of a fact.
- */
+/** A finger has no hover, so on a coarse pointer the tooltip's list is also
+ * written out beside the chip. */
 export function ConflictChips({ run }: CardSlotProps) {
   const peers = useStore((s) => s.overlaps[run.id])
   const members = useStore((s) => s.members)

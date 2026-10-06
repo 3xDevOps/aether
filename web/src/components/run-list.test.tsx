@@ -42,14 +42,12 @@ describe('run list empty states', () => {
       streamDead: true,
     })
     render(<RunList runs={[]} empty="No runs yet" />)
-    // Nothing retries a dead token; saying so is what points at the fix.
     expect(screen.getByText(/aether gui/)).toBeDefined()
     expect(screen.queryByText(/Retrying/)).toBeNull()
   })
 
   it('gives a taskless TUI run a placeholder title', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
-    // A TUI launch carries no task; the row still needs a legible title.
     render(
       <RunList
         runs={listedRuns('', stateContext({ runs: runRecords(run({ task: '' })) }))}

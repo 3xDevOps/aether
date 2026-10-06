@@ -28,11 +28,8 @@ import {
 } from '@/store/ui'
 
 /**
- * Every version up to 2 persisted the onboarding resume point as an index
- * into the step list as it stood before "Git identity" was inserted at
- * position two. The names are what those stored numbers meant; typing them
- * as OnboardingStep keeps this list from drifting away from the wizard's
- * own.
+ * Versions up to 2 persisted the onboarding resume point as an index into the
+ * step list before "Git identity" was inserted at position two.
  */
 const v0OnboardingSteps: OnboardingStep[] = [
   'Link',
@@ -86,16 +83,9 @@ const persistedUi = (s: RootState) => ({
   onboardingFirstRun: s.onboardingFirstRun,
 })
 
-/**
- * What survives a reload. Reading it back yields a partial: an older release
- * stored fewer keys, and a migration may drop one.
- */
+/** Partial: an older release stored fewer keys, and a migration may drop one. */
 type PersistedState = Partial<ReturnType<typeof persistedUi>>
 
-/**
- * The root store: one Zustand store composed of independent slices. A new
- * feature adds a slice file and one line here.
- */
 export function createRootStore() {
   return create<RootState>()(
     batched(persist(
@@ -122,24 +112,18 @@ export function createRootStore() {
       {
         name: 'aether.ui',
         version: 5,
-        // Every version before 2 stored a Repository step record this build
-        // cannot use: version 0's push answer predates the comparison state
-        // the step renders, and version 1 has no link id to tell one
-        // connection from the next. Dropping it puts the step back on its
-        // push offer, which asks the gateway again. Every version before 3
-        // stored the resume point as an index, so the number is read back
-        // as the step it meant. Every version before 4 has no furthest step:
-        // the resume point is the only evidence of how far the member got,
-        // and without it the header would turn every later step inert.
+        // Before 2 the Repository step record is unusable and is dropped, so
+        // the step asks the gateway again. Before 3 the resume point is an
+        // index. Before 4 there is no furthest step, so the resume point
+        // stands in, or the header would turn every later step inert.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
             delete state.onboardingRepo
           }
           if (version < 3) {
-            // Read the step through a view of its own: intersecting it with
-            // PersistedState collapses the field back to the current name
-            // type, and the compiler then stops checking this conversion.
+            // Not via PersistedState: that collapses the field to the current
+            // name type and the compiler stops checking this conversion.
             const step = (persisted as { onboardingStep?: unknown } | null)
               ?.onboardingStep
             state.onboardingStep =
@@ -153,11 +137,8 @@ export function createRootStore() {
           if (version < 5) delete (state as { groupBy?: unknown }).groupBy
           return state
         },
-        // `migrate` only runs when the stored version differs, and xterm is
-        // the one consumer that does not validate `fontSize`, so a
-        // hand-edited or corrupted `terminalFontSize` would reach the
-        // terminal as-is and render nothing readable. The dock heights need
-        // no such guard; `clampDockHeight` runs at render.
+        // `migrate` only runs on a version change, and xterm does not validate
+        // `fontSize`, so a corrupted `terminalFontSize` is guarded here.
         merge: (persisted, current) => {
           const stored = (persisted ?? {}) as PersistedState
           return {
@@ -170,7 +151,6 @@ export function createRootStore() {
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }
         },
-        // Only view preferences survive a reload; server data is re-hydrated.
         partialize: persistedUi,
       },
     )),

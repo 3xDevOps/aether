@@ -1,9 +1,5 @@
-// The Link step's first choice: reach a server through an edge. Signing in
-// runs the edge's device flow through the local gateway, which keeps the
-// device token to itself; this screen only shows the code, waits for the
-// gateway to report the sign-in, and then links a server: by the id its
-// admin gave, from the edge's list after showing what the link will pin,
-// or by claiming a new one with the code `aether-server setup` printed.
+// The local gateway runs the edge device flow and keeps the device token;
+// this screen never sees it.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -14,7 +10,6 @@ import type { Api } from '@/lib/api'
 import { edgeHost, message, providerName } from '@/lib/format'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeServer } from '@/lib/types'
 
-/** How often the screen asks the gateway whether the sign-in finished. */
 const pollMs = 2000
 
 type Phase =
@@ -51,11 +46,9 @@ export function EdgeSignIn({
       if (status.login?.state === 'failed' && status.login.error) setError(status.login.error)
       const signedIn = status.edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
       if (signedIn.length > 0) {
-        // With more than one edge the person picks, as the CLI's --edge does.
         setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
         return
       }
-      // A stored sign-in the gateway cannot read is fixed by signing in again.
       const unreadable = status.edges.find((e) => e.error)?.error
       if (unreadable) setError(unreadable)
       setPhase({ name: 'signed-out' })
@@ -113,9 +106,8 @@ export function EdgeSignIn({
   const signIn = async () => {
     setStarting(true)
     setError(null)
-    // Opened before the await so a browser treats it as the click's own
-    // window rather than a blocked popup. The desktop shell refuses blank
-    // windows and opens the address in the system browser instead.
+    // Opened before the await so it is not blocked as a popup. The desktop
+    // shell refuses blank windows and opens the address in the system browser.
     const popup = window.open('about:blank', '_blank')
     if (popup) popup.opener = null
     try {
@@ -201,7 +193,6 @@ function accountName(account: EdgeAccount): string {
   return `${name} (${provider})`
 }
 
-/** The edges this machine is signed in to, when there is more than one. */
 function EdgeChoice({
   edges,
   chosen,
@@ -239,8 +230,6 @@ const policyLine: Record<EdgeServer['access_policy'], string> = {
   'approved-devices': 'Approved devices: a new device waits for approval',
 }
 
-/** The servers the signed-in account reaches, linking by id, and the claim
- * form. */
 function ServerPicker({
   client,
   edge,
@@ -429,11 +418,8 @@ function ServerPicker({
   )
 }
 
-/**
- * What linking a server from the edge's list pins, shown before it does:
- * the id comes from the edge, so only comparing it with the admin's rules
- * out an edge that lists a false one.
- */
+/** The id comes from the edge, so only comparing it with the admin's rules
+ * out an edge that lists a false one. */
 function ConfirmPin({
   client,
   edge,

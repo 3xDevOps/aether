@@ -1,6 +1,3 @@
-// The mission's phase as the human sees it, and the clarifying questions the
-// integrator may ask while it plans.
-
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,7 +24,6 @@ function displayName(members: Record<string, Member>, memberID?: string): string
   return members[memberID]?.display_name ?? memberID
 }
 
-/** Completed and cancelled missions never run again. */
 export function missionFinal(mission: Mission): boolean {
   return mission.phase === 'completed' || mission.phase === 'cancelled'
 }
@@ -54,9 +50,6 @@ const phaseTone: Record<MissionPhase, Tone> = {
   cancelled: 'failed',
 }
 
-/** The mission-list marker. It replaces the generic Mission chip: which phase
- * a mission is in is the only thing the card can say that changes what the
- * reader must do. */
 export function PhaseChip({ mission }: { mission: Mission }) {
   return (
     <Badge tone={phaseTone[mission.phase]}>
@@ -94,9 +87,7 @@ export function PhaseBanner({
   onReplace: () => void
 }) {
   const integratorRunID = mission.current_integrator_run_id
-  // A finished mission's integrator stops on purpose and
-  // mission.replace-integrator is refused there, so the recovery sentence
-  // would offer a control the server will not accept.
+  // The server refuses mission.replace-integrator on a finished mission.
   const final = missionFinal(mission)
   const exited = !final && Boolean(integratorRun && isTerminal(integratorRun.status))
   const notStarted = !final && integratorMissing
@@ -226,7 +217,6 @@ export function QuestionsSection({
   )
 }
 
-/** The questions asked while planning, collapsed once the mission started. */
 export function QuestionHistory({ questions }: { questions: MissionQuestion[] }) {
   const members = useStore((state) => state.members)
   const [open, setOpen] = useState(false)

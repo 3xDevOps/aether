@@ -82,8 +82,7 @@ export interface CandidateReviewProps {
   workspaceID: string
   currentRunID: string
   client?: Api
-  /** A mission's integrator prepares, verifies, and delivers on its own, so
-   * the mission page shows its candidates without any control. */
+  /** A mission's integrator delivers on its own, so the mission page shows candidates without controls. */
   readOnly?: boolean
   /** Lists only the candidates prepared for this mission. */
   missionID?: string

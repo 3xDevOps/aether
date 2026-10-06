@@ -59,16 +59,11 @@ interface StructuralReplayState {
 }
 
 export interface TerminalDockProps {
-  /** API client used by a caller that owns a test or embedded surface. */
   client?: Api
-  /** Open the member's main terminal as soon as this dock mounts. */
   openOnMount?: boolean
   /** A line to type into the main tab after its first attach. */
   initialLine?: string
-  /**
-   * Whether the dock is bounded by its immediate parent. Embedded, intrinsic
-   * sections use the viewport cap; fixed flex layouts opt into their boundary.
-   */
+  /** Embedded intrinsic sections use the viewport cap; fixed flex layouts opt into 'parent'. */
   containment?: DockContainment
 }
 
@@ -148,8 +143,7 @@ export function TerminalDock({
           try {
             await replay.controller.finishStructuralReplay?.(replay.controllerGeneration)
           } catch {
-            // The parsed replay is still authoritative. A failed viewport
-            // restore must not leave it permanently hidden.
+            // A failed viewport restore must not leave the replay hidden.
           }
           if (
             structuralReplayRef.current !== replay ||
@@ -253,10 +247,8 @@ export function TerminalDock({
     }
   }, [rpc, setStatus, statusAttempt])
 
-  // The dock is collapsed by default, but a caller that opens it on mount
-  // means to show the terminal - the Agents and GitHub steps type into it.
-  // Once only: re-running this whenever `collapsed` changed would undo the
-  // member's own press of the collapse chevron on the same tick.
+  // Once only: re-running on every `collapsed` change would undo the member's
+  // own press of the collapse chevron on the same tick.
   const expandedOnMount = useRef(false)
   useEffect(() => {
     if (!openOnMount || expandedOnMount.current) return
@@ -575,9 +567,8 @@ export function TerminalDock({
                 imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
               >
                 {attachedTab !== activeTab && (
-                  // Only a terminal the dock has not seen running is starting
-                  // a container. A second tab, a tab switch or an expanded
-                  // dock is reattaching to one that is up.
+                  // Only a terminal the dock has not seen running is starting a
+                  // container; anything else is reattaching to one that is up.
                   <TerminalSpinner
                     label={
                       dock.status?.running

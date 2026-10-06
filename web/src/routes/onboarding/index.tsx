@@ -18,7 +18,6 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { onboardingStepIndex, onboardingSteps } from '@/store/ui'
 
-/** One step's marker in the header: reached, current, or still ahead. */
 const chip = 'rounded-sm border px-2 py-1.5'
 
 export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
@@ -32,9 +31,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const workspaces = useStore((s) => s.workspaces)
   const workspace = onboardingWorkspace ? workspaces[onboardingWorkspace] ?? null : null
   const persistedFurthest = useStore((s) => s.onboardingFurthest)
-  // Repository and everything past it need the workspace the wizard settled
-  // on; without one there is nothing to resume into, and nothing further
-  // back to jump forward to either.
+  // Repository and every later step need the workspace the wizard settled on.
   const firstStep = caps.hasLocal('link.status') ? 0 : onboardingStepIndex('Git identity')
   const reachable = (index: number) =>
     Math.max(firstStep, index >= onboardingStepIndex('Repository') && !workspace

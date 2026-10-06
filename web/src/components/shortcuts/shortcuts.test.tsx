@@ -41,8 +41,7 @@ describe('shortcut reference', () => {
     expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
   })
 
-  // Only the reference is mounted here, so of the global keys only its own
-  // answers; the run's scope is not on screen and its keys are all listed.
+  // Only the reference is mounted, so of the global keys only its own answers.
   it('lists the keys that answer here and a run\'s keys, by scope', async () => {
     render(<Slot name="statusbar" />)
     await userEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
@@ -72,8 +71,7 @@ describe('shortcut reference', () => {
     ).toBeNull()
   })
 
-  // A key pressed inside an overlay belongs to that overlay, whatever the
-  // store thinks is open: this asks the event, not the store.
+  // Overlay ownership is read from the event, not the store.
   it.each(['dialog', 'menu'])('yields to an open %s', (role) => {
     render(<Slot name="statusbar" />)
     const overlay = document.createElement('div')

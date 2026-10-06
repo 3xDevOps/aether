@@ -8,7 +8,6 @@ import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
 import { alice, fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
 
-// The local gateway's descriptor: the sync verbs the panel rides on.
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
@@ -112,7 +111,6 @@ describe('sync panel', () => {
     resolveStatus({
       sessions: [{ run_id: 'run_1', state: 'running', conflict: null }],
     })
-    // Let the resolved fetch's continuation run before asserting.
     await statusPromise
     await Promise.resolve()
 

@@ -7,7 +7,6 @@ import { onlineMembers, watchersOf } from '@/store/presence'
 /** How many avatars a row shows before it collapses into a count. */
 const shown = 4
 
-/** Who is online, in the status bar. */
 export function PresenceStatus() {
   const presence = useStore((s) => s.presence)
   const members = useStore((s) => s.members)

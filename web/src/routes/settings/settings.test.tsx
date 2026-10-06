@@ -10,7 +10,6 @@ import { pickOption } from '@/test/select'
 
 const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
-// The local gateway's descriptor: the client-machine verbs settings rides on.
 const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
@@ -44,9 +43,7 @@ function seed(extra: Partial<RootState> = {}) {
 }
 
 describe('settings view', () => {
-  // Picking a run is what opens the mirror panel, so picking none again has
-  // to be a choice a reader can make; it was an option row before the select
-  // became a primitive and a placeholder cannot be chosen.
+  // A placeholder cannot be chosen, so picking no run must be a real option.
   it('opens the mirror panel for a run and closes it again', async () => {
     seed({ runs: { [active.id]: toRecord(active) } })
     render(<SettingsRoute params={{}} client={fakeApi()} />)
@@ -147,7 +144,6 @@ describe('settings view', () => {
     seed()
     render(<SettingsRoute params={{}} client={client} />)
 
-    // link.status prefills the form; the button enables once both land.
     const install = await screen.findByRole('button', { name: 'Install' })
     expect(
       screen.getByRole('form', { name: 'Install sync daemon' }),
@@ -164,7 +160,6 @@ describe('settings view', () => {
     expect(note.value).toBe(
       'enable with systemctl --user enable --now aether-sync',
     )
-    // The prefill came from link.status, through the store mirror.
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
   })
   it('opens a sync overlay without requesting unavailable daemon methods', async () => {
@@ -202,15 +197,13 @@ describe('settings view', () => {
     seed()
     render(<SettingsRoute params={{}} client={client} />)
 
-    // Both profiles render; the active one is marked, not switchable.
     expect(await screen.findByText('prod')).toBeDefined()
     expect(screen.getByText('staging')).toBeDefined()
     expect(screen.getByText('active')).toBeDefined()
     const switches = screen.getAllByRole('button', { name: 'Switch' })
     expect(switches).toHaveLength(1)
 
-    // Switching calls link.switch and renders the server's refusal verbatim:
-    // the SSH identity is process-lifetime, so switching is a restart.
+    // The SSH identity is process-lifetime, so switching is a restart.
     fireEvent.click(switches[0])
     expect(
       await screen.findByText(

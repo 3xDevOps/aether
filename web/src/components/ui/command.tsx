@@ -53,8 +53,7 @@ function CommandDialog({
         onOpenAutoFocus={(event) => {
           onOpenAutoFocus?.(event)
           if (event.defaultPrevented) return
-          // The known input is the modal's initial focus target. Avoid Radix's
-          // generic walk through every option; its focus trap remains active.
+          // Skip Radix's walk through every option; its focus trap stays active.
           const input = (event.target as HTMLElement).querySelector<HTMLInputElement>('[cmdk-input]')
           if (input) {
             input.focus({ preventScroll: true })
@@ -63,9 +62,6 @@ function CommandDialog({
         }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          // The palette hangs from under the title bar, so its drop measures
-          // from the bar's full height - the token plus the inset the bar
-          // grew by - and its cap gives back both.
           'top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--title-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-border/90 bg-popover p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--title-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}

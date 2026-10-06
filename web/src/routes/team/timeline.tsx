@@ -50,16 +50,9 @@ const types: [string, string][] = [
 ]
 
 
-/**
- * One workspace's history, newest first, filterable by run, member and type.
- * The reader pages forward from a cursor, so the view opens on a window at
- * the end of the log and "load older" walks that window back.
- *
- * This keeps a workspace picker where the other scoped surfaces dropped
- * theirs: comparing what happened in one workspace against another is the
- * whole point of an activity log, so the sidebar's choice is only the
- * default here.
- */
+/** The reader pages forward from a cursor, so the view opens at the end of
+ * the log and "load older" walks back. It keeps its own workspace picker:
+ * comparing workspaces is the point of an activity log. */
 export function TimelineFeed({ params, client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -72,8 +65,6 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
   const error = useStore((s) => s.feedError)
   const truncated = useStore((s) => s.feedTruncated)
 
-  // The feed is workspace-scoped: prefer the workspace the caller named, then
-  // the active one, then any we know.
   useEffect(() => {
     if (filters.workspaceID) return
     const first =
@@ -147,9 +138,7 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
       />
       <div className="shrink-0 border-b bg-sidebar px-3 py-2 sm:px-4">
         {narrow ? (
-          // Four labelled selects are most of a phone screen before the first
-          // entry. The workspace one scopes the feed, so it stays; the count
-          // says what is still being filtered out while the rest are away.
+          // The workspace select scopes the feed, so it stays out of the fold.
           <Collapsible className="grid gap-2">
             {workspaceFilter}
             <CollapsibleTrigger className="text-[13px] font-medium text-foreground">

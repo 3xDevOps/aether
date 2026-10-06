@@ -5,18 +5,13 @@ import type { BudgetState } from '@/lib/types'
 import { useStore } from '@/store'
 import { costTotals } from '@/store/cost'
 
-/**
- * A budget is a soft cap: it warns and it reports being past the limit, and
- * that is all it ever does. Nothing here may suggest a run was stopped,
- * because none ever is.
- */
+/** A budget is a soft cap that never stops a run, so nothing here may suggest one was stopped. */
 const stateStyle: Record<BudgetState, string> = {
   ok: '',
   warn: 'text-state-waiting',
   exceeded: 'text-state-needs-attention',
 }
 
-/** Workspace spend and budget state, in the status bar. */
 export function BudgetStatus() {
   const budgets = useStore((s) => s.budgets)
   const workspaces = useStore((s) => s.workspaces)

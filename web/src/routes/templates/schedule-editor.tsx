@@ -1,6 +1,4 @@
-// One template's cron rule. Cron is evaluated by the server (UTC), so the
-// next-fire preview is whatever schedule.save returned - this view never
-// computes cron client-side.
+// Cron is evaluated by the server (UTC); the next-fire preview is what schedule.save returned.
 
 import { useState } from 'react'
 import { message } from '@/lib/format'
@@ -19,7 +17,6 @@ export function ScheduleEditor({
 }: {
   workspaceID: string
   template: string
-  /** The rule as the last schedule.list fetch saw it, if any. */
   schedule?: Schedule
   client?: Api
   onChanged: () => void

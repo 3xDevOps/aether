@@ -68,8 +68,7 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
     ? `Requested · ${takeover.seconds}s`
     : takeover?.phase ? `${label} · ${takeover.seconds}s` : label
   const progress = takeover?.progress
-  // The leading edge slopes upward to the right: a forward slash, not a
-  // rectangle scaling the label. Background and covered text clip separately.
+  // A forward-slash leading edge; background and covered text clip separately.
   const edge = (progress ?? 0) * 120 - 20
   const clipPath = `polygon(0 0, ${edge + 20}% 0, ${edge}% 100%, 0 100%)`
 

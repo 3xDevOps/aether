@@ -1,6 +1,3 @@
-// Appearance is client-local and available on every gateway. Machine settings
-// retain their /local/v1 capability gates and show server refusals verbatim.
-
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { linkTarget, message } from '@/lib/format'
@@ -99,11 +96,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
   )
 }
 
-/**
- * What this machine is linked to. Checked on every mount - `aether link` may
- * have run in a terminal since - and mirrored into the store so the status
- * bar agrees.
- */
+/** Checked on every mount: `aether link` may have run in a terminal since. */
 function LinkCard({ client }: { client: Api }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const link = useStore((s) => s.linkStatus)
@@ -231,12 +224,7 @@ function LinkCard({ client }: { client: Api }) {
   )
 }
 
-/**
- * The background sync daemon. daemon.status says whether the unit exists;
- * installing writes it and answers with the unit path and an enable note the
- * user will want in a terminal, hence the copy button (jsdom and older
- * engines have no navigator.clipboard; the fallback selects the text).
- */
+/** jsdom and older engines have no navigator.clipboard; the copy fallback selects the text. */
 function DaemonCard({ client }: { client: Api }) {
   const link = useStore((s) => s.linkStatus)
   const [status, setStatus] = useState<DaemonStatusResult | null>(null)
@@ -377,7 +365,6 @@ const terminal: Record<string, true> = {
   interrupted: true,
 }
 
-/** Pick a live run and drive its sync overlay through the SyncPanel. */
 function OverlayCard({ client }: { client: Api }) {
   const runs = useStore((s) => s.runs)
   const live = Object.values(runs).filter((r) => !terminal[r.status])

@@ -6,11 +6,8 @@ import { createElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { Check } from '@/components/icons'
 
-// The design system, enforced. Each rule scans the dashboard source and fails
-// on a file that breaks it. A rule's `legacy` list names the files written
-// before the rule existed; when you rebuild one, fix it and delete it from the
-// list. The test also fails when a listed file no longer breaks the rule, so
-// the lists only shrink.
+// A rule's `legacy` list names files that predate it. The test also fails when
+// a listed file no longer breaks the rule, so the lists only shrink.
 
 const src = path.dirname(fileURLToPath(import.meta.url))
 
@@ -355,7 +352,7 @@ describe('icons', () => {
   })
 })
 
-// WCAG 2.x contrast for the token pairs the plan names, read from index.css.
+// WCAG 2.x contrast, read from index.css.
 const css = readFileSync(path.join(src, 'index.css'), 'utf8')
 
 function themeColours(selector: string): Record<string, string> {

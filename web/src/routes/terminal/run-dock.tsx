@@ -222,10 +222,8 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
       },
     ),
   )
-  // terminal replace one that may have been holding the keyboard: the server
-  // refuses a shell, the agent exits the last one, the run stops running.
-  // Disposing it leaves focus on <body>, where the next keystroke reaches the
-  // shell's shortcuts, so whatever took its place takes the keyboard too.
+  // Whatever replaces a terminal that may have held the keyboard takes it too:
+  // disposing it leaves focus on <body>, where keystrokes reach the shell's shortcuts.
   const showing = !canOpenShell
     ? 'unavailable'
     : dock.refusedMessage !== null
@@ -515,8 +513,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
     return { id: tab, label: `${item.name || tab} · ${item.process.state}` }
   }) : []
   // The header strip stays live while the dock is collapsed, so a tab control
-  // has to open the dock it belongs to; otherwise it would add a tab with no
-  // terminal mounted to attach it.
+  // must open the dock or it would add a tab with no terminal to attach.
   const open = async () => {
     setDockCollapsed(runID, false)
     setBusy(true)

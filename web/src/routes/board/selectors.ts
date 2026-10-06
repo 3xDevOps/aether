@@ -35,8 +35,7 @@ export function board(s: RunsInput): BoardData {
   const archivedCards: BoardCard[] = []
   for (const run of Object.values(s.ctx.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    // A live run can never be hidden: archiving is a server-side no-op
-    // outside a final status, but this guard holds even so.
+    // Defensive: the server already ignores archiving outside a final status.
     if (!run.archived_at || !isArchivable(run.status)) continue
     const shown = presentRun(run, s.ctx)
     archivedCards.push({

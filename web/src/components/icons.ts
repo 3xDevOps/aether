@@ -49,9 +49,7 @@ import {
 
 export type { LucideIcon }
 
-// The only module that imports lucide-react; design-system.test.ts enforces
-// it. Each icon is exported once, under lucide's current name, drawn at the
-// 1.75 stroke the design system uses. A caller may still pass `strokeWidth`.
+// The only module that imports lucide-react; design-system.test.ts enforces it.
 function icon(Base: LucideIcon): LucideIcon {
   const Icon = forwardRef<SVGSVGElement, LucideProps>((props, ref) =>
     createElement(Base, { strokeWidth: 1.75, ...props, ref }),

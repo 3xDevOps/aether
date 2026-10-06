@@ -1,8 +1,3 @@
-// The command center is mounted once by AppShell. Its trigger is intentionally
-// separate so the title bar can stay the single visible command entry point
-// without creating a second dialog host. Launch, inject, forward and close
-// forms remain in `dialogs.tsx`, hosted beside this component.
-
 import { SearchIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PaletteBody } from '@/components/palette/palette'
@@ -17,7 +12,6 @@ import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
-/** The compact no-drag title-bar entry point for the command center. */
 export function CommandPaletteTrigger({ disabled = false }: { disabled?: boolean } = {}) {
   const toggle = useStore((s) => s.togglePalette)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -58,8 +52,6 @@ export function CommandPalette() {
   const context = activeWorkspace
     ? workspaces[activeWorkspace]?.name ?? 'Workspace'
     : 'All workspaces'
-  // The template form is not one of the store's palette dialogs; its open
-  // state lives here with the other dialog hosts.
   const [templates, setTemplates] = useState(false)
   const [confirmation, setConfirmation] = useState<{
     identityKey: string | null
@@ -80,18 +72,14 @@ export function CommandPalette() {
   }, [identityKey])
 
   const onShortcut = (e: KeyboardEvent) => {
-    // The app owns this chord whether or not it acts on it: left to the
-    // browser, it opens the address bar over whatever is on screen.
+    // Left to the browser, this chord opens the address bar.
     e.preventDefault()
-    // A form is a modal step out of the palette; do not stack one on top.
-    // The palette itself is the exception, because this is also what
-    // closes it. A terminal is not a modal, so its hidden textarea can
-    // invoke the palette and receive focus back when it is dismissed.
+    // Do not stack on a modal, except the palette itself, which this closes.
+    // A terminal is not a modal, so it can invoke the palette.
     const s = useStore.getState()
     if (s.paletteDialog || templates || confirmation || pendingConfirmation.current) return
     if (!s.paletteOpen && inModal(e.target)) return
-    // Keep the chord from becoming terminal input. Guarded modal events
-    // deliberately continue through their normal target path.
+    // Keep the chord from becoming terminal input.
     e.stopPropagation()
     toggle()
   }
@@ -113,8 +101,8 @@ export function CommandPalette() {
             target instanceof HTMLElement && target !== document.body ? target : null
         }}
         onCloseAutoFocus={(event) => {
-          // Finish unmounting the palette before giving a second modal focus.
-          // Keep the original invoker for cancellation, including xterm.
+          // Let the palette unmount before a second modal takes focus; keep the
+          // invoker (even xterm) to restore on cancellation.
           if (pendingConfirmation.current) {
             event.preventDefault()
             const pending = pendingConfirmation.current

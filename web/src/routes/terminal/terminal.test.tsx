@@ -442,8 +442,7 @@ describe('terminal view', () => {
     expect(screen.getByText('Take control')).toBeDefined()
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
 
-    // The mirror remains eligible for a later explicit request; no
-    // permission-denial latch is set by lease displacement.
+    // Lease displacement sets no permission-denial latch.
     view.unmount()
   })
 
@@ -592,8 +591,7 @@ describe('terminal view', () => {
   })
 
   it('starts every attach from the server, not from the last one', () => {
-    // What a previous visit to this tab left behind: a steer denial, refusal,
-    // and message. A fresh attach must ask to steer and answer for itself.
+    // State a previous visit left behind; a fresh attach must not trust it.
     const view = mount({
       steerDenied: true,
       refused: true,
@@ -609,8 +607,7 @@ describe('terminal view', () => {
   })
 
   it('writes PTY output frames into the terminal', async () => {
-    // The blank-terminal regression: the attach delivered frames but the
-    // view never handed them to xterm, so the pane stayed empty forever.
+    // Regression: frames arrived but never reached xterm.
     const write = vi.spyOn(Terminal.prototype, 'write')
     const view = mount()
     attached()
@@ -1161,9 +1158,8 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // Switching runs keeps the same view mounted, so the pane has to be cleared
-  // by the switch: a finished run with no recorded terminal is refused, and a
-  // refusal never acks, so it would show the previous run's output for good.
+  // The view stays mounted across runs, and a refused attach never acks, so
+  // only the switch itself can clear the previous run's output.
   it('clears the previous run before showing the next one', async () => {
     const view = mount()
     attached()
@@ -1194,9 +1190,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // The switch has to land even while the previous run is still draining:
-  // xterm parses in slices, and a reset leaves whatever is already queued to
-  // arrive after it.
+  // xterm parses in slices, so a reset still lets already-queued output arrive after it.
   it('shows nothing of the previous run when the switch lands mid-replay', async () => {
     const view = mount()
     attached()
@@ -1293,8 +1287,6 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // The reader is standing on the Terminal tab when a launch fails, and a
-  // Retry that can never succeed is the dead end this ticket is about.
   it('gives a run that died before it started its reason, not a retry', () => {
     const view = mount(
       {},
@@ -1314,8 +1306,6 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // A refusal that is not a missing session says nothing about the run, so
-  // the tab must not answer it with a sentence about the run.
   it('shows the gateway refusal itself when the session is not the problem', () => {
     const view = mount()
     act(() => useStore.getState().upsertRun(run({ status: 'completed' })))
@@ -1350,8 +1340,6 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // An idle run has not ended: it goes back to running,
-  // so telling it that it ended and taking its retry away is the dead end.
   it('lets a stalled run be steered without calling it not running', () => {
     const view = mount({}, { status: 'needs-attention' })
     attached()
@@ -1362,9 +1350,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  // An idle run is not a finished one: the server keeps it on
-  // the live side of its own replay gate, so the tab must not answer its
-  // refusals with a sentence about a transcript, or take the retry away.
+  // The server keeps an idle run on the live side of its replay gate.
   it('keeps the retry on a run that is idle', () => {
     const view = mount({}, { status: 'needs-attention' })
     act(() => StubSocket.last().onopen?.())
@@ -1384,8 +1370,7 @@ describe('terminal view', () => {
   })
 })
 
-// A phone renders the session the way the writers see it and keeps its own
-// width to itself. See the terminal section of docs/dashboard-frontend.md.
+// See the terminal section of docs/dashboard-frontend.md.
 describe('the terminal on a phone', () => {
   const phone = () => atViewport(390, { height: 844, pointer: 'coarse' })
 
@@ -1395,9 +1380,8 @@ describe('the terminal on a phone', () => {
     const view = mount()
     attached({ cols: 132, rows: 43 })
 
-    // The flag is what keeps this client out of the minimum the PTY is
-    // sized to; the geometry beside it is only what a session with no PTY
-    // of its own - a finished run's replay - is laid out at.
+    // The flag keeps this client out of the PTY's minimum size; the geometry
+    // only lays out a session with no PTY, such as a finished run's replay.
     expect(StubSocket.last().frames()[0]).toEqual({
       follow: true,
       screen: true,
@@ -1411,8 +1395,7 @@ describe('the terminal on a phone', () => {
       false,
     )
 
-    // Someone with a bigger screen resizes the session: the phone redraws
-    // at what the server reports rather than at what its ack once said.
+    // The phone redraws at what the server reports, not at its original ack.
     act(() => {
       StubSocket.last().onmessage?.({
         data: JSON.stringify({ type: 'geometry', cols: 120, rows: 40 }),
@@ -1455,7 +1438,6 @@ describe('the terminal on a phone', () => {
     expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
     controlAck(true, 1, 1)
     await vi.waitFor(() => expect(input()?.readOnly).toBe(false))
-    // The keys a soft keyboard has not got arrive with the ability to type.
     expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
     view.unmount()
   })

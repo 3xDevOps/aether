@@ -1,8 +1,3 @@
-// Templates: the active workspace's saved tasks and their cron schedules.
-// Deletion asks first; launching goes straight to the new run. The workspace
-// is chosen in the sidebar switcher, not here - this route acts on whatever
-// that names, like every other scoped surface.
-
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
@@ -58,9 +53,8 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<Template | null>(null)
 
-  // Templates are per workspace on the wire, so unlike the run list this has
-  // no "all" reading: before hydration names one, the sole workspace is the
-  // only unambiguous answer.
+  // Templates are per workspace on the wire, so there is no "all" reading;
+  // before hydration names one, the sole workspace is the only safe answer.
   const workspaceID = active || soleWorkspace(workspaces)
   const workspace = workspaces[workspaceID]
 

@@ -177,8 +177,7 @@ export function WorkspaceMirrorDialog({
       toast.success('Workspace source disabled')
     } catch (err) {
       setError(message(err))
-      // Do not leave stale ready/local-only controls visible after a failed
-      // disable. Only a successful status read can establish the next action.
+      // Only a successful status read can establish the next action.
       setResult(null)
       setDisableStateUnavailable(true)
       try {

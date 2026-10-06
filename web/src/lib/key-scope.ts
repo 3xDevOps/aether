@@ -1,7 +1,3 @@
-// The keyboard scopes currently on screen, innermost first. A component that
-// owns keys pushes its scope while mounted; `lib/keybindings.ts` asks this
-// stack which handlers a key press may reach.
-
 export type KeyScope = 'global' | 'run' | 'request' | 'composer'
 
 /** Inner scopes first. A request card and the composer never hold focus at
@@ -17,7 +13,6 @@ export interface ScopeEntry {
 
 const stack: ScopeEntry[] = []
 
-/** Pushes a scope and returns the function that pops this entry. */
 export function pushScope(entry: ScopeEntry): () => void {
   stack.push(entry)
   return () => {

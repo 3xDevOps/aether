@@ -45,7 +45,6 @@ const history: Event[] = [
   },
 ]
 
-// The stretch below the first window: what "load older" reads.
 const olderHistory: Event[] = [
   {
     id: 'evt_0',
@@ -112,7 +111,6 @@ describe('workspace activity feed', () => {
     const rows = screen.getAllByRole('listitem')
     expect(rows[0].textContent).toContain('needs-attention')
     expect(rows[1].textContent).toContain('pause')
-    // Bob acted last, so his colour is the dot on the newest entry.
     expect(rows[0].querySelector('span')?.getAttribute('style')).toContain(
       'background-color',
     )
@@ -137,9 +135,6 @@ describe('workspace activity feed', () => {
     })
   })
 
-  // A server update is an admin act like any other, so it lands in the
-  // same feed: without its own case the row would render a bare type and
-  // say nothing about which phase it reached.
   it('describes a server update phase', async () => {
     const client = feedApi([
       {
@@ -161,8 +156,6 @@ describe('workspace activity feed', () => {
     ).toBeDefined()
   })
 
-  // The sidebar names the scope everywhere else; here it is only the
-  // default, because comparing workspaces is what an activity log is for.
   it('opens on the active workspace', async () => {
     const client = feedApi()
     seed()
@@ -193,8 +186,6 @@ describe('workspace activity feed', () => {
     await vi.waitFor(() =>
       expect(windowsAsked(client)).toEqual([head - window, head - 2 * window]),
     )
-    // The older stretch lands before what was already loaded, oldest first,
-    // so the view still renders newest first.
     await vi.waitFor(() =>
       expect(useStore.getState().feed.map((e) => e.seq)).toEqual([3400, 4198, 4199]),
     )
@@ -225,8 +216,6 @@ describe('workspace activity feed', () => {
       expect(document.activeElement).toBe(screen.getByLabelText('Run')),
     )
 
-    // A run belongs to one workspace: keeping the filter would query the new
-    // workspace for a run it does not have.
     await pickOption(screen.getByLabelText('Workspace'), otherWorkspace.name)
 
     await vi.waitFor(() => {
@@ -349,10 +338,8 @@ describe('workspace activity feed', () => {
       expect(useStore.getState().feedFloor).toBe(head - window),
     )
 
-    // The user changes a filter while that page is still in flight. When it
-    // lands it belongs to a query nobody is looking at any more, so it must
-    // write nothing - not the events, and not the loading flag the new read
-    // now owns.
+    // A filter change makes the in-flight page stale: it must write nothing,
+    // not even the loading flag the new read owns.
     useStore.getState().beginFeed()
     release({ events: history, next_seq: head, more: false })
     await reading
@@ -380,7 +367,6 @@ describe('workspace activity feed', () => {
     expect(await screen.findByText('Session title')).toBeDefined()
   })
 
-  // Four labelled selects are most of a phone screen before the first entry.
   it('folds every filter but the workspace one below sm', async () => {
     const client = feedApi()
     seed()
@@ -393,8 +379,6 @@ describe('workspace activity feed', () => {
     expect(await screen.findByLabelText('Workspace')).toBeDefined()
     expect(screen.queryByLabelText('Member')).toBeNull()
 
-    // The count says what is still filtering the feed while the selects are
-    // away, so a member does not read an empty feed as an empty log.
     const trigger = screen.getByRole('button', { name: 'Filters (1)' })
     fireEvent.click(trigger)
     expect(await screen.findByLabelText('Member')).toBeDefined()

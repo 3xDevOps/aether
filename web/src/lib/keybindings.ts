@@ -92,7 +92,6 @@ export function formatKeys(keys: string): string {
     .join(' then ')
 }
 
-/** The keys of one binding, for a tooltip or the shortcuts dialog. */
 export function shortcutLabel(id: KeybindingID): string {
   return formatKeys(keybindings.find((binding) => binding.id === id)!.keys)
 }
@@ -162,12 +161,9 @@ function onKey(event: KeyboardEvent) {
 
 let mounted = 0
 
-/**
- * Makes `handlers` answer their bindings in `scope` while the caller is
- * mounted. Two window listeners serve every scope: chords on the capturing
- * pass, so a terminal never sees them; single keys on the bubbling pass, so
- * Radix and any component that handles the key first can mark it handled.
- */
+/** Chords listen on the capturing pass, so a terminal never sees them; single
+ * keys on the bubbling pass, so a component that handles the key first can
+ * mark it handled. */
 export function useKeybindings<S extends KeyScope>(scope: S, handlers: ScopeHandlers<S>): void {
   const latest = useRef<ScopeHandlers<S>>(handlers)
   useLayoutEffect(() => {

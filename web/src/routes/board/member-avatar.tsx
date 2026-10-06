@@ -2,12 +2,7 @@ import { initials } from '@/components/ui/avatar'
 import type { Member } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-/**
- * Members have no images, only a display name and the attribution colour the
- * core spec assigns them - so the avatar is their initials ringed in that
- * colour. The colour rings rather than fills because it is arbitrary server
- * data: text on top of it would have no contrast guarantee in either theme.
- */
+/** The colour rings rather than fills: it is arbitrary server data, so text on it has no contrast guarantee. */
 export function MemberAvatar({
   member,
   fallback,

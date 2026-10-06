@@ -274,8 +274,7 @@ it('reveals an offscreen card when its real control receives keyboard focus', ()
   act(() => title.focus())
   expect(document.activeElement).toBe(title)
   expectAllCardsInView()
-  // Native pointer-vs-keyboard :focus-visible heuristics require the browser
-  // smoke; jsdom cannot prove that distinction and must not mock matches().
+  // :focus-visible pointer-vs-keyboard behaviour needs the browser smoke; do not mock matches().
 })
 
 it('zooms from the Runs strip around the canvas center and fits back into view', () => {

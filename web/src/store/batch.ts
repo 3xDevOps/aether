@@ -16,14 +16,10 @@ interface Batch {
 const batches = new WeakMap<object, Batch>()
 
 /**
- * Store middleware that can hold subscriber notification back while
- * `batchNotifications` runs. `set()` still applies at once, so `getState()`
- * is always current; only listeners wait. They hear one change - the state
- * before the first held write and the state now - on the next frame. The
- * hold outlives the batch: each socket message drains in its own task, so
+ * `set()` applies at once; only listeners wait, for the next frame. The hold
+ * outlives the batch because each socket message drains in its own task, so
  * ending on an empty queue would notify once per message of a burst. A write
- * outside any batch, which is the user acting, notifies at once and takes
- * the held change with it.
+ * outside any batch notifies at once and takes the held change with it.
  */
 export function batched<
   T,

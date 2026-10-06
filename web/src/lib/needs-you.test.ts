@@ -58,7 +58,6 @@ function attempt(over: Partial<MissionAttempt> = {}): MissionAttempt {
   } as MissionAttempt
 }
 
-/** Each row of the table: a run the condition holds on, its context, and the expected reason. */
 const rows: {
   id: NeedsYouID
   run: RunRecord
