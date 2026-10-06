@@ -20,9 +20,6 @@ function threadTitle(body: string): string {
   return line.length > 48 ? `${line.slice(0, 48)}…` : line || 'Untitled'
 }
 
-/** The reader pages forward from a cursor, so the feed opens at the end of
- * the log and "Load older" walks back. It keeps its own workspace filter:
- * comparing workspaces is the point of an activity log. */
 export function ActivityRoute({ params, client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -49,7 +46,7 @@ export function ActivityRoute({ params, client = api }: RouteProps & { client?: 
   const runIDs = useRunIDs(filters.workspaceID)
   const runLabels = useStore(useShallow((s) => runIDs.map((id) => (s.runs[id] ? runLabel(s.runs[id]) : id))))
   const runOptions = useMemo(() => runIDs.map((id, i): Option => [id, runLabels[i]]), [runIDs, runLabels])
-  const workspaceMessages = useStore(useShallow((s) => scopeMessages(s, { kind: 'workspace', workspaceID: filters.workspaceID })))
+  const workspaceMessages = useStore(useShallow((s) => (messages ? scopeMessages(s, { kind: 'workspace', workspaceID: filters.workspaceID }) : [])))
   const threads = useMemo(
     () => workspaceMessages.filter((m) => m.kind === 'question' || m.kind === 'report').map((m): Option => [m.id, threadTitle(m.body)]),
     [workspaceMessages],

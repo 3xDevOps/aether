@@ -25,7 +25,7 @@ export function deliveryWord(message: Pick<RunMessage, 'delivered_at' | 'acked_a
   return 'Sent'
 }
 
-export function Participant({ runID }: { runID: string }) {
+function Participant({ runID }: { runID: string }) {
   const run = useStore((s) => s.runs[runID])
   const navigate = useStore((s) => s.navigate)
   if (!run) return <span className="font-code text-ui-sm text-muted">{runID}</span>

@@ -23,7 +23,7 @@ export const noMessageFilters: MessageFilters = { sender: '', recipient: '', thr
 /** Pages one "Show all" may read, so a huge history cannot pin the tab. */
 const showAllPages = 20
 
-export function messageScope(workspaceID: string, filters: MessageFilters): MessageScope {
+function messageScope(workspaceID: string, filters: MessageFilters): MessageScope {
   const runID = filters.sender || filters.recipient
   return runID ? { kind: 'run', workspaceID, runID } : { kind: 'workspace', workspaceID }
 }

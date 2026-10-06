@@ -67,7 +67,6 @@ export interface TerminalDockProps {
   initialLine?: string
   /** Embedded intrinsic sections use the viewport cap; fixed flex layouts opt into 'parent'. */
   containment?: DockContainment
-  /** Draws the page header that takes the dock's actions; without it a filled dock keeps them in its tab row. */
   header?: (actions: ReactNode, hint?: string) => ReactNode
 }
 
