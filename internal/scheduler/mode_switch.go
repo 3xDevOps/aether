@@ -114,6 +114,9 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 	entry.switching = ""
 	now := entry.launchMode
 	s.mu.Unlock()
+	if now == domain.LaunchACP {
+		s.acp.wakeIdle(run)
+	}
 	done := events.RunModePayload{Mode: now, Previous: from}
 	if err != nil {
 		err = fmt.Errorf("switch to %s: %w", modeName(mode), err)

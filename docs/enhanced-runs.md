@@ -208,6 +208,8 @@ human holds a swarm worker, is retried after 1, 2, 4 and 8 seconds and then
 dropped until the next message or turn end, so releasing the hold does not
 re-offer the mail. Holding a run's control lease does not refuse a wake. A
 paused run is not prompted; Resume offers it the mail that arrived meanwhile.
+A run switching modes is not prompted either; a switch that ends in Enhanced
+offers it the mail.
 Messages that arrive together share one prompt, and each set of new unread
 messages starts at most one turn, so an agent that ends its turn without
 reading its inbox is prompted again only when another message arrives. Mail

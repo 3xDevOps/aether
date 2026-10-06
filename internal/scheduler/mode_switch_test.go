@@ -229,8 +229,19 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 		t.Fatalf("harness_session_id %q, want the terminal's", row.HarnessSessionID)
 	}
 
+	var idleOffered atomic.Bool
+	e.coord.mu.Lock()
+	e.coord.onWake = func(r domain.RunID) {
+		if r == run.ID && e.sched.IdleEnhanced(r) {
+			idleOffered.Store(true)
+		}
+	}
+	e.coord.mu.Unlock()
 	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchACP, admitNow); err != nil {
 		t.Fatalf("switch to Enhanced: %v", err)
+	}
+	if !idleOffered.Load() {
+		t.Fatal("the switch did not offer the idle session the mail held while it ran")
 	}
 	if got := modeEvents(t, sub, run.ID, 2); got[1] != (events.RunModePayload{Mode: domain.LaunchACP, Previous: domain.LaunchTUI}) {
 		t.Fatalf("run.mode events %+v", got)
@@ -506,6 +517,30 @@ func TestSwitchingRunRefusesInput(t *testing.T) {
 	}
 	if e.sched.Switching(run.ID) != "" {
 		t.Fatal("the run is still switching")
+	}
+}
+
+func TestSwitchingRunIsNotWoken(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	run := e.launch(t, "", domain.LaunchACP)
+	waitFor(t, "the idle session", func() bool { return e.sched.IdleEnhanced(run.ID) })
+	setSwitching := func(mode domain.LaunchMode) {
+		e.sched.mu.Lock()
+		e.sched.runs[run.ID].switching = mode
+		e.sched.mu.Unlock()
+	}
+
+	setSwitching(domain.LaunchTUI)
+	if e.sched.IdleEnhanced(run.ID) {
+		t.Fatal("a switching run is idle")
+	}
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); !errors.Is(err, errACPBusy) {
+		t.Fatalf("wake during the switch: %v, want errACPBusy", err)
+	}
+	setSwitching("")
+	if !e.sched.IdleEnhanced(run.ID) {
+		t.Fatal("the run is not idle after the switch")
 	}
 }
 
