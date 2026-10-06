@@ -20,6 +20,8 @@ export interface ExtraItem {
   label: string
   Icon: React.ComponentType<{ className?: string }>
   onSelect: (returnTo: HTMLElement | null) => void
+  description?: string
+  disabled?: boolean
 }
 
 export function RunActions({ run, extra = [], compact = false }: { run: RunRecord; extra?: ExtraItem[]; compact?: boolean }) {
@@ -123,9 +125,11 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
           {extra.map((entry) => (
             <MenuItem
               key={entry.id}
+              disabled={entry.disabled}
+              description={entry.description}
+              icon={<entry.Icon aria-hidden />}
               onSelect={() => entry.onSelect(trigger.current)}
             >
-              <entry.Icon aria-hidden />
               {entry.label}
             </MenuItem>
           ))}

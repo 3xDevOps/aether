@@ -79,9 +79,10 @@ export function MenuItem({
   className,
   tone,
   description,
+  icon,
   children,
   ...props
-}: React.ComponentProps<typeof MenuPrimitive.Item> & { tone?: 'danger'; description?: React.ReactNode }) {
+}: React.ComponentProps<typeof MenuPrimitive.Item> & { tone?: 'danger'; description?: React.ReactNode; icon?: React.ReactNode }) {
   return (
     <MenuPrimitive.Item
       data-slot="menu-item"
@@ -93,6 +94,7 @@ export function MenuItem({
       )}
       {...props}
     >
+      {icon}
       {description === undefined ? children : <Described description={description}>{children}</Described>}
     </MenuPrimitive.Item>
   )

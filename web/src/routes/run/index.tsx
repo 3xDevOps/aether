@@ -40,19 +40,6 @@ function RunRoute({ params }: RouteProps) {
   return <RunFrame key={JSON.stringify([identityKey, epoch, run.id, run.created_at])} run={run} params={params} />
 }
 
-const switchBeside = 720
-
-function useNarrow(below: number): [(node: HTMLDivElement | null) => void, boolean] {
-  const [narrow, setNarrow] = useState(false)
-  const ref = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return
-    const observer = new ResizeObserver(([entry]) => setNarrow(entry!.contentRect.width < below))
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [below])
-  return [ref, narrow]
-}
-
 function useVisited(view: RunView) {
   const visited = useRef(new Set<RunView>())
   visited.current.add(view)
@@ -74,7 +61,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const returnTo = useRef<HTMLElement | null>(null)
   const [noteDraft, setNoteDraft] = useState<{ text: string } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
-  const [column, narrow] = useNarrow(switchBeside)
 
   const views = runViews.filter((view) => view !== 'browser' || cap.hasMethod('dev.browser.status'))
   const asked = isRunView(params.view) ? params.view : remembered
@@ -84,7 +70,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const agent = useAgentTerminal(run, visited.has(defaultView(run)))
   const { agents } = useAgentList()
   const agentName = agentDisplayNames(agents)[run.harness] ?? run.harness
-  const switchable = agents?.find((entry) => entry.name === run.harness)?.switchable === true
+  const agentEntry = agents?.find((entry) => entry.name === run.harness)
+  const switchable = agentEntry?.switchable === true
   const shells = useRunShells(run.id)
   const room = useRunRoom(run, agent.roomControl)
 
@@ -111,6 +98,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       requestAnimationFrame(() => textarea.current?.focus())
     },
     focusRequest: () => {
+      if (!inline) setOverlayDetails(false)
       go('session')
       requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(dockedRequestID)?.focus()))
     },
@@ -148,9 +136,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   return (
     <Tabs value={view} onValueChange={(next) => isRunView(next) && go(next)} asChild>
     <div className="flex h-full min-w-0">
-      <div ref={column} className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <RunHeader
-          narrow={narrow}
           run={run}
           view={view}
           views={views}
@@ -165,7 +152,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           onCaptures={openCaptures}
           onEvents={openDialog('events')}
           agentName={agentName}
-          switchable={switchable}
+          agentEntry={agentEntry}
         />
         <div className="relative min-h-0 flex-1">
           {visited.has('session') && (

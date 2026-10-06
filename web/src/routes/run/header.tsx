@@ -10,6 +10,7 @@ import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
+import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
@@ -17,7 +18,7 @@ import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
-import { ModeSwitch } from '@/routes/run/mode-switch'
+import { useModeSwitch } from '@/routes/run/mode-switch'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -54,7 +55,6 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
   const room = useStore((s) => s.roomMessages[run.id])
   const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
-  const mobile = useIsMobile()
   const [busy, setBusy] = useState(false)
   if (!condition) return null
 
@@ -88,7 +88,7 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
       if (action.label === terminalAction.label) return openTerminal()
       const steer = condition.id === 'queued-message' ? queuedSteers(room ?? []).find((m) => m.actor_id !== selfID) : undefined
       const input = run.pending_inputs?.[0]
-      if (!steer && input && run.acp && !mobile) return { label: action.label, act: () => nav.focusRequest() }
+      if (!steer && input && run.acp) return { label: action.label, act: () => nav.focusRequest() }
       const card = steer ? requestCardID.steer(steer.id) : input ? requestCardID.input(input.id) : 'details-needs-you'
       return { label: action.label, act: () => nav.reveal(card) }
     }
@@ -105,28 +105,33 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
   const owner = useStore((s) => s.members[run.member_id])
-  const meta = [agentName, modeLabel[run.mode] ?? run.mode].join(' · ')
   return (
     <div className="@container/state w-full min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
         <StatusDot tone={stateTone[state]} pulse={state === 'working'} label={stateLabel[state]} />
         <span className={state === 'needs-you' ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
-        <span className="hidden shrink-0 items-center gap-1.5 @sm/state:flex">
+        <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden>·</span>
           <AgentGlyph agent={run.harness} />
-          {meta}
+          <span className="sr-only @3xs/state:not-sr-only">
+            <span className="sr-only @xs/state:not-sr-only">{agentName} · </span>
+            {modeLabel[run.mode] ?? run.mode}
+          </span>
         </span>
-        <span className="hidden min-w-0 shrink items-center gap-1.5 @lg/state:flex">
+        <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
           <span aria-hidden>·</span>
           <Button
             variant="link"
             size="sm"
             hint="Copy branch name"
             aria-label={`Branch ${run.branch}, copy`}
+            className="min-w-0"
             onClick={(event) => void copyText(run.branch, event.currentTarget)}
           >
             <span className="max-w-56 truncate font-code text-muted">{run.branch}</span>
           </Button>
+        </span>
+        <span className="hidden shrink-0 @lg/state:flex">
           <Avatar name={owner?.display_name ?? run.member_id} color={owner?.color} />
         </span>
       </div>
@@ -151,23 +156,21 @@ export function RunHeader({
   agent,
   nav,
   composing,
-  narrow,
   detailsOpen,
   onDetails,
   onCaptures,
   onEvents,
   agentName,
-  switchable,
+  agentEntry,
 }: {
   run: RunRecord
   agentName: string
-  switchable: boolean
+  agentEntry: AgentInfo | undefined
   view: RunView
   views: RunView[]
   agent: AgentTerminal
   nav: RunNavigation
   composing: boolean
-  narrow: boolean
   detailsOpen: boolean
   onDetails: (returnTo: HTMLElement) => void
   onCaptures: (returnTo: HTMLElement | null) => void
@@ -177,6 +180,7 @@ export function RunHeader({
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const primary = usePrimaryAction(run, view, agent, nav)
+  const modeSwitch = useModeSwitch(run, agent, agentEntry)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -191,11 +195,9 @@ export function RunHeader({
         }
         stateLine={!composing && <StateLine run={run} agentName={agentName} />}
         onOpenSidebar={!mobile && collapsed ? toggleSidebar : undefined}
-        viewSwitch={!narrow && <ViewSwitch views={views} />}
         actionsLabel="Run actions"
         actions={
           <>
-            {!mobile && !narrow && <ModeSwitch run={run} agent={agent} switchable={switchable} />}
             {primary && <Button size="sm" onClick={primary.act}>{primary.label}</Button>}
             <Button
               variant="ghost"
@@ -212,6 +214,7 @@ export function RunHeader({
               run={run}
               compact={mobile}
               extra={[
+                ...(modeSwitch.item ? [modeSwitch.item] : []),
                 { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
                 { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
               ]}
@@ -219,11 +222,12 @@ export function RunHeader({
           </>
         }
       />
-      {narrow && !composing && (
-        <div className="flex shrink-0 items-center border-b border-seam px-2 py-1">
+      {!composing && (
+        <div className="flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch views={views} />
         </div>
       )}
+      {modeSwitch.dialog}
       {!mobile && <ConnectionLine className="border-b border-seam px-4 py-1" />}
     </>
   )
