@@ -265,6 +265,45 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 // durable run record and its dependent data. The published branch remains.
 // Terminal runs are deleted directly; deleting never leaves a live container.
 func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	workspace, err := s.teardownRun(ctx, run, actor, func(ctx context.Context) error {
+		return s.cfg.Store.DeleteRun(ctx, run)
+	})
+	if err != nil {
+		return err
+	}
+	s.publishRunDeleted(ctx, workspace, run, actor)
+	return nil
+}
+
+// TeardownRun does everything DeleteRun does except remove the run's rows,
+// so a caller can delete them in its own transaction. Repeating it is safe.
+func (s *Scheduler) TeardownRun(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	_, err := s.teardownRun(ctx, run, actor, nil)
+	return err
+}
+
+// DeleteMission deletes the swarm and the rows of runs already passed to
+// TeardownRun in one store transaction, then publishes run.deleted for each.
+func (s *Scheduler) DeleteMission(ctx context.Context, mission *domain.Mission, runs []domain.RunID, actor domain.MemberID) error {
+	if err := s.cfg.Store.DeleteMission(ctx, mission.ID, runs); err != nil {
+		return err
+	}
+	for _, run := range runs {
+		s.publishRunDeleted(ctx, mission.WorkspaceID, run, actor)
+	}
+	return nil
+}
+
+func (s *Scheduler) publishRunDeleted(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, actor domain.MemberID) {
+	s.publish(ctx, events.Event{
+		WorkspaceID: workspace,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunDeletedPayload{},
+	})
+}
+
+func (s *Scheduler) teardownRun(ctx context.Context, run domain.RunID, actor domain.MemberID, deleteRows func(context.Context) error) (domain.WorkspaceID, error) {
 	var workspace domain.WorkspaceID
 	for {
 		s.mu.Lock()
@@ -282,33 +321,33 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 
 		if entry == nil && pending != nil {
 			if err := s.waitPending(ctx, run); err != nil {
-				return err
+				return "", err
 			}
 			continue
 		}
 		if entry != nil {
 			if pendingDestroy {
 				if err := s.Kill(ctx, run, actor); err != nil {
-					return err
+					return "", err
 				}
 				continue
 			}
 			if retained {
 				if err := s.expireRetained(ctx, entry); err != nil {
-					return err
+					return "", err
 				}
 				continue
 			}
 			if !terminal {
 				if err := s.Kill(ctx, run, actor); err != nil {
-					return err
+					return "", err
 				}
 			}
 			if done != nil {
 				select {
 				case <-done:
 				case <-ctx.Done():
-					return ctx.Err()
+					return "", ctx.Err()
 				}
 			}
 			break
@@ -316,25 +355,25 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 
 		current, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
-			return err
+			return "", err
 		}
 		workspace = current.WorkspaceID
 		if !current.Status.Terminal() {
 			if killErr := s.Kill(ctx, run, actor); killErr != nil {
-				return killErr
+				return "", killErr
 			}
 			continue
 		}
 		retainedEntry, retry, err := s.reconcileRetainedSidecarForDelete(ctx, run)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if retry {
 			continue
 		}
 		if retainedEntry != nil {
 			if err := s.expireRetained(ctx, retainedEntry); err != nil {
-				return err
+				return "", err
 			}
 			continue
 		}
@@ -354,28 +393,22 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		if err := os.Remove(s.sidecarPath(run)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("scheduler: delete run sidecar: %w", err)
 		}
-		if err := s.cfg.Store.DeleteRun(cleanupCtx, run); err != nil {
-			return err
+		if deleteRows == nil {
+			return nil
 		}
-		return nil
+		return deleteRows(cleanupCtx)
 	}
 	s.mu.Lock()
 	service := s.evidence
 	s.mu.Unlock()
 	if purger, ok := service.(EvidencePurger); ok {
 		if err := purger.PurgeRun(ctx, workspace, run, removeSources); err != nil {
-			return fmt.Errorf("scheduler: purge run evidence: %w", err)
+			return "", fmt.Errorf("scheduler: purge run evidence: %w", err)
 		}
 	} else if err := removeSources(ctx); err != nil {
-		return err
+		return "", err
 	}
-	s.publish(ctx, events.Event{
-		WorkspaceID: workspace,
-		RunID:       run,
-		ActorID:     actor,
-		Payload:     events.RunDeletedPayload{},
-	})
-	return nil
+	return workspace, nil
 }
 
 // reconcileRetainedSidecarForDelete atomically checks for a concurrently

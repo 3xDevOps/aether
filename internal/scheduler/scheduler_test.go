@@ -1333,6 +1333,28 @@ func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 	}
 }
 
+func TestTeardownRunKeepsTheRowAndCanRepeat(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "tear down active run")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := e.sched.TeardownRun(t.Context(), run.ID, e.member.ID); err != nil {
+			t.Fatalf("TeardownRun attempt %d: %v", attempt, err)
+		}
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("teardown left the run's container")
+	}
+	if _, err := os.Stat(e.git.checkoutPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("checkout after teardown: %v, want it removed", err)
+	}
+	current, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || !current.Status.Terminal() {
+		t.Fatalf("run after teardown = %+v (err %v), want a terminal row kept", current, err)
+	}
+}
+
 func TestDeleteRunPublishesDeletedEvent(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

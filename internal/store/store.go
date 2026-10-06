@@ -139,6 +139,7 @@ type Store interface {
 	// run, and reports whether this call changed it.
 	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
+	DeleteMission(ctx context.Context, id domain.MissionID, runs []domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering
 	// it, and reports whether this call was the one that added them.
 	AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error)

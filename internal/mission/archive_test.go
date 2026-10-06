@@ -16,11 +16,11 @@ import (
 )
 
 type storeRetirer struct {
-	db      *store.DB
-	closed  map[domain.RunID]domain.RunStatus
-	deleted []domain.RunID
-	calls   int
-	failOn  int
+	db       *store.DB
+	closed   map[domain.RunID]domain.RunStatus
+	tornDown []domain.RunID
+	calls    int
+	failOn   int
 }
 
 var errInjected = errors.New("injected failure")
@@ -46,12 +46,16 @@ func (r *storeRetirer) SetMissionArchived(ctx context.Context, mission domain.Mi
 	return changed, err
 }
 
-func (r *storeRetirer) DeleteRun(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
+func (r *storeRetirer) TeardownRun(_ context.Context, run domain.RunID, _ domain.MemberID) error {
 	if err := r.fail(); err != nil {
 		return err
 	}
-	r.deleted = append(r.deleted, run)
-	return r.db.DeleteRun(ctx, run)
+	r.tornDown = append(r.tornDown, run)
+	return nil
+}
+
+func (r *storeRetirer) DeleteMission(ctx context.Context, mission *domain.Mission, runs []domain.RunID, _ domain.MemberID) error {
+	return r.db.DeleteMission(ctx, mission.ID, runs)
 }
 
 type archiveFixture struct {
@@ -244,8 +248,8 @@ func TestDeleteRefusesASwarmWithALiveRun(t *testing.T) {
 	if err := f.svc.Delete(ctx, f.human, f.params()); !errors.Is(err, store.ErrMissionPhase) || !strings.Contains(err.Error(), "wait for its runs to stop") {
 		t.Fatalf("delete with live runs = %v, want ErrMissionPhase", err)
 	}
-	if len(f.retire.deleted) != 0 {
-		t.Fatalf("a refused delete deleted %v", f.retire.deleted)
+	if len(f.retire.tornDown) != 0 {
+		t.Fatalf("a refused delete tore down %v", f.retire.tornDown)
 	}
 	f.runsAre(t, domain.RunAbandoned)
 	if err := f.svc.Delete(ctx, f.human, f.params()); err != nil {
@@ -329,8 +333,8 @@ func TestSwarmOperationsRefuseAnotherMembersProtectedRun(t *testing.T) {
 	if err := f.svc.Delete(ctx, f.human, f.params()); !errors.Is(err, permissions.ErrDenied) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("delete over a protected run = %v, want ErrDenied containing %q", err, want)
 	}
-	if len(f.retire.deleted) != 0 || f.reload(t).ArchivedAt != nil {
-		t.Fatalf("a refused operation deleted %v or archived the swarm", f.retire.deleted)
+	if len(f.retire.tornDown) != 0 || f.reload(t).ArchivedAt != nil {
+		t.Fatalf("a refused operation tore down %v or archived the swarm", f.retire.tornDown)
 	}
 	owner.Role = domain.RoleAdmin
 	if err := f.db.UpdateMember(ctx, owner); err != nil {
@@ -381,7 +385,24 @@ func TestDeleteThatFailsPartWayFinishesOnRetry(t *testing.T) {
 	f.runsAre(t, domain.RunAbandoned)
 	f.retire.failOn = 2
 	if err := f.svc.Delete(ctx, f.human, f.params()); !errors.Is(err, errInjected) {
-		t.Fatalf("delete with a failing run delete = %v, want the injected error", err)
+		t.Fatalf("delete with a failing run teardown = %v, want the injected error", err)
+	}
+	if _, err := f.db.GetMission(ctx, f.mission.ID); err != nil {
+		t.Fatalf("mission after a failed delete = %v, want it kept", err)
+	}
+	subs, err := f.db.ListSubmissions(ctx, f.mission.ID, "")
+	if err != nil || len(subs) != 1 || subs[0].State != domain.SubmissionAccepted {
+		t.Fatalf("submissions after a failed delete = %+v (err %v), want the accepted one kept", subs, err)
+	}
+	for _, run := range f.runs() {
+		if _, err := f.db.GetRun(ctx, run); err != nil {
+			t.Fatalf("run %s after a failed delete = %v, want it kept", run, err)
+		}
+	}
+	for _, event := range f.missionEvents() {
+		if event.Deleted {
+			t.Fatal("a failed delete published mission.changed with deleted")
+		}
 	}
 	if err := f.svc.Delete(ctx, f.human, f.params()); err != nil {
 		t.Fatalf("retry delete: %v", err)

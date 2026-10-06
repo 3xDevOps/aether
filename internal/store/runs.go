@@ -499,7 +499,16 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		return fmt.Errorf("store: delete run: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := deleteRunRows(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete run: commit: %w", err)
+	}
+	return nil
+}
 
+func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 	deletes := []struct {
 		query string
 		args  []any
@@ -528,9 +537,6 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 	}
 	if affected == 0 {
 		return fmt.Errorf("store: delete run: %w", ErrNotFound)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: delete run: commit: %w", err)
 	}
 	return nil
 }

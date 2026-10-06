@@ -70,8 +70,7 @@ type MissionStore interface {
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
-	DeleteMissionSubmissions(context.Context, domain.MissionID) error
-	DeleteMission(context.Context, domain.MissionID) error
+	DeleteMission(context.Context, domain.MissionID, []domain.RunID) error
 	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)
 	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
 	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 
@@ -77,7 +76,7 @@ func TestDeleteMissionRemovesItsRecordsAndReleasesItsRuns(t *testing.T) {
 	if err := db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: workspace.ID, FromRun: submission.Ref.RunID, ToRun: mission.CurrentIntegratorRunID, Body: "done"}, 10); err != nil {
 		t.Fatalf("AppendRunMessage: %v", err)
 	}
-	if err := db.DeleteMission(ctx, mission.ID); !errors.Is(err, ErrMissionPhase) {
+	if err := db.DeleteMission(ctx, mission.ID, nil); !errors.Is(err, ErrMissionPhase) {
 		t.Fatalf("delete an active mission = %v, want ErrMissionPhase", err)
 	}
 	if err := db.DeleteRun(ctx, submission.Ref.RunID); !errors.Is(err, ErrInUse) {
@@ -86,7 +85,7 @@ func TestDeleteMissionRemovesItsRecordsAndReleasesItsRuns(t *testing.T) {
 	if _, err := db.CancelMission(ctx, mission.ID, member.ID, "delete-cancel"); err != nil {
 		t.Fatalf("CancelMission: %v", err)
 	}
-	if err := db.DeleteMission(ctx, mission.ID); err != nil {
+	if err := db.DeleteMission(ctx, mission.ID, nil); err != nil {
 		t.Fatalf("DeleteMission: %v", err)
 	}
 	for _, table := range []string{"missions WHERE id", "mission_tasks WHERE mission_id", "mission_attempts WHERE mission_id", "mission_submissions WHERE mission_id", "mission_acceptances WHERE mission_id", "run_messages WHERE mission_id"} {
@@ -100,34 +99,37 @@ func TestDeleteMissionRemovesItsRecordsAndReleasesItsRuns(t *testing.T) {
 			t.Fatalf("delete run %s after its mission: %v", run, err)
 		}
 	}
-	if err := db.DeleteMission(ctx, mission.ID); !errors.Is(err, ErrNotFound) {
+	if err := db.DeleteMission(ctx, mission.ID, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete a deleted mission = %v, want ErrNotFound", err)
 	}
 }
 
-func TestDeleteMissionSubmissionsReleasesRunsTheSwarmStillLists(t *testing.T) {
+func TestDeleteMissionRemovesTheGivenRunsWithIt(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID)
 	task := mustCreateMissionTask(t, db, mission.ID, "accepted output")
-	submission := mustSubmitMissionAttempt(t, db, mission, task, "release-output")
-	mustAcceptMissionSubmission(t, db, mission, submission, "release-accept")
-	if err := db.DeleteMissionSubmissions(ctx, mission.ID); !errors.Is(err, ErrMissionPhase) {
-		t.Fatalf("release an active mission's runs = %v, want ErrMissionPhase", err)
+	submission := mustSubmitMissionAttempt(t, db, mission, task, "cascade-output")
+	mustAcceptMissionSubmission(t, db, mission, submission, "cascade-accept")
+	runs := []domain.RunID{submission.Ref.RunID, "run-already-gone"}
+	if err := db.DeleteMission(ctx, mission.ID, runs); !errors.Is(err, ErrMissionPhase) {
+		t.Fatalf("delete an active mission = %v, want ErrMissionPhase", err)
 	}
-	if _, err := db.CancelMission(ctx, mission.ID, member.ID, "release-cancel"); err != nil {
+	if _, err := db.GetRun(ctx, submission.Ref.RunID); err != nil {
+		t.Fatalf("worker after a refused delete = %v, want it kept", err)
+	}
+	if _, err := db.CancelMission(ctx, mission.ID, member.ID, "cascade-cancel"); err != nil {
 		t.Fatalf("CancelMission: %v", err)
 	}
-	if err := db.DeleteMissionSubmissions(ctx, mission.ID); err != nil {
-		t.Fatalf("DeleteMissionSubmissions: %v", err)
+	if err := db.DeleteMission(ctx, mission.ID, runs); err != nil {
+		t.Fatalf("DeleteMission: %v", err)
 	}
-	if err := db.DeleteRun(ctx, submission.Ref.RunID); err != nil {
-		t.Fatalf("delete the worker run after its submission: %v", err)
+	if _, err := db.GetRun(ctx, submission.Ref.RunID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("worker after delete = %v, want ErrNotFound", err)
 	}
-	runs, err := db.ListMissionRunIDs(ctx, mission.ID)
-	if err != nil || !slices.Contains(runs, submission.Ref.RunID) {
-		t.Fatalf("mission runs = %v, %v; want the worker still listed for a retried delete", runs, err)
+	if _, err := db.GetMission(ctx, mission.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("mission after delete = %v, want ErrNotFound", err)
 	}
 }
