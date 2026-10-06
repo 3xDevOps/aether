@@ -41,16 +41,9 @@ func (r *storeRetirer) CloseRun(ctx context.Context, run domain.RunID, _ domain.
 	return r.db.UpdateRunStatus(ctx, run, outcome, "closed", nil, nil)
 }
 
-func (r *storeRetirer) SetArchived(ctx context.Context, run domain.RunID, _ domain.MemberID, archived bool) (*domain.Run, error) {
-	var at *time.Time
-	if archived {
-		now := time.Now().UTC()
-		at = &now
-	}
-	if _, err := r.db.SetRunArchived(ctx, run, at); err != nil {
-		return nil, err
-	}
-	return r.db.GetRun(ctx, run)
+func (r *storeRetirer) SetMissionArchived(ctx context.Context, mission domain.MissionID, runs []domain.RunID, _ domain.MemberID, at *time.Time) (bool, error) {
+	changed, _, err := r.db.SetMissionArchived(ctx, mission, runs, at)
+	return changed, err
 }
 
 func (r *storeRetirer) DeleteRun(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
@@ -350,6 +343,33 @@ func TestSwarmOperationsRefuseAnotherMembersProtectedRun(t *testing.T) {
 
 func (f *archiveFixture) runs() []domain.RunID {
 	return []domain.RunID{f.mission.CurrentIntegratorRunID, f.worker}
+}
+
+func TestArchiveThatFailsPartWayArchivesNothing(t *testing.T) {
+	ctx := context.Background()
+	f := newArchiveFixture(t)
+	f.complete(t)
+	f.retire.failOn = 2
+	if _, err := f.svc.Archive(ctx, f.human, f.params()); !errors.Is(err, errInjected) {
+		t.Fatalf("archive with a failing close = %v, want the injected error", err)
+	}
+	if f.reload(t).ArchivedAt != nil {
+		t.Fatal("a failed archive archived the swarm")
+	}
+	for _, run := range f.runs() {
+		current, err := f.db.GetRun(ctx, run)
+		if err != nil || current.ArchivedAt != nil {
+			t.Fatalf("run %s after a failed archive = %+v (err %v), want unarchived like its swarm", run, current, err)
+		}
+	}
+	if _, err := f.svc.Archive(ctx, f.human, f.params()); err != nil {
+		t.Fatalf("retry archive: %v", err)
+	}
+	for _, run := range f.runs() {
+		if current, err := f.db.GetRun(ctx, run); err != nil || current.ArchivedAt == nil {
+			t.Fatalf("run %s after the retried archive = %+v (err %v), want archived", run, current, err)
+		}
+	}
 }
 
 func TestDeleteThatFailsPartWayFinishesOnRetry(t *testing.T) {

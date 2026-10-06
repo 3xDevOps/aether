@@ -3,45 +3,70 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-func (d *DB) SetMissionArchived(ctx context.Context, id domain.MissionID, at *time.Time) (bool, error) {
+// SetMissionArchived archives (at != nil) or restores the mission and the
+// given runs in one transaction, so the swarm and its runs never disagree.
+// Archiving refuses a run that is not Final; a run that no longer exists is
+// skipped. It reports whether the mission changed and which runs did.
+func (d *DB) SetMissionArchived(ctx context.Context, id domain.MissionID, runs []domain.RunID, at *time.Time) (bool, []domain.RunID, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("store: archive mission: begin: %w", err)
+		return false, nil, fmt.Errorf("store: archive mission: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	m, err := lockMissionRow(ctx, tx, id)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	var value sql.NullInt64
 	if at != nil {
 		if phaseErr := requireMissionPhase(m, "mission.archive", domain.MissionPhaseCompleted, domain.MissionPhaseCancelled); phaseErr != nil {
-			return false, phaseErr
-		}
-		if m.ArchivedAt != nil {
-			return false, tx.Commit()
+			return false, nil, phaseErr
 		}
 		ts, encErr := encodeTime(*at)
 		if encErr != nil {
-			return false, fmt.Errorf("store: archive mission: %w", encErr)
+			return false, nil, fmt.Errorf("store: archive mission: %w", encErr)
 		}
 		value = sql.NullInt64{Int64: ts, Valid: true}
-	} else if m.ArchivedAt == nil {
-		return false, tx.Commit()
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET archived_at = ? WHERE id = ?`, value, id); err != nil {
-		return false, fmt.Errorf("store: archive mission %s: %w", id, err)
+	var changedRuns []domain.RunID
+	for _, run := range runs {
+		var status domain.RunStatus
+		var archivedAt sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT status, archived_at FROM runs WHERE id = ?`, run).Scan(&status, &archivedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, nil, fmt.Errorf("store: archive mission %s: read run %s: %w", id, run, err)
+		}
+		if at != nil && !status.Final() {
+			return false, nil, fmt.Errorf("%w: mission.archive: run %s is %s; only merged, abandoned, failed or interrupted runs can be archived", ErrMissionPhase, run, status)
+		}
+		if archivedAt.Valid == value.Valid {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET archived_at = ? WHERE id = ?`, value, run); err != nil {
+			return false, nil, fmt.Errorf("store: archive mission %s: run %s: %w", id, run, err)
+		}
+		changedRuns = append(changedRuns, run)
+	}
+	missionChanged := (m.ArchivedAt != nil) != value.Valid
+	if missionChanged {
+		if _, err := tx.ExecContext(ctx, `UPDATE missions SET archived_at = ? WHERE id = ?`, value, id); err != nil {
+			return false, nil, fmt.Errorf("store: archive mission %s: %w", id, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("store: archive mission: commit: %w", err)
+		return false, nil, fmt.Errorf("store: archive mission: commit: %w", err)
 	}
-	return true, nil
+	return missionChanged, changedRuns, nil
 }
 
 // DeleteMissionSubmissions removes the swarm's submissions, the only

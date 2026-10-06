@@ -169,6 +169,35 @@ func TestSetArchivedRestore(t *testing.T) {
 	}
 }
 
+func TestSetMissionArchivedPublishesEachRunItMoves(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	sub := e.subscribe(t)
+	m := &domain.Mission{
+		WorkspaceID: e.ws.ID, Objective: "archive swarm", AccountableHumanID: e.member.ID,
+		Integrator:     domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "fake", Mode: domain.LaunchTUI},
+		IdempotencyKey: "archive-swarm",
+	}
+	if err := e.db.CreateMission(ctx, m); err != nil {
+		t.Fatalf("create mission: %v", err)
+	}
+	if _, err := e.db.CancelMission(ctx, m.ID, e.member.ID, "archive-swarm-cancel"); err != nil {
+		t.Fatalf("cancel mission: %v", err)
+	}
+	r := createRun(t, e, domain.RunAbandoned)
+	now := time.Now().UTC()
+	for _, at := range []*time.Time{&now, nil} {
+		changed, err := e.sched.SetMissionArchived(ctx, m.ID, []domain.RunID{r.ID}, e.member.ID, at)
+		if err != nil || !changed {
+			t.Fatalf("SetMissionArchived(%v) = %v, %v; want the swarm changed", at, changed, err)
+		}
+		if payload := waitArchivedEvent(t, sub, r.ID); (payload.ArchivedAt != nil) != (at != nil) {
+			t.Fatalf("run.archived payload after SetMissionArchived(%v) = %+v", at, payload)
+		}
+	}
+}
+
 // Relaunching an archived retained TUI run restores it, publishing the
 // restore under the same archiveMu that guards SetArchived.
 func TestRelaunchRestoresArchivedRun(t *testing.T) {

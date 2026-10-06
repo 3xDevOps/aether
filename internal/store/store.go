@@ -132,6 +132,9 @@ type Store interface {
 	// SetRunArchived is the narrow, conditional archive/restore mutator;
 	// see its doc comment on the DB implementation for the exact rules.
 	SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error)
+	// SetMissionArchived archives or restores a swarm together with its
+	// runs; see its doc comment on the DB implementation.
+	SetMissionArchived(ctx context.Context, id domain.MissionID, runs []domain.RunID, at *time.Time) (bool, []domain.RunID, error)
 	// ClearRunOutcomeUnseen clears outcome_unseen while owner owns the
 	// run, and reports whether this call changed it.
 	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)

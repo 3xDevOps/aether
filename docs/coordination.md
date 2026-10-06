@@ -881,11 +881,13 @@ wait for its runs to stop`.
   swarm; a `planning` or `active` one is refused with `cancel it first`. It
   closes each `completed` run - `merged` for the integrator of a completed
   swarm and for workers whose submission was accepted, `abandoned` otherwise
-  - then archives every run of the swarm as `run.archive` does, and sets the
-  swarm's `archived_at`. The dashboard folds archived swarms under
-  **Archived (n)**. Archiving again is a no-op.
+  - then archives every run of the swarm as `run.archive` does and sets the
+  swarm's `archived_at`, in one transaction: a failure archives nothing.
+  A run that fails to close stops the call before anything is archived.
+  The dashboard folds archived swarms under **Archived (n)**. Archiving
+  again is a no-op.
 - `mission.unarchive` (**Unarchive swarm**) clears `archived_at` and restores
-  the swarm's runs. Closed runs stay closed.
+  the swarm's runs in the same single transaction. Closed runs stay closed.
 - `mission.delete` (**Delete swarm…**) needs a `cancelled` or archived swarm;
   a completed one is refused with `archive it first`. It deletes each run as
   `run.delete` does, then removes the swarm, its tasks, attempts,

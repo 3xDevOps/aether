@@ -70,7 +70,6 @@ type MissionStore interface {
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
-	SetMissionArchived(context.Context, domain.MissionID, *time.Time) (bool, error)
 	DeleteMissionSubmissions(context.Context, domain.MissionID) error
 	DeleteMission(context.Context, domain.MissionID) error
 	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)

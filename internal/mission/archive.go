@@ -16,7 +16,7 @@ import (
 
 type RunRetirer interface {
 	CloseRun(context.Context, domain.RunID, domain.MemberID, domain.RunStatus) error
-	SetArchived(context.Context, domain.RunID, domain.MemberID, bool) (*domain.Run, error)
+	SetMissionArchived(context.Context, domain.MissionID, []domain.RunID, domain.MemberID, *time.Time) (bool, error)
 	DeleteRun(context.Context, domain.RunID, domain.MemberID) error
 }
 
@@ -50,12 +50,9 @@ func (s *Service) Archive(ctx context.Context, actor domain.MemberID, p protocol
 				return protocol.MissionArchiveResult{}, fmt.Errorf("mission.archive: close run %s: %w", run.ID, err)
 			}
 		}
-		if _, err := retire.SetArchived(ctx, run.ID, actor, true); err != nil {
-			return protocol.MissionArchiveResult{}, fmt.Errorf("mission.archive: archive run %s: %w", run.ID, err)
-		}
 	}
 	now := s.cfg.Now().UTC()
-	return s.setArchived(ctx, m.ID, &now)
+	return s.setArchived(ctx, retire, m.ID, runs, actor, &now)
 }
 
 func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protocol.MissionIDParams) (protocol.MissionArchiveResult, error) {
@@ -74,12 +71,7 @@ func (s *Service) Unarchive(ctx context.Context, actor domain.MemberID, p protoc
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
-	for _, run := range runs {
-		if _, err := retire.SetArchived(ctx, run.ID, actor, false); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return protocol.MissionArchiveResult{}, fmt.Errorf("mission.unarchive: restore run %s: %w", run.ID, err)
-		}
-	}
-	return s.setArchived(ctx, m.ID, nil)
+	return s.setArchived(ctx, retire, m.ID, runs, actor, nil)
 }
 
 // Delete removes the swarm row last so a failed run deletion leaves the
@@ -219,8 +211,12 @@ func (s *Service) mergedRuns(ctx context.Context, m *domain.Mission) (map[domain
 	return merged, nil
 }
 
-func (s *Service) setArchived(ctx context.Context, id domain.MissionID, at *time.Time) (protocol.MissionArchiveResult, error) {
-	changed, err := s.cfg.Missions.SetMissionArchived(ctx, id, at)
+func (s *Service) setArchived(ctx context.Context, retire RunRetirer, id domain.MissionID, runs []*domain.Run, actor domain.MemberID, at *time.Time) (protocol.MissionArchiveResult, error) {
+	ids := make([]domain.RunID, len(runs))
+	for i, run := range runs {
+		ids[i] = run.ID
+	}
+	changed, err := retire.SetMissionArchived(ctx, id, ids, actor, at)
 	if err != nil {
 		return protocol.MissionArchiveResult{}, err
 	}
