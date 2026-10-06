@@ -59,3 +59,11 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass, place: 'palette' })
   return list
 }
+
+const everything: Capability = { hasMethod: () => true, hasLocal: () => true, hasWS: () => true }
+
+/** A page this gateway or member is not offered, such as a stale shared link. */
+export function withheld(name: string, cap: Capability): boolean {
+  const named = (list: Surface[]) => list.some((surface) => surface.name === name)
+  return named(surfaces(everything)) && !named(surfaces(cap))
+}

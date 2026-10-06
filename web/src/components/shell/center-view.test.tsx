@@ -218,13 +218,34 @@ describe('CenterView route mounting', () => {
     expect(screen.getByTestId('board')).toBeDefined()
   })
 
-  it('shows the fallback for an unknown route', () => {
+  it('redirects an unknown page to the board without a history entry', () => {
+    window.history.replaceState(null, '', '/?page=nosuchpage')
+    const entries = window.history.length
     render(<CenterView />)
 
-    setRoute('missing')
+    setRoute('nosuchpage')
 
-    expect(screen.queryByTestId('board')).toBeNull()
-    expect(screen.getByText('No view registered for “missing”.')).toBeDefined()
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    expect(window.location.search).toBe('')
+    expect(window.history.length).toBe(entries)
+    expect(screen.getByTestId('board')).toBeDefined()
+  })
+
+  it('redirects a page the gateway does not offer once capabilities are known', () => {
+    routeRegistry.current.missions = StubBoard
+    useStore.setState({
+      hydrated: false,
+      capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events'] },
+    })
+    render(<CenterView />)
+    setRoute('missions')
+    expect(useStore.getState().route.name).toBe('missions')
+
+    act(() => {
+      useStore.setState({ hydrated: true })
+    })
+
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
   })
 
   it('does not retain a hidden terminal across store and run changes', () => {

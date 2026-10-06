@@ -404,8 +404,12 @@ token is removed on first load as before.
 `aether://run/<id>` still works unchanged: both shells load
 `<dashboard>?run=<id>`, which is that run's Terminal view. When the first
 hydration does not find the run, the dashboard opens the board instead, or
-onboarding for a member who has not finished it. These redirects replace the
-history entry (`redirectRoute`), so back does not return to the dead link.
+onboarding for a member who has not finished it. A `?page=` name with no
+view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
+or member, opens the board once the first hydration has the capabilities.
+These redirects replace the history entry (`redirectRoute`), so back does not
+return to the dead link. A `?page=missions&id=` link to a swarm the server
+does not know stays on the Swarms page and shows the server's error.
 
 ## Configuration view
 
