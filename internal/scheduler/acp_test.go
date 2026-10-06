@@ -28,8 +28,10 @@ type acpRuntime struct {
 	*fakeRuntime
 	fixture acpmock.Fixture
 
-	mu    sync.Mutex
-	execs []*acpExec
+	mu       sync.Mutex
+	execs    []*acpExec
+	specs    []runtime.ExecSpec
+	startErr error
 }
 
 func newACPRuntime(t *testing.T) *acpRuntime {
@@ -45,6 +47,13 @@ func (r *acpRuntime) StartExecTTY(context.Context, runtime.ID, runtime.ExecSpec)
 }
 
 func (r *acpRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec runtime.ExecSpec) (runtime.ManagedExec, error) {
+	r.mu.Lock()
+	r.specs = append(r.specs, spec)
+	err := r.startErr
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	agentIn, hostOut := io.Pipe()
 	hostIn, agentOut := io.Pipe()
 	e := &acpExec{
