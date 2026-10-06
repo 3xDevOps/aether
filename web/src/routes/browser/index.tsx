@@ -9,6 +9,7 @@ import { message } from '@/lib/format'
 import type { DevBrowserCloseParams, DevBrowserNavigateParams, DevBrowserPage, DevBrowserResetParams, DevBrowserStatusResult, DevController, DevControlFence, DevSurface } from '@/lib/types'
 import { cn, field } from '@/lib/utils'
 import { useStore } from '@/store'
+import { isTerminal } from '@/store/runs'
 import { BrowserSurface } from './surface'
 
 // A tab-local identity survives pane detach but is never cloned through
@@ -118,12 +119,13 @@ function BrowserRoute({ runID }: { runID: string }) {
     } finally { reading.current = false }
   }, [runID, controlSession, release])
 
+  const ended = run ? isTerminal(run.status) : false
   useEffect(() => {
     alive.current = true
     void refresh()
-    const timer = setInterval(() => { if (!document.hidden) void refresh() }, 1500)
+    const timer = ended ? undefined : setInterval(() => { if (!document.hidden) void refresh() }, 1500)
     return () => { alive.current = false; clearInterval(timer) }
-  }, [refresh])
+  }, [refresh, ended])
   useEffect(() => {
     if (selectedPage) setAddress(selectedPage.url)
   }, [selectedPage?.url, selectedPage?.page_id])
