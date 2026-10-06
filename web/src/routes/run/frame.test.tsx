@@ -82,6 +82,17 @@ describe('run frame', () => {
     expect(useStore.getState().runViewMemory.run_1).toBe('terminal')
   })
 
+  it('asks for control only once the owner shows the agent terminal', () => {
+    const view = open({}, 'session')
+    attached()
+    const socket = StubSocket.last()
+    expect(socket.frames()[0]).not.toMatchObject({ write: true })
+    view.rerender(rerouted('changes'))
+    expect(socket.frames()).toHaveLength(1)
+    view.rerender(rerouted('terminal'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', write: true })
+  })
+
   it('opens an Enhanced run on Session and never attaches an agent terminal', async () => {
     open({ mode: 'acp' })
     const views = screen.getByRole('tablist', { name: 'Run views' })

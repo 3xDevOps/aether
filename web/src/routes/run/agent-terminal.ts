@@ -14,7 +14,7 @@ import { useRunTerminalSession } from '@/routes/terminal/session'
 import { useTakeover } from '@/routes/terminal/use-takeover'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import { requestSessionControl, requestSessionTakeover, sessionStreamOpen, subscribeSession } from '@/store/session-stream'
+import { allowSessionAutoWrite, requestSessionControl, requestSessionTakeover, sessionStreamOpen, subscribeSession } from '@/store/session-stream'
 import type { RunRecord } from '@/store/runs'
 
 /**
@@ -26,7 +26,7 @@ export const endedStatuses: readonly RunStatus[] = ['completed', 'merged', 'aban
 
 const startingStatuses: readonly RunStatus[] = ['queued', 'provisioning']
 
-export function useAgentTerminal(run: RunRecord) {
+export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
   const runID = run.id
   const workspaceID = run.workspace_id
   const steerOthers = useStore((s) => s.workspaces[workspaceID]?.steer_others)
@@ -49,7 +49,7 @@ export function useAgentTerminal(run: RunRecord) {
   const [readingHistory, setReadingHistory] = useState(true)
 
   const steerable = run.status === 'running' || run.status === 'needs-attention'
-  const automaticWrite = !phone && steerable && run.mission_role !== 'worker' && run.member_id === self.id
+  const automaticWrite = surfaceShown && !phone && steerable && run.mission_role !== 'worker' && run.member_id === self.id
   const authorityKey = [
     self.id,
     self.role,
@@ -116,6 +116,9 @@ export function useAgentTerminal(run: RunRecord) {
     useStore.getState().touchAcpSession(runID, sessionStreamOpen)
     return unsubscribe
   }, [streamed, runID])
+  useEffect(() => {
+    if (streamed && automaticWrite) allowSessionAutoWrite(runID)
+  }, [streamed, automaticWrite, runID])
   const acpStream = useStore((s) => s.acpSessions[runID]?.stream)
   const acpControl = useStore((s) => s.acpSessions[runID]?.control)
   const acpTakeover = useStore((s) => s.acpSessions[runID]?.takeover)

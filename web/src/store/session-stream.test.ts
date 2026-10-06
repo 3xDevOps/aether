@@ -1,5 +1,5 @@
 import { createRootStore } from '@/store'
-import { requestSessionControl, subscribeSession } from '@/store/session-stream'
+import { allowSessionAutoWrite, requestSessionControl, subscribeSession } from '@/store/session-stream'
 import { ScriptedSession } from '@/test/acp-stream'
 import { alice, run, serverInfo } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -9,11 +9,11 @@ vi.mock('@/lib/api', () => ({ api: { acpSocket: (runID: string) => `ws://localho
 const controlFrames = (session: ScriptedSession) =>
   session.socket.frames().filter((f) => (f as { type?: string }).type === 'control') as { write: boolean; request_id: number }[]
 
-function setup() {
+function setup(autoWrite = true) {
   const store = createRootStore()
   store.setState({ info: serverInfo })
   store.getState().upsertRun(run({ mode: 'acp', acp: true, controller_member_id: alice.id }))
-  const stop = subscribeSession(store, 'run_1', true)
+  const stop = subscribeSession(store, 'run_1', autoWrite)
   return { store, stop, session: ScriptedSession.last() }
 }
 
@@ -38,6 +38,17 @@ describe('the session stream owner', () => {
     expect(controlFrames(session)).toHaveLength(2)
     session.send({ type: 'control', request_id: 2, ok: true, has_control: true, control_generation: 3 })
     expect(store.getState().acpSessions.run_1?.control).toMatchObject({ has_control: true, control_generation: 3 })
+    stop()
+  })
+
+  it('asks for the lease only once automatic control is allowed', () => {
+    const { stop, session } = setup(false)
+    session.open({ has_control: false })
+    expect(controlFrames(session)).toHaveLength(0)
+    allowSessionAutoWrite('run_1')
+    expect(controlFrames(session)).toMatchObject([{ write: true }])
+    allowSessionAutoWrite('run_1')
+    expect(controlFrames(session)).toHaveLength(1)
     stop()
   })
 

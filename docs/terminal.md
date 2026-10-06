@@ -72,8 +72,10 @@ or `aether attach` must acquire that lease; read-only attaches may coexist. A
 second tab or connection from the same member is a different session, not a
 second writer. Development terminals have separate, surface-scoped leases.
 
-On a desktop, the owner's first run-terminal attach asks for control
-automatically **except for mission workers**. A mission worker is a subsession
+On a desktop, the owner's run terminal asks for control automatically once
+the Terminal view is first shown, **except for mission workers**. Opening the
+run on Session or Changes keeps the terminal a mirror, so reviewing a run
+leaves the lease free. A mission worker is a subsession
 assigned work by an integrator; its terminal starts as a read-only mirror even
 for its owner. Merely viewing that worker must not create an orchestration
 hold. Use **Take control** to type, and release control to return to viewing.

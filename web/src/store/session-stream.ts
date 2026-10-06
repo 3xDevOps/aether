@@ -16,6 +16,7 @@ interface Owned {
   autoRetries: number
   retryTimer?: ReturnType<typeof setTimeout>
   stopWatch: () => void
+  askOnce: () => void
 }
 
 const owned = new Map<string, Owned>()
@@ -45,13 +46,20 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
     const sessionID = controlSession(runID)
     const created: Owned = {
       users: 1, sessionID, autoWrite, askedWrite: false, autoRequest: false, autoRetries: 0,
-      stream: null as unknown as SessionStream, stopWatch: () => {},
+      stream: null as unknown as SessionStream, stopWatch: () => {}, askOnce: () => {},
     }
     entry = created
     owned.set(runID, created)
     const askAutomatically = () => {
       clearTimeout(created.retryTimer)
       created.autoRequest = created.stream.control(true)
+    }
+    created.askOnce = () => {
+      if (!created.autoWrite || created.askedWrite) return
+      const control = store.getState().acpSessions[runID]?.control
+      if (!control || control.has_control) return
+      created.askedWrite = true
+      askAutomatically()
     }
     const stopFree = store.subscribe((next, prior) => {
       const was = prior.runs[runID]?.controller_member_id
@@ -85,10 +93,7 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
             has_control: ack.has_control,
           })
         })
-        if (created.autoWrite && !created.askedWrite && !ack.has_control) {
-          created.askedWrite = true
-          askAutomatically()
-        }
+        created.askOnce()
       },
       onFrames: (frames) => {
         void batchNotifications(store, async () => store.getState().acpFrames(runID, frames))
@@ -143,6 +148,13 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
       store.getState().acpTakeover(runID, undefined)
     })
   }
+}
+
+export function allowSessionAutoWrite(runID: string): void {
+  const entry = owned.get(runID)
+  if (!entry || entry.autoWrite) return
+  entry.autoWrite = true
+  entry.askOnce()
 }
 
 export function requestSessionControl(runID: string, write: boolean, takeover = false): boolean {

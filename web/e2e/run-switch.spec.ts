@@ -423,3 +423,40 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
   await expect(page.getByRole('button', { name: 'Take control' })).toBeHidden()
   await expect(page.getByText('run control is held by another session')).toBeHidden()
 })
+
+test('reviewing a run leaves its control free until its terminal is shown', async ({ page, aether }) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  const aliceID = await memberID(alice)
+  aether.installAgent(aliceID, 'claude', 'sleep 600')
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id,
+    harness: 'claude',
+    task: 'reviewed run',
+  })
+  await expect
+    .poll(
+      async () => (await alice.api.rpc<{ run: { status: string } }>('run.get', { run_id: run.id })).run.status,
+      { timeout: 3 * 60 * 1000 },
+    )
+    .toBe('running')
+  const controller = async () =>
+    (await alice.api.rpc<{ controller?: { member_id: string } }>('run.room.status', {
+      workspace_id: workspaces[0].id,
+      run_id: run.id,
+    })).controller
+
+  const url = new URL(alice.url)
+  url.searchParams.set('run', run.id)
+  url.searchParams.set('view', 'changes')
+  await page.goto(url.toString())
+  await expect(page.getByRole('heading', { name: 'reviewed run', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Session' }).click()
+  await page.waitForTimeout(3000)
+  expect(await controller()).toBeUndefined()
+
+  await page.getByRole('tab', { name: 'Terminal' }).click()
+  await expect.poll(controller, { timeout: 30_000 }).toMatchObject({ member_id: aliceID })
+})

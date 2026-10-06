@@ -119,8 +119,9 @@ it never interrupts; `Mod+Shift+Enter` always queues.
 The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`); `/` lists the agent's commands and `@` completes a
 path in the run's checkout. Sending, answering and changing options need the
-run's control lease: the tab that opens the run takes it when nobody holds
-it, and the composer offers **Take control** otherwise.
+run's control lease: the owner's desktop tab takes it when it first shows
+Session and nobody holds it, and the composer offers **Take control**
+otherwise.
 
 A pending request docks above the composer, one at a time with `1/N`, and
 the composer stays shut until it is answered; **Interrupt** stays, to stop

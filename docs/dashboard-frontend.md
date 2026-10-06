@@ -1521,8 +1521,8 @@ open and not `switching`; `store/session-stream.ts` owns the socket
 resume, an immediate resubscribe on close 1012, a final stop on 1008 or a
 `-32602` refusal) and the control session id, so the lease and timed
 takeover frames work as on an attach and switching views keeps the stream.
-The tab asks for the lease on its first ack when the terminal would (the
-owner, not a phone, not a swarm worker). A refused automatic request shows
+The tab asks for the lease once it has shown Session and the stream has
+acked, when the terminal would (the owner, not a phone, not a swarm worker). A refused automatic request shows
 no error: it retries with backoff while the holder is the viewer or nobody,
 and again when `run.controller` reports the lease free. Leaving the page
 releases a held lease, so a reload takes it straight back; closing the
@@ -1933,8 +1933,9 @@ because the page cannot tell whether the terminal predates the first one.
   compact current screen and bounded scrollback. Upward scrolling fetches older
   normalized output through `terminal.history`, independently of the attach.
   The dashboard does not download the raw archive.
-- **Controller lease and compact bootstrap.** A desktop owner's first attach
-  asks for write for ordinary and integrator runs, not mission workers.
+- **Controller lease and compact bootstrap.** A desktop owner's attach asks
+  for write for ordinary and integrator runs, not mission workers, once the
+  Terminal view has been shown; until then it is a mirror.
   Mission-worker terminals and other members start as mirrors. The server
   grants write only when no controller exists; a second tab cannot become a
   second writer.

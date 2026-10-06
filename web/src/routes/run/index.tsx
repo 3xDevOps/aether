@@ -81,7 +81,7 @@ function RunFrame({ run, requested }: { run: RunRecord; requested?: string }) {
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
 
-  const agent = useAgentTerminal(run)
+  const agent = useAgentTerminal(run, visited.has(defaultView(run)))
   const { agents } = useAgentList()
   const agentName = agentDisplayNames(agents)[run.harness] ?? run.harness
   const switchable = agents?.find((entry) => entry.name === run.harness)?.switchable === true
