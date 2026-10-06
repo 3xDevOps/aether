@@ -84,7 +84,7 @@ test('a launch refusal sits below the form, not over it', async ({ page, aether 
 
   await page.goto(alice.url)
   await page
-    .getByRole('banner', { name: 'Aether' })
+    .getByRole('banner')
     .getByRole('button', { name: 'New run' })
     .tap()
   const dialog = page.getByRole('dialog', { name: 'New run' })

@@ -46,7 +46,7 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   const github = wizard.agent.github
   await wizard.agent.connectGitHub()
   await expect(github.section).toContainText(
-    'There is no gh in your environment terminal',
+    'There is no gh in your Environment',
     { timeout: 3 * 60 * 1000 },
   )
 
@@ -66,7 +66,7 @@ test('connecting GitHub registers a signing key and keeps gh credentials', async
   // The state, not the command block: a probe that threw would put the
   // same block back, so only this sentence proves the check passed.
   await expect(github.section).toContainText(
-    'The login command is ready in your environment terminal:',
+    'The login command is ready in your Environment:',
     { timeout: 30_000 },
   )
   await expect(github.commands).toContainText([githubLoginCommand])

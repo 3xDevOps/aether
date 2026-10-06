@@ -26,7 +26,8 @@ test('a toast clears the bottom edge on a phone', async ({ page, aether }) => {
     .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: 'Templates', exact: true })
     .tap()
-  await page.getByRole('button', { name: 'Delete', exact: true }).tap()
+  await page.getByRole('button', { name: 'More for nightly', exact: true }).tap()
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).tap()
   await page
     .getByRole('alertdialog')
     .getByRole('button', { name: 'Delete', exact: true })

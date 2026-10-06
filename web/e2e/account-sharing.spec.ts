@@ -99,7 +99,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await expect(sharing.getByRole('button', { name: 'Revoke access' })).toBeVisible()
     const notice = sharing.getByRole('status')
     await expect(notice).toContainText(
-      `Your environment terminal was started before you shared, so a Claude Code login written there will not reach ${bobName}'s runs`,
+      `Your Environment was started before you shared, so a Claude Code login written there will not reach ${bobName}'s runs`,
     )
     await notice.getByRole('button', { name: 'Stop environment' }).click()
     const confirm = page.getByRole('alertdialog', { name: 'Stop your environment?' })
