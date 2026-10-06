@@ -44,8 +44,6 @@ func (s *Scheduler) Switching(run domain.RunID) domain.LaunchMode {
 	return ""
 }
 
-// AgentSwitchable reports whether SwitchMode accepts a run of harnessName
-// launched by member on account.
 func (s *Scheduler) AgentSwitchable(ctx context.Context, member, account domain.MemberID, harnessName string) (bool, error) {
 	profile, _, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {

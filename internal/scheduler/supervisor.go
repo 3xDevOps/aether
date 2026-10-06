@@ -13,19 +13,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
-// supervisorStateFile is where the run supervisor records the child a mode
-// switch started. It is inside the container because the run directory is
-// read-only there.
+// The run directory is read-only inside the container.
 const supervisorStateFile = "/tmp/aether-supervisor"
 
-// wrapTUICommand runs the harness as the first child of a POSIX-shell
-// supervisor. Harness arguments stay positional parameters so argv can never
-// become shell source. After the harness exits, a login shell keeps the
-// container available until the run is closed or killed; with no argv (an
-// ACP-driven run) the login shell is the first child. SIGUSR1 and SIGUSR2
-// end the container with 0 and 1, which is how a background run over ACP
-// reports its one turn's outcome. SIGALRM swaps the child for a mode switch
-// (swapChild).
+// Harness arguments stay positional parameters so argv can never become
+// shell source.
 func wrapTUICommand(argv []string) []string {
 	return supervisorCommand(path.Join(coordtransport.MountDir, coordtransport.NextCommandName), supervisorStateFile, argv)
 }
@@ -35,9 +27,10 @@ func supervisorCommand(nextFile, stateFile string, argv []string) []string {
 	return append([]string{"/bin/sh", "-c", script, "aether-run-supervisor"}, argv...)
 }
 
-// supervisorScript ends the current child on SIGALRM and then runs the body
-// of the next-command file, or a login shell when the body is empty. A
-// second SIGALRM while the first is pending kills the child; one that arrives
+// supervisorScript contract: SIGUSR1 and SIGUSR2 end the container with 0
+// and 1 (a background run's turn outcome). SIGALRM ends the current child and
+// runs the body of the next-command file, or a login shell when the body is
+// empty; a second SIGALRM while the first is pending kills the child, and one
 // after the file's nonce was consumed is ignored. The file's first line is
 // "# <nonce>"; the state file reads "<nonce> started" once the old child is
 // gone and "<nonce> exited <status>" when the new one exits.
@@ -160,11 +153,7 @@ do
 	fi
 done`
 
-// swapScript asks the supervisor to swap its child and waits for the old one
-// to be gone: SIGALRM, a second SIGALRM after 10 seconds, failure after 15.
-// It then waits $2 seconds and fails with exit 3 and the new child's status
-// on stdout if that child has already exited. PID 1 is Docker's init, which
-// forwards the signal to the supervisor.
+// PID 1 is Docker's init, which forwards the signal to the supervisor.
 const swapScript = `nonce=$1 settle=$2 state=$3
 kill -ALRM 1 || exit 1
 i=0
@@ -192,13 +181,9 @@ case $s in
 	;;
 esac`
 
-// swapBound bounds the swap exec: the script's own 15 seconds, the settle
-// time and Docker's exec round trips.
+// swapBound must exceed swapScript's own 15 seconds plus the settle time.
 const swapBound = 30 * time.Second
 
-// swapChild has the supervisor of container cid run the next-command file
-// carrying nonce in place of its current child. With settle, the new child
-// must still be running that long after it started.
 func (s *Scheduler) swapChild(ctx context.Context, cid runtime.ID, nonce string, settle time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, swapBound)
 	defer cancel()

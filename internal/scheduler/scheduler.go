@@ -268,12 +268,11 @@ type supervised struct {
 	parkedAt         time.Time
 	postParkActivity time.Time
 	launchMode       domain.LaunchMode
-	// acp mirrors Run.ACP.
-	acp             bool
-	missionAssigned bool
-	retained        bool
-	retainedUntil   *time.Time
-	destroyPending  bool
+	acp              bool
+	missionAssigned  bool
+	retained         bool
+	retainedUntil    *time.Time
+	destroyPending   bool
 	// evidencePending persists a completed terminalization whose required
 	// evidence capture did not finish, so a same-status retry resolves it first.
 	evidencePending bool
