@@ -1,13 +1,16 @@
-import { useState } from 'react'
+import { type ComponentProps, useState } from 'react'
 import { AddAgent } from '@/components/agents/add-agent'
-import { defaultMode, enhancedSupported, label, ready } from '@/components/agents/agent-copy'
+import { defaultMode, enhancedSupported, label } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
+import { ModeOverview } from '@/components/agents/mode-comparison'
 import { modes } from '@/components/launch/modes'
 import { ArrowLeft } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
@@ -43,12 +46,31 @@ function DefaultMode({ agent }: { agent: AgentInfo }) {
   )
 }
 
+function AgentRows({ agents, ...actions }: { agents: AgentInfo[] } & Pick<ComponentProps<typeof AgentList>, 'onSetUp' | 'onRun' | 'returnFocusTo'>) {
+  const list = (shown: AgentInfo[], label?: string) => (
+    <AgentList agents={shown} label={label} extra={(agent) => agent.installed === true && <DefaultMode agent={agent} />} {...actions} />
+  )
+  const installed = agents.filter((agent) => agent.installed === true)
+  const more = agents.filter((agent) => agent.installed !== true)
+  if (installed.length === 0 || more.length === 0) return list(agents)
+  return (
+    <>
+      {list(installed)}
+      <Collapsible>
+        <CollapsibleTrigger>More agents ({more.length})</CollapsibleTrigger>
+        <CollapsibleContent><div className="pt-2">{list(more, 'More agents')}</div></CollapsibleContent>
+      </Collapsible>
+    </>
+  )
+}
+
 export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const { agents, error, reload } = useAgentList(client, true)
   const [screen, setScreen] = useState('')
   const [returnFocusTo, setReturnFocusTo] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
+  const [compare, setCompare] = useState(false)
   const loading = useDelayed(agents === null && error === null)
   const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
   const settingUp = agents?.find((agent) => agent.name === screen)
@@ -86,6 +108,8 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
             <>
               <p className="max-w-2xl text-ui text-muted">
                 An agent is the coding CLI a run starts. Each one is installed once in your environment and every workspace uses it.
+                {' '}A run shows the agent in Standard or Enhanced mode.{' '}
+                <Button variant="link" size="sm" onClick={() => setCompare(true)}>What's the difference?</Button>
               </p>
               {loading && <div className="h-28"><Skeleton className="size-full" /></div>}
               {error && (
@@ -95,11 +119,10 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
               )}
               {agents?.length === 0 && <p className="text-ui text-muted">This server lists no agents.</p>}
               {agents && agents.length > 0 && (
-                <AgentList
+                <AgentRows
                   agents={agents}
                   onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                   onRun={caps.hasMethod('run.launch') ? run : undefined}
-                  extra={(agent) => ready(agent) && <DefaultMode agent={agent} />}
                   returnFocusTo={returnFocusTo}
                 />
               )}
@@ -108,6 +131,15 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           )}
         </div>
       </div>
+      <Dialog open={compare} onOpenChange={setCompare}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Standard or Enhanced</DialogTitle>
+            <DialogDescription>Two ways a run can show the same agent. You pick one per run; the default is set per agent.</DialogDescription>
+          </DialogHeader>
+          <ModeOverview />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

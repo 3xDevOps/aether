@@ -1,6 +1,7 @@
 import { FileText, Terminal } from '@/components/icons'
 import { buttonVariants } from '@/components/ui/button'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
+import { cn } from '@/lib/utils'
 
 function WorkLine({ tool }: { tool: SessionToolCall }) {
   const Icon = tool.tool_kind === 'execute' ? Terminal : FileText
@@ -21,7 +22,7 @@ function RequestMock({ request }: { request: SessionRequest }) {
       </span>
       <span className="flex gap-1.5">
         {request.options?.map((option, index) => (
-          <span key={option.id} className={buttonVariants({ variant: index === 0 ? 'primary' : 'secondary', size: 'sm' })}>
+          <span key={option.id} className={cn(buttonVariants({ variant: index === 0 ? 'primary' : 'secondary', size: 'sm' }), 'pointer-events-none')}>
             {option.name}
           </span>
         ))}

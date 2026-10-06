@@ -46,19 +46,44 @@ describe('splitArgv', () => {
 })
 
 describe('agents page', () => {
-  it('lists each agent with its install and login state, its modes and one action', async () => {
+  it('lists installed agents first and folds the rest under More agents', async () => {
     mount()
     await flush()
 
     const rows = within(screen.getByRole('list', { name: 'Agents' })).getAllByRole('listitem')
+    expect(rows).toHaveLength(1)
     expect(rows[0].textContent).toContain('Claude Code')
     expect(rows[0].textContent).toContain('Installed · Login found')
     expect(rows[0].textContent).toContain('Standard · Enhanced')
     expect(within(rows[0]).getByRole('button', { name: 'Run Claude Code' })).toBeDefined()
-    expect(rows[1].textContent).toContain('Not installed')
-    expect(within(rows[1]).getByLabelText('Supports Standard only')).toBeDefined()
-    expect(within(rows[1]).getByRole('button', { name: 'Set up myagent' })).toBeDefined()
-    expect(within(rows[1]).queryByRole('button', { name: 'Run myagent' })).toBeNull()
+    expect(within(rows[0]).getByRole('combobox', { name: 'Default mode for Claude Code' })).toBeDefined()
+    expect(screen.queryByRole('list', { name: 'More agents' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'More agents (1)' }))
+    const more = within(screen.getByRole('list', { name: 'More agents' })).getAllByRole('listitem')
+    expect(more[0].textContent).toContain('Not installed')
+    expect(within(more[0]).getByLabelText('Supports Standard only')).toBeDefined()
+    expect(within(more[0]).getByRole('button', { name: 'Set up myagent' })).toBeDefined()
+    expect(within(more[0]).queryByRole('combobox')).toBeNull()
+  })
+
+  it('asks an installed agent without a login to log in', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([agentInfo({ display_name: 'Claude Code', login_found: false })])
+    mount()
+    await flush()
+
+    expect(screen.getByRole('button', { name: 'Log in Claude Code' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'More agents (0)' })).toBeNull()
+  })
+
+  it('explains Standard and Enhanced in a dialog', async () => {
+    mount()
+    await flush()
+
+    fireEvent.click(screen.getByRole('button', { name: "What's the difference?" }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Standard or Enhanced' }))
+    expect(dialog.getByText('Works with every agent.')).toBeDefined()
+    expect(dialog.queryByRole('radio')).toBeNull()
   })
 
   it('keeps a default mode per agent without making it the most recent launch', async () => {

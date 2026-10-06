@@ -15,6 +15,7 @@ function facts(agent: AgentInfo): string {
 
 export function AgentList({
   agents,
+  label: listLabel = 'Agents',
   onSetUp,
   onRun,
   extra,
@@ -22,6 +23,7 @@ export function AgentList({
   primary,
 }: {
   agents: AgentInfo[]
+  label?: string
   onSetUp?: (agent: AgentInfo) => void
   onRun?: (agent: AgentInfo) => void
   extra?: (agent: AgentInfo) => ReactNode
@@ -35,10 +37,11 @@ export function AgentList({
     Array.from(actions).find((action) => action.dataset.agentAction === returnFocusTo)?.focus()
   }, [returnFocusTo])
   return (
-    <ul ref={list} aria-label="Agents" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+    <ul ref={list} aria-label={listLabel} className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
       {agents.map((agent) => {
         const name = label(agent)
         const runnable = ready(agent) && onRun
+        const action = runnable ? 'Run' : agent.installed === true ? 'Log in' : 'Set up'
         return (
           <li key={agent.name} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
             <AgentGlyph agent={agent.glyph ?? agent.name} colored className="size-5" />
@@ -58,10 +61,10 @@ export function AgentList({
                   size="sm"
                   variant={agent.name === primary ? 'primary' : 'secondary'}
                   data-agent-action={agent.name}
-                  aria-label={`${runnable ? 'Run' : 'Set up'} ${name}`}
+                  aria-label={`${action} ${name}`}
                   onClick={() => (runnable ? onRun(agent) : onSetUp?.(agent))}
                 >
-                  {runnable ? 'Run' : 'Set up'}
+                  {action}
                 </Button>
               )}
               {runnable && onSetUp && (

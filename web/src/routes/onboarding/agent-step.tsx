@@ -4,11 +4,13 @@ import { defaultMode } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
+import { ModeOverview } from '@/components/agents/mode-comparison'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
+import { cn } from '@/lib/utils'
 import type { GitHubConnectResult } from '@/lib/types'
 import { useAgentList } from '@/routes/agents/use-agents'
 import { actionRow, Step } from '@/routes/onboarding/layout'
@@ -59,7 +61,7 @@ export function AgentStep({
         ) : (
           <div className="h-20"><Skeleton className="size-full" /></div>
         )}
-        <div className={actionRow}>{back}</div>
+        <div className={cn(actionRow, 'max-sm:static')}>{back}</div>
       </section>
     )
   }
@@ -69,7 +71,7 @@ export function AgentStep({
     <Step
       label="Agent"
       title="Set up an agent"
-      lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it."
+      lead="An agent is the coding CLI a run starts, such as Claude Code or Codex. Set one up once and every workspace can use it. A run shows the agent in one of two modes:"
       actions={
         <>
           {installed ? <Button onClick={onNext}>Continue</Button> : <Button variant="secondary" onClick={onNext}>Skip for now</Button>}
@@ -77,6 +79,7 @@ export function AgentStep({
         </>
       }
     >
+      <ModeOverview />
       {loading && <div className="h-28"><Skeleton className="size-full" /></div>}
       {error && (
         <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={reload}>Retry agents</Button>}>
