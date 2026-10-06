@@ -17,7 +17,23 @@ const (
 	// ErrorReasonAlreadyAnswered is the data.reason of the CodeConflict
 	// run.input.answer returns when another answer won.
 	ErrorReasonAlreadyAnswered = "already_answered"
+
+	// MethodRunModeSwitch moves a live run between Standard (tui) and
+	// Enhanced (acp). It needs Steer and, while anyone holds the run's
+	// control, that lease.
+	MethodRunModeSwitch = "run.mode.switch"
+	// ErrorReasonNotSwitchable is the data.reason of the CodeInvalidState
+	// run.mode.switch returns for an agent that cannot switch.
+	ErrorReasonNotSwitchable = "not_switchable"
 )
+
+// RunModeSwitchParams.Mode is "tui" or "acp". The lease may be empty while
+// nobody holds the run's control. The result is a RunResult.
+type RunModeSwitchParams struct {
+	RunID string `json:"run_id"`
+	Mode  string `json:"mode"`
+	ACPLease
+}
 
 // ACPLease is the control lease proof every enhanced-run input carries.
 type ACPLease struct {

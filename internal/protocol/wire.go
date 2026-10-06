@@ -31,6 +31,9 @@ type Run struct {
 	// ControllerMemberID holds the run's control lease; empty means nobody
 	// does. No omitempty, so absence still means a gateway too old to say.
 	ControllerMemberID string `json:"controller_member_id"`
+	// Switching is the mode (tui or acp) a run.mode.switch is moving the run
+	// to, empty when none is in flight.
+	Switching string `json:"switching,omitempty"`
 	// Always a list, including [].
 	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
 	Branch        string                   `json:"branch"`
@@ -669,6 +672,9 @@ type AgentInfo struct {
 	// Enhanced is "native", "adapter" or "none".
 	Enhanced          string `json:"enhanced"`
 	EnhancedInstalled bool   `json:"enhanced_installed"`
+	// Switchable means a running session can move between Standard and
+	// Enhanced (run.mode.switch).
+	Switchable bool `json:"switchable"`
 	// LoginFound checks the launch home for login paths, not for a working
 	// session.
 	LoginFound bool `json:"login_found"`

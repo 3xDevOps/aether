@@ -84,6 +84,11 @@ type RunController interface {
 	// zero reads from the newest.
 	ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error)
 	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
+	// SwitchMode moves a live run between Standard and Enhanced; admit
+	// calls begin under the caller's authorization.
+	SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error
+	// Switching is the mode a run is switching to, empty when none.
+	Switching(run domain.RunID) domain.LaunchMode
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)

@@ -141,6 +141,7 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		Glyph:       profile.Name,
 		Source:      source,
 		Enhanced:    string(profile.EnhancedSupport()),
+		Switchable:  profile.Switchable(),
 		DefaultMode: string(domain.LaunchTUI),
 	}
 	if source == "member" {
