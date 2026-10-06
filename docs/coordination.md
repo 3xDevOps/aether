@@ -317,9 +317,13 @@ The dashboard's Activity feed shows `coord.message` as an **Agent message**
 row such as `Planner → Backend · question`; `aether timeline` prints it as
 `<from-run> -> <to-run> · question`. The CLI has no command for bodies, so
 read them in the dashboard or through `coord.messages.list`.
-`workspace.timeline` accepts
-`mission_id`, which matches every run that has served the swarm, and its
-`run_id` filter also matches mail addressed to the run. A run snapshot's
+
+`workspace.timeline` accepts `mission_id`, which matches events of every run
+that has served the swarm, and its `run_id` filter also matches mail
+addressed to the run. The two mission filters differ: the timeline also
+shows mail a swarm run received from a run outside the swarm, which
+`coord.messages.list` omits because its sender carries no swarm stamp. A
+run snapshot's
 `unacked_messages` counts mail addressed to the run that it has not
 acknowledged.
 
