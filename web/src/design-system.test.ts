@@ -60,7 +60,6 @@ const rules: Rule[] = [
       'routes/admin-dialogs/import-repository-dialog.tsx',
       'routes/admin-dialogs/workspace-settings-dialog.tsx',
       'routes/board/clear-done-dialog.tsx',
-      'routes/board/member-avatar.tsx',
       'routes/browser/index.tsx',
       'routes/browser/surface.tsx',
       'routes/diff/conflict-chips.tsx',
