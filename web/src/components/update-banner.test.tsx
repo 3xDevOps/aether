@@ -362,8 +362,6 @@ describe('the server update banner', () => {
       expect(vi.mocked(client.serverInfo).mock.calls.length).toBeGreaterThan(reads),
     )
     await waitFor(() => expect(screen.queryByText('The server is behind.')).toBeNull())
-    // And nothing is left saying a restart is coming, which is the line
-    // every non-admin sees in the status bar.
     expect(useStore.getState().serverUpdateProgress).toBeNull()
     stop()
     vi.unstubAllGlobals()

@@ -161,7 +161,7 @@ describe('update dismissals are per version', () => {
     expect(useStore.getState().dismissedUpdates.server).toBe('v1.3.0')
   })
 
-  it('clears every kind, which is what the status bar badge does', () => {
+  it('clears every kind at once', () => {
     useStore.getState().dismissUpdate('cli', 'v1.3.0')
     useStore.getState().dismissUpdate('server', 'v1.3.0')
     useStore.getState().dismissUpdate('shell', 'v1.3.0')

@@ -184,8 +184,6 @@ describe('onboarding wizard', () => {
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    // Linked: the summary carries the address and user from link.status,
-    // and the store mirror is updated for the status bar.
     expect(await screen.findByText('host:2222')).toBeDefined()
     expect(screen.getByText('alice')).toBeDefined()
     expect(client.localLinkStatus).toHaveBeenCalledTimes(1)
