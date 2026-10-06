@@ -13,6 +13,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -157,7 +158,7 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 	cfg := &container.Config{
 		Image:      spec.Image,
 		User:       spec.User,
-		Env:        dockerEnv(spec.Env),
+		Env:        dockerEnv(trustCheckout(spec.Env, spec.WorktreeMountPath)),
 		WorkingDir: spec.WorkingDir,
 		Entrypoint: spec.Command,
 		Labels:     labels,
@@ -279,6 +280,31 @@ func dockerEnv(env map[string]string) []string {
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		out = append(out, k+"="+env[k])
 	}
+	return out
+}
+
+// trustCheckout marks the checkout as git's safe.directory: an unprivileged
+// server owns it on the host, and git refuses a repository the container user
+// does not own. GIT_CONFIG_* reaches every git process, execs included. A
+// workspace's own entries are kept; a malformed count is left for git to
+// report.
+func trustCheckout(env map[string]string, checkout string) map[string]string {
+	if checkout == "" {
+		return env
+	}
+	n := 0
+	if count, ok := env["GIT_CONFIG_COUNT"]; ok {
+		parsed, err := strconv.Atoi(count)
+		if err != nil || parsed < 0 {
+			return env
+		}
+		n = parsed
+	}
+	out := make(map[string]string, len(env)+3)
+	maps.Copy(out, env)
+	out["GIT_CONFIG_KEY_"+strconv.Itoa(n)] = "safe.directory"
+	out["GIT_CONFIG_VALUE_"+strconv.Itoa(n)] = checkout
+	out["GIT_CONFIG_COUNT"] = strconv.Itoa(n + 1)
 	return out
 }
 
