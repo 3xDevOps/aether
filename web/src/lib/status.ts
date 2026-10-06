@@ -64,14 +64,6 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   return { state: 'working', reason: workingReason(run, ctx) }
 }
 
-export function runState(run: RunRecord, ctx: StateContext): PresentationState {
-  return presentRun(run, ctx).state
-}
-
-export function stateReason(run: RunRecord, ctx: StateContext): string {
-  return presentRun(run, ctx).reason
-}
-
 export function groupOf(state: PresentationState): RunGroup {
   switch (state) {
     case 'needs-you':

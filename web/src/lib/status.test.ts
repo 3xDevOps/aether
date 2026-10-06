@@ -1,5 +1,5 @@
 import { awaitingReview } from '@/lib/needs-you'
-import { groupOf, presentRun, runLabel, runState, stateLabel, stateReason } from '@/lib/status'
+import { groupOf, presentRun, runLabel, stateLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
@@ -54,12 +54,12 @@ describe('run presentation', () => {
 
   it('reads what the agent is doing from its activity', () => {
     const reading = { ...toRecord(run()), activity: { verb: 'Reading', target: 'src/auth.ts', at: '2026-08-14T10:19:00Z' } }
-    expect(stateReason(reading, ctx)).toBe('Reading src/auth.ts')
+    expect(presentRun(reading, ctx).reason).toBe('Reading src/auth.ts')
   })
 
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', paused: true }))
-    expect(runState(paused, ctx)).toBe('paused')
+    expect(presentRun(paused, ctx).state).toBe('paused')
     expect(groupOf('paused')).toBe('working')
   })
 
