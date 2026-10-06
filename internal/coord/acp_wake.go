@@ -3,6 +3,7 @@ package coord
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,9 +59,10 @@ func (s *Service) wakeEnhancedLocked(run domain.RunID) {
 }
 
 // wakeEnhanced prompts an idle enhanced run once per set of unread message
-// IDs: a turn the agent ends without reading its mail is not repeated until
-// another message arrives. It reports whether admission refused the wake
-// while the session stayed idle, which no turn end will retry.
+// IDs and, for an integrator, once per mission notice: a turn the agent ends
+// without acting is not repeated until something else changes. It reports
+// whether admission refused the wake while the session stayed idle, which
+// no turn end will retry.
 func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	mail, ok := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
 	if !ok || !s.cfg.ACPWaker.IdleEnhanced(run) || !s.enterRun(run) {
@@ -77,11 +79,21 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 		slog.Warn("coord: enhanced wake: list unread mail", "run", run, "error", err)
 		return false
 	}
-	if !s.unwoken(run, ids) {
+	notice := s.integratorNotice(ctx, run)
+	freshMail := s.unwoken(run, ids)
+	missionChanged := s.missionNoticeChanged(run, notice)
+	if !freshMail && !missionChanged {
 		return false
 	}
+	var prompt strings.Builder
+	if len(ids) > 0 {
+		prompt.WriteString(protocol.CoordInboxContext(len(ids)))
+	}
+	if missionChanged {
+		prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission))
+	}
 	err = s.cfg.WakeAdmission(ctx, run, func() error {
-		return s.cfg.ACPWaker.WakeEnhanced(ctx, run, protocol.CoordInboxContext(len(ids)))
+		return s.cfg.ACPWaker.WakeEnhanced(ctx, run, prompt.String())
 	})
 	if err != nil {
 		slog.Debug("coord: enhanced wake suppressed", "run", run, "error", err)
@@ -97,7 +109,57 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	for _, id := range ids {
 		woken[id] = struct{}{}
 	}
+	if missionChanged {
+		s.enhancedNotices[run] = notice
+	}
 	return false
+}
+
+type missionNotice struct {
+	mission string
+	key     string
+}
+
+func (s *Service) integratorNotice(ctx context.Context, run domain.RunID) missionNotice {
+	if s.cfg.Mission == nil {
+		return missionNotice{}
+	}
+	a, err := s.cfg.Mission.Assignment(ctx, run)
+	if err != nil {
+		slog.Debug("coord: enhanced wake: read mission assignment", "run", run, "error", err)
+		return missionNotice{}
+	}
+	return missionNotice{mission: a.MissionID, key: a.IntegratorNotice()}
+}
+
+// missionNoticeChanged reports whether an integrator's notice differs from
+// the one its last wake announced. The first notice seen is the baseline:
+// the integrator's own task already describes the mission it starts in.
+func (s *Service) missionNoticeChanged(run domain.RunID, notice missionNotice) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if notice.key == "" {
+		delete(s.enhancedNotices, run)
+		return false
+	}
+	announced, ok := s.enhancedNotices[run]
+	if !ok {
+		s.enhancedNotices[run] = notice
+		return false
+	}
+	return announced.key != notice.key
+}
+
+// wakeMissionIntegrators offers a changed mission to its enhanced
+// integrators that a wake has already seen.
+func (s *Service) wakeMissionIntegrators(mission domain.MissionID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for run, notice := range s.enhancedNotices {
+		if notice.mission == string(mission) {
+			s.wakeEnhancedLocked(run)
+		}
+	}
 }
 
 // unwoken forgets woken IDs that are no longer unread and reports whether

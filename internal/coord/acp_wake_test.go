@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -150,5 +151,67 @@ func TestEnhancedWakeRetriesARefusedAdmission(t *testing.T) {
 	defer mu.Unlock()
 	if refusals != 1 {
 		t.Fatalf("admission refused %d times, want 1", refusals)
+	}
+}
+
+type questionMissionStub struct {
+	missionTransportStub
+	mu   sync.Mutex
+	open int
+}
+
+func (m *questionMissionStub) Assignment(ctx context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
+	a, err := m.missionTransportStub.Assignment(ctx, run)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a.Phase, a.OpenQuestions = "active", m.open
+	return a, err
+}
+
+func (m *questionMissionStub) setOpen(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.open = n
+}
+
+// A human's answer changes no mail, so the mission change itself wakes an
+// enhanced integrator, once per changed notice.
+func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
+	waker := newFakeACPWaker()
+	stub := &questionMissionStub{open: 1}
+	h := newHarness(t, 2, func(c *Config) {
+		c.WakeAdmission = allowHookWake
+		c.ACPWaker = waker
+		c.Mission = stub
+	})
+	worker, integrator := h.run(0), h.run(1)
+	stub.mission, stub.integrator = []domain.RunID{worker, integrator}, integrator
+	h.start()
+	publish := func() {
+		t.Helper()
+		if _, err := h.bus.Publish(context.Background(), events.Event{
+			WorkspaceID: h.workspace, Payload: events.MissionChangedPayload{MissionID: "mission-1"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	waker.endTurn(integrator)
+	h.svc.wakeEnhanced(integrator)
+	if n := waker.count(); n != 0 {
+		t.Fatalf("the first mission state seen woke the integrator %d times", n)
+	}
+
+	stub.setOpen(0)
+	publish()
+	if got, want := waker.next(t), protocol.CoordMissionUpdateContext("mission-1"); got != want {
+		t.Fatalf("mission wake prompt %q, want %q", got, want)
+	}
+
+	waker.endTurn(integrator)
+	publish()
+	h.svc.wakeEnhanced(integrator)
+	if n := waker.count(); n != 1 {
+		t.Fatalf("an unchanged mission woke the integrator again: %d wakes", n)
 	}
 }

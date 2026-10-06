@@ -18,7 +18,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 const hookUsage = `usage: aether-internal hook <harness> <event>
@@ -141,8 +140,8 @@ type hookNotices struct {
 
 func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
 	n := hookNotices{Unread: status.Unread, Mail: status.UnreadMessageIDs}
-	if a := status.Assignment; a != nil && a.Role == "integrator" {
-		n.Mission = fmt.Sprintf("%s|%s|%d|%d", a.MissionID, a.Phase, a.OpenQuestions, a.IntegratorGeneration)
+	if a := status.Assignment; a != nil {
+		n.Mission = a.IntegratorNotice()
 	}
 	var overlap []string
 	for _, peer := range status.Peers {
@@ -226,7 +225,7 @@ func hookContext(status protocol.CoordStatusResult, notices hookNotices, stoppin
 		text.WriteString(protocol.CoordInboxContext(notices.Unread))
 	}
 	if notices.Mission != "" {
-		fmt.Fprintf(&text, "Mission update: run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id %s before waiting or declaring completion.\n", shellquote.Quote(status.Assignment.MissionID))
+		text.WriteString(protocol.CoordMissionUpdateContext(status.Assignment.MissionID))
 	}
 	if notices.Overlap != "" && !stopping {
 		text.WriteString("Aether detects overlapping edits with an authorized peer. Run /usr/local/bin/aether-internal status to inspect the overlap and coordinate before editing shared files.\n")

@@ -112,16 +112,27 @@ Aether has 1 unacknowledged inbox item(s). Run /usr/local/bin/aether-internal in
 
 The prompt passes the same admission as a Standard run's native wake: a
 protected run, a human holding a swarm worker, or a finished swarm task
-suppresses it. Each unread message starts at most one such turn, so an agent
-that ends its turn without reading its inbox is prompted again only when
-another message arrives. Mail is acknowledged only when the agent acks its
-inbox batch. An enhanced container sets `AETHER_ENHANCED=1`, and every
+suppresses it. A wake refused while the session stays idle, such as while a
+human holds the run's control, is retried after 1, 2, 4 and 8 seconds. A
+paused run is not prompted; Resume offers it the mail that arrived
+meanwhile. Messages that arrive together share one prompt, and each set of
+new unread messages starts at most one turn, so an agent that ends its turn
+without reading its inbox is prompted again only when another message
+arrives. Mail is acknowledged only when the agent acks its inbox batch.
+
+An enhanced integrator is also prompted when its mission's phase,
+open-question count or generation changes, for example when a human answers
+its question, with the instruction its hooks would give:
+
+```
+Mission update: run /usr/local/bin/aether-internal mission plan show and /usr/local/bin/aether-internal worker list --mission-id <mission-id> before waiting or declaring completion.
+```
+
+The mission state at the integrator's first turn end is its baseline and
+prompts nothing. An enhanced container sets `AETHER_ENHANCED=1`, and every
 `aether-internal hook` an adapter loads from the member's own settings
-exits without output there, so the prompt is the run's only wake path.
-The hooks' mission-update and overlap notices therefore do not reach an
-enhanced run: an enhanced integrator follows its swarm with
-`aether-internal mission plan show --wait 30`, and a human's answer to its
-question does not start a turn by itself.
+exits without output there, so these prompts are the run's only wake path
+and the hooks' overlap notice does not reach an enhanced run.
 
 ## Restarts and failures
 

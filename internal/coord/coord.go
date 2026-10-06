@@ -114,7 +114,8 @@ type Config struct {
 	RetainsContainer func(context.Context, domain.RunID) bool
 	// Mail persists the mailbox.
 	Mail store.MessageStore
-	// Bus carries the radar's overlap changes in and timeline entries out.
+	// Bus carries the radar's overlap changes and mission changes in and
+	// timeline entries out.
 	Bus events.Bus
 	// Peers is the radar index sends are authorized against.
 	Peers Peers
@@ -180,6 +181,7 @@ type Service struct {
 	// enhancedWoken holds the unread message IDs the last enhanced wake
 	// announced, per run.
 	enhancedWoken     map[domain.RunID]map[string]struct{}
+	enhancedNotices   map[domain.RunID]missionNotice
 	enhancedWakeLocks map[domain.RunID]*sync.Mutex
 	reportPackets     map[string]protocol.EvidencePacket
 	runs              map[domain.RunID]*runLifecycle
@@ -239,6 +241,7 @@ func New(cfg Config) (*Service, error) {
 		inboxConsumers:    make(map[domain.RunID]int),
 		reportLocks:       make(map[domain.RunID]*sync.Mutex),
 		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
+		enhancedNotices:   make(map[domain.RunID]missionNotice),
 		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
 		reportPackets:     make(map[string]protocol.EvidencePacket),
 		runs:              make(map[domain.RunID]*runLifecycle),
@@ -248,7 +251,8 @@ func New(cfg Config) (*Service, error) {
 
 // Start recovers the host-side listeners left by the previous process and,
 // while coordination is enabled, begins consuming the radar's overlap
-// changes. ctx bounds only the setup; the service runs until Close.
+// changes and mission changes. ctx bounds only the setup; the service runs
+// until Close.
 func (s *Service) Start(ctx context.Context) error {
 	if err := s.recoverListeners(ctx); err != nil {
 		return err
@@ -257,10 +261,10 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap}},
+		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeMissionChanged}},
 	})
 	if err != nil {
-		return fmt.Errorf("coord: subscribe to overlap changes: %w", err)
+		return fmt.Errorf("coord: subscribe to overlap and mission changes: %w", err)
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -316,11 +320,16 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into grace bookkeeping.
-// Authorization also re-reads the live index, so a dropped event cannot
-// extend a grace window beyond the last observed overlap.
+// consume folds the radar's overlap changes into grace bookkeeping and
+// offers changed missions to their enhanced integrators. Authorization
+// also re-reads the live index, so a dropped event cannot extend a grace
+// window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
+		if p, ok := e.Payload.(events.MissionChangedPayload); ok {
+			s.wakeMissionIntegrators(p.MissionID)
+			continue
+		}
 		p, ok := e.Payload.(events.OverlapPayload)
 		if !ok || e.RunID == "" {
 			continue
