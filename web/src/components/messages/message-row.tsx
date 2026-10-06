@@ -5,6 +5,9 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { runLabel } from '@/lib/status'
 import type { RunMessage, RunMessageKind } from '@/lib/types'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
+
+export type ParticipantLabel = (runID: string, run: RunRecord | undefined) => string
 
 const kinds: Record<RunMessageKind, { icon: LucideIcon; word: string }> = {
   message: { icon: MessageSquare, word: 'Message' },
@@ -25,24 +28,24 @@ export function deliveryWord(message: Pick<RunMessage, 'delivered_at' | 'acked_a
   return 'Sent'
 }
 
-function Participant({ runID }: { runID: string }) {
+function Participant({ runID, label }: { runID: string; label?: ParticipantLabel }) {
   const run = useStore((s) => s.runs[runID])
   const navigate = useStore((s) => s.navigate)
-  if (!run) return <span className="font-code text-ui-sm text-muted">{runID}</span>
-  const name = runLabel(run)
+  const name = label ? label(runID, run) : run && runLabel(run)
+  if (!name) return <span className="font-code text-ui-sm text-muted">{runID}</span>
   return (
-    <Button variant="link" className="max-w-64 min-w-0 shrink" title={name} onClick={() => navigate('run', { runId: run.id })}>
+    <Button variant="link" className="max-w-64 min-w-0 shrink" title={name} onClick={() => navigate('run', { runId: runID })}>
       <span className="truncate">{name}</span>
     </Button>
   )
 }
 
-export function Participants({ from, to }: { from: string; to: string }) {
+export function Participants({ from, to, label }: { from: string; to: string; label?: ParticipantLabel }) {
   return (
     <span className="inline-flex max-w-full min-w-0 items-center gap-1 align-bottom">
-      <Participant runID={from} />
+      <Participant runID={from} label={label} />
       <ArrowRight aria-label="to" role="img" className="size-3 shrink-0 text-muted" />
-      <Participant runID={to} />
+      <Participant runID={to} label={label} />
     </span>
   )
 }
@@ -50,9 +53,11 @@ export function Participants({ from, to }: { from: string; to: string }) {
 export const MessageRow = memo(function MessageRow({
   message,
   onThread,
+  label,
 }: {
   message: RunMessage
   onThread?: (thread: string) => void
+  label?: ParticipantLabel
 }) {
   const [expanded, setExpanded] = useState(false)
   const long = message.body.split('\n').length > 3 || message.body.length > 280
@@ -65,7 +70,7 @@ export const MessageRow = memo(function MessageRow({
       </span>
       <header className="flex min-w-0 flex-wrap items-center gap-x-3">
         <span className="min-w-0 flex-1">
-          <Participants from={message.from_run_id} to={message.to_run_id} />
+          <Participants from={message.from_run_id} to={message.to_run_id} label={label} />
         </span>
         <span className="flex shrink-0 items-center gap-1.5 text-ui-sm text-muted tabular-nums max-sm:basis-full">
           {message.kind !== 'message' && <span>{kinds[message.kind]?.word} ·</span>}
@@ -80,9 +85,9 @@ export const MessageRow = memo(function MessageRow({
       )}
       {report.length > 0 && (
         <dl className="col-start-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 text-ui-sm">
-          {report.map(([label, value]) => (
-            <div key={label} className="contents">
-              <dt className="text-muted">{label}</dt>
+          {report.map(([term, value]) => (
+            <div key={term} className="contents">
+              <dt className="text-muted">{term}</dt>
               <dd className="break-words text-text">{value}</dd>
             </div>
           ))}

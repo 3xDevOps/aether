@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ClipboardCheck, CornerDownRight, MessageCircleQuestion, MessageSquare, type LucideIcon } from '@/components/icons'
+import { MessageSquare } from '@/components/icons'
+import { MessageRow, Participants, type ParticipantLabel } from '@/components/messages/message-row'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import type { Api } from '@/lib/api'
-import type { RunMessage, RunMessageKind } from '@/lib/types'
-import { ClampedText } from '@/routes/missions/clamped-text'
 import { participantLabel } from '@/routes/missions/swarm'
 import { useStore } from '@/store'
 import {
-  deliveryWord,
   groupMessages,
   loadMessagePage,
   messageScopeKey,
@@ -20,74 +18,17 @@ import {
 } from '@/store/messages'
 import type { MissionDetail } from '@/store/missions'
 
-const kindIcon: Record<RunMessageKind, LucideIcon> = {
-  message: MessageSquare,
-  question: MessageCircleQuestion,
-  reply: CornerDownRight,
-  report: ClipboardCheck,
-}
-
-const kindWord: Record<RunMessageKind, string> = {
-  message: 'Message',
-  question: 'Question',
-  reply: 'Reply',
-  report: 'Report',
-}
-
 const collapsedGroups = 6
 const noIDs: string[] = []
 
-function Participant({ runID, detail }: { runID: string; detail: MissionDetail }) {
-  const navigate = useStore((s) => s.navigate)
-  const label = useStore((s) => participantLabel(runID, detail, s.runs))
-  return (
-    <Button variant="link" size="sm" className="min-w-0" title={label} onClick={() => navigate('run', { runId: runID })}>
-      <span className="max-w-40 truncate sm:max-w-56">{label}</span>
-    </Button>
-  )
-}
-
-function Pair({ from, to, detail }: { from: string; to: string; detail: MissionDetail }) {
-  return (
-    <span className="flex min-w-0 max-w-full items-center gap-1">
-      <Participant runID={from} detail={detail} />
-      <span aria-label="to" className="text-muted">→</span>
-      <Participant runID={to} detail={detail} />
-    </span>
-  )
-}
-
-function reportText(m: RunMessage): string {
-  const lines = [m.outcome && m.summary ? `${m.outcome[0].toUpperCase()}${m.outcome.slice(1)}: ${m.summary}` : m.summary || m.body]
-  if (m.next_action) lines.push(`Next: ${m.next_action}`)
-  return lines.filter(Boolean).join('\n')
-}
-
-function MessageRow({ message: m, detail, pair = true }: { message: RunMessage; detail: MissionDetail; pair?: boolean }) {
-  const Icon = kindIcon[m.kind]
-  return (
-    <div className="flex min-w-0 gap-2 py-1.5 text-ui" data-message-id={m.id}>
-      <Icon aria-label={kindWord[m.kind]} className="mt-0.5 size-3.5 shrink-0 text-muted" />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
-          {pair && <Pair from={m.from_run_id} to={m.to_run_id} detail={detail} />}
-          <RelativeTime at={m.created_at} className="tabular-nums" />
-          <span>{deliveryWord(m)}</span>
-        </div>
-        <ClampedText text={m.kind === 'report' ? reportText(m) : m.body} />
-      </div>
-    </div>
-  )
-}
-
-function MessageRun({ group, detail }: { group: Extract<MessageGroup, { kind: 'run' }>; detail: MissionDetail }) {
+function MessageRun({ group, label }: { group: Extract<MessageGroup, { kind: 'run' }>; label: ParticipantLabel }) {
   const [open, setOpen] = useState(false)
   const last = group.messages.at(-1)!
   return (
     <div className="flex min-w-0 flex-col">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 py-1.5 text-ui-sm text-muted">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 px-4 py-1.5 text-ui-sm text-muted">
         <MessageSquare aria-hidden className="size-3.5 shrink-0" />
-        <Pair from={group.from} to={group.to} detail={detail} />
+        <Participants from={group.from} to={group.to} label={label} />
         <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {group.messages.length} messages
         </Button>
@@ -95,26 +36,26 @@ function MessageRun({ group, detail }: { group: Extract<MessageGroup, { kind: 'r
       </div>
       {open && (
         <div className="ml-1.5 border-l border-seam pl-3">
-          {group.messages.map((m) => <MessageRow key={m.id} message={m} detail={detail} pair={false} />)}
+          {group.messages.map((m) => <MessageRow key={m.id} message={m} label={label} />)}
         </div>
       )}
     </div>
   )
 }
 
-function Group({ group, detail }: { group: MessageGroup; detail: MissionDetail }) {
+function Group({ group, label }: { group: MessageGroup; label: ParticipantLabel }) {
   switch (group.kind) {
     case 'run':
-      return <MessageRun group={group} detail={detail} />
+      return <MessageRun group={group} label={label} />
     case 'single':
-      return <MessageRow message={group.message} detail={detail} />
+      return <MessageRow message={group.message} label={label} />
     case 'thread':
       return (
         <div className="flex min-w-0 flex-col">
-          <MessageRow message={group.question} detail={detail} />
+          <MessageRow message={group.question} label={label} />
           {group.replies.length > 0 && (
             <div className="ml-1.5 border-l border-seam pl-3">
-              {group.replies.map((m) => <MessageRow key={m.id} message={m} detail={detail} />)}
+              {group.replies.map((m) => <MessageRow key={m.id} message={m} label={label} />)}
             </div>
           )}
         </div>
@@ -145,6 +86,7 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
   const loaded = useStore((s) => s.messageLists[key] !== undefined)
   const hasOlder = useStore((s) => Boolean(s.messageLists[key]?.nextBefore))
   const error = useStore((s) => s.messageErrors[key])
+  const label = useCallback<ParticipantLabel>((runID, run) => participantLabel(runID, detail, run), [detail])
   const [showAll, setShowAll] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -171,7 +113,7 @@ export function AgentMessages({ detail, client }: { detail: MissionDetail; clien
       <ol className="flex flex-col divide-y divide-seam">
         {shown.map((group) => (
           <li key={groupKey(group)} className="[contain-intrinsic-size:auto_3rem] [content-visibility:auto]">
-            <Group group={group} detail={detail} />
+            <Group group={group} label={label} />
           </li>
         ))}
       </ol>

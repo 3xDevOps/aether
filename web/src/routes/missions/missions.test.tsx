@@ -267,7 +267,7 @@ describe('swarm detail', () => {
     const section = within(screen.getByRole('region', { name: 'Agent messages' }))
     expect(section.getByText('keep the template?')).toBeDefined()
     expect(section.getByText('switch it')).toBeDefined()
-    expect(section.getByText('Acknowledged')).toBeDefined()
+    expect(section.getByText(/Acknowledged/)).toBeDefined()
     expect(section.queryByText('started')).toBeNull()
     await userEvent.click(section.getByRole('button', { name: '2 messages' }))
     expect(section.getByText('started')).toBeDefined()

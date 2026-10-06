@@ -1,7 +1,7 @@
 import { ApiError } from '@/lib/api'
 import type { Event, RunMessage } from '@/lib/types'
 import { createRootStore } from '@/store'
-import { deliveryWord, groupMessages, loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
+import { groupMessages, loadMessagePage, scopeMessages, type MessageScope } from '@/store/messages'
 import { applyEvent, hydrate } from '@/store/sync'
 import { fakeApi, run, workspace } from '@/test/fixtures'
 
@@ -118,12 +118,6 @@ describe('message grouping', () => {
       runMessage({ id: 'r2', kind: 'reply', correlation_id: 'paged-out', created_at: at(4) }),
     ])
     expect(shape(groups)).toEqual(['m', 'q<r1>', 'r2'])
-  })
-
-  it('names the delivery state', () => {
-    expect(deliveryWord(runMessage())).toBe('Sent')
-    expect(deliveryWord(runMessage({ delivered_at: at(1) }))).toBe('Delivered')
-    expect(deliveryWord(runMessage({ delivered_at: at(1), acked_at: at(2) }))).toBe('Acknowledged')
   })
 })
 

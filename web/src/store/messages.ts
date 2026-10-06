@@ -154,8 +154,3 @@ function latestAt(group: MessageGroup): string {
       return group.messages.at(-1)!.created_at
   }
 }
-
-export function deliveryWord(m: Pick<RunMessage, 'delivered_at' | 'acked_at'>): 'Acknowledged' | 'Delivered' | 'Sent' {
-  if (m.acked_at) return 'Acknowledged'
-  return m.delivered_at ? 'Delivered' : 'Sent'
-}

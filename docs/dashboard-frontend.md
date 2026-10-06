@@ -3400,12 +3400,10 @@ re-reads its newest page. `groupMessages` (`store/messages.ts`) groups the
 loaded rows by structure, never by content: a reply sits under its question
 when the question is loaded, reports and questions stand alone, and adjacent
 plain messages between the same sender and recipient fold into one line
-("Port the controller → Integrator · 3 messages", expandable). Each row has
-a kind icon (message, question, reply, report), both runs named by their
-swarm task title, else `Integrator`, else the run title, each opening its
-run; the relative time; and the delivery word `Sent`, `Delivered` or
-`Acknowledged`. A report shows `<Outcome>: <summary>` and `Next: <next
-action>`. Bodies clamp at three lines with **Show more**. Groups order by
+("Port the controller → Integrator · 3 messages", expandable). Each row is
+the Activity message row (`components/messages/message-row.tsx`) with both
+runs named by their swarm task title, else `Integrator`, else the run title
+(`participantLabel` in `routes/missions/swarm.ts`). Groups order by
 their latest message, so a fresh reply brings its thread forward. The newest
 six groups show first; **Show all** shows every loaded group and then **Show
 earlier messages** pages older history. Rows use `content-visibility: auto`
