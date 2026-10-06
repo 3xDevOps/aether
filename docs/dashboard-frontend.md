@@ -966,9 +966,11 @@ archived run leaves. Each archived card, and the run header for one, show
 
 **Archive closed runs... hides every eligible Done card.** The Done
 `ColumnHeader` in Cards and the Runs header in Map offer this action; the
-palette carries the same command. All open `ClearDoneConfirm`
-(`src/routes/board/clear-done-dialog.tsx`) over the `clearDonePlan()`
-(`src/lib/commands.ts`) snapshot taken when opened. Eligible runs are
+palette carries the same command whenever the gateway serves `run.archive`.
+All open `ClearDoneConfirm` (`src/routes/board/clear-done-dialog.tsx`) over
+the `clearDonePlan()` (`src/lib/commands.ts`) snapshot taken when opened;
+the palette's dialog takes it from the board as it stands then and says
+"No closed runs to archive" when none qualify. Eligible runs are
 `isArchivable`, not already archived, and killable by the caller. The dialog
 says archiving hides runs and schedules their deletion after retention, but
 does not free container memory. It counts completed runs awaiting Close and
@@ -980,7 +982,9 @@ error in Done order.
 
 **Release finished resources... frees retained containers without archiving.**
 The same Cards/Map header and the command palette offer workspace-scoped bulk
-release. Its `releaseFinishedPlan()` searches all runs in the active workspace,
+release; the palette offers it whenever the gateway serves `run.release`, and
+its dialog says "No finished runs hold resources" when none qualify. Its
+`releaseFinishedPlan()` searches all runs in the active workspace,
 including archived runs behind the toggle and finished runs still awaiting
 review; it does not depend on visible Done cards. It requires `run.release`,
 the Kill permission and a finished status with an existing retained-container
@@ -1079,9 +1083,11 @@ again if a run changed after the command was displayed.
   `Cmd/Ctrl+Shift+P` remains an alias. It is mounted once by `AppShell`,
   independently of the status Slot, directly below the titlebar.
   Navigation comes before run actions, so opening the palette initially
-  selects **Open the board**, not a mutation. The **Runs** group searches
-  complete task text, title, branch, harness, workspace and run ID without
-  clipping the searchable text or limiting the result set.
+  selects **Open the board**, not a mutation. With an empty query the
+  **Runs** group lists the 50 most urgent runs in attention order; a query
+  searches every run. A run matches on the label its row shows (its title,
+  or the task's first line), branch, harness, workspace name and run ID,
+  never the full task text.
   Opening a workspace also makes it the active scope. Run actions apply to
   the run named by `route.params.runId`, on any run-detail tab; the board has
   no focused run. The "Go to" group uses the gated `src/lib/surfaces.ts` list.
@@ -1105,11 +1111,13 @@ This also prevents a second click from racing a branch pull over SSH.
 Primary buttons use the command's `short` label and its full sentence as a
 tooltip; the overflow menu prints the full label.
 
-`src/lib/palette-filter.ts` preserves cmdk's fuzzy scores and ranking while
-avoiding recursive rescans of long task bodies. The pinned local cmdk patch
-in `patches/cmdk@1.1.1.patch` synchronizes initial accessible selection,
-avoids redundant scrolling and DOM reordering, and restores current browse
-order when a query is cleared. Filtering and live data updates keep the
+The palette ranks with cmdk's default scorer. The pinned local cmdk patch
+in `patches/cmdk@1.1.1.patch` stays because stock cmdk 1.1.1 leaves the
+input's `aria-activedescendant` unset for the initial selection and stale
+after filtering, and spreads caller props before that attribute, so no
+wrapper can correct it. The patch also adds the list's `browseOrder`, which
+restores current browse order when a query is cleared, and avoids redundant
+scrolling and DOM reordering. Filtering and live data updates keep the
 input focused and its active descendant tied to a visible enabled result.
 
 hand off and protect need the run's owner or an admin. Before hydration the

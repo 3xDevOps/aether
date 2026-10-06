@@ -28,7 +28,7 @@ export function ClearDoneConfirm({
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
         <DialogHeader>
           <DialogTitle>
-            Archive {n} closed {n === 1 ? 'run' : 'runs'}?
+            {n === 0 ? 'No closed runs to archive' : `Archive ${n} closed ${n === 1 ? 'run' : 'runs'}?`}
           </DialogTitle>
           <DialogDescription>
             Archive hides these runs and schedules their deletion after the retention
@@ -54,12 +54,14 @@ export function ClearDoneConfirm({
         )}
         <DialogFooter>
           <Button variant="outline" disabled={running} onClick={onCancel}>
-            Cancel
+            {n === 0 ? 'Close' : 'Cancel'}
           </Button>
-          <Button disabled={running} onClick={onConfirm}>
-            {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
-            Archive {n}
-          </Button>
+          {n > 0 && (
+            <Button disabled={running} onClick={onConfirm}>
+              {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
+              Archive {n}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -83,18 +85,26 @@ export function ReleaseFinishedConfirm({
     <Dialog open onOpenChange={(next) => !running && !next && onCancel()}>
       <DialogContent className="max-w-[min(440px,calc(100%-2rem))] p-3 sm:p-4">
         <DialogHeader>
-          <DialogTitle>Release resources for {n} finished {n === 1 ? 'run' : 'runs'}?</DialogTitle>
+          <DialogTitle>
+            {n === 0
+              ? 'No finished runs hold resources'
+              : `Release resources for ${n} finished ${n === 1 ? 'run' : 'runs'}?`}
+          </DialogTitle>
           <DialogDescription>
             Their retained containers will be removed and cannot be relaunched.
             Run records and history remain visible; this does not archive or delete them.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" disabled={running} onClick={onCancel}>Cancel</Button>
-          <Button disabled={running} onClick={onConfirm}>
-            {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
-            Release {n}
+          <Button variant="outline" disabled={running} onClick={onCancel}>
+            {n === 0 ? 'Close' : 'Cancel'}
           </Button>
+          {n > 0 && (
+            <Button disabled={running} onClick={onConfirm}>
+              {running && <Loader2 className="size-3 animate-spin" aria-hidden />}
+              Release {n}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

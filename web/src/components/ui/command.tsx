@@ -37,7 +37,6 @@ function CommandDialog({
   showCloseButton = true,
   onOpenAutoFocus,
   onCloseAutoFocus,
-  filter,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
@@ -46,7 +45,6 @@ function CommandDialog({
   showCloseButton?: boolean
   onOpenAutoFocus?: React.ComponentProps<typeof DialogContent>['onOpenAutoFocus']
   onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>['onCloseAutoFocus']
-  filter?: React.ComponentProps<typeof CommandPrimitive>['filter']
 }) {
   return (
     <Dialog {...props}>
@@ -78,7 +76,7 @@ function CommandDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Command filter={filter} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
+        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-1 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-item]_svg]:size-4">
           {children}
         </Command>
       </DialogContent>

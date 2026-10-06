@@ -422,14 +422,19 @@ describe('command palette', () => {
     await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(active.id))
   })
 
-  it('keeps long-task tails and later results reachable by keyboard without a result cap', async () => {
+  it('browses the 50 most urgent runs and searches every run by its label, not its task text', async () => {
     const runs = Array.from({ length: 120 }, (_, index) => run({
       id: `run_${index}`,
-      task: `${'Preserve the current behavior. '.repeat(40)}quasar ${String(index).padStart(3, '0')}`,
+      title: `quasar ${String(index).padStart(3, '0')}`,
+      task: `${'Preserve the current behavior. '.repeat(40)}nebula`,
     }))
     useStore.setState({ runs: Object.fromEntries(runs.map((value) => [value.id, toRecord(value)])) })
     open()
     const search = await screen.findByRole('combobox')
+    expect(screen.getAllByText(/^quasar \d+$/)).toHaveLength(50)
+    await userEvent.type(search, 'nebula')
+    await waitFor(() => expect(screen.queryAllByText(/^quasar \d+$/)).toHaveLength(0))
+    await userEvent.clear(search)
     await userEvent.type(search, 'quasar 119')
     await waitFor(() => expect(screen.getByRole('option', { selected: true }).getAttribute('data-value')).toContain('run_119'))
     fireEvent.keyDown(search, { key: 'Enter' })

@@ -893,8 +893,9 @@ do not substitute a development-server measurement for either.
 
 Compare the same browser, viewport, pointer mode and datasets on both revisions:
 50 and 500 runs, with short tasks and varied natural-prose tasks around 1,600
-characters. Preserve complete task bodies, branch names, harnesses, workspace
-names and IDs. Record synthetic fixtures separately from live workspace data,
+characters. Keep complete task bodies in the fixtures: the palette scores only
+each run's label, branch, harness, workspace name and ID with cmdk's default
+scorer, and long tasks must not slow a keystroke past 16 ms. Record synthetic fixtures separately from live workspace data,
 and keep fixtures and raw traces outside the source tree.
 
 Measure the first opening separately from at least 20 warm reopens. Use trusted

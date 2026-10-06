@@ -11,7 +11,6 @@ import { RunCommandConfirmation } from '@/components/run-command-confirmation'
 import { CommandDialog } from '@/components/ui/command'
 import { Tooltip } from '@/components/ui/heroui'
 import { useCommandRunner, type Command } from '@/lib/commands'
-import { paletteFilter } from '@/lib/palette-filter'
 import { inModal } from '@/lib/keys'
 import { shortcutLabel } from '@/lib/platform'
 import { cn, focusRing } from '@/lib/utils'
@@ -123,7 +122,6 @@ export function CommandPalette() {
     <>
       <CommandDialog
         open={open}
-        filter={paletteFilter}
         showCloseButton={false}
         onOpenChange={(next: boolean) => {
           if (!next) restoreFocus.current = true

@@ -19,7 +19,7 @@ import { registerRoute } from '@/routes/registry'
 import { ClearDoneConfirm, ReleaseFinishedConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
-import { useBoard, type BoardColumn } from '@/routes/board/selectors'
+import { allCards, doneCards, useBoard, type BoardColumn } from '@/routes/board/selectors'
 import { RunMap } from '@/routes/board/run-map'
 import { useBoardTransition } from '@/routes/board/use-board-transition'
 import { useStore } from '@/store'
@@ -29,7 +29,8 @@ import '@/components/palette'
 
 /** The active workspace's runs, as status columns or a spatial workbench. */
 export function Board() {
-  const { columns, archivedCards } = useBoard()
+  const data = useBoard()
+  const { columns, archivedCards } = data
   const ackAll = useStore((s) => s.ackAll)
   const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -54,11 +55,9 @@ export function Board() {
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
 
-  const doneCandidates = columns.find((c) => c.key === 'done')?.cards ?? []
-  const donePlan = clearDonePlan(doneCandidates, caps, self)
+  const donePlan = clearDonePlan(doneCards(data), caps, self)
   const runClear = (eligible: RunRecord[]) => runClearDone(eligible, { api, removeRun })
-  const releaseCandidates = [...columns.flatMap((column) => column.cards), ...archivedCards]
-  const releasePlan = releaseFinishedPlan(releaseCandidates, caps, self)
+  const releasePlan = releaseFinishedPlan(allCards(data), caps, self)
 
   const [showArchived, setShowArchived] = useState(false)
   // The toggle only exists while there is something behind it; once the

@@ -126,3 +126,26 @@ export function useBoard(): BoardData {
     [workspace, workspaces, runs, members, acked, pausedRuns],
   )
 }
+
+/** The Done column's cards, which Archive closed runs sweeps. */
+export function doneCards(data: BoardData): BoardCard[] {
+  return data.columns.find((c) => c.key === 'done')?.cards ?? []
+}
+
+/** Every card in scope, archived ones included, which Release finished resources sweeps. */
+export function allCards(data: BoardData): BoardCard[] {
+  return [...data.columns.flatMap((column) => column.cards), ...data.archivedCards]
+}
+
+/** The board as the store holds it now, for a snapshot taken outside render. */
+export function currentBoard(): BoardData {
+  const s = useStore.getState()
+  return board({
+    workspace: s.activeWorkspace,
+    workspaces: s.workspaces,
+    runs: s.runs,
+    members: s.members,
+    acked: s.acked,
+    pausedRuns: s.pausedRuns,
+  })
+}

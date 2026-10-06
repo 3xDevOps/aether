@@ -1,5 +1,5 @@
 import { FolderGit2 } from 'lucide-react'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { StateDot } from '@/components/state-dot'
 import {
   CommandEmpty,
@@ -18,10 +18,12 @@ import {
 } from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
-import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+
+// Browsing shows the most urgent runs; a search reaches every run.
+const browseRunLimit = 50
 
 const destinationCommandIDs: Record<string, true> = {
   board: true,
@@ -60,9 +62,7 @@ export function PaletteBody({
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
   const self = useSelf()
-  const { columns, archivedCards } = useBoard()
-  const doneCandidates = columns.find((c) => c.key === 'done')?.cards ?? []
-  const releaseCandidates = [...columns.flatMap((column) => column.cards), ...archivedCards]
+  const [search, setSearch] = useState('')
   const selected = useRef<Command | null>(null)
   const complete = () => {
     const command = selected.current
@@ -83,13 +83,15 @@ export function PaletteBody({
     ...surface,
     value: `${surface.label} ${surface.name}`,
   }))
-  const board = boardCommands({ cap, self, doneCandidates, releaseCandidates })
+  const board = boardCommands({ cap, self })
   const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')
   const boardActions = board.filter((command) => command.id !== 'board' && command.id !== 'overview')
-  const runItems = runs.map(({ run, state }) => ({
+  // The value is what cmdk scores: the label the row shows, never the full
+  // task text. The id keeps two otherwise identical rows distinct.
+  const runItems = (search ? runs : runs.slice(0, browseRunLimit)).map(({ run, state }) => ({
     run,
     state,
-    value: `${run.task} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}${run.title ? ` ${run.title}` : ''}`,
+    value: `${runLabel(run)} ${run.branch} ${run.harness} ${workspaces[run.workspace_id]?.name ?? ''} ${run.id}`,
   }))
   const workspaceItems = Object.values(workspaces).map((workspace) => ({
     workspace,
@@ -145,7 +147,11 @@ export function PaletteBody({
 
   return (
     <>
-      <CommandInput placeholder="Search commands, runs, workspaces..." />
+      <CommandInput
+        value={search}
+        onValueChange={setSearch}
+        placeholder="Search commands, runs, workspaces..."
+      />
       <CommandList browseOrder={browseOrder} className="min-h-0 px-1 pb-1">
         <CommandEmpty className="py-4">No commands, runs, or workspaces match.</CommandEmpty>
 

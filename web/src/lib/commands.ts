@@ -50,8 +50,6 @@ export interface CommandDeps {
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
-  openClearDoneDialog: (plan: ClearDonePlan) => void
-  openReleaseFinishedDialog: (plan: ReleaseFinishedPlan) => void
   ackAll: () => void
   setTheme: (theme: Theme) => void
   /** Keeps a pull's git output for the diff tab to show. */
@@ -120,10 +118,6 @@ export interface BoardCommandContext {
   cap: Capability
   /** The caller's own id and role, null before hydration. */
   self: { id: string | null; role: Member['role'] | null }
-  /** The Done column's live cards in scope, for bulk archive. */
-  doneCandidates: RunActionCandidate[]
-  /** All runs in the selected workspace, including hidden archived runs. */
-  releaseCandidates: RunActionCandidate[]
 }
 
 /** The run and workspace policy needed for Kill-gated bulk actions. */
@@ -583,22 +577,22 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     Icon: CheckCheck,
     perform: (d) => d.ackAll(),
   })
-  const plan = clearDonePlan(ctx.doneCandidates, ctx.cap, ctx.self)
-  if (plan.eligible.length > 0) {
+  // The confirmation computes which runs qualify when it opens, and says so
+  // when none do; the palette does not build the board to find out first.
+  if (ctx.cap.hasMethod('run.archive')) {
     list.push({
       id: 'clear-done',
       label: 'Archive closed runs...',
       Icon: Archive,
-      perform: (d) => d.openClearDoneDialog(plan),
+      perform: (d) => d.openDialog('clear-done'),
     })
   }
-  const releasePlan = releaseFinishedPlan(ctx.releaseCandidates, ctx.cap, ctx.self)
-  if (releasePlan.eligible.length > 0) {
+  if (ctx.cap.hasMethod('run.release')) {
     list.push({
       id: 'release-finished',
       label: 'Release finished resources...',
       Icon: PackageX,
-      perform: (d) => d.openReleaseFinishedDialog(releasePlan),
+      perform: (d) => d.openDialog('release-finished'),
     })
   }
   list.push(
@@ -637,8 +631,6 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
-  const openClearDoneDialog = useStore((s) => s.openClearDoneDialog)
-  const openReleaseFinishedDialog = useStore((s) => s.openReleaseFinishedDialog)
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
@@ -653,8 +645,6 @@ export function useCommandRunner(
         navigate,
         openDialog,
         openForwardDialog,
-        openReleaseFinishedDialog,
-        openClearDoneDialog,
         ackAll,
         recordPull,
         removeRun,
@@ -677,8 +667,6 @@ export function useCommandRunner(
       onTemplates,
       openDialog,
       openForwardDialog,
-      openClearDoneDialog,
-      openReleaseFinishedDialog,
       recordPull,
       removeRun,
       setTheme,
