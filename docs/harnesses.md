@@ -203,9 +203,11 @@ described under [managed loading](#managed-native-loading).
 - **Headless.** The harness is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
-  and is never relaunchable. An agent whose ACP server is installed runs its
-  background task over ACP instead and finishes the same way after its one
-  turn ([enhanced-runs.md](enhanced-runs.md#background-runs)).
+  and is never relaunchable. `codex`, `omp` and `opencode` run their
+  background task over ACP instead when their ACP server is installed, and
+  finish the same way after its one turn; Claude keeps `claude -p` because
+  its adapter runs on the Claude Agent SDK
+  ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
 Close a TUI run explicitly:
 
@@ -862,9 +864,9 @@ replacement shell.
 machine-readable mode as a one-shot:
 on exit Aether commits and publishes the branch, records `completed` or
 `failed`, and destroys the container immediately. Headless runs never open a
-replacement shell and are not relaunchable. When the agent's ACP server is
-installed, the one-shot is a single ACP turn instead
-([enhanced-runs.md](enhanced-runs.md#background-runs)).
+replacement shell and are not relaunchable. For `codex`, `omp` and
+`opencode` with their ACP server installed, the one-shot is a single ACP
+turn instead ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 

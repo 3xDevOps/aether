@@ -15,13 +15,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// newBackgroundEnv is an enhanced env whose fake agent also has a headless
-// command line. installed puts the agent and its ACP server in the member's
-// home, where a background launch looks for them.
-func newBackgroundEnv(t *testing.T, installed bool) (*testEnv, *acpRuntime) {
+// newBackgroundEnv is an enhanced env that runs agent as a fake agent with a
+// headless command line. installed puts the agent and its ACP server in the
+// member's home, where a background launch looks for them.
+func newBackgroundEnv(t *testing.T, agent string, installed bool) (*testEnv, *acpRuntime) {
 	t.Helper()
 	e, rt := newACPEnv(t, func(cfg *Config) {
-		cfg.Harnesses["fake"] = HarnessSpec{
+		cfg.Harnesses[agent] = HarnessSpec{
 			TUIArgs:      []string{"fake-agent", "{task}"},
 			HeadlessArgs: []string{"fake-agent", "-p", "{task}"},
 			ACPArgs:      []string{"acp-mock"},
@@ -59,9 +59,12 @@ func newBackgroundEnv(t *testing.T, installed bool) (*testEnv, *acpRuntime) {
 	return e, rt
 }
 
-func (e *testEnv) launchBackground(t *testing.T, task string) *domain.Run {
+// enhancedAgent is a shipped agent whose profile sets ACPDefault.
+const enhancedAgent = "opencode"
+
+func (e *testEnv) launchBackground(t *testing.T, agent, task string) *domain.Run {
 	t.Helper()
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "fake", domain.LaunchHeadless)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, agent, domain.LaunchHeadless)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -70,8 +73,8 @@ func (e *testEnv) launchBackground(t *testing.T, task string) *domain.Run {
 
 func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 	t.Parallel()
-	e, rt := newBackgroundEnv(t, true)
-	run := e.launchBackground(t, "say pong")
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, "say pong")
 	if !run.ACP {
 		t.Fatal("a background run of an agent with an installed ACP server is not driven over ACP")
 	}
@@ -105,8 +108,8 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 
 func TestBackgroundRunOverACPAllowsPermissions(t *testing.T) {
 	t.Parallel()
-	e, _ := newBackgroundEnv(t, true)
-	run := e.launchBackground(t, acpmock.PromptAskPermission)
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptAskPermission)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	items, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
@@ -124,8 +127,8 @@ func TestBackgroundRunOverACPAllowsPermissions(t *testing.T) {
 
 func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 	t.Parallel()
-	e, _ := newBackgroundEnv(t, true)
-	run := e.launchBackground(t, acpmock.PromptWait)
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptWait)
 	waitFor(t, "the turn", func() bool {
 		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
 	})
@@ -140,8 +143,8 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 
 func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	t.Parallel()
-	e, _ := newBackgroundEnv(t, true)
-	run := e.launchBackground(t, acpmock.PromptWait)
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptWait)
 	waitFor(t, "the turn", func() bool {
 		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
 	})
@@ -174,8 +177,8 @@ func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 // which has never seen the task.
 func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 	t.Parallel()
-	e, rt := newBackgroundEnv(t, true)
-	run := e.launchBackground(t, acpmock.PromptWait)
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptWait)
 	waitFor(t, "the turn", func() bool {
 		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
 	})
@@ -216,17 +219,29 @@ func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunFailed)
 }
 
-func TestBackgroundRunWithoutACPServerKeepsCommandLine(t *testing.T) {
+func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 	t.Parallel()
-	e, rt := newBackgroundEnv(t, false)
-	run := e.launchBackground(t, "say pong")
-	if run.ACP {
-		t.Fatal("a background run without an installed ACP server is driven over ACP")
-	}
-	if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", e.sched.withCoAuthorInstruction("say pong")}) {
-		t.Fatalf("container command %q, want the headless command line", cmd)
-	}
-	if execs := rt.all(); len(execs) != 0 {
-		t.Fatalf("started an ACP server: %+v", execs)
+	for _, tc := range []struct {
+		name      string
+		agent     string
+		installed bool
+	}{
+		{"no ACP server installed", enhancedAgent, false},
+		{"agent defaults to its terminal", "claude", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, rt := newBackgroundEnv(t, tc.agent, tc.installed)
+			run := e.launchBackground(t, tc.agent, "say pong")
+			if run.ACP {
+				t.Fatal("the background run is driven over ACP")
+			}
+			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", e.sched.withCoAuthorInstruction("say pong")}) {
+				t.Fatalf("container command %q, want the headless command line", cmd)
+			}
+			if execs := rt.all(); len(execs) != 0 {
+				t.Fatalf("started an ACP server: %+v", execs)
+			}
+		})
 	}
 }

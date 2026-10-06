@@ -353,7 +353,6 @@ var profiles = map[string]Profile{
 		ACPArgs:        []string{claudeACP.Binary},
 		ACPInstall:     claudeACP,
 		ACPMode:        "auto",
-		ACPAutoMode:    "bypassPermissions",
 		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the

@@ -671,11 +671,11 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 }
 
 // backgroundACP reports whether a background run of the agent goes through
-// its ACP server: the agent has one, and it is installed in the home whose
-// CLI the launch runs.
+// its ACP server: the agent defaults to enhanced runs, has an ACP server, and
+// it is installed in the home whose CLI the launch runs.
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
 	adapter := argvs[domain.LaunchACP]
-	if len(adapter) == 0 || s.cfg.Homes == nil {
+	if !profile.ACPDefault || len(adapter) == 0 || s.cfg.Homes == nil {
 		return false
 	}
 	cli := adapter[0]

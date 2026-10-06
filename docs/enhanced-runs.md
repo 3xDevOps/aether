@@ -163,11 +163,13 @@ container was paused starts on Resume. See
 
 ## Background runs
 
-A background run (`--mode background`, wire name `headless`) uses the
-agent's ACP server when the agent has one and it is installed in the home
-the launch uses (`agent.list` reports `enhanced_installed`). The run row
-and the wire carry `acp: true`. Otherwise the run uses the agent's headless
-command line as before.
+A background run (`--mode background`, wire name `headless`) of `codex`,
+`omp` or `opencode` uses the agent's ACP server when it is installed in the
+home the launch uses (`agent.list` reports `enhanced_installed`). The run
+row and the wire carry `acp: true`. Every other agent, and these three
+without the server, use the agent's headless command line. Claude stays on
+`claude -p` because its adapter runs on the Claude Agent SDK, whose terms
+favour API keys over the subscription login a member shares.
 
 Such a run has the enhanced container shape and session item log, and
 `/ws/acp/<run_id>` streams it while it works. The task is the session's
@@ -176,7 +178,6 @@ asking:
 
 | Agent | Background session mode |
 | --- | --- |
-| `claude` | `bypassPermissions` |
 | `codex` | `agent-full-access` |
 | others | the enhanced mode above |
 
