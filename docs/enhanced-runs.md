@@ -269,6 +269,13 @@ aether run switch <run-id> --mode enhanced
 aether run switch <run-id> --mode standard
 ```
 
+A Background run takes no input and cannot switch. For an agent that can
+otherwise switch, the server answers `-32002`:
+
+```
+scheduler: invalid run state transition: a background run cannot switch modes
+```
+
 The server method is `run.mode.switch` with `mode` `acp` or `tui`
 ([local-gateway.md](local-gateway.md#enhanced-run-methods)). It needs
 **Steer**. While someone holds the run's control lease, only that session
