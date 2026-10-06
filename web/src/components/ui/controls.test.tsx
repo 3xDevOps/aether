@@ -101,7 +101,9 @@ test('the variants paint the tokens the design system names', () => {
   const secondary = screen.getByRole('button', { name: 'Secondary' }).className
   expect(secondary).toContain('bg-raised')
   expect(secondary).toContain('hover:not-aria-disabled:bg-hover-chrome')
-  expect(screen.getByRole('button', { name: 'Danger' }).className).toContain('bg-state-failed')
+  const danger = screen.getByRole('button', { name: 'Danger' }).className
+  expect(danger).toContain('bg-state-failed')
+  expect(danger).toContain('text-on-failed')
 })
 
 function ThreeTabs({ look }: { look?: 'underline' | 'segmented' }) {

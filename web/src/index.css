@@ -336,6 +336,7 @@
   --color-text: var(--text);
   --color-icon-faint: var(--icon-faint);
   --color-on-accent: var(--on-accent);
+  --color-on-failed: var(--on-failed);
   --color-selection: var(--selection);
   --color-state-working: var(--state-working);
   --color-state-needs-you: var(--state-needs-you);

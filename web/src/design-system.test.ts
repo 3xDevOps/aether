@@ -404,3 +404,19 @@ describe.each([
     expect(contrast(colours[fg], colours[bg])).toBeGreaterThanOrEqual(min)
   })
 })
+
+describe('primitive colour utilities', () => {
+  const defined = new Set([...css.matchAll(/^\s*--((?:color|text-color|background-color|text)-[\w-]+):/gm)].map((m) => m[1]))
+  const utilities = new Set([...css.matchAll(/^@utility ([\w-]+)/gm)].map((m) => m[1]))
+  const builtIn = new Set(['transparent', 'current', 'inherit', 'white', 'black', 'left', 'center', 'right'])
+  const primitives = sources.filter(({ file }) => file.startsWith('components/ui/')).map(({ file, text }) => [file, text])
+  it.each(primitives)('%s names only defined tokens', (_, text) => {
+    const missing = [...text.matchAll(/(?<![\w-])(text|bg)-([a-z][\w-]*)/g)]
+      .filter(([match, prop, name]) => {
+        if (utilities.has(match) || builtIn.has(name) || defined.has(`color-${name}`)) return false
+        return prop === 'bg' ? !defined.has(`background-color-${name}`) : !defined.has(`text-color-${name}`) && !defined.has(`text-${name}`)
+      })
+      .map(([match]) => match)
+    expect(missing, 'Tailwind generates no class for these; add the token to index.css').toEqual([])
+  })
+})
