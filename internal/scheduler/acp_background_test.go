@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -167,6 +168,52 @@ func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	}) {
 		t.Fatalf("the restored session was not asked to continue: %+v", items)
 	}
+}
+
+// An agent that cannot restore the interrupted session starts a new one,
+// which has never seen the task.
+func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, true)
+	run := e.launchBackground(t, acpmock.PromptWait)
+	waitFor(t, "the turn", func() bool {
+		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rt.fixture.Initialize = json.RawMessage(`{"protocolVersion":1,"agentCapabilities":{}}`)
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	waitFor(t, "the task sent to the new session", func() bool {
+		items, err := s2.ACPHistory(run.ID, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prompts []string
+		reset := false
+		for _, it := range items {
+			switch {
+			case it.Kind == acphost.KindReset:
+				reset = true
+			case it.Kind == acphost.KindMessage && it.Message.Role == "user":
+				prompts = append(prompts, it.Message.Text)
+			}
+		}
+		return reset && slices.Equal(prompts, []string{s2.withCoAuthorInstruction(acpmock.PromptWait), s2.withCoAuthorInstruction(acpmock.PromptWait)})
+	})
+	if err := s2.ACPCancel(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunFailed)
 }
 
 func TestBackgroundRunWithoutACPServerKeepsCommandLine(t *testing.T) {

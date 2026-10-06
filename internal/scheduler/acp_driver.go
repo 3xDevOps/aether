@@ -336,14 +336,18 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 
 // startOneShot runs a background run's single turn. A restored session
 // continues a turn the restart interrupted and ends at once when its turn
-// had already ended.
+// had already ended; a new session that replaced it gets the task again.
 func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
 	prompt := d.s.withCoAuthorInstruction(task)
 	if !fresh {
-		switch last := lastItem(sess.Log(), acphost.KindTurnEnd); last.StopReason {
+		last := lastItem(sess.Log(), acphost.KindTurnEnd)
+		reset := lastItem(sess.Log(), acphost.KindReset).Seq > last.Seq
+		switch last.StopReason {
 		case "":
 		case "interrupted":
-			prompt = oneShotResume
+			if !reset {
+				prompt = oneShotResume
+			}
 		default:
 			go d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
 			return
