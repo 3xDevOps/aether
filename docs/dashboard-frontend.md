@@ -2290,8 +2290,10 @@ count, and neither creates a second action inbox.
     until a read succeeds or a full read clears the error.
   - `workspace.budget` carries the state, cap and spend, applied as they
     are. It fires on threshold crossings, refusals and admin edits, not on
-    every spend change, so each `run.cost` re-reads that workspace's
-    `budget.get` to keep the spend and unmetered count current.
+    every spend change, so `run.cost` re-reads that workspace's
+    `budget.get` to keep the spend and unmetered count current, once 1.5 s
+    pass without another result for it. Each budget event is counted per
+    workspace, and a read that started before one is dropped.
   - `workspace.presence` names one transition, so it re-reads
     `presence.roster`.
   These reads start without holding up the events queued behind them (only

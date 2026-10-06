@@ -118,44 +118,72 @@ describe('team state from events', () => {
   })
 
   it('applies a budget event and re-reads the budget after a metered result', async () => {
-    const store = seeded()
-    store.getState().setBudget(budget(workspace.id))
-    const budgetGet = vi.fn(async (id: string) => budget(id, { state: 'exceeded' }))
-    const client = fakeApi({ budgetGet })
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      store.getState().setBudget(budget(workspace.id))
+      const budgetGet = vi.fn(async (id: string) => budget(id, { state: 'exceeded' }))
+      const client = fakeApi({ budgetGet })
 
-    await applyEvent(store, event(1, 'workspace.budget', { state: 'warn', spend_usd: 4, limit_usd: 5, warn_usd: 3, unmetered_runs: 1 }, { run_id: '' }), client)
-    expect(store.getState().budgets[workspace.id]).toMatchObject({
-      state: 'warn',
-      budget: { limit_usd: 5, warn_usd: 3 },
-      spend: { cost_usd: 4, unmetered_runs: 1 },
-      advisory: true,
-    })
-    expect(budgetGet).not.toHaveBeenCalled()
+      await applyEvent(store, event(1, 'workspace.budget', { state: 'warn', spend_usd: 4, limit_usd: 5, warn_usd: 3, unmetered_runs: 1 }, { run_id: '' }), client)
+      expect(store.getState().budgets[workspace.id]).toMatchObject({
+        state: 'warn',
+        budget: { limit_usd: 5, warn_usd: 3 },
+        spend: { cost_usd: 4, unmetered_runs: 1 },
+        advisory: true,
+      })
+      expect(budgetGet).not.toHaveBeenCalled()
 
-    await applyEvent(store, event(2, 'run.cost', { input_tokens: 10, output_tokens: 5, cost_usd: 0.2, metered: true }), client)
-    expect(budgetGet).toHaveBeenCalledWith(workspace.id)
-    await vi.waitFor(() => expect(store.getState().budgets[workspace.id].state).toBe('exceeded'))
+      await applyEvent(store, event(2, 'run.cost', { input_tokens: 10, output_tokens: 5, cost_usd: 0.2, metered: true }), client)
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(budgetGet).toHaveBeenCalledWith(workspace.id)
+      expect(store.getState().budgets[workspace.id].state).toBe('exceeded')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('does not hold later events behind a budget read, and folds a burst into two reads', async () => {
-    const store = seeded()
-    const pending: (() => void)[] = []
-    const budgetGet = vi.fn(
-      (id: string) => new Promise<ReturnType<typeof budget>>((resolve) => pending.push(() => resolve(budget(id)))),
-    )
-    const client = fakeApi({ budgetGet })
-    const cost = (seq: number) => event(seq, 'run.cost', { metered: true })
+  it('reads the budget once after a burst of results, without holding later events', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      const budgetGet = vi.fn(async (id: string) => budget(id))
+      const client = fakeApi({ budgetGet })
+      const cost = (seq: number) => event(seq, 'run.cost', { metered: true })
 
-    for (let seq = 1; seq <= 5; seq++) await applyEvent(store, cost(seq), client)
-    await applyEvent(store, event(6, 'run.status', { to: 'failed' }), client)
-    expect(store.getState().runs.run_1.status).toBe('failed')
-    expect(budgetGet).toHaveBeenCalledTimes(1)
+      for (let seq = 1; seq <= 5; seq++) {
+        await applyEvent(store, cost(seq), client)
+        await vi.advanceTimersByTimeAsync(1000)
+      }
+      await applyEvent(store, event(6, 'run.status', { to: 'failed' }), client)
+      expect(store.getState().runs.run_1.status).toBe('failed')
+      expect(budgetGet).not.toHaveBeenCalled()
 
-    pending.shift()?.()
-    await vi.waitFor(() => expect(budgetGet).toHaveBeenCalledTimes(2))
-    pending.shift()?.()
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(budgetGet).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(500)
+      expect(budgetGet).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(budgetGet).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a budget read that a budget event overtook', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      const late = Promise.withResolvers<ReturnType<typeof budget>>()
+      const client = fakeApi({ budgetGet: () => late.promise })
+
+      await applyEvent(store, event(1, 'run.cost', { metered: true }), client)
+      await vi.advanceTimersByTimeAsync(1500)
+      await applyEvent(store, event(2, 'workspace.budget', { state: 'exceeded', spend_usd: 6, limit_usd: 5 }, { run_id: '' }), client)
+      late.resolve(budget(workspace.id, { state: 'ok' }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().budgets[workspace.id].state).toBe('exceeded')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reads the list again when an event lands while it is in flight', async () => {

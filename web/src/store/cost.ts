@@ -1,4 +1,7 @@
+import type { Api } from '@/lib/api'
 import type { BudgetReport, BudgetState, CostRollup } from '@/lib/types'
+import type { RootStore } from '@/store'
+import { coalesce } from '@/store/coalesce'
 import type { SliceCreator } from '@/store/slice'
 
 /** The `workspace.budget` event payload. */
@@ -14,6 +17,8 @@ export interface BudgetPayload {
 export interface CostSlice {
   /** Workspace ID to its budget report: the cap, its state, and the spend. */
   budgets: Record<string, BudgetReport>
+  /** `workspace.budget` events per workspace, so a read one overtook is dropped. */
+  budgetEvents: Record<string, number>
   setBudget: (report: BudgetReport) => void
   applyBudgetEvent: (workspaceID: string, payload: BudgetPayload) => void
 }
@@ -29,6 +34,7 @@ const noSpend: CostRollup = {
 
 export const createCostSlice: SliceCreator<CostSlice> = (set) => ({
   budgets: {},
+  budgetEvents: {},
   setBudget: (report) =>
     set((s) => ({ budgets: { ...s.budgets, [report.workspace_id]: report } })),
   // The event carries the state, the cap and the total, not the per-run
@@ -52,9 +58,32 @@ export const createCostSlice: SliceCreator<CostSlice> = (set) => ({
         spend: { ...(current?.spend ?? noSpend), cost_usd: p.spend_usd, unmetered_runs: unmetered },
         advisory: unmetered > 0,
       }
-      return { budgets: { ...s.budgets, [workspaceID]: report } }
+      return {
+        budgets: { ...s.budgets, [workspaceID]: report },
+        budgetEvents: { ...s.budgetEvents, [workspaceID]: (s.budgetEvents[workspaceID] ?? 0) + 1 },
+      }
     }),
 })
+
+const budgetReadDelayMs = 1500
+const budgetTimers = new WeakMap<RootStore, Map<string, ReturnType<typeof setTimeout>>>()
+
+export function scheduleBudgetRead(store: RootStore, client: Api, workspaceID: string): void {
+  let timers = budgetTimers.get(store)
+  if (!timers) {
+    timers = new Map()
+    budgetTimers.set(store, timers)
+  }
+  clearTimeout(timers.get(workspaceID))
+  timers.set(workspaceID, setTimeout(() => {
+    timers.delete(workspaceID)
+    coalesce(store, `budget:${workspaceID}`, async () => {
+      const stamp = store.getState().budgetEvents[workspaceID]
+      const report = await client.budgetGet(workspaceID).catch(() => null)
+      if (report && store.getState().budgetEvents[workspaceID] === stamp) store.getState().setBudget(report)
+    })
+  }, budgetReadDelayMs))
+}
 
 /** Worst first: a warning anywhere outranks every workspace that is fine. */
 const severity: BudgetState[] = ['exceeded', 'warn', 'ok']

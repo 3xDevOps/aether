@@ -25,7 +25,7 @@ import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
 import { pausedFromTimeline } from '@/store/board'
-import type { BudgetPayload } from '@/store/cost'
+import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
 import { watchOutcomeSeen } from '@/store/outcome-seen'
 import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
@@ -512,12 +512,7 @@ export async function applyEvent(
       // Budget events fire on threshold crossings, refusals and admin edits;
       // the spend and unmetered count the status bar shows move with every
       // result. The read does not hold up the events behind it.
-      const workspaceID = ev.workspace_id
-      if (workspaceID) {
-        coalesce(store, `budget:${workspaceID}`, () =>
-          client.budgetGet(workspaceID).then(store.getState().setBudget).catch(ignore),
-        )
-      }
+      if (ev.workspace_id) scheduleBudgetRead(store, client, ev.workspace_id)
       break
     }
     case 'workspace.presence':
