@@ -99,13 +99,12 @@ function toolStatus(call: SessionToolCall): WorkStatus {
 }
 
 function toolTarget(call: SessionToolCall): string {
-  const path = call.locations?.[0]?.path
+  const path = call.locations?.[0]?.path ?? call.diffs?.[0]?.path
   if (path && call.tool_kind !== 'execute') return path
   const [present, past] = toolTenses({ tool: call.tool_kind })
-  for (const verb of [past, present]) {
-    if (call.title.startsWith(`${verb} `)) return call.title.slice(verb.length + 1)
-  }
-  return call.title
+  const first = call.title.split(' ', 1)[0]!
+  const verbs = [present, past, call.tool_kind, 'Edit', 'Write', 'Run', 'Search', 'Fetch'].map((verb) => verb?.toLowerCase())
+  return verbs.includes(first.toLowerCase()) && call.title.length > first.length ? call.title.slice(first.length + 1) : call.title
 }
 
 export function toolLabel(call: SessionToolCall, status: WorkStatus): string {

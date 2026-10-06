@@ -81,6 +81,8 @@ export interface SessionsSlice {
 export const residentSessions = 3
 export const keptItems = 200
 
+let touches = 0
+
 const emptyLog: SessionLog = { events: [], cursor: 0, loading: false, error: null }
 
 function merge(current: Event[], incoming: Event[]): Event[] {
@@ -233,7 +235,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
   acpTakeover: (runID, takeover, error) => set((s) => patchSession(s, runID, { takeover, takeoverError: error })),
   touchAcpSession: (runID, open) =>
     set((s) => {
-      const sessions = { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), touched: Date.now() } }
+      const sessions = { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), touched: ++touches } }
       const idle = Object.entries(sessions)
         .filter(([id]) => id !== runID && !open(id))
         .sort(([, a], [, b]) => b.touched - a.touched)
