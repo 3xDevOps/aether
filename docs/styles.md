@@ -194,12 +194,13 @@ own surfaces. Floating menus stay inside the available viewport and scroll to
 their last action. Route roots own the shell's bounded height; their content
 regions use `min-h-0` and vertical overflow.
 
-The run Browser view: before a page is selected, the URL field and **Open
-browser** are primary; a selected page adds **Back**, **Forward**, **Reload
-page** and **Go**. **Browser tools** holds page and viewport selection,
+The run Browser view: before a page is selected, one `EmptyState` ("No page
+open") with **Open http://localhost:3000** or **Take control**, and **Other
+address…** for a URL field; a selected page adds **Back**, **Forward**,
+**Reload page** and **Go**. **Page tools** holds page and viewport selection,
 **New page**, **Screenshot**, **Reconnect** and the gated **Close page** and
 **Reset session**, each behind an `AlertDialog` confirmation that keeps the
-raw failure and returns focus to **Browser tools** when dismissed.
+raw failure and returns focus to **Page tools** when dismissed.
 
 The terminal toolbar holds the terminal tabs, **Tools** (a menu; a bottom
 sheet under 768px) and, at its end, who controls the terminal beside **Take

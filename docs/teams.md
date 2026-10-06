@@ -990,8 +990,8 @@ agent-to-agent mail, grouped by thread) and **Integration** (the read-only
 candidate, with the swarm's IDs under **Technical details**). **More swarm
 actions** holds
 **Replace integrator…** and **Cancel swarm…**. An integrator that leaves
-mail unread for over two minutes says so on its state line ("3 agent
-messages unread for 12 min").
+mail unread for over two minutes says so in muted text ("Integrator has
+not read 3 messages (12 min)").
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \

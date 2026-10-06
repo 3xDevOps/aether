@@ -340,12 +340,15 @@ top to bottom:
    Templates, then under a hairline Members (admins only) and Settings. The
    current one carries `aria-current="page"`. Gates come from
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
-   `palette` entries (Approvals, Devices, Manage workspaces, Onboarding, and
-   Members for a non-admin) are reached from the palette only.
+   `palette` entries (Members › Devices, Manage workspaces, and Members for a
+   non-admin) are reached from the palette only, and its `link` entries
+   (Approvals, the board's Needs you; Onboarding, opened from **Settings ›
+   Onboarding**) only from a link.
 5. **One update notice row** when a CLI, server or desktop update exists, for
    example "Aether 0.5.3 is available · Update"; see
    [Update prompts](#update-prompts).
-6. **Footer**: the member's avatar and name and a connection dot, whose word
+6. **Footer**: the member's avatar (a neutral glyph before the computer is
+   linked) and name and a connection dot, whose word
    ("Live", "Reconnecting", "Offline") is in the button's name and tooltip.
    Its menu holds **Profile** (a dialog: colour, git identity and agent
    account sharing; see [Members, devices and
@@ -367,8 +370,9 @@ is one tab stop (roving `tabindex`); Arrow keys, Home and End move within it,
 next run that needs you, oldest first.
 
 A swarm is one row showing the objective and the workers' counts ("3 working ·
-1 needs you"), or "3 unread" while the integrator has unread agent mail;
-selecting it opens the swarm page. Only workers that need the viewer are
+1 needs you"); while the integrator has unread agent mail the row's name and
+tooltip end with "Integrator has not read 3 messages (12 min)". Selecting it
+opens the swarm page. Only workers that need the viewer are
 listed under it, and the row then sits in Needs you. Workers never list on
 their own: a swarm whose integrator is missing or archived is rooted at its
 oldest worker (`swarmRoot` in `src/store/selectors.ts`). Relationships come
@@ -1182,8 +1186,10 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Browser appears only when the gateway serves
-`dev.browser.status`. `isRunRoute` in `views.ts` keeps a sidebar row lit
+Terminal otherwise. Browser appears once the run has a browser session:
+`useBrowserTab` (`src/routes/browser/visibility.ts`) polls
+`dev.browser.status` every 10 seconds for a live run on a gateway that serves
+it, and `?view=browser` opens it before then. `isRunRoute` in `views.ts` keeps a sidebar row lit
 across views.
 
 The frame (header, view switch, Details) stays mounted while the view
@@ -1786,9 +1792,12 @@ browser; every read answers
 dev.browser.status: scheduler: the run has no live environment: the run is completed and its container is gone
 ```
 
-Before a page is selected, the URL field and **Open browser** are the primary
-path to launching explicitly. A selected page exposes **Go**, **Back**,
-**Forward** and **Reload page** beside the URL. **Browser tools** contains the
+With no page selected the view is one **No page open** empty state: the
+state in words ("Browser not started · Nobody is driving") and one action,
+**Open http://localhost:3000**, or **Take control** / **Take over** when a
+session exists and the viewer does not hold it. **Other address…** swaps the
+button for a URL field. A selected page exposes **Go**, **Back**,
+**Forward** and **Reload page** beside the URL. **Page tools** contains the
 secondary page, viewport, capture, reconnect and destructive controls. **New
 page** opens another page in the existing context. The **Page** selector
 includes popups and changes the selected page for the agent and other viewers,
@@ -1799,12 +1808,13 @@ user agent, operating system or hardware.
 
 The pane uses shared 13px inputs and buttons and native selectors styled with
 `field`: 28px high for mouse input and 44px for coarse pointers. Primary
-controls wrap responsively; secondary controls stay in Browser tools. Long
+controls wrap responsively; secondary controls stay in Page tools. Long
 addresses, page titles and errors stay within the pane.
 
-The header identifies the browser incarnation, lifecycle state and current
-member or run-agent controller. **Acquire control** claims an unoccupied
-browser; **Take over browser** explicitly displaces the displayed lease.
+The status line names the lifecycle state and who is driving: "You are
+driving", "Alice is driving", "The agent is driving" or "Nobody is
+driving". **Take control** claims an unoccupied browser; **Take over**
+explicitly displaces the displayed lease.
 **Release control** gives up only that browser surface, not a swarm control
 hold. Watchers see the same selected page but cannot navigate, resize, select
 pages or send input. The server revalidates the steer permission, current
@@ -1850,7 +1860,7 @@ pages/cookies and requires acquiring the new session before opening pages.
 Each confirmation captures the session and control identity/generation, plus
 the page and revision for Close. A replacement page, session or authority
 invalidates it rather than retargeting the mutation. Cancel restores focus to
-Browser tools, and raw failures remain readable in the confirmation. Closing
+Page tools, and raw failures remain readable in the confirmation. Closing
 the run owns stopping the companion itself.
 
 **Screenshot** calls the real capture API at its own recorded boundary, not
@@ -2049,8 +2059,8 @@ phase word (`Planning`, `Planning · N questions for you`, `Active`,
 `Completed`, `Cancelled`), the Needs you reason when a swarm run needs the
 viewer, the unread reason when the integrator has left mail unread for over
 two minutes, or `Integrator did not launch: <error>` while
-`integrator_launch_error` is set. The unread case also adds an `n unread`
-badge. Swarms that need you sort first, then by last update; completed and
+`integrator_launch_error` is set. When a Needs you reason leads, the unread
+sentence follows the counts in muted text. Swarms that need you sort first, then by last update; completed and
 cancelled swarms fold behind **Finished (n)**, listed openly when no swarm
 is open. The server has no archive or delete for a swarm, so Finished is the
 archive. With no swarms the page shows one sentence and **New swarm**. On a
@@ -2145,11 +2155,17 @@ re-reads its newest page. A failed read shows the error with **Retry**.
 `groupMessages` (`store/messages.ts`) groups the loaded rows by structure,
 never by content: a reply sits under its question when the question is loaded,
 reports and questions stand alone, and adjacent plain messages between the
-same sender and recipient fold into one line ("Port the controller →
-Integrator · 3 messages", expandable). Each row is the Activity message row
-(`components/messages/message-row.tsx`) with both runs named by their swarm
-task title, else `Integrator`, else the run title (`participantLabel` in
-`routes/missions/swarm.ts`). A participant is a muted link (the `quiet` Button
+same sender and recipient fold into one line ("Worker 1 → Integrator · 3
+messages", expandable). Each row is the Activity message row
+(`components/messages/message-row.tsx`). Every swarm participant is named by
+a short handle (`useRunHandle` in `components/messages/handles.ts`):
+**Integrator**, or **Worker N** numbered by the swarm's task order, with
+", attempt M" for a retried task and the task title as the tooltip. The
+handle comes from the swarm's `mission.show`, read once when a row needs one
+the store does not hold; a caller's label overrides it, so a run's own
+Details and Session name it "This run". Outside a swarm a participant is its
+run title. The task table's Worker column leads with the same handle. A
+participant is a muted link (the `quiet` Button
 variant) that opens that run; the run already open is plain text. Groups order
 by their latest message, so a fresh reply brings its thread forward. The
 newest six groups show first; **Show all** shows every loaded group and then
@@ -2159,9 +2175,11 @@ auto` rather than a virtualizer: history arrives only as the viewer pages it.
 ### Unread mail
 
 An integrator whose oldest unacknowledged message (`oldest_unacked_at` on
-the run) is over two minutes old reads `3 agent messages unread for 12 min`
-as its state line on the swarm page, its board card and its sidebar row,
-whose trailing text becomes `3 unread`. `presentRun` (`lib/status.ts`)
+the run) is over two minutes old reads `Integrator has not read 3 messages
+(12 min)`. It is muted text, never amber: the swarm card shows it beside the
+counts, or as the card's state line and the swarm page's when nothing else
+needs the viewer, and the sidebar row carries it in its name and tooltip.
+`presentRun` (`lib/status.ts`)
 computes it once, through `unreadMail` in `lib/needs-you.ts`; it is a
 reason, not a Needs you state. A `coord.message` or `coord.message.acked`
 event re-reads the recipient's count and age.
@@ -2280,15 +2298,23 @@ questions and queued messages stay contextual to their run, in its Details
   workspace against another is the question the view exists to answer; it
   opens on the active workspace and switching it clears the run filter, since
   a run belongs to exactly one workspace.
-- **A feed row names the event's type; it does not print it.** The name comes
-  from `src/lib/events.ts`, which is also where the type filter's options are
-  named from, so an option and the rows it selects cannot call one type two
-  different things. The wire string stays as the row's tooltip. The describer
-  table in `src/components/feed-entry.tsx` is keyed by the map's own type, and
-  `filterTypes` by those keys too, so a type cannot gain a name without a
-  description, or the reverse, without failing the build. A type the map has
-  never heard of renders as its wire string, because a server newer than the
-  dashboard can emit one.
+- **A feed row is a sentence.** `src/components/event-words.tsx` words
+  every event type the server declares: "You messaged the agent: “…”",
+  "Needs you: agent idle", "Alice approved “Bash: rm -rf build”", "Failed:
+  Agent exited with code 1". The viewer is "You", server reasons go through
+  `plainReason` (`src/lib/status.ts`), and room ids, run ids and wire enums
+  never appear outside Raw events. Its table is keyed by `src/lib/events.ts`'s
+  type names, which also name the filter options, so a type cannot gain a
+  name without words. `src/lib/events.test.tsx` reads the event, timeline
+  and room vocabularies from the Go sources under `internal/`, so a server
+  type without words fails the test. A type this dashboard has never heard of
+  reads "Something changed" under the type name "Other".
+- **Opening a run is one row.** Viewing a run takes its control and leaving
+  releases it; `foldVisits` (`routes/activity/visits.ts`) folds each
+  `run.controller` take and the release that ends it into one "Alice viewed
+  the run" row ("is viewing" while it lasts). A release with no take on the
+  page stays "Control released". **Show › Run control** lists only these
+  rows. Raw events does not fold.
 - **One Filter popover.** **Filter** in the Activity header holds Workspace,
   **Show** (every event, one event type, or **Agent messages**), Run and
   Member; its label counts what is set (`Filter · 2`), so a narrowed feed is
@@ -2297,11 +2323,11 @@ questions and queued messages stay contextual to their run, in its Details
   type and JSON payload instead of its description.
 - **Rows share one time column.** Each row is a grid: relative time, a state
   dot only on `run.status` (the run's new state), the actor's avatar or the
-  message kind glyph, the type name with its description, and the run as a
-  quiet link. On a phone the type name shares the first line with the time,
-  and the description and run link take the full width under it.
-  `coord.message` and `coord.message.acked` rows name sender and recipient
-  (`Backend → Planner`), never the payload's ids, and a delivery word only
+  message kind glyph, the sentence, and the run as a quiet link. On a phone
+  the sentence shares the first line with the time and the run link takes
+  the full width under it. `coord.message` and `coord.message.acked` rows
+  name sender and recipient by their handles (`Worker 1 → Integrator`), never
+  the payload's ids, and a delivery word only
   once the message is in the messages slice; the event alone does not say
   whether it was delivered.
 - **The feed is virtualized.** `virtua` mounts only the rows near the
@@ -2411,11 +2437,15 @@ both. The page header has **Add agent…** where the gateway serves
 `AgentList` rows show the agent's coloured `AgentGlyph`, its display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
 login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
-one button: **Set up**, or **Run** once the agent is installed with no
-missing login, with **Set up again** in the row's **More** menu; closing a
-setup returns focus to that row's button. On the Agents page a set-up agent's
-row also has a **Default mode** select, shown as "Default: Standard", which
-writes `launchDefaults` without changing which agent **New run** preselects.
+one button by state: **Set up** while not installed, **Log in** while
+installed with no login found, and **Run** once ready, with **Set up again**
+in the row's **More** menu; closing a setup returns focus to that row's
+button. On the Agents page an installed agent's row also has a **Default
+mode** select, shown as "Default: Standard", which writes `launchDefaults`
+without changing which agent **New run** preselects. Once one agent is
+installed the page folds the rest under **More agents (n)**. **What's the
+difference?** beside the page's lead opens the Standard and Enhanced cards
+(`ModeOverview`) in a dialog.
 **Run** remembers the agent and its default mode and opens **New run** on it;
 in onboarding it moves to First run with that agent preselected. **Add
 agent…** (`add-agent.tsx`) asks for a name, a Standard and a Background
@@ -2428,13 +2458,15 @@ the identity itself; **GitHub**; and **Agent config files**.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how runs
 show it**, **Install and log in** and **Check**. The first is
-`mode-comparison.tsx`: a `radiogroup` of two cards, side by side
+`mode-comparison.tsx`: a `radiogroup` of two cards (`ModeOverview` draws the
+same cards as a static list with agent-neutral notes), side by side
 when its container is at least 640px wide and stacked below, each with a mock
 at least 160px tall above its description, trade-off and note. The mocks
 draw one canned item log (`mock-moment.ts`, `SessionItem` shapes): the
 Standard card as a terminal still, the Enhanced card through `session-mock.tsx`
-with the permission request as a card. Both are spans with `aria-hidden`,
-static, so they can sit inside the radio's button; the description and
+with the permission request as a card whose Approve and Deny ignore the
+pointer. Both are spans with `aria-hidden`, static, so they can sit inside
+the radio's button; the description and
 trade-off are its `aria-describedby`. Below the cards a `dl` gives the
 per-agent lines from `agent-copy.ts`: support, setup, switching (from
 `switchable`, otherwise "Chosen when the run starts"), fallback, and billing
@@ -2834,9 +2866,12 @@ workspace and repository state; changing workspaces never applies the
 previous workspace's link or Git result.
 
 In the step header, every step the member has already reached carries a check
-and is a button that jumps to it, forwards as well as back, so walking
-backwards does not strand them on a step they cannot leave. The current step
-and the ones never reached are inert text.
+(a dash for a skipped Agent step) and is a button that jumps to it, forwards
+as well as back, so walking backwards does not strand them on a step they
+cannot leave. The current step and the ones never reached are inert text.
+Leaving the wizard keeps its progress, and **Settings › Onboarding › Open
+guide** reopens it at the furthest step reached; only finishing First run
+starts it over.
 
 Git identity is the name and email the member's commits are authored as,
 saved on the server with `member.git` by **Save identity**. A local gateway
@@ -2990,10 +3025,14 @@ once a server is configured, and refreshes on Retry and when the window
 regains focus, so a separate `aether link` command appears without
 restarting the GUI.
 
-The Agent step renders the agent list, **Add agent…** and the extras
+The Agent step opens with the two Standard and Enhanced cards
+(`ModeOverview`), then the agent list, **Add agent…** and the extras
 described under [Agents](#agents). Its primary action is **Continue** once
 any agent is installed; before that the first agent's **Set up** is the
-filled button, with **Skip for now** beside Back. A gateway that cannot
+filled button, with **Skip for now** beside Back. A skipped Agent step shows
+a dash in the step list instead of a check. On a phone the setup
+sub-screen's Back row scrolls with the page rather than sticking over the
+cards. A gateway that cannot
 install agents says to run `aether agent add` from a terminal instead.
 
 First run is the launch form, not a copy of it: `RunFields` and

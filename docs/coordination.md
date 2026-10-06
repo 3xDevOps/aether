@@ -293,8 +293,10 @@ In the dashboard, open **Activity**, then **Filter** > **Show** > **Agent
 messages**: the workspace's mail, newest first, with sender → recipient,
 kind, delivery (Sent, Delivered, Acknowledged), and a search over the loaded
 bodies. Sender, Recipient and Thread narrow it; **Show all** reads older
-pages. The ordinary Activity feed shows each send as an **Agent message** row
-without the body.
+pages. The ordinary Activity feed shows each send as a row without the body.
+Rows and the Details panel name swarm participants by a short handle:
+**Integrator**, and **Worker 1**, **Worker 2** … numbered by task order, with
+the task title as the tooltip.
 
 Members read agent mail on the control channel with `coord.messages.list`.
 It needs View on the workspace, so every member of the workspace can read
@@ -328,10 +330,10 @@ restart delays them rather than losing them, and neither carries the body:
 | `coord.message` | sender | `message_id`, `workspace_id`, `mission_id`, `from_run_id`, `to_run_id`, `kind`, `correlation_id` |
 | `coord.message.acked` | recipient | `message_id`, `to_run_id`, `acked_at` |
 
-The dashboard's Activity feed shows `coord.message` as an **Agent message**
-row: an icon for the kind, then sender → recipient and, once the message is
-loaded, its delivery word, such as `Planner → Backend · Delivered`. An
-acknowledgement shows as an **Agent message acknowledged** row.
+The dashboard's Activity feed shows `coord.message` as a row with an icon for
+the kind, then sender → recipient and, once the message is loaded, its
+delivery word, such as `Worker 1 → Integrator · Delivered`. An
+acknowledgement shows as `Worker 1 → Integrator · Acknowledged`.
 `aether timeline` prints the send as `<from-run> -> <to-run> · question`.
 Neither shows the body. Bodies come from `coord.messages.list`:
 the swarm page's **Agent messages** section lists a swarm's mail grouped by
@@ -339,8 +341,9 @@ thread, with each body and its delivery word (`Sent`, `Delivered`,
 `Acknowledged`)
 ([dashboard-frontend.md](dashboard-frontend.md#agent-messages-on-a-swarm)).
 An integrator that leaves mail unacknowledged for over two minutes reads
-`3 agent messages unread for 12 min` on the swarm page, its board card and
-its sidebar row.
+`Integrator has not read 3 messages (12 min)` in muted text on its swarm card
+and in its sidebar row's tooltip; it leads the card and the swarm page only
+when nothing else needs you.
 
 `workspace.timeline` pages forward from `after_seq`, or with `newest: true`
 backward from `before_seq` (zero: the log head; pass the previous page's

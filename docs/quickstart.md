@@ -209,8 +209,9 @@ authentication.
 
 ## 4. Create a workspace
 
-The dashboard opens **Onboarding** until you finish it; later, find it in the
-command palette (**Ctrl/Cmd+K**). Its header lists four steps: **Connect**,
+The dashboard opens **Onboarding** until you finish it; later, open it from
+**Settings → Onboarding → Open guide**, which resumes at the furthest step
+you reached. Its header lists four steps: **Connect**,
 **Repository**, **Agent** and **First run**. The local dashboard starts at
 **Connect**; the hosted dashboard has no machine-local link and starts at
 **Repository**, and opens onboarding for new members even when shared
@@ -446,10 +447,14 @@ the image new containers use.
 
 ## 5. Set up your agent
 
-An **agent** is the coding CLI a run starts. **Onboarding → Agent** and the
-**Agents** page list each one with **Installed** or **Not installed**,
-**Login found** or **No login found**, and the modes it supports
-(**Standard · Enhanced**, or **Standard**). Setup belongs to your member
+An **agent** is the coding CLI a run starts. **Onboarding → Agent** opens
+with two cards comparing **Standard** and **Enhanced**, the two ways a run
+can show an agent; on the **Agents** page, **What's the difference?** shows
+the same cards. Both list each agent with **Installed** or **Not
+installed**, **Login found** or **No login found**, and the modes it
+supports (**Standard · Enhanced**, or **Standard**), and one button: **Set
+up**, **Log in** or **Run**. Once one agent is installed, the Agents page
+folds the others under **More agents**. Setup belongs to your member
 account, not to one workspace. **Set up** opens three numbered steps:
 
 1. **Choose how runs show it.** Two cards draw the same moment of one run:
