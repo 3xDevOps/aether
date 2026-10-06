@@ -50,23 +50,23 @@ export async function refreshTeam(store: RootStore, client: Api = api): Promise<
 export async function refreshInbox(store: RootStore, client: Api = api): Promise<void> {
   const s = store.getState()
   const id = s.startInboxRead()
-  const results = await Promise.all(
+  await Promise.all(
     Object.keys(s.workspaces).map((wsp) =>
-      client
-        .approvalList(wsp, s.showDecided)
-        .then((list) => {
+      client.approvalList(wsp, s.showDecided).then(
+        (list) => {
           const now = store.getState()
-          if (now.inboxRequest !== id) return null
+          if (now.inboxRequest !== id) return
           // An approval event applied meanwhile is newer than this answer.
-          if (now.inboxEvents[wsp] === s.inboxEvents[wsp]) now.setInbox(wsp, list)
-          else readInbox(store, client, wsp)
-          return null
-        })
-        .catch(message),
+          if (now.inboxEvents[wsp] !== s.inboxEvents[wsp]) return readInbox(store, client, wsp)
+          now.setInbox(wsp, list)
+          now.setInboxError(wsp, null)
+        },
+        (err) => {
+          if (store.getState().inboxRequest === id) store.getState().setInboxError(wsp, message(err))
+        },
+      ),
     ),
   )
-  if (store.getState().inboxRequest !== id) return
-  store.getState().setInboxError(results.find((r) => r !== null) ?? null)
 }
 
 export async function heartbeat(store: RootStore, client: Api = api): Promise<void> {

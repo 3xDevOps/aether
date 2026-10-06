@@ -12,8 +12,10 @@ export interface ApprovalsSlice {
   showDecided: boolean
   /** Run ID to its pending requests, oldest first; rebuilt whenever the inbox changes. */
   approvalsByRun: Record<string, Approval[]>
-  /** The last read's failure, so an unreadable queue cannot render as empty. */
+  /** A read failure, so an unreadable queue cannot render as empty. */
   inboxError: string | null
+  /** Workspace ID to its last failed read; `inboxError` is one of these. */
+  inboxErrors: Record<string, string>
   /** Bumped per read, so a slow one cannot overwrite a newer one's answer. */
   inboxRequest: number
   /**
@@ -30,7 +32,7 @@ export interface ApprovalsSlice {
     decidedBy: string,
     decidedAt: string,
   ) => void
-  setInboxError: (error: string | null) => void
+  setInboxError: (workspaceID: string, error: string | null) => void
   startInboxRead: () => number
   setShowDecided: (show: boolean) => void
 }
@@ -40,6 +42,7 @@ export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get) => 
   approvalsByRun: {},
   showDecided: false,
   inboxError: null,
+  inboxErrors: {},
   inboxRequest: 0,
   inboxEvents: {},
   setInbox: (workspaceID, approvals) =>
@@ -65,7 +68,14 @@ export const createApprovalsSlice: SliceCreator<ApprovalsSlice> = (set, get) => 
       const inbox = { ...s.inbox, [workspaceID]: next }
       return { inbox, approvalsByRun: indexByRun(inbox) }
     }),
-  setInboxError: (inboxError) => set({ inboxError }),
+  setInboxError: (workspaceID, error) =>
+    set((s) => {
+      if ((s.inboxErrors[workspaceID] ?? null) === error) return {}
+      const inboxErrors = { ...s.inboxErrors }
+      if (error === null) delete inboxErrors[workspaceID]
+      else inboxErrors[workspaceID] = error
+      return { inboxErrors, inboxError: Object.values(inboxErrors)[0] ?? null }
+    }),
   startInboxRead: () => {
     const inboxRequest = get().inboxRequest + 1
     set({ inboxRequest })
@@ -99,8 +109,6 @@ export function sortByCreated(approvals: Approval[]): Approval[] {
 
 const retryMs = 5000
 const maxRetryMs = 60_000
-/** The inbox error a single-workspace read set, so only that read's success clears it. */
-const readErrors = new WeakMap<RootStore, string>()
 
 /**
  * The payload carries no request text, so an unknown request is read with its
@@ -133,14 +141,12 @@ export function readInbox(store: RootStore, client: Api, workspaceID: string, at
         return false
       }
       now.setInbox(workspaceID, list)
-      if (now.inboxError !== null && now.inboxError === readErrors.get(store)) now.setInboxError(null)
+      now.setInboxError(workspaceID, null)
     } catch (err) {
-      const error = message(err)
-      readErrors.set(store, error)
-      store.getState().setInboxError(error)
+      store.getState().setInboxError(workspaceID, message(err))
       setTimeout(() => {
         const now = store.getState()
-        if (attempt > 0 && (now.connection !== 'live' || now.inboxError === null)) return
+        if (attempt > 0 && (now.connection !== 'live' || now.inboxErrors[workspaceID] === undefined)) return
         readInbox(store, client, workspaceID, attempt + 1)
       }, Math.min(retryMs * 2 ** attempt, maxRetryMs))
     }

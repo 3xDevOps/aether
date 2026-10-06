@@ -2,7 +2,7 @@ import type { Event } from '@/lib/types'
 import { refreshInbox } from '@/routes/team/sync'
 import { createRootStore } from '@/store'
 import { applyEvent } from '@/store/sync'
-import { alice, approval, budget, fakeApi, run, workspace } from '@/test/fixtures'
+import { alice, approval, budget, fakeApi, otherWorkspace, run, workspace } from '@/test/fixtures'
 
 function event(seq: number, type: string, payload: unknown, over: Partial<Event> = {}): Event {
   return {
@@ -109,9 +109,43 @@ describe('team state from events', () => {
         expect(approvalList).toHaveBeenCalledTimes(++calls)
       }
 
-      store.getState().setInboxError(null)
+      store.getState().setInboxError(workspace.id, null)
       await vi.advanceTimersByTimeAsync(120_000)
       expect(approvalList).toHaveBeenCalledTimes(calls)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps one workspace's failed read retrying when a full read succeeds elsewhere", async () => {
+    vi.useFakeTimers()
+    try {
+      const store = seeded()
+      store.setState({ connection: 'live', workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace } })
+      let answerFirst: (list: never[]) => void = () => {}
+      let firstRead = true
+      const approvalList = vi.fn((wsp: string) => {
+        if (wsp !== workspace.id) return Promise.resolve([])
+        if (firstRead) {
+          firstRead = false
+          return new Promise<never[]>((resolve) => { answerFirst = resolve })
+        }
+        return Promise.reject(new Error('approval.list: database is locked'))
+      })
+      const client = fakeApi({ approvalList })
+
+      const full = refreshInbox(store, client)
+      await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
+      await vi.advanceTimersByTimeAsync(0)
+      answerFirst([])
+      await full
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().inboxError).toContain('locked')
+
+      const before = approvalList.mock.calls.filter(([wsp]) => wsp === workspace.id).length
+      await vi.advanceTimersByTimeAsync(5000 + 10_000)
+      expect(approvalList.mock.calls.filter(([wsp]) => wsp === workspace.id).length).toBeGreaterThan(before)
+      expect(store.getState().inboxError).toContain('locked')
     } finally {
       vi.useRealTimers()
     }
