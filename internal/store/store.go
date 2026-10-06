@@ -122,6 +122,9 @@ type Store interface {
 	// SetRunAgentSession records only the agent's own session id
 	// (Run.HarnessSessionID), leaving every other field untouched.
 	SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error
+	// SetRunMode sets only the run's launch mode and ACP flag, for a live
+	// run switched between Standard and Enhanced.
+	SetRunMode(ctx context.Context, id domain.RunID, mode domain.LaunchMode, acp bool) error
 	// TransferRun reassigns only the run's owning member (handoff),
 	// leaving every other field untouched.
 	TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error

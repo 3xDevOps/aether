@@ -33,11 +33,13 @@ const (
 	ReasonResumed = "agent resumed"
 )
 
-// An input-only report preserves the last execution state.
+// An input-only report preserves the last execution state. SessionID is the
+// agent's own top-level session, the one a mode switch resumes.
 type Report struct {
 	State        State                   `json:"state,omitempty"`
 	Reason       string                  `json:"reason,omitempty"`
 	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
+	SessionID    string                  `json:"session_id,omitempty"`
 }
 
 const ReporterCommand = coordtransport.BinaryPath
@@ -75,6 +77,14 @@ func FromClaudeHook(stdin []byte) (Report, bool) {
 	if err := json.Unmarshal(stdin, &hook); err != nil {
 		return Report{}, false
 	}
+	report, ok := fromClaudeHook(hook)
+	if ok {
+		report.SessionID = hook.SessionID
+	}
+	return report, ok
+}
+
+func fromClaudeHook(hook claudeHook) (Report, bool) {
 	session := hook.SessionID
 	if session != "" && hook.AgentID != "" {
 		// JSON tuple encoding avoids collisions between parent and child IDs.
@@ -142,13 +152,14 @@ const CodexNotifySetting = `notify=["` + ReporterCommand + `","report","codex"]`
 
 func FromCodexNotify(arg string) (Report, bool) {
 	var notify struct {
-		Type string `json:"type"`
+		Type     string `json:"type"`
+		ThreadID string `json:"thread-id"`
 	}
 	if err := json.Unmarshal([]byte(arg), &notify); err != nil {
 		return Report{}, false
 	}
 	if notify.Type == "agent-turn-complete" {
-		return Report{State: Idle, Reason: ReasonIdle}, true
+		return Report{State: Idle, Reason: ReasonIdle, SessionID: notify.ThreadID}, true
 	}
 	return Report{}, false
 }

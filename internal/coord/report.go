@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -102,7 +103,11 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 	if s.cfg.Reports == nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, ErrNoReportSink)
 	}
-	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason), InputUpdates: p.InputUpdates}
+	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason), InputUpdates: p.InputUpdates, SessionID: p.SessionID}
+	if report.SessionID != "" && !domain.ValidAgentSessionID(report.SessionID) {
+		slog.Warn("coord: run.report carries an unusable session id; ignoring it", "run", run, "bytes", len(report.SessionID))
+		report.SessionID = ""
+	}
 	if err := s.cfg.Reports.ReportAgentState(ctx, run, report); err != nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, err)
 	}

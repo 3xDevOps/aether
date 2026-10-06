@@ -34,6 +34,9 @@ const (
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
+	// TypeRunMode signals a live run switching between Standard (tui) and
+	// Enhanced (acp).
+	TypeRunMode Type = "run.mode"
 	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -162,6 +165,21 @@ type RunControllerPayload struct {
 func (RunControllerPayload) EventType() Type { return TypeRunController }
 
 func init() { registerPayload[RunControllerPayload](TypeRunController) }
+
+// RunModePayload reports a mode switch. Previous is the mode the run was in
+// when the switch started. The first event of a switch has Switching set and
+// Mode the target; the last has the mode the run is left in, which after a
+// failed switch is Previous, with the error in Reason.
+type RunModePayload struct {
+	Mode      domain.LaunchMode `json:"mode"`
+	Previous  domain.LaunchMode `json:"previous"`
+	Switching bool              `json:"switching,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+}
+
+func (RunModePayload) EventType() Type { return TypeRunMode }
+
+func init() { registerPayload[RunModePayload](TypeRunMode) }
 
 // RunArchivedPayload reports a run's archive state, both RFC3339. A nil
 // ArchivedAt (and DeletesAt) means the run was restored.

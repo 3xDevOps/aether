@@ -414,6 +414,16 @@ func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberI
 	return err
 }
 
+// SetRunMode updates only the run's launch mode and whether it runs over ACP.
+func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.LaunchMode, acp bool) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET mode = ?, acp = ? WHERE id = ?`, mode, acp, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run mode: %w", err)
+	}
+	return err
+}
+
 func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET protected = ? WHERE id = ?`, protected, id))

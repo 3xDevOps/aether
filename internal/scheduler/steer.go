@@ -553,6 +553,10 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool) (string, error) {
 	s.mu.Lock()
 	entry := s.runs[run]
+	if entry != nil && entry.switching != "" {
+		s.mu.Unlock()
+		return "", fmt.Errorf("%w: %w; send the message when it finishes", ptyhost.ErrNoSession, ErrSwitching)
+	}
 	if entry != nil && (entry.status == domain.RunRunning || entry.status == domain.RunNeedsAttention) {
 		workspace := entry.workspaceID
 		s.mu.Unlock()

@@ -9,7 +9,7 @@ const IDLE_RECHECK_MAX_MS = 250
 type InputRequest = { id: string; session_id: string; kind: string }
 const shared: {
   posts: Promise<void>; warned: boolean; pending: Map<string, InputRequest>;
-  busy: Set<string>; state?: string; dispose?: () => void;
+  busy: Set<string>; state?: string; session?: string; dispose?: () => void;
 } = globalThis[CHAIN] || (globalThis[CHAIN] = {
   posts: Promise.resolve(), warned: false, pending: new Map(), busy: new Set(),
 })
@@ -41,6 +41,7 @@ function report(): void {
   const body = JSON.stringify({
     ...(shared.state ? { state: shared.state } : {}),
     ...(shared.state === 'waiting' ? { reason: 'agent idle' } : {}),
+    ...(shared.session ? { session_id: shared.session } : {}),
     input_updates: [{ operation: 'replace', requests: [...shared.pending.values()] }],
   })
   // Identical Working reports are heartbeats even without terminal/file output.
@@ -98,9 +99,13 @@ export default function (pi): void {
     shared.state = shared.busy.size ? 'working' : 'waiting'
     report()
   }
+  function adopt(id: string): void {
+    session = id
+    shared.session = id.startsWith('process:') ? undefined : id
+  }
   function start(_event, ctx): void {
     cancel()
-    session = sessionID(undefined, ctx)
+    adopt(sessionID(undefined, ctx))
     ended = false
     execution(true)
   }
@@ -126,7 +131,7 @@ export default function (pi): void {
     if (next !== session) {
       const changed = shared.busy.has(session) || [...shared.pending.values()].some(request => request.session_id === session)
       clearSession(session)
-      session = next
+      adopt(next)
       ended = false
       cancel()
       if (changed) execution(false)

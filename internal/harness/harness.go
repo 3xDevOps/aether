@@ -250,6 +250,9 @@ type Profile struct {
 	// ResumeArgs reopens a stored session, SessionPlaceholder being its id.
 	// Empty when the CLI cannot target one session.
 	ResumeArgs []string
+	// SwitchVerified records that the live switch test (ACP_LIVE=1,
+	// switch_live_test.go) passed in both directions for this agent.
+	SwitchVerified bool
 	// EnvPassthrough names server environment variables copied into run
 	// containers when set; keys are never baked into images.
 	EnvPassthrough []string
@@ -349,12 +352,14 @@ var profiles = map[string]Profile{
 		DisplayName: "Claude Code",
 		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
-		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
-		ACPArgs:        []string{claudeACP.Binary},
-		ACPInstall:     claudeACP,
-		ACPMode:        "auto",
-		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
+		HeadlessArgs:     []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		ACPArgs:          []string{claudeACP.Binary},
+		ACPInstall:       claudeACP,
+		ACPMode:          "auto",
+		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		ACPSessionShared: true,
+		SwitchVerified:   true,
+		EnvPassthrough:   []string{"ANTHROPIC_API_KEY"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the
 		// environment declares a sandbox; the run container is one.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
@@ -441,6 +446,7 @@ var profiles = map[string]Profile{
 		ACPSessionShared: true,
 		ACPDefault:       true,
 		ResumeArgs:       []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
+		SwitchVerified:   true,
 		EnvPassthrough:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.

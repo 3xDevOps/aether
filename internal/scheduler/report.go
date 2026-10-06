@@ -131,7 +131,26 @@ func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, repo
 	if finishes {
 		s.startReportedFinishLocked(entry)
 	}
+	if err := s.recordReportedSessionLocked(ctx, entry, report.SessionID); err != nil {
+		return err
+	}
 	return s.publishPendingInputLocked(ctx, entry)
+}
+
+// recordReportedSessionLocked keeps the latest session a Standard run's agent
+// reports. An enhanced run's session id comes from its session host instead.
+func (s *Scheduler) recordReportedSessionLocked(ctx context.Context, entry *supervised, session string) error {
+	if session == "" || entry.launchMode != domain.LaunchTUI || session == entry.agentSessionID {
+		return nil
+	}
+	if err := s.cfg.Store.SetRunAgentSession(ctx, entry.runID, session); err != nil {
+		return fmt.Errorf("scheduler: record the agent's session: %w", err)
+	}
+	entry.agentSessionID = session
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		return fmt.Errorf("scheduler: persist the agent's session: %w", err)
+	}
+	return nil
 }
 
 // publishPendingInputLocked repairs only an outstanding publication, never an

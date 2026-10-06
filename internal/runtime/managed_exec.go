@@ -28,8 +28,10 @@ type ManagedExecRuntime interface {
 // directly; callers wanting shell syntax must explicitly use /bin/sh -c.
 // Cols and Rows size StartExecTTY's terminal; StartExecPipe ignores them.
 type ExecSpec struct {
-	Argv        []string
-	WorkingDir  string
+	Argv       []string
+	WorkingDir string
+	// Env adds KEY=VALUE entries to the container's environment.
+	Env         []string
 	Cols, Rows  uint
 	CreationKey string
 }

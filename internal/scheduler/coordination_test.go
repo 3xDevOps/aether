@@ -64,6 +64,23 @@ func (f *fakeCoordinator) WriteCoAuthors(run domain.RunID, trailers []string) er
 	return nil
 }
 
+func (f *fakeCoordinator) WriteFiles(run domain.RunID, files map[string][]byte) error {
+	if f.err != nil {
+		return f.err
+	}
+	dir := filepath.Join(f.root, string(run))
+	for name, body := range files {
+		tmp := filepath.Join(dir, "."+name)
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeCoordinator) trailers(run domain.RunID) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

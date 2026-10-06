@@ -33,7 +33,10 @@ type Config struct {
 	MCPServers []acp.McpServer
 	// SessionID is the agent session to restore; empty starts a new one.
 	SessionID string
-	Logger    *slog.Logger
+	// RequireRestore fails Start instead of starting a new session when
+	// SessionID cannot be restored.
+	RequireRestore bool
+	Logger         *slog.Logger
 	// AutoAllow answers every permission request with allow_once, or else
 	// the first allow_* option.
 	AutoAllow bool
@@ -192,6 +195,9 @@ func (s *Session) open(ctx context.Context) error {
 		}
 		if restoreErr != nil && info.LoadSession {
 			res, restoreErr = s.conn.loadSession(ctx, id, s.cfg.Cwd, s.cfg.MCPServers)
+		}
+		if restoreErr != nil && s.cfg.RequireRestore {
+			return fmt.Errorf("restore session %s: %w", id, restoreErr)
 		}
 	}
 	if s.cfg.SessionID == "" || restoreErr != nil {

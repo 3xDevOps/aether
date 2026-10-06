@@ -51,6 +51,21 @@ func (p Profile) EnhancedSupport() Enhanced {
 	return EnhancedNone
 }
 
+// Switchable reports whether a live run of the agent can move between its
+// terminal and its ACP server, keeping the conversation.
+func (p Profile) Switchable() bool {
+	return p.ACPSessionShared && p.SwitchVerified && len(p.ResumeArgs) > 0 && len(p.ACPArgs) > 0
+}
+
+// ResumeCommand is ResumeArgs reopening session.
+func (p Profile) ResumeCommand(session string) []string {
+	out := make([]string, len(p.ResumeArgs))
+	for i, a := range p.ResumeArgs {
+		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
+	}
+	return out
+}
+
 // InstallCommand is the shell command that installs the agent into the member home.
 func (p Profile) InstallCommand(enhanced bool) string {
 	if p.InstallScript == "" || !enhanced || p.ACPInstall == nil {

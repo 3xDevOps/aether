@@ -309,10 +309,12 @@ type supervised struct {
 	// gitAuthorEmail is fixed at container creation, so it tells the agent's
 	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
-	// agentSessionID and agentExec mirror the sidecar fields of the same
-	// name for a driver that hosts the agent outside the primary PTY.
+	// agentSessionID and agentExec mirror the sidecar fields of the same name.
 	agentSessionID string
 	agentExec      *runtime.ExecIdentity
+	// switching is the mode a mode switch is moving the run to, empty when
+	// none is in flight. The switch holds lifecycleMu throughout.
+	switching domain.LaunchMode
 	// coAuthorMu serializes the co-author list's read-modify-write so
 	// concurrent steers cannot leave the shorter list on disk.
 	coAuthorMu sync.Mutex
@@ -732,6 +734,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.DiscoveryFiles = nil
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
+		profile.SwitchVerified = false
 	case inRegistry:
 		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
 	default:
@@ -741,88 +744,6 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		return harness.Profile{}, nil, fmt.Errorf("scheduler: harness %q %w", harnessName, errMemberDefinitionOnly)
 	}
 	return profile, map[domain.LaunchMode][]string{domain.LaunchTUI: tui, domain.LaunchHeadless: headless, domain.LaunchACP: acp}, nil
-}
-
-// wrapTUICommand runs the harness as the first child of a POSIX-shell
-// supervisor. Harness arguments stay positional parameters so argv can never
-// become shell source. After the harness exits, a login shell keeps the
-// container available until the run is closed or killed; with no argv (an
-// ACP-driven run) the login shell is the first child. SIGUSR1 and SIGUSR2
-// end the container with 0 and 1, which is how a background run over ACP
-// reports its one turn's outcome.
-func wrapTUICommand(argv []string) []string {
-	const script = `exec 3<&0
-child=
-child_signal=TERM
-child_signaled=
-pending_signal=
-pending_status=
-
-forward_shutdown() {
-	if [ -n "$child" ] && [ -z "$child_signaled" ]; then
-		kill -"$child_signal" "$child" 2>/dev/null || :
-		child_signaled=1
-	fi
-}
-
-request_shutdown() {
-	if [ -z "$pending_signal" ]; then
-		pending_signal=$1
-		pending_status=$2
-	fi
-	forward_shutdown
-}
-
-trap 'request_shutdown TERM 143' TERM
-trap 'request_shutdown INT 130' INT
-trap 'request_shutdown HUP 129' HUP
-trap 'request_shutdown USR1 0' USR1
-trap 'request_shutdown USR2 1' USR2
-
-run_child() {
-	child_signal=$1
-	shift
-	child_signaled=
-	if [ -n "$pending_signal" ]; then
-		exit "$pending_status"
-	fi
-	"$@" <&3 &
-	child=$!
-	if [ -n "$pending_signal" ]; then
-		forward_shutdown
-		wait "$child" 2>/dev/null || :
-		exit "$pending_status"
-	fi
-	wait "$child"
-	status=$?
-	if [ -n "$pending_signal" ]; then
-		forward_shutdown
-		wait "$child" 2>/dev/null || :
-		exit "$pending_status"
-	fi
-	child=
-	child_signaled=
-	return "$status"
-}
-
-if [ "$#" -gt 0 ]; then
-	run_child TERM "$@"
-	status=$?
-	printf '\n[aether] harness exited with code %s\n' "$status"
-fi
-while :
-do
-	if [ -n "$pending_signal" ]; then
-		exit "$pending_status"
-	fi
-	if [ -x /bin/bash ]; then
-		run_child HUP /bin/bash -l
-	else
-		run_child HUP /bin/sh -l
-	fi
-done`
-	command := []string{"/bin/sh", "-c", script, "aether-run-supervisor"}
-	return append(command, argv...)
 }
 
 // memberHarnessSpec loads the member's stored definition for name. A corrupt

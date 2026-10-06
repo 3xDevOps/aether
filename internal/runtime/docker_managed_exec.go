@@ -66,7 +66,7 @@ func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty
 	argv := append([]string{coordtransport.CLIPath, devexec.Command, helper, spec.CreationKey, claim}, spec.Argv...)
 	created, err := d.cli.ExecCreate(ctx, container.Container.ID, client.ExecCreateOptions{
 		TTY: tty, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-		Cmd: argv, WorkingDir: spec.WorkingDir, ConsoleSize: size,
+		Cmd: argv, Env: spec.Env, WorkingDir: spec.WorkingDir, ConsoleSize: size,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: create managed execution: %w", err)

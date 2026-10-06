@@ -219,9 +219,10 @@ type sidecar struct {
 	BridgePath          string                   `json:"bridge_path,omitempty"`
 	CoordDir            string                   `json:"coord_dir,omitempty"`
 	GitAuthorEmail      string                   `json:"git_author_email,omitempty"`
-	// AgentSessionID and AgentExec belong to a driver that hosts the agent
-	// outside the primary PTY: its session id and its managed exec, which
-	// every reattach stops before starting a fresh one.
+	// AgentSessionID is the agent's own session, from the session host or
+	// the agent's status reports. AgentExec is the managed exec of a driver
+	// that hosts the agent outside the primary PTY, which every reattach
+	// stops before starting a fresh one.
 	AgentSessionID string                `json:"agent_session_id,omitempty"`
 	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
 }

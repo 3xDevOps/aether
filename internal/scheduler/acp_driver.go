@@ -116,7 +116,7 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
-	d.connect(ctx, entry, true)
+	d.connect(ctx, entry, openNew)
 	return nil
 }
 
@@ -124,7 +124,7 @@ func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.A
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
-	d.connect(ctx, entry, false)
+	d.connect(ctx, entry, openRestore)
 	return nil
 }
 
@@ -202,10 +202,40 @@ func (d *acpDriver) started(run domain.RunID) (*acphost.Session, <-chan struct{}
 	}
 }
 
-func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) {
+// acpOpen says how connect opens the agent session.
+type acpOpen int
+
+const (
+	// openNew starts a new session and sends it the run's task.
+	openNew acpOpen = iota
+	// openRestore restores the stored session, or starts a new one and
+	// says so in the log.
+	openRestore
+	// openSwitch restores the stored session or fails, for a mode switch
+	// that rolls back on failure.
+	openSwitch
+)
+
+func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen) {
 	defer d.lockOp(entry.runID)()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), acpConnectTimeout)
 	defer cancel()
+	if err := d.open(ctx, entry, how); err != nil {
+		d.fail(entry, err)
+	}
+}
+
+// openForSwitch opens a Standard run's stored session as its enhanced
+// session. On failure nothing is recorded: the switch restores the terminal.
+func (d *acpDriver) openForSwitch(ctx context.Context, entry *supervised) error {
+	defer d.lockOp(entry.runID)()
+	ctx, cancel := context.WithTimeout(ctx, acpConnectTimeout)
+	defer cancel()
+	return d.open(ctx, entry, openSwitch)
+}
+
+// open runs under the run's op lock.
+func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) error {
 	d.stopAdapterLocked(ctx, entry.runID)
 	d.stopStaleExec(ctx, entry)
 
@@ -215,28 +245,25 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	if paused {
 		// Docker cannot exec into a frozen container; Resume connects.
 		d.setRun(entry.runID, &acpRun{err: errors.New("the container is paused")})
-		return
+		return nil
 	}
 	run, err := d.s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
-		d.fail(entry, fmt.Errorf("load run: %w", err))
-		return
+		return fmt.Errorf("load run: %w", err)
 	}
 	profile, argv, err := d.s.launchProfile(ctx, run.MemberID, run.AccountMember(), run.Harness)
 	if err != nil {
-		d.fail(entry, err)
-		return
+		return err
 	}
 	adapter := argv[domain.LaunchACP]
 	if len(adapter) == 0 {
-		d.fail(entry, fmt.Errorf("agent %q has no ACP command", run.Harness))
-		return
+		return fmt.Errorf("agent %q has no ACP command", run.Harness)
 	}
 	managed, ok := d.s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
-		d.fail(entry, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable))
-		return
+		return fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
 	}
+	fresh := how == openNew
 	oneShot := entry.launchMode == domain.LaunchHeadless
 	sessionID, mode := "", profile.ACPMode
 	if oneShot && profile.ACPAutoMode != "" {
@@ -254,10 +281,11 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	}
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
 		Argv: adapter, WorkingDir: d.s.cfg.WorktreeMount, CreationKey: "acp-" + rand.Text(),
+		// A container started for a Standard run lacks both.
+		Env: []string{coordtransport.EnhancedEnv + "=1", "NO_BROWSER=1"},
 	})
 	if err != nil {
-		d.fail(entry, fmt.Errorf("start %s: %w", adapter[0], err))
-		return
+		return fmt.Errorf("start %s: %w", adapter[0], err)
 	}
 	identity := exec.Identity()
 	d.record(entry, func() { entry.agentExec = &identity })
@@ -273,12 +301,13 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	}
 	runID := entry.runID
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
-		LogPath:    d.s.cfg.PTY.ItemLogPath(runID),
-		Cwd:        d.s.cfg.WorktreeMount,
-		MCPServers: mcp,
-		SessionID:  sessionID,
-		Logger:     slog.Default().With("run", runID),
-		AutoAllow:  oneShot,
+		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
+		Cwd:            d.s.cfg.WorktreeMount,
+		MCPServers:     mcp,
+		SessionID:      sessionID,
+		RequireRestore: how == openSwitch,
+		Logger:         slog.Default().With("run", runID),
+		AutoAllow:      oneShot,
 		OnState: func(working bool, reason string, failed error) {
 			if oneShot && !working {
 				if reason != "" {
@@ -308,8 +337,7 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 	})
 	if err != nil {
 		d.stopExec(exec)
-		d.fail(entry, adapterError(fmt.Errorf("open the agent session: %w", err), stderr))
-		return
+		return adapterError(fmt.Errorf("open the agent session: %w", err), stderr)
 	}
 	if id := sess.SessionID(); id != run.HarnessSessionID {
 		if err := d.s.cfg.Store.SetRunAgentSession(ctx, runID, id); err != nil {
@@ -340,6 +368,7 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, fresh bool) 
 		// does not look idle yet.
 		d.wakeIdle(runID)
 	}
+	return nil
 }
 
 func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
@@ -427,7 +456,7 @@ func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {
 func (d *acpDriver) fail(entry *supervised, err error) {
 	slog.Warn("scheduler: enhanced session failed", "run", entry.runID, "error", err)
 	d.setRun(entry.runID, &acpRun{err: err})
-	d.notice(entry.runID, "Enhanced session failed", err.Error())
+	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if entry.launchMode == domain.LaunchHeadless {
 		d.endOneShot(entry, false, idle)
@@ -436,15 +465,22 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	go d.report(entry.runID, idle)
 }
 
+// switchNotice records a mode switch in the item log of a run with no live
+// session.
+func (d *acpDriver) switchNotice(run domain.RunID, severity, title, description string) {
+	defer d.lockOp(run)()
+	d.notice(run, severity, title, description)
+}
+
 // notice appends to the item log of a run with no live session. The caller
 // holds the run's op lock, so no session opens the log meanwhile.
-func (d *acpDriver) notice(run domain.RunID, title, description string) {
+func (d *acpDriver) notice(run domain.RunID, severity, title, description string) {
 	log, err := acphost.OpenLog(d.s.cfg.PTY.ItemLogPath(run))
 	if err != nil {
 		slog.Warn("scheduler: open item log", "run", run, "error", err)
 		return
 	}
-	if err := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Severity: "error", Title: title, Description: description}}); err != nil {
+	if err := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Severity: severity, Title: title, Description: description}}); err != nil {
 		slog.Warn("scheduler: record notice", "run", run, "error", err)
 	}
 	if err := log.Close(); err != nil {
@@ -483,7 +519,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	if !current {
 		return
 	}
-	d.notice(entry.runID, "Enhanced session ended", cause.Error())
+	d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
 	if entry.launchMode == domain.LaunchHeadless {
 		d.endOneShot(entry, false, idle)
@@ -629,7 +665,7 @@ func (d *acpDriver) activity(entry *supervised, kind, target string) {
 
 func (d *acpDriver) resumeAfterPause(ctx context.Context, entry *supervised) {
 	if d.session(entry.runID) == nil {
-		d.connect(ctx, entry, false)
+		d.connect(ctx, entry, openRestore)
 		return
 	}
 	d.wakeIdle(entry.runID)

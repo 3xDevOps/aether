@@ -620,6 +620,15 @@ type Run struct {
 	BaseCheckedAt time.Time
 }
 
+var agentSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+// ValidAgentSessionID reports whether id can be stored as a run's
+// HarnessSessionID. An agent reports it from inside its container, and a mode
+// switch puts it on the agent's command line.
+func ValidAgentSessionID(id string) bool {
+	return agentSessionID.MatchString(id)
+}
+
 // AccountMember returns the member whose agent account backs the run.
 func (r *Run) AccountMember() MemberID {
 	if r.AccountMemberID != "" {

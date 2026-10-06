@@ -103,12 +103,8 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 		return "", fmt.Errorf("coord: set mode on %s: %w", dir, err)
 	}
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		// The names come from the harness registry, never from a client or
-		// an agent, but this path is handed to a container runtime: a name
-		// that is not a plain file in this directory is refused rather than
-		// written somewhere else.
-		if name == "" || name == "." || name == ".." || strings.ContainsRune(name, filepath.Separator) {
-			return "", fmt.Errorf("coord: %q is not a usable asset name", name)
+		if err := checkAssetName(name); err != nil {
+			return "", err
 		}
 		path := filepath.Join(dir, name)
 		if err := removeFile(path); err != nil {
@@ -127,6 +123,16 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 	return dir, nil
 }
 
+// checkAssetName refuses a name that is not a plain file in the run's
+// directory. The names come from the server, never from a client or an
+// agent, but the directory is handed to a container runtime.
+func checkAssetName(name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsRune(name, filepath.Separator) {
+		return fmt.Errorf("coord: %q is not a usable asset name", name)
+	}
+	return nil
+}
+
 // WriteCoAuthors replaces the run's co-author list with one trailer per
 // line. The file is read-only to the container like the harness config:
 // the agent copies these lines into its commits, it does not decide who is
@@ -138,16 +144,35 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 // is a rename over the old name: a reader either gets the whole previous
 // list or the whole new one, never a missing path.
 func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
-	dir, err := s.runDir(run)
-	if err != nil {
-		return err
-	}
 	var body []byte
 	if len(trailers) > 0 {
 		body = []byte(strings.Join(trailers, "\n") + "\n")
 	}
-	path := filepath.Join(dir, CoAuthorsName)
-	tmp, err := os.CreateTemp(dir, "."+CoAuthorsName+"-*")
+	return s.WriteFiles(run, map[string][]byte{CoAuthorsName: body})
+}
+
+// WriteFiles replaces files in a provisioned run's directory while its
+// container may be reading them, each by a rename over the old name, as
+// WriteCoAuthors does.
+func (s *Service) WriteFiles(run domain.RunID, files map[string][]byte) error {
+	dir, err := s.runDir(run)
+	if err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		if err := checkAssetName(name); err != nil {
+			return err
+		}
+		if err := replaceFile(dir, name, files[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replaceFile(dir, name string, body []byte) error {
+	path := filepath.Join(dir, name)
+	tmp, err := os.CreateTemp(dir, "."+name+"-*")
 	if err != nil {
 		return fmt.Errorf("coord: write %s: %w", path, err)
 	}
@@ -171,7 +196,7 @@ func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 		// worth saying out loud even though the write error is what the
 		// caller gets.
 		if rerr := os.Remove(tmp.Name()); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-			slog.Warn("coord: remove co-author temp file", "path", tmp.Name(), "error", rerr)
+			slog.Warn("coord: remove temp file", "path", tmp.Name(), "error", rerr)
 		}
 		return fmt.Errorf("coord: write %s: %w", path, werr)
 	}

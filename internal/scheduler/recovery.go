@@ -1505,6 +1505,11 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if mode == "" {
 		mode = r.Mode
 	}
+	// A mode switch writes the sidecar before the run row.
+	acp := r.ACP
+	if mode.Interactive() {
+		acp = mode == domain.LaunchACP
+	}
 	return &supervised{
 		runID: r.ID,
 		// Older sidecars have no workspace scope; the row is the source of truth.
@@ -1527,7 +1532,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		blockedReportID:     sc.BlockedReportID,
 		blockedReportAt:     blockedAt,
 		launchMode:          mode,
-		acp:                 r.ACP,
+		acp:                 acp,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		startedAt:           started,

@@ -1,0 +1,305 @@
+package scheduler
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/shellquote"
+)
+
+// ErrNotSwitchable refuses a mode switch for an agent without
+// harness.Profile.Switchable.
+var ErrNotSwitchable = errors.New("scheduler: this agent cannot move a running session between Standard and Enhanced")
+
+// ErrSwitching refuses input while a run switches modes.
+var ErrSwitching = errors.New("scheduler: the run is switching between Standard and Enhanced")
+
+// tuiSettle is how long a resumed terminal must keep running for a switch to
+// Standard to count: a CLI that cannot resume the session exits at once.
+const tuiSettle = 3 * time.Second
+
+func modeName(mode domain.LaunchMode) string {
+	if mode == domain.LaunchACP {
+		return "Enhanced"
+	}
+	return "Standard"
+}
+
+// Switching is the mode a live run is switching to, empty when none.
+func (s *Scheduler) Switching(run domain.RunID) domain.LaunchMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil {
+		return entry.switching
+	}
+	return ""
+}
+
+// SwitchMode moves a live run's agent between its terminal (tui) and its ACP
+// server (acp) inside the same container, resuming the agent's session.
+// admit calls begin, which claims the run for the switch, under the caller's
+// authorization. A failed switch puts the previous mode's driver back and
+// returns the real error.
+func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error {
+	if mode != domain.LaunchTUI && mode != domain.LaunchACP {
+		return fmt.Errorf("%w: a run switches to tui or acp, not %q", ErrInvalidTransition, mode)
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	profile, _, err := s.launchProfile(ctx, r.MemberID, r.AccountMember(), r.Harness)
+	if err != nil {
+		return err
+	}
+	if !profile.Switchable() {
+		return fmt.Errorf("%w: %s", ErrNotSwitchable, r.Harness)
+	}
+	c := s.coordinationSeam()
+	if c == nil || c.svc == nil {
+		return fmt.Errorf("%w: switching needs the run directory, and coordination is not configured", ErrInvalidTransition)
+	}
+	s.mu.Lock()
+	entry := s.runs[run]
+	s.mu.Unlock()
+	if entry == nil {
+		return fmt.Errorf("%w: the run has no live container", ErrInvalidTransition)
+	}
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	var from domain.LaunchMode
+	var session string
+	var cid runtime.ID
+	err = admit(func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if refusal := s.switchableLocked(entry, mode); refusal != nil {
+			return refusal
+		}
+		session = entry.agentSessionID
+		if session == "" {
+			session = r.HarnessSessionID
+		}
+		switch {
+		case session == "":
+			return fmt.Errorf("%w: the agent has not reported its session yet; it does on its first turn", ErrInvalidTransition)
+		case !domain.ValidAgentSessionID(session):
+			return fmt.Errorf("%w: the agent's session id %q cannot be resumed", ErrInvalidTransition, session)
+		}
+		from, cid = entry.launchMode, entry.containerID
+		entry.switching = mode
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	ctx = context.WithoutCancel(ctx)
+	s.publishMode(ctx, entry, actor, events.RunModePayload{Mode: mode, Previous: from, Switching: true, Reason: "Switching to " + modeName(mode) + "…"})
+	sw := modeSwitch{s: s, c: c, entry: entry, run: r, profile: profile, cid: cid, session: session}
+	if mode == domain.LaunchTUI {
+		err = sw.toStandard(ctx)
+	} else {
+		err = sw.toEnhanced(ctx)
+	}
+	s.mu.Lock()
+	entry.switching = ""
+	now := entry.launchMode
+	s.mu.Unlock()
+	done := events.RunModePayload{Mode: now, Previous: from}
+	if err != nil {
+		err = fmt.Errorf("switch to %s: %w", modeName(mode), err)
+		done.Reason = err.Error()
+	}
+	s.publishMode(ctx, entry, actor, done)
+	return err
+}
+
+func (s *Scheduler) switchableLocked(entry *supervised, mode domain.LaunchMode) error {
+	switch {
+	case s.runs[entry.runID] != entry || entry.containerID == "" || entry.retained || entry.destroyPending ||
+		entry.finalizing || entry.exitObserved || entry.killRequested:
+		return fmt.Errorf("%w: the run's container is not live", ErrInvalidTransition)
+	case entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention:
+		return fmt.Errorf("%w: the run is %s", ErrInvalidTransition, entry.status)
+	case entry.paused:
+		return fmt.Errorf("%w: the run is paused; resume it first", ErrInvalidTransition)
+	case !entry.launchMode.Interactive():
+		return fmt.Errorf("%w: a background run cannot switch modes", ErrInvalidTransition)
+	case entry.launchMode == mode:
+		return fmt.Errorf("%w: the run is already %s", ErrInvalidTransition, modeName(mode))
+	case entry.coordDir == "":
+		return fmt.Errorf("%w: the run has no run directory for its supervisor to read", ErrInvalidTransition)
+	}
+	return nil
+}
+
+func (s *Scheduler) publishMode(ctx context.Context, entry *supervised, actor domain.MemberID, payload events.RunModePayload) {
+	s.publish(ctx, events.Event{WorkspaceID: entry.workspaceID, RunID: entry.runID, ActorID: actor, Payload: payload})
+}
+
+// modeSwitch is one switch in flight. Its caller holds the run's lifecycleMu.
+type modeSwitch struct {
+	s       *Scheduler
+	c       *coordination
+	entry   *supervised
+	run     *domain.Run
+	profile harness.Profile
+	cid     runtime.ID
+	session string
+}
+
+func (m modeSwitch) toStandard(ctx context.Context) error {
+	nonce, reporter, err := m.writeTerminal()
+	if err != nil {
+		return err
+	}
+	m.s.acp.stopAdapter(ctx, m.entry.runID)
+	if err := m.s.swapChild(ctx, m.cid, nonce, tuiSettle); err != nil {
+		return errors.Join(err, m.restoreEnhanced(ctx))
+	}
+	m.s.acp.switchNotice(m.entry.runID, "info", "Switched to Standard",
+		"The conversation continues in the agent's terminal and is not recorded here until the run switches back to Enhanced.")
+	if err := m.commit(ctx, domain.LaunchTUI, reporter); err != nil {
+		return err
+	}
+	// The resumed terminal waits for input, and the adapter's requests went with it.
+	if err := m.s.ReportAgentState(ctx, m.entry.runID, agentstatus.Report{
+		State: agentstatus.Idle, Reason: agentstatus.ReasonIdle,
+		InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: []domain.RunInputRequest{}}},
+	}); err != nil {
+		slog.Warn("scheduler: report the switched run idle", "run", m.entry.runID, "error", err)
+	}
+	return nil
+}
+
+func (m modeSwitch) toEnhanced(ctx context.Context) error {
+	nonce, err := m.writeShell()
+	if err != nil {
+		return err
+	}
+	if err := m.s.swapChild(ctx, m.cid, nonce, 0); err != nil {
+		return errors.Join(fmt.Errorf("stop the agent's terminal: %w", err), m.restoreStandard(ctx))
+	}
+	m.s.acp.switchNotice(m.entry.runID, "info", "Switched from Standard",
+		"Turns the agent took in its terminal are not shown here.")
+	if err := m.s.acp.openForSwitch(ctx, m.entry); err != nil {
+		m.s.acp.switchNotice(m.entry.runID, "error", "Switch to Enhanced failed", err.Error())
+		return errors.Join(err, m.restoreStandard(ctx))
+	}
+	return m.commit(ctx, domain.LaunchACP, harness.ReporterFull)
+}
+
+func (m modeSwitch) restoreEnhanced(ctx context.Context) error {
+	var errs []error
+	nonce, err := m.writeShell()
+	if err == nil {
+		err = m.s.swapChild(ctx, m.cid, nonce, 0)
+	}
+	if err != nil {
+		errs = append(errs, fmt.Errorf("start the login shell: %w", err))
+	}
+	m.s.acp.connect(ctx, m.entry, openRestore)
+	if _, err := m.s.acp.live(m.entry.runID); err != nil {
+		errs = append(errs, fmt.Errorf("restore the enhanced session: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (m modeSwitch) restoreStandard(ctx context.Context) error {
+	nonce, _, err := m.writeTerminal()
+	if err == nil {
+		err = m.s.swapChild(ctx, m.cid, nonce, tuiSettle)
+	}
+	if err != nil {
+		return fmt.Errorf("restore the agent's terminal: %w", err)
+	}
+	return nil
+}
+
+// writeTerminal writes the next-command file that resumes the session in the
+// agent's terminal, with the coordination assets that command loads. It
+// returns the file's nonce and the reporter the command gives the run.
+func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
+	argv := m.profile.ResumeCommand(m.session)
+	var native harness.NativeLaunch
+	if m.c.enabled && m.run.Task != "" {
+		var err error
+		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, nil); err != nil {
+			return "", 0, fmt.Errorf("prepare native coordination: %w", err)
+		}
+	}
+	tui := *m.run
+	tui.Mode = domain.LaunchTUI
+	launch, err := newCoordinationLaunch(m.c.enabled, &tui, m.profile, native)
+	if err != nil {
+		return "", 0, err
+	}
+	env := make(map[string]string)
+	maps.Copy(env, launch.env)
+	maps.Copy(env, native.Env)
+	nonce := rand.Text()
+	files := maps.Clone(launch.files)
+	files[coordtransport.NextCommandName] = nextCommand(nonce, native.Command(append(argv, launch.args...)), env)
+	if err := m.c.svc.WriteFiles(m.entry.runID, files); err != nil {
+		return "", 0, fmt.Errorf("write the agent's command: %w", err)
+	}
+	return nonce, launch.reporter, nil
+}
+
+func (m modeSwitch) writeShell() (string, error) {
+	nonce := rand.Text()
+	if err := m.c.svc.WriteFiles(m.entry.runID, map[string][]byte{coordtransport.NextCommandName: nextCommand(nonce, nil, nil)}); err != nil {
+		return "", fmt.Errorf("write the shell command: %w", err)
+	}
+	return nonce, nil
+}
+
+// commit records the mode the container now runs. The sidecar decides the
+// driver after a restart, so it is written first.
+func (m modeSwitch) commit(ctx context.Context, mode domain.LaunchMode, reporter harness.Reporter) error {
+	acp := mode == domain.LaunchACP
+	m.s.mu.Lock()
+	m.entry.launchMode, m.entry.acp, m.entry.reporter = mode, acp, reporter
+	var errs []error
+	if err := m.s.writeSidecar(m.entry.sidecar()); err != nil {
+		errs = append(errs, fmt.Errorf("persist the run's mode: %w", err))
+	}
+	m.s.mu.Unlock()
+	if err := m.s.cfg.Store.SetRunMode(ctx, m.entry.runID, mode, acp); err != nil {
+		errs = append(errs, fmt.Errorf("record the run's mode: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+// nextCommand is the supervisor's next-command file: "# <nonce>", then a
+// script that runs argv with env, or nothing for a login shell.
+func nextCommand(nonce string, argv []string, env map[string]string) []byte {
+	var b strings.Builder
+	b.WriteString("# " + nonce + "\n")
+	if len(argv) == 0 {
+		return []byte(b.String())
+	}
+	b.WriteString("unset " + coordtransport.EnhancedEnv + "\n")
+	for _, key := range slices.Sorted(maps.Keys(env)) {
+		b.WriteString("export " + key + "=" + shellquote.QuoteAlways(env[key]) + "\n")
+	}
+	b.WriteString("exec")
+	for _, arg := range argv {
+		b.WriteString(" " + shellquote.QuoteAlways(arg))
+	}
+	b.WriteString("\n")
+	return []byte(b.String())
+}
