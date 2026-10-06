@@ -98,6 +98,26 @@ describe('profile dialog', () => {
     expect(useStore.getState().members[alice.id].display_name).toBe('Alice B')
   })
 
+  it('keeps a saved colour when a later colour save fails before its refresh lands', async () => {
+    const green = { ...alice, color: '#3cb44b' }
+    let release = () => {}
+    const delayed = new Promise<Member[]>((resolve) => { release = () => resolve([green, bob]) })
+    const client = fakeApi({
+      memberColor: vi.fn().mockResolvedValueOnce(green).mockRejectedValueOnce(new Error('member.color: gateway closed')),
+      memberList: vi.fn().mockReturnValueOnce(delayed),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const picker = within(screen.getByRole('region', { name: 'Your colour' }))
+    fireEvent.click(picker.getByRole('button', { name: 'Set colour #3cb44b' }))
+    await waitFor(() => expect(client.memberColor).toHaveBeenCalledTimes(1))
+    fireEvent.click(picker.getByRole('button', { name: 'Set colour #f58231' }))
+    expect((await picker.findByRole('alert')).textContent).toContain('member.color: gateway closed')
+    release()
+    await act(async () => { await delayed })
+    expect(useStore.getState().members[alice.id].color).toBe('#3cb44b')
+  })
+
   it('edits the git identity your agents commit as', () => {
     seed()
     render(<ProfileDialog open onOpenChange={() => {}} client={fakeApi()} />)

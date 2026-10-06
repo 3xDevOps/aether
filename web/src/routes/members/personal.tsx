@@ -66,9 +66,10 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
   const [error, setError] = useState<string | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const saves = useRef(0)
+  const started = useRef(0)
+  const applied = useRef(0)
   const save = async () => {
-    const attempt = ++saves.current
+    const attempt = ++started.current
     setBusy(true)
     setError(null)
     setRefreshError(null)
@@ -80,6 +81,8 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
       setBusy(false)
       return
     }
+    if (attempt < applied.current) return
+    applied.current = attempt
     const s = useStore.getState()
     if (s.info) s.setInfo({ ...s.info, member: { ...s.info.member, display_name: member.display_name } })
     setMember(member)
@@ -88,9 +91,9 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
     toast.success('Display name saved')
     try {
       const members = await client.memberList()
-      if (attempt === saves.current) setMembers(members)
+      if (attempt === applied.current) setMembers(members)
     } catch (err) {
-      if (attempt === saves.current) setRefreshError(`Name saved. Refreshing the member list failed: ${message(err)}`)
+      if (attempt === applied.current) setRefreshError(`Name saved. Refreshing the member list failed: ${message(err)}`)
     }
   }
   return (
@@ -125,21 +128,24 @@ function DisplayNameForm({ client, current }: { client: Api; current: string }) 
 function ColorPicker({ client, current }: { client: Api; current: string }) {
   const setMembers = useStore((s) => s.setMembers)
   const [error, setError] = useState<string | null>(null)
-  const saves = useRef(0)
+  const started = useRef(0)
+  const applied = useRef(0)
   const recolor = async (color: string) => {
-    const attempt = ++saves.current
+    const attempt = ++started.current
     setError(null)
     try {
       await client.memberColor(color)
     } catch (err) {
-      if (attempt === saves.current) setError(message(err))
+      setError(message(err))
       return
     }
+    if (attempt < applied.current) return
+    applied.current = attempt
     try {
       const members = await client.memberList()
-      if (attempt === saves.current) setMembers(members)
+      if (attempt === applied.current) setMembers(members)
     } catch (err) {
-      if (attempt === saves.current) setError(`Colour saved. Refreshing the member list failed: ${message(err)}`)
+      if (attempt === applied.current) setError(`Colour saved. Refreshing the member list failed: ${message(err)}`)
     }
   }
   return (
