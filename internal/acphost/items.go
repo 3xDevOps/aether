@@ -145,7 +145,10 @@ const (
 	RequestCancelled = "cancelled"
 )
 
-// Request is something the agent is waiting on a person for.
+// Request is something the agent is waiting on a person for. ACP requests
+// are not ordered against session/update notifications, so a Request item,
+// and the tool call snapshot a permission request carries, can be logged
+// before updates the agent sent earlier.
 type Request struct {
 	ID         string          `json:"id"`
 	Kind       string          `json:"kind"`

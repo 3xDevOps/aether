@@ -188,9 +188,9 @@ func TestPlanIsReplacedWhole(t *testing.T) {
 	}
 }
 
-func permissionRequest(toolCallID string) map[string]any {
+func (m *mockAgent) permissionRequest(toolCallID string) map[string]any {
 	return map[string]any{
-		"sessionId": "s",
+		"sessionId": m.sessionID(),
 		"toolCall":  map[string]any{"toolCallId": toolCallID, "title": "rm -rf build", "kind": "execute", "status": "pending"},
 		"options": []any{
 			map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
@@ -203,7 +203,7 @@ func TestPermissionAnswer(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 1)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		res, err := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, permissionRequest("t1"))
+		res, err := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
 		if err != nil {
 			got <- err.Error()
 		} else {
@@ -253,7 +253,7 @@ func TestCancelAnswersPendingRequests(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 2)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		res, _ := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, permissionRequest("t1"))
+		res, _ := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
 		got <- string(res)
 		<-m.cancelled
 		return map[string]any{"stopReason": "cancelled"}, nil
@@ -517,7 +517,7 @@ func TestSteerOutcomes(t *testing.T) {
 func TestConnectionLossMidTurn(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		_, _ = m.request(call.ctx, acp.ClientMethodSessionRequestPermission, permissionRequest("t1"))
+		_, _ = m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
 		return nil, nil
 	}
 	s, rec := startMock(t, m, Config{})
@@ -637,6 +637,7 @@ func TestStartFailsWithTheAgentError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "session/new") || !strings.Contains(err.Error(), "Authentication required") {
 		t.Fatalf("Start: %v", err)
 	}
+
 }
 
 // A viewer that subscribes while the agent streams sees every item once, in

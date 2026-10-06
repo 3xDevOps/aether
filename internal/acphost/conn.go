@@ -399,11 +399,15 @@ func replayedKind(raw json.RawMessage) bool {
 
 func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *acp.RequestError) {
 	var p struct {
-		ToolCall json.RawMessage        `json:"toolCall"`
-		Options  []acp.PermissionOption `json:"options"`
+		SessionID string                 `json:"sessionId"`
+		ToolCall  json.RawMessage        `json:"toolCall"`
+		Options   []acp.PermissionOption `json:"options"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	if sid := c.SessionID(); p.SessionID != sid {
+		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unknown session %q", p.SessionID)})
 	}
 	var tc struct {
 		ToolCallID string `json:"toolCallId"`
