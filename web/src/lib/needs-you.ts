@@ -156,7 +156,6 @@ function waited(iso: string, now: number): string {
 
 const unreadAfterMs = 2 * 60_000
 
-/** How much mail an integrator has left unacknowledged for over two minutes. */
 export function unreadMail(run: Pick<Run, 'mission_role' | 'unacked_messages' | 'oldest_unacked_at'>, now: number): number {
   if (run.mission_role !== 'integrator' || !run.unacked_messages || !run.oldest_unacked_at) return 0
   return now - Date.parse(run.oldest_unacked_at) >= unreadAfterMs ? run.unacked_messages : 0

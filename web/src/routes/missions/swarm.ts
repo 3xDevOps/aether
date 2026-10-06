@@ -97,7 +97,6 @@ export function useSwarmLines(): Record<string, SwarmLine> {
   return useMemo(() => JSON.parse(key) as Record<string, SwarmLine>, [key])
 }
 
-/** A swarm run's label: its task title, else its own. */
 export function participantLabel(runID: string, detail: MissionDetail | undefined, runs: StateContext['runs']): string {
   if (detail?.mission.current_integrator_run_id === runID) return 'Integrator'
   const attempt = detail?.attempts.find((item) => item.run_id === runID)

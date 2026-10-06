@@ -19,7 +19,6 @@ export interface RunPresentation {
   state: PresentationState
   reason: string
   needsYou?: NeedsYouCondition
-  /** Agent messages an integrator has left unread for over two minutes. */
   unread?: number
 }
 
