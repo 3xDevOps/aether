@@ -49,11 +49,12 @@ type Run struct {
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
 	// Always present, including zero; web clients keep it optional for older
 	// gateways.
-	UnansweredQuestions int    `json:"unanswered_questions"`
-	UnackedMessages     int    `json:"unacked_messages"`
-	MissionID           string `json:"mission_id,omitempty"`
-	MissionRole         string `json:"mission_role,omitempty"`
-	IntegratorRunID     string `json:"integrator_run_id,omitempty"`
+	UnansweredQuestions int     `json:"unanswered_questions"`
+	UnackedMessages     int     `json:"unacked_messages"`
+	OldestUnackedAt     *string `json:"oldest_unacked_at,omitempty"`
+	MissionID           string  `json:"mission_id,omitempty"`
+	MissionRole         string  `json:"mission_role,omitempty"`
+	IntegratorRunID     string  `json:"integrator_run_id,omitempty"`
 	// Immutable base provenance captured at launch.
 	BaseCommit    string  `json:"base_commit,omitempty"`
 	BaseBranch    string  `json:"base_branch,omitempty"`
@@ -162,6 +163,7 @@ func RunFromDomain(r *domain.Run) Run {
 		ProfileSnapshotID:   string(r.ProfileSnapshotID),
 		UnansweredQuestions: r.UnansweredQuestions,
 		UnackedMessages:     r.UnackedMessages,
+		OldestUnackedAt:     rfc3339Ptr(r.OldestUnackedAt),
 		MissionID:           string(r.MissionID),
 		MissionRole:         r.MissionRole,
 		IntegratorRunID:     string(r.IntegratorRunID),

@@ -332,7 +332,7 @@ shows mail a swarm run received from a run outside the swarm, which
 `coord.messages.list` omits because its sender carries no swarm stamp. A
 run snapshot's
 `unacked_messages` counts mail addressed to the run that it has not
-acknowledged.
+acknowledged, and `oldest_unacked_at` is when the oldest of it was sent.
 
 Mail stays as history until its run is deleted, by `aether delete` or the
 archive sweep. When a run's container is released, mail it never

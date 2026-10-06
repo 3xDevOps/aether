@@ -596,6 +596,9 @@ type Run struct {
 	// UnackedMessages is how much agent mail addressed to the run it has not
 	// acknowledged, populated by run snapshot reads.
 	UnackedMessages int
+	// OldestUnackedAt is when the oldest of that mail was sent; nil when
+	// there is none.
+	OldestUnackedAt *time.Time
 	// Mission fields are read-only snapshot metadata from durable mission and
 	// attempt relationships, not authorization. MissionRole is "integrator"
 	// only for the current integrator, or "worker" even for finished attempts.

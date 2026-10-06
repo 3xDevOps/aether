@@ -70,8 +70,13 @@ func TestRetireRunMessagesKeepsHistoryOutOfTheInbox(t *testing.T) {
 	if unread := byBody["unread"]; unread.AckedAt != nil || unread.RetiredAt == nil {
 		t.Fatalf("unread row = %+v, want retired and not acked", unread.RunMessage)
 	}
-	if run, err := db.GetRun(ctx, to.ID); err != nil || run.UnackedMessages != 1 {
-		t.Fatalf("snapshot unacked = %v, %v; want 1", run, err)
+	run, err := db.GetRun(ctx, to.ID)
+	if err != nil || run.UnackedMessages != 1 || run.OldestUnackedAt == nil {
+		t.Fatalf("snapshot unacked = %v, %v; want 1 with its send time", run, err)
+	}
+	quiet := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	if run, err := db.GetRun(ctx, quiet.ID); err != nil || run.OldestUnackedAt != nil {
+		t.Fatalf("run without mail = %v, %v; want no oldest unacked", run, err)
 	}
 }
 

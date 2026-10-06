@@ -117,18 +117,20 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		lastCommitAt          *int64
 		baseCheckedAt         *int64
 		archivedAt            *int64
+		oldestUnacked         *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.HomeMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.ACP, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages); err != nil {
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
 	r.StartedAt = decodeTimePtr(startedAt)
 	r.FinishedAt = decodeTimePtr(finishedAt)
+	r.OldestUnackedAt = decodeTimePtr(oldestUnacked)
 	if lastCommitAt != nil {
 		r.LastCommitAt = decodeTime(*lastCommitAt)
 	}
@@ -155,7 +157,8 @@ func runSnapshotQuery(where string) string {
 		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
 		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
-		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
+		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
+		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
 		FROM runs
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (
