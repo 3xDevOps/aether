@@ -52,7 +52,7 @@ export function WorkspaceSwitcher() {
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button variant="ghost" aria-label={`Workspace: ${current?.name ?? 'none'}`} className="min-w-0 flex-1 justify-start">
+        <Button variant="ghost" aria-label={`Workspace: ${current?.name ?? 'none'}${total > 0 ? `, ${needsYouLabel(total)}` : ''}`} className="min-w-0 flex-1 justify-start">
           {name}
           {badge}
           <ChevronsUpDown />

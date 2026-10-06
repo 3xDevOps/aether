@@ -167,8 +167,7 @@ describe('workspace switcher', () => {
   it('shows the Needs you total closed and each workspace its own count', async () => {
     render(<AppShell />)
 
-    const trigger = nav().getByRole('button', { name: 'Workspace: main-repo' })
-    expect(within(trigger).getByRole('img', { name: '2 runs need you' })).toBeDefined()
+    const trigger = nav().getByRole('button', { name: 'Workspace: main-repo, 2 runs need you' })
     fireEvent.keyDown(trigger, { key: 'Enter' })
 
     expect(await screen.findByRole('menuitemradio', { name: 'main-repo, 1 run needs you' })).toBeDefined()
