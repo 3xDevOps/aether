@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { belowMd, useMediaQuery } from '@/lib/hooks'
+import { useIsMobile } from '@/lib/breakpoints'
 import { api, type Api } from '@/lib/api'
 import type { DevArtifact, EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
 import { useCandidateReview } from '@/routes/terminal/candidate-review'
@@ -48,7 +48,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
   const select = useStore((state) => state.selectEvidence)
   const selectedID = useStore((state) => state.selectedEvidence[runID])
   const [open, setOpen] = useState(false)
-  const viewportNarrow = useMediaQuery(belowMd)
+  const viewportNarrow = useIsMobile()
   const [narrow, setNarrow] = useState(viewportNarrow)
   if (!deferLayout && narrow !== viewportNarrow) setNarrow(viewportNarrow)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -192,7 +192,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
     event.preventDefault()
   }
   const evidenceTrigger = (
-    <Button ref={trigger} type="button" variant="outline" size="sm">
+    <Button ref={trigger} type="button" variant="secondary" size="sm">
       Evidence{packets.length ? ` (${packets.length})` : ''}
     </Button>
   )
@@ -207,7 +207,7 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
                 ? <DialogDescription className="text-[11px] text-muted-foreground">Recorded observations, not verification</DialogDescription>
                 : <p className="text-[11px] text-muted-foreground">Recorded observations, not verification</p>}
             </div>
-            <Button type="button" size="icon" variant="ghost" aria-label="Close evidence" onClick={() => setOpen(false)}><X className="size-4" aria-hidden /></Button>
+            <Button type="button" size="icon" variant="ghost" label="Close evidence" onClick={() => setOpen(false)}><X className="size-4" aria-hidden /></Button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-3">
@@ -290,9 +290,10 @@ function EvidenceDrawerSession({ runID, workspaceID, client = api, onAnswer, def
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>{evidenceTrigger}</DialogTrigger>
           <DialogContent
+            variant="bottom"
             showCloseButton={false}
             onCloseAutoFocus={onCloseAutoFocus}
-            className="top-[calc(var(--title-bar-height)+var(--safe-top))] right-0 bottom-0 left-0 z-[80] flex min-h-0 max-h-none w-full max-w-none translate-x-0 flex-col gap-0 overflow-hidden rounded-none bg-background p-0 sm:top-[calc(var(--title-bar-height)+var(--safe-top))] sm:max-w-none sm:translate-y-0"
+            className="top-[calc(var(--title-bar-height)+var(--safe-top))] z-[80] flex min-h-0 max-h-none flex-col gap-0 overflow-hidden rounded-none bg-background p-0"
           >
             {content}
           </DialogContent>
@@ -327,7 +328,7 @@ function EvidenceSummary({ packet, onAnswer }: { packet: EvidencePacket; onAnswe
         <h4 className="font-medium">Source availability</h4>
         <ul className="mt-1 space-y-1 text-muted-foreground">{(packet.sources ?? []).map((source) => <li key={source.name}>{source.name}: {source.available ? 'available' : `unavailable${source.reason ? ` (${source.reason})` : ''}`}{source.truncated ? ', truncated' : ''}</li>)}</ul>
       </div>
-      {packet.unresolved_facts?.length ? <div><h4 className="font-medium">Unresolved questions</h4><ul className="mt-1 space-y-1">{packet.unresolved_facts.map((fact) => <li key={fact} className="flex items-start justify-between gap-2"><span>{fact}</span>{onAnswer && <Button type="button" size="sm" variant="outline" onClick={() => onAnswer(fact)}>Answer</Button>}</li>)}</ul></div> : <p className="text-muted-foreground">No unresolved questions recorded.</p>}
+      {packet.unresolved_facts?.length ? <div><h4 className="font-medium">Unresolved questions</h4><ul className="mt-1 space-y-1">{packet.unresolved_facts.map((fact) => <li key={fact} className="flex items-start justify-between gap-2"><span>{fact}</span>{onAnswer && <Button type="button" size="sm" variant="secondary" onClick={() => onAnswer(fact)}>Answer</Button>}</li>)}</ul></div> : <p className="text-muted-foreground">No unresolved questions recorded.</p>}
       {packet.next_action && <p><span className="font-medium">Next action: </span>{packet.next_action}</p>}
       <p className="text-muted-foreground"><span className="font-medium">Provenance: </span>{packet.provenance || 'Not recorded'}</p>
     </div>
@@ -595,7 +596,7 @@ function CaptureImage({ capture, client, packetID, unavailable }: CaptureImagePr
   return (
     <div className="mt-2 space-y-2">
       {unavailable ? <p role="status" className="text-[12px] text-state-failed">{unavailable}</p> : (
-        <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadImage()}>{loading ? 'Loading image…' : url ? 'Reload image' : 'Load image / download'}</Button>
+        <Button type="button" size="sm" variant="secondary" disabled={loading} onClick={() => void loadImage()}>{loading ? 'Loading image…' : url ? 'Reload image' : 'Load image / download'}</Button>
       )}
       {error && <p role="alert" className="break-words text-[12px] text-state-failed">Image unavailable (it may be missing, expired, or access may have changed): {error}</p>}
       {url && !unavailable && (

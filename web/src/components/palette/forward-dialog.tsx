@@ -171,7 +171,7 @@ export function ForwardDialog() {
                     </span>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       onClick={() => void stop(forward.port)}
                       disabled={stopping !== null}
@@ -185,7 +185,7 @@ export function ForwardDialog() {
           </div>
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
           <Button

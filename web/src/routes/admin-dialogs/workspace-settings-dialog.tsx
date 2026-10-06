@@ -91,7 +91,7 @@ export function WorkspaceSettingsDialog({
           </div>
           {onRepository && <section className="space-y-2 border-b pb-3 text-xs">
             <p>Manage the public/private read source, or link and relink a local clone. Deploy-key read access is separate from checkout Origin and your native Git/gh publishing credentials.</p>
-            <Button type="button" size="sm" variant="outline" onClick={onRepository}>Repository settings</Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onRepository}>Repository settings</Button>
           </section>}
           <div className="min-w-0 space-y-1 text-[13px]">
             <Label htmlFor="workspace-steer">Who may steer others&apos; runs</Label>
@@ -118,7 +118,7 @@ export function WorkspaceSettingsDialog({
           )}
         </form>
         <DialogFooter className="border-t pt-3">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="workspace-settings" disabled={busy}>

@@ -114,7 +114,7 @@ export function BudgetDialog({
           <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>
             Clear budget
           </Button>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" form="budget-set" disabled={busy || !limitValid}>

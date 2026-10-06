@@ -34,7 +34,7 @@ export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }
       variant="ghost"
       size="icon"
       className="col-start-3 row-start-1 size-6 shrink-0 md:col-start-4"
-      aria-label="Dismiss"
+      label="Dismiss"
       onClick={() => dismiss(kind, version)}
     >
       <X className="size-3.5" aria-hidden />

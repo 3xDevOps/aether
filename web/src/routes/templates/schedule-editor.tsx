@@ -84,7 +84,7 @@ export function ScheduleEditor({
           />
         </Label>
         <div className="flex flex-wrap gap-2 sm:shrink-0">
-          <Button type="submit" size="sm" variant="outline" disabled={busy || !cron.trim()}>
+          <Button type="submit" size="sm" variant="secondary" disabled={busy || !cron.trim()}>
             Schedule
           </Button>
           {current && (

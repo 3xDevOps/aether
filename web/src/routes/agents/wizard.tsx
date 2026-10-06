@@ -199,7 +199,7 @@ export function AgentWizard({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               onClick={() => setStep('form')}
               disabled={busy}
             >
@@ -259,7 +259,7 @@ export function AgentWizard({
         <Button type="submit" size="sm" disabled={!trimmed}>
           Continue
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+        <Button type="button" size="sm" variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
       </div>

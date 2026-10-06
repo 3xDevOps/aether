@@ -201,7 +201,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
       <div className="max-h-[70dvh] space-y-4 overflow-y-auto px-3 pb-4 text-[13px]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">Run checkout</h2>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform(refreshStatus)}>Refresh native status</Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void perform(refreshStatus)}>Refresh native status</Button>
         </div>
         {error && <p role="alert" className="break-words text-state-failed">{error}</p>}
         {!status && !error && <p>Loading native Git status...</p>}
@@ -224,7 +224,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
             </label>)}
             {!status.changes?.length && <p>No native checkout changes.</p>}
           </fieldset>
-          <Button size="sm" variant="outline" disabled={busy || !paths.length || !expected} onClick={() => void perform(reviewPaths)}>Review selected paths</Button>
+          <Button size="sm" variant="secondary" disabled={busy || !paths.length || !expected} onClick={() => void perform(reviewPaths)}>Review selected paths</Button>
           {patches?.map((result, index) => <section key={index} aria-label={index ? 'Selected staged diff' : 'Selected worktree diff'} className="min-w-0 overflow-hidden border">
             <h3 className="p-2 font-medium">{index ? 'Staged diff' : 'Worktree diff (tracked paths)'}</h3>
             <Diagnostics output={{ ...result.output, stdout: undefined }} error={result.error} />
@@ -271,7 +271,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
               <Label className="space-y-1">PR head repository (owner/name)<Input value={target.head_repository} onChange={(event) => changeTarget('head_repository', event.target.value)} /></Label>
               <Label className="space-y-1">PR head branch<Input value={target.head_branch} onChange={(event) => changeTarget('head_branch', event.target.value)} /></Label>
             </fieldset>
-            <Button size="sm" variant="outline" disabled={busy || !expected || !targetComplete || !caps.hasMethod('run.pr.status')} onClick={() => void perform(discoverPR)}>{uncertain ? 'Reconcile PR read-only' : 'Discover existing PR'}</Button>
+            <Button size="sm" variant="secondary" disabled={busy || !expected || !targetComplete || !caps.hasMethod('run.pr.status')} onClick={() => void perform(discoverPR)}>{uncertain ? 'Reconcile PR read-only' : 'Discover existing PR'}</Button>
             {uncertain && <p role="alert">Creation outcome is uncertain. Keep this exact target and reconcile read-only; creation will not be retried.</p>}
             {currentPRReview && <>
               <p className="break-all">Reviewed GitHub identity: <strong>{currentPRReview.result.identity || 'Unavailable'}</strong> · Agent account: {currentPRReview.result.account_member_id}</p>
@@ -286,7 +286,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
               <Button size="sm" disabled={busy || !canWrite || !caps.hasMethod('run.pr.create') || uncertain || !currentPRReview || !!currentPRReview.result.error || !prReviewed || !title.trim()} onClick={() => void perform(createPR)}>Create reviewed PR</Button>
             </>}
             {creation && <section aria-label="PR creation outcome" className="space-y-1 border p-2"><p>Created: {creation.created ? 'yes' : 'no'} · Reconciled: {creation.reconciled ? 'yes' : 'no'}</p><Actual actual={creation.actual} /><Diagnostics output={creation.output} error={creation.error} /></section>}
-            <Button size="sm" variant="outline" disabled={busy || !expected || !targetComplete || !caps.hasMethod('run.pr.feedback')} onClick={() => void perform(async () => { setFeedback(null); if (expected) setFeedback(await client.runPRFeedback({ run_id: run.id, expected, target, limit: 100 })) })}>Refresh PR feedback</Button>
+            <Button size="sm" variant="secondary" disabled={busy || !expected || !targetComplete || !caps.hasMethod('run.pr.feedback')} onClick={() => void perform(async () => { setFeedback(null); if (expected) setFeedback(await client.runPRFeedback({ run_id: run.id, expected, target, limit: 100 })) })}>Refresh PR feedback</Button>
             {feedback && <PRFeedback key={JSON.stringify(target)} run={run} feedback={feedback} client={client} />}
           </section>
         </>}

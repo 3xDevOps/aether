@@ -242,18 +242,18 @@ function BrowserRoute({ runID }: { runID: string }) {
           </p>
         </div>
         <div className={`${expanded ? 'hidden' : 'flex'} flex-wrap items-center gap-2`}>
-          {surface && (!owns || blocked) && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
-          {surface && controller && !owns && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}
-          {surface && fence && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
+          {surface && (!owns || blocked) && <Button className="coarse:h-11" variant="secondary" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
+          {surface && controller && !owns && <Button className="coarse:h-11" variant="secondary" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}
+          {surface && fence && <Button className="coarse:h-11" variant="secondary" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
         </div>
       </div>
       {status?.reason && <p role="alert" className="break-words text-sm text-destructive">{status.reason}</p>}
       {error && !confirmation && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
       <form className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-2`} onSubmit={(event) => { event.preventDefault(); if (selectedPage) navigatePage('url'); else open() }}>
         {selectedPage && <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" className="coarse:h-11" variant="outline" aria-label="Back" disabled={!writable || !selectedPage} onClick={() => navigatePage('back')}>Back</Button>
-          <Button type="button" className="coarse:h-11" variant="outline" aria-label="Forward" disabled={!writable || !selectedPage} onClick={() => navigatePage('forward')}>Forward</Button>
-          <Button type="button" className="coarse:h-11" variant="outline" disabled={!writable || !selectedPage} onClick={() => navigatePage('reload')}>Reload page</Button>
+          <Button type="button" className="coarse:h-11" variant="secondary" aria-label="Back" disabled={!writable || !selectedPage} onClick={() => navigatePage('back')}>Back</Button>
+          <Button type="button" className="coarse:h-11" variant="secondary" aria-label="Forward" disabled={!writable || !selectedPage} onClick={() => navigatePage('forward')}>Forward</Button>
+          <Button type="button" className="coarse:h-11" variant="secondary" disabled={!writable || !selectedPage} onClick={() => navigatePage('reload')}>Reload page</Button>
         </div>}
         <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
           <Input aria-label="Browser URL" type="url" value={address} onChange={(event) => setAddress(event.target.value)} className="min-w-0 flex-1" />
@@ -263,7 +263,7 @@ function BrowserRoute({ runID }: { runID: string }) {
       </form>
       <div className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-2`}>
         <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
-          <PopoverTrigger asChild><Button ref={toolsTrigger} className="coarse:h-11" variant="outline">Browser tools</Button></PopoverTrigger>
+          <PopoverTrigger asChild><Button ref={toolsTrigger} className="coarse:h-11" variant="secondary">Browser tools</Button></PopoverTrigger>
           <PopoverContent aria-label="Browser tools" className="space-y-3" onCloseAutoFocus={(event) => {
             if (!openingDialog.current) return
             openingDialog.current = false
@@ -295,16 +295,16 @@ function BrowserRoute({ runID }: { runID: string }) {
           </select>
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          {pages.length > 0 && <Button className="coarse:h-11" variant="outline" disabled={busy || blocked || !status?.available || !fence} onClick={open}>New page</Button>}
-          {selectedPage && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => {
+          {pages.length > 0 && <Button className="coarse:h-11" variant="secondary" disabled={busy || blocked || !status?.available || !fence} onClick={open}>New page</Button>}
+          {selectedPage && <Button className="coarse:h-11" variant="secondary" disabled={busy} onClick={() => {
             if (!selectedPage) return
             void perform(async () => { const result = await api.devBrowserScreenshot({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision }); setCapture(result.artifact.id) })
           }}>Screenshot</Button>}
           <Button className="coarse:h-11" variant="ghost" disabled={busy} onClick={() => void perform(async () => { await refresh(); setConnection((value) => value + 1); setBlocked(false) })}>Reconnect</Button>
         </div>
         {surface && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-          {selectedPage && <Button className="coarse:h-11" variant="outline" disabled={!writable} onClick={() => ask('close')}>Close page</Button>}
-          <Button className="coarse:h-11" variant="outline" disabled={!fence || busy || blocked} onClick={() => ask('reset')}>Reset session</Button>
+          {selectedPage && <Button className="coarse:h-11" variant="secondary" disabled={!writable} onClick={() => ask('close')}>Close page</Button>}
+          <Button className="coarse:h-11" variant="secondary" disabled={!fence || busy || blocked} onClick={() => ask('reset')}>Reset session</Button>
         </div>}
           </PopoverContent>
         </Popover>

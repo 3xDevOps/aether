@@ -60,10 +60,10 @@ export function CloseDialog() {
           )}
         </div>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
-          <Button variant="outline" disabled={closing} onClick={() => void finish('abandoned')}>
+          <Button variant="secondary" disabled={closing} onClick={() => void finish('abandoned')}>
             <Archive aria-hidden />
             Abandoned
           </Button>

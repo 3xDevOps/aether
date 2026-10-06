@@ -3,6 +3,7 @@ import {
   ArrowLeft as LucideArrowLeft,
   ArrowUp as LucideArrowUp,
   Bot as LucideBot,
+  Boxes as LucideBoxes,
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
   ChevronRight as LucideChevronRight,
@@ -24,6 +25,7 @@ import {
   PanelLeft as LucidePanelLeft,
   Paperclip as LucidePaperclip,
   Pause as LucidePause,
+  Pi as LucidePi,
   Play as LucidePlay,
   Plus as LucidePlus,
   RefreshCw as LucideRefreshCw,
@@ -31,15 +33,21 @@ import {
   Send as LucideSend,
   Settings as LucideSettings,
   Shield as LucideShield,
+  Sparkles as LucideSparkles,
   Square as LucideSquare,
+  SquarePi as LucideSquarePi,
+  SquareTerminal as LucideSquareTerminal,
   Terminal as LucideTerminal,
   TriangleAlert as LucideTriangleAlert,
   Users as LucideUsers,
+  Wrench as LucideWrench,
   X as LucideX,
   Zap as LucideZap,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
+
+export type { LucideIcon }
 
 // The only module that imports lucide-react; design-system.test.ts enforces
 // it. Each icon is exported once, under lucide's current name, drawn at the
@@ -55,6 +63,7 @@ function icon(Base: LucideIcon): LucideIcon {
 export const ArrowLeft = icon(LucideArrowLeft)
 export const ArrowUp = icon(LucideArrowUp)
 export const Bot = icon(LucideBot)
+export const Boxes = icon(LucideBoxes)
 export const Check = icon(LucideCheck)
 export const ChevronDown = icon(LucideChevronDown)
 export const ChevronRight = icon(LucideChevronRight)
@@ -76,6 +85,7 @@ export const MessageSquare = icon(LucideMessageSquare)
 export const PanelLeft = icon(LucidePanelLeft)
 export const Paperclip = icon(LucidePaperclip)
 export const Pause = icon(LucidePause)
+export const Pi = icon(LucidePi)
 export const Play = icon(LucidePlay)
 export const Plus = icon(LucidePlus)
 export const RefreshCw = icon(LucideRefreshCw)
@@ -83,10 +93,14 @@ export const Search = icon(LucideSearch)
 export const Send = icon(LucideSend)
 export const Settings = icon(LucideSettings)
 export const Shield = icon(LucideShield)
+export const Sparkles = icon(LucideSparkles)
 /** Interrupt. */
 export const Square = icon(LucideSquare)
+export const SquarePi = icon(LucideSquarePi)
+export const SquareTerminal = icon(LucideSquareTerminal)
 export const Terminal = icon(LucideTerminal)
 export const TriangleAlert = icon(LucideTriangleAlert)
 export const Users = icon(LucideUsers)
+export const Wrench = icon(LucideWrench)
 export const X = icon(LucideX)
 export const Zap = icon(LucideZap)

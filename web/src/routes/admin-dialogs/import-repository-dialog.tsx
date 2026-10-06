@@ -115,7 +115,7 @@ export function ImportRepositoryDialog({ client, onClose, onImported }: { client
         </section>}
       </form>
       <DialogFooter className="border-t pt-3">
-        <Button variant="outline" disabled={busy} onClick={onClose}>{result?.created ? 'Close' : 'Cancel'}</Button>
+        <Button variant="secondary" disabled={busy} onClick={onClose}>{result?.created ? 'Close' : 'Cancel'}</Button>
         {result?.created ? <Button onClick={() => setSourceOpen(true)}>Continue to Source control</Button> : <Button type="submit" form="import-repository" disabled={busy || uncertain || !name.trim() || !source.trim() || !base.trim()}>{busy ? 'Importing...' : 'Import repository'}</Button>}
       </DialogFooter>
     </DialogContent>

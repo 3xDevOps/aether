@@ -108,7 +108,7 @@ export function InjectDialog() {
           )}
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={close}>
+          <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
           <Button type="submit" form="inject-message" disabled={sending || !text.trim()}>

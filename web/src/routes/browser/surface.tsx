@@ -306,8 +306,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
       <span role="status" className="min-w-0 break-words">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
       <div className="flex items-center gap-2">
-        <Button className="coarse:h-11" variant="outline" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
-        <Button className="coarse:h-11" variant="outline" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
+        <Button className="coarse:h-11" variant="secondary" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
+        <Button className="coarse:h-11" variant="secondary" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
       </div>
       <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only — restore browser controls to acquire control.' : 'Watch only — acquire control to interact.'}</span>
     </div>

@@ -73,7 +73,7 @@ export function StopEnvironmentDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={stopping}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            variant="default"
+            variant="primary"
             onClick={(event) => {
               event.preventDefault()
               void stop()

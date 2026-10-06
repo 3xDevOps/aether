@@ -288,7 +288,7 @@ export function useTerminalImage({
                 <span className="min-w-0 break-words text-sm">{selected.name || 'Clipboard image'}</span>
               </div>
             )}
-            <Button type="button" variant="outline" onClick={openPicker} disabled={uploading}>
+            <Button type="button" variant="secondary" onClick={openPicker} disabled={uploading}>
               Choose another image
             </Button>
             {error && (
@@ -298,7 +298,7 @@ export function useTerminalImage({
             )}
           </div>
           <DialogFooter className="border-t px-3 py-3 sm:px-4">
-            <Button type="button" variant="outline" onClick={close}>
+            <Button type="button" variant="secondary" onClick={close}>
               Cancel
             </Button>
             <Button
@@ -327,8 +327,7 @@ export function TerminalImageAction({ controller }: { controller: TerminalImageC
       variant="ghost"
       size="icon"
       className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
-      aria-label="Upload image to terminal"
-      title="Upload image to terminal"
+      label="Upload image to terminal"
       disabled={!controller.canUpload}
       onClick={controller.openPicker}
     >

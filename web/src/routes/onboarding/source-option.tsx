@@ -120,7 +120,7 @@ export function OnboardingSourceOption({
         )}
       </div>
 
-      {canManageSource && <Button type="button" variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+      {canManageSource && <Button type="button" variant="secondary" size="sm" onClick={() => setDialogOpen(true)}>
         {configured ? 'Review source mirror' : 'Set up source mirror'}
       </Button>}
 

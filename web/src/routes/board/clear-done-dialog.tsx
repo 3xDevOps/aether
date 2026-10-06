@@ -59,7 +59,7 @@ export function ClearDoneConfirm({
           </ul>
         )}
         <DialogFooter>
-          <Button variant="outline" disabled={running} onClick={onCancel}>
+          <Button variant="secondary" disabled={running} onClick={onCancel}>
             {n === 0 ? 'Close' : 'Cancel'}
           </Button>
           {n > 0 && (
@@ -108,7 +108,7 @@ export function ReleaseFinishedConfirm({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" disabled={running} onClick={onCancel}>
+          <Button variant="secondary" disabled={running} onClick={onCancel}>
             {n === 0 ? 'Close' : 'Cancel'}
           </Button>
           {n > 0 && (

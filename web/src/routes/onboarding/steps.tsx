@@ -134,7 +134,7 @@ export function LinkStep({
       {statusError && (
         <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
           <p className="text-sm text-state-failed">{statusError}</p>
-          <Button size="sm" variant="outline" onClick={() => void check()}>
+          <Button size="sm" variant="secondary" onClick={() => void check()}>
             Retry
           </Button>
         </div>
@@ -188,7 +188,7 @@ export function LinkStep({
                 For a server on your tailnet, or one this computer reaches over SSH.
               </p>
             </div>
-            <Button size="sm" variant="outline" onClick={() => setByAddress(true)}>
+            <Button size="sm" variant="secondary" onClick={() => setByAddress(true)}>
               Link by address
             </Button>
           </div>
@@ -246,7 +246,7 @@ export function LinkStep({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={linking}
               onClick={() => setByAddress(false)}
             >
@@ -340,7 +340,7 @@ export function WorkspaceStep({
       {error && (
         <div role="alert" className="space-y-2 text-sm text-state-failed">
           <p>{error}</p>
-          <Button size="sm" variant="outline" onClick={() => void refetch()}>Retry workspace list</Button>
+          <Button size="sm" variant="secondary" onClick={() => void refetch()}>Retry workspace list</Button>
         </div>
       )}
       {workspaces && workspaces.length > 0 && (
@@ -356,7 +356,7 @@ export function WorkspaceStep({
               </span>
               <Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 aria-label={`Use ${w.name}`}
                 onClick={() => onNext(w)}
               >
@@ -549,7 +549,7 @@ export function FirstRunStep({
           Choose a workspace before launching a run.
         </p>
         <div className={actionRow}>
-          <Button variant="outline" size="sm" onClick={onBackToWorkspace}>
+          <Button variant="secondary" size="sm" onClick={onBackToWorkspace}>
             Back to Workspace
           </Button>
         </div>
@@ -577,7 +577,7 @@ export function FirstRunStep({
           </p>
         )}
         {withoutASubscription}
-        {onBackToRepository && <Button size="sm" variant="outline" onClick={onBackToRepository}>Review repository setup</Button>}
+        {onBackToRepository && <Button size="sm" variant="secondary" onClick={onBackToRepository}>Review repository setup</Button>}
         <div className={actionRow}>
           {/* Setting an agent up cannot fix a gateway that did not answer,
               so the failed list asks for the call again instead. */}
@@ -590,7 +590,7 @@ export function FirstRunStep({
               Set up an agent
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={goToBoard}>
+          <Button variant="secondary" size="sm" onClick={goToBoard}>
             Go to board
           </Button>
           {back}
@@ -614,7 +614,7 @@ export function FirstRunStep({
       {!launchable && <p className="text-sm text-muted-foreground">Your membership or this gateway cannot launch runs. Ask an administrator for launch access; you can still prepare your account.</p>}
       <section aria-label="Source readiness" className="space-y-2 border-y py-3 text-sm">
         {sourceCheck?.workspace !== workspace.id ? <p>Checking the workspace base branch...</p> : sourceCheck.error ? <p role="alert" className="whitespace-pre-wrap break-words text-state-failed">{sourceCheck.error}</p> : <p>{caps.hasMethod('files.tree') ? 'The workspace base branch is available.' : 'This gateway checks the base branch at launch.'} The server rechecks source policy when launching.</p>}
-        <Button size="sm" variant="outline" onClick={() => { setSourceCheck(null); setSourceAttempt((attempt) => attempt + 1) }}>Check source again</Button>
+        <Button size="sm" variant="secondary" onClick={() => { setSourceCheck(null); setSourceAttempt((attempt) => attempt + 1) }}>Check source again</Button>
       </section>
       {loading && <Skeleton className="h-20 w-full rounded-md" />}
       {agents && (
@@ -652,12 +652,12 @@ export function FirstRunStep({
         </p>
       )}
       {withoutASubscription}
-      {onBackToRepository && <Button size="sm" variant="outline" onClick={onBackToRepository}>Review repository setup</Button>}
+      {onBackToRepository && <Button size="sm" variant="secondary" onClick={onBackToRepository}>Review repository setup</Button>}
       <div className={actionRow}>
         <Button size="sm" disabled={busy || !ready} onClick={() => void launch()}>
           Launch
         </Button>
-        <Button variant="outline" size="sm" onClick={goToBoard}>
+        <Button variant="secondary" size="sm" onClick={goToBoard}>
           Go to board
         </Button>
         {back}

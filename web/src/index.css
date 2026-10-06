@@ -1,12 +1,4 @@
 @import 'tailwindcss';
-@import 'tw-animate-css';
-
-/* HeroUI v3 component layers are imported selectively. The package's full
-   stylesheet also installs a second base/theme and changes shadcn's
-   --accent/--muted meanings, so only the components used by the workbench
-   are included here. */
-@import '@heroui/styles/components/chip.css' layer(components);
-@import '@heroui/styles/components/tooltip.css' layer(components);
 
 @custom-variant dark (&:is(.dark *));
 
@@ -134,6 +126,7 @@
   --canvas: #ffffff;
   --chrome: #f7f7f7;
   --hover: #f3f3f3;
+  --hover-chrome: #ececec;
   --raised: #ffffff;
   --seam: rgb(0 0 0 / 0.08);
   --control-border: #8a8a8a;
@@ -155,6 +148,12 @@
   --diff-add: #1a7a36;
   --diff-del: #c8321f;
   --diff-bg: 8%;
+
+  --agent-claude: #b4532a;
+  --agent-codex: #4757c9;
+  --agent-pi: #8a3fb8;
+  --agent-omp: #1f7a8c;
+  --agent-opencode: #b23a68;
   --tone-soft: 8%;
 
   --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.18);
@@ -175,6 +174,7 @@
   --canvas: #141516;
   --chrome: #1b1c1d;
   --hover: #1d1e1f;
+  --hover-chrome: #262728;
   --raised: #222324;
   --seam: rgb(255 255 255 / 0.08);
   --control-border: #767676;
@@ -196,6 +196,12 @@
   --diff-add: #45c26a;
   --diff-del: #f05c4a;
   --diff-bg: 10%;
+
+  --agent-claude: #e0835e;
+  --agent-codex: #8fa3ff;
+  --agent-pi: #c792ea;
+  --agent-omp: #5ec4d6;
+  --agent-opencode: #f07fa8;
   --tone-soft: 12%;
 
   --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
@@ -206,7 +212,9 @@
 /* Legacy names, each an alias of a v2 token so the screens not yet rebuilt
    move onto the v2 palette at once. Screen rebuilds stop using them; the
    last one deletes this block. Several old roles collapse into one token
-   here (card and background, muted and sidebar, accent and toolbar-hover). */
+   here (card and background, muted and sidebar). The old hover names
+   (secondary, accent, toolbar-hover) point at --hover-chrome: they hover
+   chrome surfaces, where --hover does not show in the dark theme. */
 :root,
 .dark {
   --background: var(--canvas);
@@ -220,11 +228,11 @@
   --primary-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --primary-foreground: var(--on-accent);
   --sidebar: var(--chrome);
-  --secondary: var(--hover);
+  --secondary: var(--hover-chrome);
   --secondary-foreground: var(--text);
   --muted: var(--chrome);
   --muted-foreground: var(--text-muted);
-  --accent: var(--hover);
+  --accent: var(--hover-chrome);
   --accent-foreground: var(--text);
   --destructive: var(--state-failed);
   --destructive-foreground: var(--on-failed);
@@ -232,7 +240,7 @@
   --input: var(--control-border);
   --ring: var(--accent-fill);
   --selection-foreground: var(--text);
-  --toolbar-hover: var(--hover);
+  --toolbar-hover: var(--hover-chrome);
   --scrollbar-thumb: var(--icon-faint);
   --scrollbar-thumb-hover: var(--text-muted);
   --scrollbar-track: transparent;
@@ -244,41 +252,14 @@
   --state-needs-attention: var(--state-needs-you);
   --state-idle: var(--state-paused);
 
-  /* HeroUI chip and tooltip names. HeroUI's `muted` is a foreground colour
-     where shadcn's is a surface, hence the separate names. */
-  --default: var(--chrome);
-  --default-foreground: var(--text);
-  --overlay: var(--raised);
-  --overlay-foreground: var(--text);
-  --segment: var(--canvas);
-  --segment-foreground: var(--text);
-  --focus: var(--accent-fill);
-  --separator: var(--seam);
-  --surface-shadow: none;
-  --accent-soft: color-mix(in srgb, var(--accent-fill) var(--tone-soft), transparent);
   --accent-soft-foreground: var(--accent-text);
-  --success: var(--state-done);
   --success-foreground: var(--state-done);
-  --success-soft: color-mix(in srgb, var(--state-done) var(--tone-soft), transparent);
-  --success-soft-foreground: var(--state-done);
-  --warning: var(--state-needs-you);
-  --warning-foreground: var(--state-needs-you);
-  --warning-soft: color-mix(in srgb, var(--state-needs-you) var(--tone-soft), transparent);
   --warning-soft-foreground: var(--state-needs-you);
-  --danger: var(--state-failed);
-  --danger-foreground: var(--on-failed);
-  --danger-soft: color-mix(in srgb, var(--state-failed) var(--tone-soft), transparent);
   --danger-soft-foreground: var(--state-failed);
-  --ease-smooth: ease;
-  --ease-out-fluid: cubic-bezier(0.32, 0.72, 0, 1);
-  --disabled-opacity: 0.5;
-  --cursor-interactive: pointer;
-  --cursor-disabled: not-allowed;
-  --ring-offset-width: 2px;
 }
 
 /* Theme-independent values. `static` emits every one to :root, so plain CSS
-   (HeroUI's layers, `text-title`) can read them too. */
+   (`text-title`, the overlay keyframes) can read them too. */
 @theme static {
   --radius-control: 4px;
   --radius-panel: 6px;
@@ -305,14 +286,50 @@
   --text-ui--line-height: 20px;
   --text-prose: 14px;
   --text-prose--line-height: 22px;
+  --text-avatar: 10px;
+  --text-avatar--line-height: 1;
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --animate-overlay-in: overlay-in var(--duration-overlay) var(--ease-out);
+  --animate-sheet-up: sheet-up var(--duration-overlay) var(--ease-out);
+  --animate-sheet-left: sheet-left var(--duration-overlay) var(--ease-out);
+  --animate-sheet-right: sheet-right var(--duration-overlay) var(--ease-out);
+  --animate-fade-in: fade-in var(--duration-overlay) var(--ease-out);
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+  @keyframes sheet-left {
+    from {
+      transform: translateX(-100%);
+    }
+  }
+  @keyframes sheet-right {
+    from {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-chrome: var(--chrome);
   --color-hover: var(--hover);
+  --color-hover-chrome: var(--hover-chrome);
   --color-raised: var(--raised);
   --color-seam: var(--seam);
   --color-control: var(--control-border);
@@ -335,11 +352,17 @@
   --color-diff-del: var(--diff-del);
   --color-diff-add-bg: color-mix(in srgb, var(--diff-add) var(--diff-bg), transparent);
   --color-diff-del-bg: color-mix(in srgb, var(--diff-del) var(--diff-bg), transparent);
+  --color-agent-claude: var(--agent-claude);
+  --color-agent-codex: var(--agent-codex);
+  --color-agent-pi: var(--agent-pi);
+  --color-agent-omp: var(--agent-omp);
+  --color-agent-opencode: var(--agent-opencode);
 
   /* `accent` and `muted` mean different colours per property: a fill and a
      link colour for accent, a surface (legacy) and a text tier for muted.
      Tailwind reads the property namespace before `--color-*`. */
   --color-accent: var(--accent-fill);
+  --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --text-color-accent: var(--accent-text);
   --text-color-muted: var(--text-muted);
 
@@ -379,24 +402,10 @@
   --color-state-success: var(--state-done);
   --color-state-warn: var(--state-needs-you);
 
-  /* Names consumed by the selected HeroUI component layers. */
-  --color-default: var(--default);
-  --color-default-foreground: var(--default-foreground);
-  --color-overlay: var(--overlay);
-  --color-overlay-foreground: var(--overlay-foreground);
-  --color-segment: var(--segment);
-  --color-segment-foreground: var(--segment-foreground);
-  --color-focus: var(--focus);
   --color-scrim: var(--scrim);
-  --color-danger: var(--danger);
-  --color-danger-foreground: var(--danger-foreground);
-  --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
-  --shadow-surface: var(--surface-shadow);
-  --ease-smooth: ease;
-  --ease-out-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+  --color-warning-soft-foreground: var(--warning-soft-foreground);
+  --color-danger-soft-foreground: var(--danger-soft-foreground);
 }
 
 /* Saira at 600 for pane, dialog, step and empty-state headings only. */
@@ -409,12 +418,6 @@
 
 @utility no-highlight {
   -webkit-tap-highlight-color: transparent;
-}
-
-/* HeroUI's tooltip layer applies this; it goes with HeroUI. */
-@utility status-focused {
-  outline: 2px solid var(--ring);
-  outline-offset: var(--ring-offset-width);
 }
 
 @layer base {
@@ -907,26 +910,9 @@
   }
 }
 
-/* Shared HeroUI refinements stay in the component layer; only
-   content-specific styling lives here. */
-@layer components {
-
-  .aether-chip {
-    border-radius: var(--radius-sm);
-  }
-
-  .aether-tooltip {
-    border: 1px solid var(--border);
-    color: var(--popover-foreground);
-  }
-
-  /* HeroUI zooms and slides the bubble in, and a tooltip now opens on plain
-     keyboard focus across the shell - so a reader who asked for less motion
-     would meet one on every Tab. The stylesheet's own reduced-motion rule
-     covers the trigger, not the bubble. */
-  @media (prefers-reduced-motion: reduce) {
-    .aether-tooltip {
-      animation: none;
-    }
-  }
+/* Radix sets popper placement inline on the wrapper. */
+[data-radix-popper-content-wrapper]:has(> [data-slot='menu-content'][data-sheet]) {
+  inset: auto 0 0 0 !important;
+  transform: none !important;
+  min-width: 0 !important;
 }

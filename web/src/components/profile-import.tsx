@@ -570,7 +570,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="secondary"
             disabled={importing}
             onClick={() => picker.current?.click()}
           >
@@ -639,10 +639,10 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           <div className="space-y-2 border-t border-border/70 pt-2">
             <p className="text-sm font-medium">Select files</p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => setOmitted(new Set())}>Select all</Button>
-              <Button size="sm" variant="outline" onClick={() => setOmitted(new Set(selection.files.map(({ path }) => path)))}>Exclude all</Button>
+              <Button size="sm" variant="secondary" onClick={() => setOmitted(new Set())}>Select all</Button>
+              <Button size="sm" variant="secondary" onClick={() => setOmitted(new Set(selection.files.map(({ path }) => path)))}>Exclude all</Button>
               {selection.files.some(({ problem }) => problem) && (
-                <Button size="sm" variant="outline" onClick={() => setOmitted((current) =>
+                <Button size="sm" variant="secondary" onClick={() => setOmitted((current) =>
                   new Set([...current, ...selection.files.filter(({ problem }) => problem).map(({ path }) => path)]),
                 )}>
                   Exclude unsupported files
@@ -662,7 +662,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                     <p className="break-words text-state-failed">
                       {problem.detail}
                       {problem.reason === 'read' && (
-                        <Button size="sm" variant="outline" onClick={() => setSelection({
+                        <Button size="sm" variant="secondary" onClick={() => setSelection({
                           ...selection,
                           files: selection.files.map((entry) => entry.path === path ? { ...entry, problem: undefined } : entry),
                         })}>Retry reading on import</Button>
@@ -728,7 +728,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                     {status.unknownPaths.length > 0 && (
                       <p>Inspect Files before explicitly retrying any unknown outcome by choosing the directory again.</p>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+                    <Button size="sm" variant="secondary" onClick={() => navigate('files')}>
                       Inspect Files
                     </Button>
                   </div>
@@ -778,14 +778,14 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                       <li key={destinationPath}><span className="font-mono">{destinationPath}</span>{problem?.detail && ` — ${problem.detail}`}</li>
                     ))}
                   </ul>
-                  {!recovering && <Button size="sm" variant="outline" disabled={roots === null} onClick={reviewRemaining}>Review remaining files</Button>}
+                  {!recovering && <Button size="sm" variant="secondary" disabled={roots === null} onClick={reviewRemaining}>Review remaining files</Button>}
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+                <Button size="sm" variant="secondary" onClick={() => navigate('files')}>
                   Open remote files
                 </Button>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => picker.current?.click()}>
+                <Button size="sm" variant="secondary" disabled={importing} onClick={() => picker.current?.click()}>
                   Import another directory
                 </Button>
               </div>

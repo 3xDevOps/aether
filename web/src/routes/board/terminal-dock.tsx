@@ -15,11 +15,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
@@ -472,40 +472,40 @@ export function TerminalDock({
                 <Button
                   type="button"
                   size="sm"
-                  variant="default"
+                  variant="primary"
                   onClick={() => void save()}
                   disabled={saving}
                 >
                   {saving ? 'Saving...' : 'Save environment'}
                 </Button>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              <Menu>
+                <MenuTrigger asChild>
                   <Button ref={actionsTrigger} type="button" size="sm" variant="ghost" aria-label="Environment actions">
                     More
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
+                </MenuTrigger>
+                <MenuContent align="end" onCloseAutoFocus={(event) => {
                   if (returnToActions.current) event.preventDefault()
                 }}>
                   {dock.status?.running && capability.hasLocal('forward.start') && (
-                    <DropdownMenuItem onSelect={() => {
+                    <MenuItem onSelect={() => {
                       returnToActions.current = true
                       openForwardDialog('terminal')
                     }}>
                       Forward port
-                    </DropdownMenuItem>
+                    </MenuItem>
                   )}
                   {!empty && (
-                    <DropdownMenuItem onSelect={() => {
+                    <MenuItem onSelect={() => {
                       returnToActions.current = true
                       setConfirmingStop(true)
                     }}>
                       Stop environment
-                    </DropdownMenuItem>
+                    </MenuItem>
                   )}
                   {dock.status?.saved_image && (
-                    <DropdownMenuItem
+                    <MenuItem
                       onSelect={() => {
                         returnToActions.current = true
                         setResetError(null)
@@ -514,10 +514,10 @@ export function TerminalDock({
                       disabled={resetting}
                     >
                       Reset to standard
-                    </DropdownMenuItem>
+                    </MenuItem>
                   )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </MenuContent>
+              </Menu>
               {savedConfirmation && (
                 <span className="text-xs text-muted-foreground">
                   Saved - new runs use this environment

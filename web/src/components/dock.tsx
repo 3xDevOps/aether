@@ -361,7 +361,7 @@ export function Dock({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Add terminal tab"
+              label="Add terminal tab"
               disabled={atLimit}
               onClick={onAddTab}
             >
@@ -388,7 +388,7 @@ export function Dock({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={
+            label={
               full
                 ? 'Shrink terminal dock to half the screen'
                 : 'Expand terminal dock to the full screen'
@@ -405,7 +405,7 @@ export function Dock({
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={collapsed ? 'Expand terminal dock' : 'Collapse terminal dock'}
+          label={collapsed ? 'Expand terminal dock' : 'Collapse terminal dock'}
           aria-expanded={!collapsed}
           onClick={onToggleCollapse}
         >

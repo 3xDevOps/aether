@@ -18,7 +18,7 @@ export function ConfigurationRoute({ client = api }: RouteProps & { client?: Api
         subtitle="your persistent remote home"
         actions={
           canImport && (
-            <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+            <Button size="sm" variant="secondary" onClick={() => navigate('files')}>
               Open remote files
             </Button>
           )

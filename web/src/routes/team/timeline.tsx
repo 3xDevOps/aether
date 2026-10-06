@@ -202,8 +202,8 @@ export function TimelineFeed({ params, client = api }: RouteProps & { client?: A
           )}
           {older && (
             <Button
-              variant="outline"
-              size="default"
+              variant="secondary"
+              size="md"
               className="mt-3"
               disabled={loading}
               onClick={() => void olderFeed(useStore, client)}

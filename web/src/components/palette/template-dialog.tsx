@@ -139,7 +139,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
           )}
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button

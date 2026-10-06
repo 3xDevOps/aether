@@ -40,7 +40,7 @@ function KeyButton({
     <Button
       type="button"
       size="sm"
-      variant={pressed ? 'default' : 'outline'}
+      variant={pressed ? 'primary' : 'secondary'}
       aria-label={label}
       aria-pressed={pressed}
       className="shrink-0 px-3 font-mono text-[13px]"

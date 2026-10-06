@@ -388,7 +388,7 @@ export function RepoStep({
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     disabled={picking}
                     onClick={() => void pick()}
                   >
@@ -514,7 +514,7 @@ export function RepoStep({
                   {resolveCmds}
                 </pre>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   aria-label="Copy resolve commands"
                   onClick={() => void copy(resolveCmds)}
@@ -599,7 +599,7 @@ export function RepoStep({
                   onFocus={(e) => e.target.select()}
                 />
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => void copy(pushCmd)}
                 >
@@ -611,12 +611,12 @@ export function RepoStep({
           <div className={actionRow}>
             <Button
               size="sm"
-              variant={canPush && !settled ? 'outline' : 'default'}
+              variant={canPush && !settled ? 'secondary' : 'primary'}
               onClick={onNext}
             >
               Continue
             </Button>
-            <Button size="sm" variant="outline" onClick={repoint}>
+            <Button size="sm" variant="secondary" onClick={repoint}>
               Use a different repository
             </Button>
             {back}

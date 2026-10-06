@@ -151,7 +151,7 @@ export function GitIdentityStep({
           >
             Save
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={onNext}>
+          <Button type="button" size="sm" variant="secondary" onClick={onNext}>
             Skip
           </Button>
           {back}

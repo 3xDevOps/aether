@@ -77,7 +77,7 @@ export function AgentsStep({
           Continue
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={onNext}>
+      <Button size="sm" variant="secondary" onClick={onNext}>
         Skip for now
       </Button>
       {back}
@@ -146,13 +146,13 @@ export function AgentsStep({
         </div>
 
         {loading && <Skeleton className="h-20 w-full rounded-md" />}
-        {agentsError && <Button size="sm" variant="outline" onClick={loadAgents}>Retry agents</Button>}
+        {agentsError && <Button size="sm" variant="secondary" onClick={loadAgents}>Retry agents</Button>}
         {agentsError && (
           <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed">
             {agentsError}
           </p>
         )}
-        {agents?.length === 0 && canSetUp && <Button size="sm" variant="outline" onClick={() => onSetup('@custom')}>Add an agent</Button>}
+        {agents?.length === 0 && canSetUp && <Button size="sm" variant="secondary" onClick={() => onSetup('@custom')}>Add an agent</Button>}
         {agents && agents.length > 0 && (
           <ul className="min-w-0 border-y border-border/70 bg-card">
             {agents.map((h) => {
@@ -178,7 +178,7 @@ export function AgentsStep({
                   {canSetUp && (
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       aria-label={`Set up ${label}`}
                       onClick={() => onSetup(h.name)}
                     >

@@ -290,7 +290,7 @@ export function WorkspaceMirrorDialog({
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => setConfirmation('adopt')}
                     >
@@ -368,7 +368,7 @@ export function WorkspaceMirrorDialog({
                             <Button
                               type="button"
                               size="sm"
-                              variant="outline"
+                              variant="secondary"
                               onClick={() => void copyText(result.public_key ?? '', publicKeyRef.current)}
                             >
                               Copy public key
@@ -399,16 +399,16 @@ export function WorkspaceMirrorDialog({
           </div>
           <DialogFooter className="flex-wrap border-t pt-3">
             {!disableStateUnavailable && (result?.enabled || isDisabling) && (
-              <Button type="button" variant="destructive" onClick={() => setConfirmation('disable')} disabled={busy}>
+              <Button type="button" variant="danger" onClick={() => setConfirmation('disable')} disabled={busy}>
                 {isDisabling ? 'Retry disable' : 'Disable source'}
               </Button>
             )}
             <span className="flex-1" />
-            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+            <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
               Close
             </Button>
             {!disableStateUnavailable && !isDisabling && result?.enabled && (
-              <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>
+              <Button type="button" variant="secondary" onClick={() => void refresh()} disabled={busy}>
                 {busy ? 'Checking…' : result.status === 'ready' ? 'Refresh' : 'Verify'}
               </Button>
             )}

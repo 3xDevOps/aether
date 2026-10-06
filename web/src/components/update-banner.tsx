@@ -500,7 +500,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
       </div>
       {!status && statusError && (
         <div className={bannerActions}>
-          <Button size="sm" variant="outline" onClick={onRetry}>
+          <Button size="sm" variant="secondary" onClick={onRetry}>
             Retry
           </Button>
         </div>
@@ -510,7 +510,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
           {flow.name === 'scheduled' ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={busy}
               onClick={() => void act('cancel')}
             >
@@ -524,7 +524,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => void act('idle')}
                 >
@@ -543,7 +543,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
             <DialogDescription>{confirmLine(active)}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirming(false)}>
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
               Keep waiting
             </Button>
             <Button

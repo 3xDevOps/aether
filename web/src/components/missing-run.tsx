@@ -41,7 +41,7 @@ export function MissingRun() {
             </div>
           </div>
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             className="mt-2"
             onClick={() => navigate('board')}

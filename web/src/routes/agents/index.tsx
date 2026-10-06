@@ -51,7 +51,7 @@ function AgentsView() {
         subtitle="the agents this server can launch"
         actions={
           caps.hasMethod('config.roots') && caps.hasMethod('config.import') && (
-            <Button size="sm" variant="outline" onClick={() => navigate('configuration')}>
+            <Button size="sm" variant="secondary" onClick={() => navigate('configuration')}>
               Configuration
             </Button>
           )
@@ -60,7 +60,7 @@ function AgentsView() {
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
           {caps.hasMethod('member.git') && <section className="space-y-2 border-b pb-3">
-            <Button size="sm" variant="outline" onClick={() => setIdentityOpen(!identityOpen)}>Git commit identity</Button>
+            <Button size="sm" variant="secondary" onClick={() => setIdentityOpen(!identityOpen)}>Git commit identity</Button>
             {identityOpen && <GitIdentityStep client={api} caps={caps} onNext={() => setIdentityOpen(false)} />}
           </section>}
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-2">
@@ -72,7 +72,7 @@ function AgentsView() {
                 </p>
               )}
             </div>
-            <Button size="sm" variant="outline" onClick={refetch}>
+            <Button size="sm" variant="secondary" onClick={refetch}>
               Refresh agents
             </Button>
           </div>
@@ -82,7 +82,7 @@ function AgentsView() {
               className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-y border-state-failed/30 bg-state-failed/5 px-3 py-2 text-[13px] text-state-failed"
             >
               <span className="min-w-0 break-words">{error}</span>
-              <Button size="sm" variant="outline" onClick={refetch}>
+              <Button size="sm" variant="secondary" onClick={refetch}>
                 Retry
               </Button>
             </div>
@@ -120,7 +120,7 @@ function AgentsView() {
                     <span className="shrink-0 border-l pl-3 text-xs text-muted-foreground">
                       {a.source === 'shipped' ? 'shipped' : 'member'}
                     </span>
-                    {caps.hasMethod('agent.register') && caps.hasMethod('env.save') && <Button size="sm" variant="outline" onClick={() => { setHarness(a.name); setAdding(true) }}>Set up / log in</Button>}
+                    {caps.hasMethod('agent.register') && caps.hasMethod('env.save') && <Button size="sm" variant="secondary" onClick={() => { setHarness(a.name); setAdding(true) }}>Set up / log in</Button>}
                   </li>
                 ))}
                 {agents.length === 0 && (

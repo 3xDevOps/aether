@@ -159,7 +159,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
                         Launch
                       </Button>
                       {caps.hasMethod('template.save') && (
-                        <Button size="sm" variant="outline" onClick={() => setEditing(template)}>
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(template)}>
                           Edit
                         </Button>
                       )}
@@ -346,7 +346,7 @@ function TemplateForm({
           )}
         </form>
         <DialogFooter className="border-t pt-3">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button

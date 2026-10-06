@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/types'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
@@ -613,7 +613,7 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
       {dock.hidden.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3 py-1">
           {dock.terminals.filter((item) => !dock.tabs.includes(item.terminal_id)).map((item) => (
-            <Button key={item.terminal_id} size="sm" variant="outline" onClick={() => {
+            <Button key={item.terminal_id} size="sm" variant="secondary" onClick={() => {
               selectShellTab(runID, item.terminal_id); setDockCollapsed(runID, false)
             }}>Show {item.name || item.terminal_id} · {item.process.state}</Button>
           ))}
@@ -649,17 +649,17 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
           <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-toolbar px-3 py-1.5 text-xs text-muted-foreground">
             <span role="status" className="min-w-0 flex-1 truncate" title={`${activeProcess?.name} · ${activeProcess?.process.state}${activeProcess?.process.exit_code !== undefined ? ` (${activeProcess.process.exit_code})` : ''} · Controller: ${activeHasControl ? 'You (this terminal)' : controllerName}`}>{activeProcess?.name} · {activeProcess?.process.state}{activeProcess?.process.exit_code !== undefined ? ` (${activeProcess.process.exit_code})` : ''} · Controller: {activeHasControl ? 'You (this terminal)' : controllerName}</span>
             {processRunning && (activeHasControl
-              ? <Button size="sm" variant="outline" className="shrink-0" disabled={busy} onClick={() => void releaseShellControl()}>Release shell control</Button>
-              : <Button size="sm" variant="outline" className="shrink-0" disabled={busy || attachedIdentity === null} onClick={(event) => {
+              ? <Button size="sm" variant="secondary" className="shrink-0" disabled={busy} onClick={() => void releaseShellControl()}>Release shell control</Button>
+              : <Button size="sm" variant="secondary" className="shrink-0" disabled={busy || attachedIdentity === null} onClick={(event) => {
                 confirmationTrigger.current = event.currentTarget
                 if (owner) setConfirmation('take')
                 else takeShellControl()
               }}>Take shell control</Button>)}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button ref={moreTrigger} size="sm" variant="outline" className="shrink-0" aria-label="More terminal actions"><Ellipsis className="size-3" aria-hidden />More</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
+            <Menu>
+              <MenuTrigger asChild>
+                <Button ref={moreTrigger} size="sm" variant="secondary" className="shrink-0" aria-label="More terminal actions"><Ellipsis className="size-3" aria-hidden />More</Button>
+              </MenuTrigger>
+              <MenuContent align="end" onCloseAutoFocus={(event) => {
                 const target = menuFocusTarget.current
                 menuFocusTarget.current = null
                 if (!target) return
@@ -670,19 +670,19 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
                   else moreTrigger.current?.focus()
                 }
               }}>
-                <DropdownMenuItem disabled={busy || !incarnation} onSelect={() => void screenshot()}>Screenshot</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => {
+                <MenuItem disabled={busy || !incarnation} onSelect={() => void screenshot()}>Screenshot</MenuItem>
+                <MenuItem onSelect={() => {
                   menuFocusTarget.current = 'terminal'
                   if (activeTab) closeShellTab(runID, activeTab)
-                }}>Hide terminal</DropdownMenuItem>
-                <div role="separator" className="-mx-1 my-1 h-px bg-border" />
-                <DropdownMenuItem className="text-destructive" disabled={busy || !activeHasControl || !processRunning} onSelect={() => {
+                }}>Hide terminal</MenuItem>
+                <MenuSeparator />
+                <MenuItem className="text-destructive" disabled={busy || !activeHasControl || !processRunning} onSelect={() => {
                   menuFocusTarget.current = 'dialog'
                   confirmationTrigger.current = moreTrigger.current
                   setConfirmation('stop')
-                }}>Stop terminal</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                }}>Stop terminal</MenuItem>
+              </MenuContent>
+            </Menu>
           </div>
           {!processRunning && <p className="p-3 text-sm">This process {activeProcess?.process.state}. {activeProcess?.process.reason} Opening or showing it never reruns it. Use + to start a new terminal.</p>}
           <TerminalPane
@@ -715,8 +715,8 @@ export function RunDock({ runID, onEvidenceAnswer, deferLayout = false }: {
             : 'Stop ends this exact terminal incarnation. Hiding or detaching instead leaves it running.'}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setConfirmation(null)}>Cancel</Button>
-          <Button variant={confirmation === 'stop' ? 'destructive' : 'default'} disabled={busy} onClick={() => confirmation === 'take' ? takeShellControl() : void stopTerminal()}>{confirmation === 'take' ? 'Confirm takeover' : 'Confirm stop'}</Button>
+          <Button variant="secondary" onClick={() => setConfirmation(null)}>Cancel</Button>
+          <Button variant={confirmation === 'stop' ? 'danger' : 'primary'} disabled={busy} onClick={() => confirmation === 'take' ? takeShellControl() : void stopTerminal()}>{confirmation === 'take' ? 'Confirm takeover' : 'Confirm stop'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

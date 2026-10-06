@@ -57,14 +57,7 @@ export function useDrag(): () => AbortController {
 /** The CSS variant of the same name, asked from JavaScript. */
 export const coarsePointer = '(pointer: coarse)'
 
-/**
- * Tailwind's own breakpoints, asked from JavaScript. `sm` starts at 640px
- * and `md` at 768px, so being below one is being a pixel short of it. Every
- * JavaScript branch reads the edge from here, so a layout that stacks in CSS
- * and a layout that stacks in JavaScript cannot disagree about where.
- */
 export const belowSm = '(max-width: 639px)'
-export const belowMd = '(max-width: 767px)'
 
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`

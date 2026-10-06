@@ -63,7 +63,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
       <Button
         type="button"
         size="sm"
-        variant="outline"
+        variant="secondary"
         onClick={() => (subStep ? setSubStep('') : setStep(currentStep - 1))}
       >
         Back

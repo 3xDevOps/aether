@@ -78,7 +78,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
               className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-y border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed"
             >
               <span className="min-w-0 break-words">{error}</span>
-              <Button size="sm" variant="outline" onClick={() => void refetch()}>
+              <Button size="sm" variant="secondary" onClick={() => void refetch()}>
                 Retry
               </Button>
             </div>
@@ -115,18 +115,18 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                       <div className="flex shrink-0 gap-2">
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant="secondary"
                           onClick={() => navigate('workspace', { workspaceId: workspace.id })}
                         >
                           Open
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => navigate('workspace', { workspaceId: workspace.id, repository: 'local' })}>
+                        <Button size="sm" variant="secondary" onClick={() => navigate('workspace', { workspaceId: workspace.id, repository: 'local' })}>
                           Link local repository
                         </Button>
                         {canDelete && (
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="secondary"
                             onClick={() => setDeleting(workspace)}
                           >
                             Delete

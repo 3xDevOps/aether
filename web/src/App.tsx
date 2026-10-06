@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Toaster, toast } from 'sonner'
+import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
 import { TitleBar } from '@/components/shell/title-bar'
 import { ThemeEffect } from '@/components/theme'
+import { Toaster } from '@/components/ui/toast'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -98,14 +99,6 @@ export function App() {
                 // the same value.
                 offset={toastOffset}
                 mobileOffset={toastOffset}
-                toastOptions={{
-                  className:
-                    'rounded-[4px] border border-border bg-popover px-3 py-2 text-[13px] text-popover-foreground shadow-overlay',
-                  classNames: {
-                    title: 'font-medium',
-                    description: 'text-muted-foreground',
-                  },
-                }}
               />
             </>
           )}

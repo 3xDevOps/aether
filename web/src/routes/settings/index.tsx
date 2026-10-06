@@ -197,7 +197,7 @@ function LinkCard({ client }: { client: Api }) {
                     </span>
                   ) : (
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       onClick={() => switchTo(l.name)}
                     >
@@ -221,7 +221,7 @@ function LinkCard({ client }: { client: Api }) {
           from a clone or link a clone to an existing workspace.
         </p>
       )}
-      {serverConfigured && <Button size="sm" variant="outline" onClick={() => navigate('workspaces')}>Manage repositories and workspaces</Button>}
+      {serverConfigured && <Button size="sm" variant="secondary" onClick={() => navigate('workspaces')}>Manage repositories and workspaces</Button>}
       {link && !serverConfigured && (
         <p className="border-t border-border/70 py-3 text-sm text-muted-foreground">
           No server configured. Run `aether link` in a terminal to get started.
@@ -329,7 +329,7 @@ function DaemonCard({ client }: { client: Api }) {
               value={installed.note}
               onFocus={(e) => e.target.select()}
             />
-            <Button variant="outline" size="sm" onClick={() => void copy()}>
+            <Button variant="secondary" size="sm" onClick={() => void copy()}>
               <Copy />
               {copied ? 'Copied' : 'Copy'}
             </Button>

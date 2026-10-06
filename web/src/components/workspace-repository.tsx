@@ -48,8 +48,8 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
     <div className="space-y-2 border-t pt-3">
       <h3 className="text-sm font-semibold">Local clone</h3>
       <p className="text-xs leading-5 text-muted-foreground">Link or relink a clone to this workspace. Linking changes its aether remote, not its origin or history. A mirrored base stays server-owned.</p>
-      {!local && <Button size="sm" variant="outline" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
-      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={<>{back}<Button size="sm" variant="outline" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Back to repository choices</Button></>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
+      {!local && <Button size="sm" variant="secondary" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
+      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={<>{back}<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Back to repository choices</Button></>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
     </div>
     <div className="space-y-2 border-t pt-3 text-sm">
       <h3 className="font-semibold">Checkout Origin</h3>
@@ -76,7 +76,7 @@ export function WorkspaceRepositoryDialog({ workspace, client = api, onClose, in
     <DialogContent className="grid-cols-1 max-h-[calc(100dvh-2rem)] max-w-[min(800px,calc(100%-2rem))] overflow-y-auto">
       <DialogHeader><DialogTitle>Workspace repository</DialogTitle><DialogDescription>{workspace.name} · source and local clone settings</DialogDescription></DialogHeader>
       <WorkspaceRepository key={workspace.id} client={client} caps={caps} workspace={workspace} initialLocal={initialLocal} />
-      <Button size="sm" variant="outline" onClick={onClose}>Close repository settings</Button>
+      <Button size="sm" variant="secondary" onClick={onClose}>Close repository settings</Button>
     </DialogContent>
   </Dialog>
 }

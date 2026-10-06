@@ -71,12 +71,12 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
       <div className="space-y-2 border p-3">
         <h3 className="text-sm font-semibold">Public or private remote repository</h3>
         <p className="text-xs leading-5 text-muted-foreground">Import public HTTPS or a private repository with a read-only deploy key. No local clone is needed.</p>
-        {isAdmin && caps.hasMethod('workspace.import') ? <Button size="sm" variant="outline" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button> : <p className="text-xs text-muted-foreground">An administrator with repository import access must create the workspace.</p>}
+        {isAdmin && caps.hasMethod('workspace.import') ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button> : <p className="text-xs text-muted-foreground">An administrator with repository import access must create the workspace.</p>}
       </div>
       <div className="space-y-2 border p-3">
         <h3 className="text-sm font-semibold">Local clone</h3>
         <p className="text-xs leading-5 text-muted-foreground">Create a workspace, link your existing Git clone, then push its base branch without rewriting history.</p>
-        {isAdmin && caps.hasMethod('workspace.add') ? <Button size="sm" variant="outline" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button> : <p className="text-xs text-muted-foreground">An administrator must create the workspace. You can link your clone to an existing workspace below.</p>}
+        {isAdmin && caps.hasMethod('workspace.add') ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button> : <p className="text-xs text-muted-foreground">An administrator must create the workspace. You can link your clone to an existing workspace below.</p>}
       </div>
     </div>
     {choice === 'local' && (caps.hasLocal('link.repo') ? <form aria-label="Create workspace" className="space-y-3 border-t pt-3" onSubmit={(event) => { event.preventDefault(); void create() }}>

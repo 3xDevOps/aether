@@ -51,7 +51,7 @@ export function GitHubSection({
           Connected in this session as {connection.login}
         </p>
       )}
-      <Button size="sm" variant="outline" onClick={onOpen}>
+      <Button size="sm" variant="secondary" onClick={onOpen}>
         Connect GitHub
       </Button>
     </section>
@@ -202,7 +202,7 @@ export function GitHubConnect({
         </pre>
       )}
       {(ghUnusable || probeError !== null) && (
-        <Button type="button" size="sm" variant="outline" onClick={recheck}>
+        <Button type="button" size="sm" variant="secondary" onClick={recheck}>
           Check again
         </Button>
       )}
