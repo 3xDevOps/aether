@@ -144,6 +144,10 @@ describe('Sidebar', () => {
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
     const drawer = screen.getByRole('dialog', { name: 'Runs' })
 
+    // Off Apple platforms Meta+B is not the binding, inside the drawer or out.
+    fireEvent.keyDown(drawer, { key: 'b', metaKey: true })
+    expect(screen.getByRole('dialog', { name: 'Runs' })).toBeDefined()
+
     fireEvent.keyDown(drawer, { key: 'b', ctrlKey: true })
 
     expect(screen.queryByRole('dialog', { name: 'Runs' })).toBeNull()

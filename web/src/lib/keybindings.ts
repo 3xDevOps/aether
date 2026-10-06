@@ -97,6 +97,13 @@ export function shortcutLabel(id: KeybindingID): string {
   return formatKeys(keybindings.find((binding) => binding.id === id)!.keys)
 }
 
+/** Whether `event` is the single press of binding `id`, for a layer that
+ * stands the table down and answers one of its keys itself. */
+export function isPress(event: KeyboardEvent, id: KeybindingID): boolean {
+  const parsed = presses.get(id)!
+  return parsed.length === 1 && matchKeybindingPress(event, parsed[0]!)
+}
+
 /** The live handlers for chords or for single keys, innermost scope first. */
 function candidates(chord: boolean): [Keybinding, Handler][] {
   const out: [Keybinding, Handler][] = []

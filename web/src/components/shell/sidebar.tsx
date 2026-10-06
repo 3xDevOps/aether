@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDelayed, useDrag } from '@/lib/hooks'
-import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
+import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
 import { runLabel } from '@/lib/status'
 import { surfaces, type Surface } from '@/lib/surfaces'
@@ -257,13 +257,7 @@ export function Sidebar() {
               // and Mod+B is the pair of the key that opened this one, so the
               // drawer answers it here.
               onKeyDown={(event) => {
-                if (
-                  !(event.metaKey || event.ctrlKey) ||
-                  event.altKey ||
-                  event.shiftKey ||
-                  event.key.toLowerCase() !== 'b'
-                )
-                  return
+                if (!isPress(event.nativeEvent, 'sidebar')) return
                 event.preventDefault()
                 toggleAndFollow()
               }}
