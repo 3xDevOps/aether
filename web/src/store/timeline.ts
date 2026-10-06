@@ -56,7 +56,7 @@ export interface TimelineSlice {
   setFeedTruncated: (truncated: boolean) => void
 }
 
-export const createTimelineSlice: SliceCreator<TimelineSlice> = (set) => ({
+export const createTimelineSlice: SliceCreator<TimelineSlice> = (set, get) => ({
   feed: [],
   feedFilters: emptyFilters,
   feedFloor: 0,
@@ -71,11 +71,13 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set) => ({
     set((s) => ({ feedViews: s.feedViews + 1 }))
     return () => set((s) => ({ feedViews: s.feedViews - 1 }))
   },
-  appendLiveEvent: (event) =>
+  appendLiveEvent: (event) => {
+    // Even an empty set notifies listeners and makes persist rewrite localStorage.
+    const now = get()
+    if (now.feedViews === 0 || !selects(now.feedFilters, event)) return
+    if (now.feed.some((e) => e.seq === event.seq)) return
     set((s) => {
-      if (s.feedViews === 0 || !selects(s.feedFilters, event)) return {}
       const last = s.feed.at(-1)
-      if (s.feed.some((e) => e.seq === event.seq)) return {}
       return {
         feed: !last || last.seq < event.seq
           ? [...s.feed, event]
@@ -86,7 +88,8 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set) => ({
           ? s.feedCursor
           : Math.max(s.feedCursor, event.seq),
       }
-    }),
+    })
+  },
   setFeedFilters: (filters) =>
     set((s) => ({ feedFilters: { ...s.feedFilters, ...filters } })),
   beginFeed: () =>

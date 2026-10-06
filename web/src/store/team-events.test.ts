@@ -167,6 +167,12 @@ describe('team state from events', () => {
     store.getState().setFeedFilters({ workspaceID: workspace.id })
     const status = (seq: number) => event(seq, 'run.status', { to: 'running' })
 
+    const before = store.getState()
+    const persisted = vi.spyOn(Storage.prototype, 'setItem')
+    store.getState().appendLiveEvent(status(1))
+    expect(store.getState()).toBe(before)
+    expect(persisted).not.toHaveBeenCalled()
+    persisted.mockRestore()
     await applyEvent(store, status(1), client)
     expect(store.getState().feed).toEqual([])
 
