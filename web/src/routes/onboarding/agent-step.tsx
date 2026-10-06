@@ -40,6 +40,11 @@ export function AgentStep({
   const loading = useDelayed(agents === null && error === null)
   const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
   const settingUp = agents?.find((agent) => agent.name === setup)
+  const [returnFocusTo, setReturnFocusTo] = useState('')
+  const openSetup = (name: string) => {
+    setReturnFocusTo(name)
+    onSetup(name)
+  }
 
   if (setup) {
     return (
@@ -47,7 +52,7 @@ export function AgentStep({
         {setup === githubSubStep ? (
           <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={() => onSetup('')} />
         ) : setup === addAgentSubStep ? (
-          <AddAgent client={client} onAdded={(agent) => { reload(); onSetup(agent.name) }} onCancel={() => onSetup('')} />
+          <AddAgent client={client} onAdded={(agent) => { reload(); openSetup(agent.name) }} onCancel={() => onSetup('')} />
         ) : settingUp ? (
           <AgentSetup key={settingUp.name} agent={settingUp} client={client} onDone={() => { reload(); onSetup('') }} />
         ) : (
@@ -83,7 +88,8 @@ export function AgentStep({
             <div className="self-stretch">
               <AgentList
                 agents={agents}
-                onSetUp={canSetUp ? (agent) => onSetup(agent.name) : undefined}
+                onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
+                returnFocusTo={returnFocusTo}
                 onRun={(agent) => {
                   rememberLaunch(agent.name, defaultMode(agent, useStore.getState().launchDefaults[agent.name]?.mode))
                   onNext()

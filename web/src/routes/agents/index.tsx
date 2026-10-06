@@ -45,11 +45,16 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   const { agents, error, reload } = useAgentList(client)
   const [screen, setScreen] = useState('')
+  const [returnFocusTo, setReturnFocusTo] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
   const loading = useDelayed(agents === null && error === null)
   const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
   const settingUp = agents?.find((agent) => agent.name === screen)
   const close = () => setScreen('')
+  const openSetup = (name: string) => {
+    setReturnFocusTo(name)
+    setScreen(name)
+  }
 
   const run = (agent: AgentInfo) => {
     const state = useStore.getState()
@@ -70,7 +75,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           {screen === githubScreen ? (
             <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={close} />
           ) : screen === addScreen ? (
-            <AddAgent client={client} onAdded={(agent) => { reload(); setScreen(agent.name) }} onCancel={close} />
+            <AddAgent client={client} onAdded={(agent) => { reload(); openSetup(agent.name) }} onCancel={close} />
           ) : screen ? (
             settingUp
               ? <AgentSetup key={settingUp.name} agent={settingUp} client={client} onDone={() => { reload(); close() }} />
@@ -90,9 +95,10 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
               {agents && agents.length > 0 && (
                 <AgentList
                   agents={agents}
-                  onSetUp={canSetUp ? (agent) => setScreen(agent.name) : undefined}
+                  onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                   onRun={caps.hasMethod('run.launch') ? run : undefined}
                   extra={(agent) => <DefaultMode agent={agent} />}
+                  returnFocusTo={returnFocusTo}
                 />
               )}
               <AgentExtras client={client} caps={caps} identity github={github} onConnectGitHub={() => setScreen(githubScreen)} />

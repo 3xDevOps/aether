@@ -995,7 +995,7 @@ describe('the agent the step set up', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Done' }))
 
     expect(await screen.findByText('Installed · Login found')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Run Claude Code' })).toBeDefined()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run Claude Code' }))
     expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
   })
 

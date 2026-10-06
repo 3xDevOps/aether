@@ -1,7 +1,9 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { enhancedSupported, label, ready, supportWords } from '@/components/agents/agent-copy'
+import { Ellipsis } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -31,15 +33,22 @@ export function AgentList({
   onSetUp,
   onRun,
   extra,
+  returnFocusTo,
 }: {
   agents: AgentInfo[]
-  /** Absent when this gateway cannot set agents up. */
   onSetUp?: (agent: AgentInfo) => void
   onRun?: (agent: AgentInfo) => void
   extra?: (agent: AgentInfo) => ReactNode
+  returnFocusTo?: string
 }) {
+  const list = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    if (!returnFocusTo) return
+    const actions = list.current?.querySelectorAll<HTMLElement>('[data-agent-action]') ?? []
+    Array.from(actions).find((action) => action.dataset.agentAction === returnFocusTo)?.focus()
+  }, [returnFocusTo])
   return (
-    <ul aria-label="Agents" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+    <ul ref={list} aria-label="Agents" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
       {agents.map((agent) => {
         const name = label(agent)
         const runnable = ready(agent) && onRun
@@ -56,23 +65,30 @@ export function AgentList({
               </span>
             </span>
             <span className="ml-auto flex items-center gap-2">
-            {extra?.(agent)}
-            {runnable && onSetUp && (
-              <Button size="sm" variant="ghost" aria-label={`Set up ${name} again`} onClick={() => onSetUp(agent)}>
-                Set up
-              </Button>
-            )}
-            {runnable ? (
-              <Button size="sm" variant="secondary" aria-label={`Run ${name}`} onClick={() => onRun(agent)}>
-                Run
-              </Button>
-            ) : (
-              onSetUp && (
-                <Button size="sm" variant="secondary" aria-label={`Set up ${name}`} onClick={() => onSetUp(agent)}>
-                  Set up
+              {extra?.(agent)}
+              {(runnable || onSetUp) && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-agent-action={agent.name}
+                  aria-label={`${runnable ? 'Run' : 'Set up'} ${name}`}
+                  onClick={() => (runnable ? onRun(agent) : onSetUp?.(agent))}
+                >
+                  {runnable ? 'Run' : 'Set up'}
                 </Button>
-              )
-            )}
+              )}
+              {runnable && onSetUp && (
+                <Menu>
+                  <MenuTrigger asChild>
+                    <Button size="icon" variant="ghost" label={`More for ${name}`}>
+                      <Ellipsis />
+                    </Button>
+                  </MenuTrigger>
+                  <MenuContent align="end">
+                    <MenuItem onSelect={() => onSetUp(agent)}>Set up again</MenuItem>
+                  </MenuContent>
+                </Menu>
+              )}
             </span>
           </li>
         )

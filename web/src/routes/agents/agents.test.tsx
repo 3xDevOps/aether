@@ -84,10 +84,12 @@ describe('agents page', () => {
     mount()
     await flush()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set up Claude Code again' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More for Claude Code' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Set up again' }))
     expect(screen.getByRole('radiogroup', { name: 'How runs show Claude Code' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'All agents' }))
     expect(screen.getByRole('list', { name: 'Agents' })).toBeDefined()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run Claude Code' }))
   })
 
   it('adds a custom agent from the header', async () => {

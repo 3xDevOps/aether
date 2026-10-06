@@ -2670,15 +2670,17 @@ The Agent step and the **Agents** page render the same parts from
 `AgentGlyph`, its display name, **Installed** or **Not installed**, **Login
 found** or **No login found** from `login_found`, "Standard · Enhanced" or
 "Standard", and one button: **Set up**, or **Run** once the agent is installed
-with no missing login), **Add agent…** (`add-agent.tsx`: a name, a Standard
-and a Background command, and an optional Enhanced command, sent through
-`agent.register`), and `AgentExtras`, the collapsed **Git identity** (Agents
-page only), **GitHub** and **Agent config files** disclosures. The Agents
-page adds a **Default mode** select per row, which writes `launchDefaults`
-without changing which agent **New run** preselects. **Run** on the page
-opens **New run** on that agent; in onboarding it moves to First run with
-that agent preselected. The Agent step's primary action is **Continue** once
-any agent is installed and **Skip for now** before that.
+with no missing login, with **Set up again** in the row's **More** menu;
+closing a setup returns focus to that row's button), **Add agent…**
+(`add-agent.tsx`: a name, a Standard and a Background command, and an
+optional Enhanced command, sent through `agent.register`), and
+`AgentExtras`, the collapsed **Git identity** (Agents page only), **GitHub**
+and **Agent config files** disclosures. The Agents page adds a **Default
+mode** select per row, which writes
+`launchDefaults` without changing which agent **New run** preselects. **Run**
+on the page opens **New run** on that agent; in onboarding it moves to First
+run with that agent preselected. The Agent step's primary action is
+**Continue** once any agent is installed and **Skip for now** before that.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps. **Choose how runs
 show it** is `mode-comparison.tsx`: a `radiogroup` of two cards, side by side
