@@ -426,12 +426,12 @@ describe('board', () => {
       id, task: `worker ${id}`, status, mode: 'headless',
       mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id,
     })
-    seed([integrator, worker('w1', 'running'), worker('w2', 'running'), worker('w3', 'completed')])
+    seed([integrator, worker('w1', 'running'), worker('w2', 'running'), worker('w3', 'completed'), worker('w4', 'failed')])
     render(<Board />)
 
     expect(screen.getAllByRole('article')).toHaveLength(1)
     expect(column('Working').getByText('coordinate checkout')).toBeDefined()
-    expect(column('Working').getByText('2 working · 1 done')).toBeDefined()
+    expect(column('Working').getByText('2 working · 1 done · 1 failed')).toBeDefined()
     expect(screen.queryByText('worker w1')).toBeNull()
   })
 

@@ -328,8 +328,8 @@ workspace's Needs you count.
 
 A swarm is a mission whose integrator coordinates worker runs. It is one row,
 its current integrator's, carrying an **Integrator** badge and the workers'
-counts ("3 working · 1 needs you · 2 done" on the board card). Only workers
-that need the viewer are listed under it, with indented tree guides; the
+counts ("3 working · 1 needs you · 2 done · 1 failed" on the board card).
+Only workers that need the viewer are listed under it, with indented tree guides; the
 swarm row then sits in Needs you. If an integrator is missing or archived,
 its visible workers remain top-level rows marked **Worker**.
 

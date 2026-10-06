@@ -114,7 +114,7 @@ describe('swarms', () => {
     expect(ids(groups.working)).toEqual(['run_integrator'])
     const [swarm] = groups.working
     expect(swarm.children).toEqual([])
-    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1 } })
+    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 0 } })
     expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3'])
   })
 
@@ -125,7 +125,7 @@ describe('swarms', () => {
     const [swarm] = groups['needs-you']
     expect(swarm.state).toBe('working')
     expect(ids(swarm.children)).toEqual(['blocked'])
-    expect(swarm.swarm?.counts).toEqual({ working: 1, needsYou: 1, done: 0 })
+    expect(swarm.swarm?.counts).toEqual({ working: 1, needsYou: 1, done: 0, failed: 0 })
   })
 
   it("roots a replaced integrator's swarm at the current one", () => {

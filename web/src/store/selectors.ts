@@ -40,7 +40,7 @@ export interface RunRow {
 export interface SwarmSummary {
   /** Some members are not listed under the swarm entry. */
   collapsed: boolean
-  counts: { working: number; needsYou: number; done: number }
+  counts: { working: number; needsYou: number; done: number; failed: number }
   /** Every member run besides the entry's own integrator. */
   members: RunRow[]
 }
@@ -115,10 +115,11 @@ function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow | undefined {
 
 function swarmTree(root: RunRow, members: RunRow[]): RunTree {
   const children = members.filter((row) => row.state === 'needs-you')
-  const counts = { working: 0, needsYou: 0, done: 0 }
+  const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
   for (const row of members) {
     if (row.state === 'needs-you') counts.needsYou++
     else if (row.group === 'working') counts.working++
+    else if (row.state === 'failed') counts.failed++
     else counts.done++
   }
   const waits = [root, ...children].filter((row) => row.state === 'needs-you')

@@ -268,6 +268,7 @@ function swarmCounts({ counts }: SwarmSummary): string {
     counts.working > 0 && `${counts.working} working`,
     counts.needsYou > 0 && `${counts.needsYou} needs you`,
     counts.done > 0 && `${counts.done} done`,
+    counts.failed > 0 && `${counts.failed} failed`,
   ].filter(Boolean).join(' · ') || 'No workers yet'
 }
 
