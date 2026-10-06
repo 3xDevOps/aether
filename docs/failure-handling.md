@@ -51,7 +51,7 @@ interval only needs to be small relative to the threshold - a third of it is
 plenty, and polling faster than that just wakes the scheduler up more often.
 
 Parking is not terminal. A stalled run whose agent starts producing output
-again returns to running on the next poll, and messaging it (`aether inject`,
+again returns to running on the next poll, and messaging it (`aether message`,
 or typing on an attach) is usually what gets it talking. A run parked
 because its agent said it was waiting is the exception: output alone does
 not release it, because a TUI repainting while you type is output and is not

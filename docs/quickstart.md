@@ -734,7 +734,7 @@ Detach without killing anything: the PTY lives on the server.
 To message a running agent without attaching:
 
 ```sh
-aether inject <run-id> "also update the README"
+aether message <run-id> "also update the README"
 ```
 
 The message appears in the run's **Session** under your name, so everyone

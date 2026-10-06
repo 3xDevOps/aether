@@ -600,7 +600,7 @@ commit captured at launch.
 | `aether runs` | Every run you can see, colored by owner, with conflict warnings. The `needs-attention` wire status prints as `needs-you`, and a notice counts those runs; `--attention` lists only them, not every run waiting on an input request. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
-| `aether inject <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |
+| `aether message <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
 | `aether delete <run>` | Stop the run if it is live, then remove its checkout, transcript, captures, and run records. Needs the same permission as `kill`. A published run branch stays in the workspace repo and the timeline keeps the history. |
 | `aether archive <run>` / `unarchive <run>` | Hide a finished run from the board and default `aether runs`, or restore it. Needs the same permission as `kill`; only a merged, abandoned, failed, or interrupted run can be archived. Archiving itself removes nothing; the server deletes the run on the printed date. See [failure-handling.md](failure-handling.md) for what the checkout TTL GC reclaims sooner. |
