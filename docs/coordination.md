@@ -198,8 +198,8 @@ are four ways to notice mail:
 4. **An enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox
-   instruction, under the same admission as a native wake. Each unread
-   message starts at most one such turn. Hooks stay silent in these runs
+   instruction, under the same admission as a native wake. Each set of new
+   unread messages starts at most one such turn. Hooks stay silent in these runs
    (`AETHER_ENHANCED=1`); see [enhanced-runs.md](enhanced-runs.md#mail).
 
 See [per-harness setup and limits](harnesses.md#incoming-coordination-hooks).
@@ -788,15 +788,17 @@ report summary, and `correlation_id` is the report ID; `worker list` shows the
 outcome. A worker whose run ends without reporting sends nothing, so check
 `worker list` before declaring completion. The integrator's hooks announce a
 changed mission phase or open-question count once; an enhanced integrator
-is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries).
+is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries),
+and with the same mission-update instruction when its phase, open-question
+count or generation changes.
 The integrator is always interactive (`tui` or `acp`): `mission.create` and
 `mission.replace-integrator` refuse `headless` with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
 account, harness, and mode among the execution choices;
-`mission.replace-integrator` accepts any listed account and harness in `tui`,
-so a swarm whose choices are all headless can still get an interactive
-integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
+`mission.replace-integrator` accepts any listed account and harness in `tui`
+or `acp`, so a swarm whose choices are all headless can still get an
+interactive integrator; `aether swarm replace-integrator` always sends `tui`. Both refuse, with `-32602` and `integrator harness <name> cannot
 launch in tui mode: <cause>`, a harness the integrator's run owner cannot
 start in `tui` on that account, such as one whose definition the run owner no
 longer has, or the run owner's own member-defined harness on another

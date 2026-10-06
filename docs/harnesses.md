@@ -260,7 +260,7 @@ profile, or a status reporter activates inbox delivery. Native idle wake is
 for eligible TUI runs, not a way to restart headless or exited processes.
 
 **Enhanced run wake** needs no asset: in an enhanced run the server sends the
-idle ACP session one prompt per new unread message
+idle ACP session at most one prompt per set of new unread messages
 ([enhanced-runs.md](enhanced-runs.md#mail)). The container sets
 `AETHER_ENHANCED=1`, and there every `aether-internal hook` exits without
 output, so hooks the agent loads from the member's own settings do not
