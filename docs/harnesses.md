@@ -51,15 +51,15 @@ window has passed without a new measurement.
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes | adapter `@agentclientprotocol/claude-agent-acp@0.86.0` |
-| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes | adapter `@agentclientprotocol/codex-acp@2.1.1` |
-| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes | adapter `pi-acp@0.0.34` |
-| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no | native (`omp acp`) |
-| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no | native (`opencode acp`) |
-| `fake` | a script you name | - | - | - | - | - | PTY | no | none |
-| `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced | Switch |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes | adapter `@agentclientprotocol/claude-agent-acp@0.86.0` | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes | adapter `@agentclientprotocol/codex-acp@2.1.1` | no |
+| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes | adapter `pi-acp@0.0.34` | no |
+| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no | native (`omp acp`) | yes |
+| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no | native (`opencode acp`) | no |
+| `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
+| `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user). **Login state** is the path an
@@ -103,6 +103,10 @@ the agent's messages, tool calls, and permission requests instead of its
 terminal. [enhanced-runs.md](enhanced-runs.md) covers launching and
 operating one; [Enhanced mode adapters](#enhanced-mode-adapters) covers
 installing what serves it.
+
+The **Switch** column marks the agents whose running session can move
+between Standard and Enhanced (`agent.list` `switchable`); see
+[Switching a running agent](enhanced-runs.md#switching-a-running-agent).
 
 ### Enhanced mode adapters
 
@@ -691,7 +695,11 @@ Every reporter uses the existing staged binary and coordination socket:
 ```
 
 Stateful extensions/plugins send `state` (`working` or the legacy `waiting`
-wire value), an optional `reason`, and `input_updates`. Their `replace`
+wire value), an optional `reason`, and `input_updates`. Claude's hooks, Codex's
+notify and the pi/omp extension also carry the agent's own session id
+(`session_id`, Codex's `thread-id`), which a Standard run stores so a
+[mode switch](enhanced-runs.md#switching-a-running-agent) can resume it;
+OpenCode's plugins carry none. Their `replace`
 update contains the complete current request list, including `[]` when
 empty. Claude's stateless hooks send matching `open`/`close` updates.
 Each request contains only `id`, `session_id`, and `kind` (`question`,

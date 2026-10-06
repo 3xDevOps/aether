@@ -637,6 +637,21 @@ make test-integration INTEGRATION_PKGS='./internal/scheduler ./internal/server' 
   INTEGRATION_RUN='TestIntegrationEnhancedRun'
 ```
 
+[Mode switching](enhanced-runs.md#switching-a-running-agent) is proven the
+same way. `TestIntegrationModeSwitchDocker` switches a run in a real
+container both ways, with acpmock as omp's ACP server and a script as its
+terminal. `TestIntegrationSupervisorSwapsInContainer` swaps the run
+supervisor's child under busybox's `sh` and, with `AETHER_ACP_IMAGE` set,
+under the standard image's `dash`. `TestLiveSwitch` is the check behind an
+agent's `switchable`: with `ACP_LIVE=1` it runs the agents and adapters on
+the host's `PATH` with their own logins, starts a session over ACP and asks
+about it from the terminal, then the reverse. `ACP_LIVE_OMP_MODEL` picks
+omp's model when its default cannot answer:
+
+```sh
+ACP_LIVE=1 go test -tags integration -run TestLiveSwitch -v ./internal/harness/
+```
+
 ### Native mailbox lifecycle and idle-wake smoke
 
 Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures

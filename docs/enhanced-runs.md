@@ -171,6 +171,86 @@ adapter is frozen with its container; one that could not start while the
 container was paused starts on Resume. See
 [failure-handling.md](failure-handling.md#enhanced-runs).
 
+## Switching a running agent
+
+A running Standard or Enhanced run can move to the other mode in the same
+container, keeping the agent's conversation:
+
+```sh
+aether run switch <run-id> --mode enhanced
+aether run switch <run-id> --mode standard
+```
+
+The server method is `run.mode.switch` with `mode` `acp` or `tui`
+([local-gateway.md](local-gateway.md#enhanced-run-methods)). It needs
+**Steer**. While someone holds the run's control lease, only that session
+can switch; the CLI holds none, so it switches only a run nobody controls.
+
+**Which agents.** `agent.list` reports `switchable`. Claude Code and
+oh-my-pi switch: their ACP server and terminal share one session store, and
+`TestLiveSwitch` (`ACP_LIVE=1 go test -tags integration -run TestLiveSwitch
+./internal/harness/`) resumed a session in both directions. Any other agent,
+and any agent whose command a server or member definition overrides, is
+refused:
+
+```
+scheduler: this agent cannot move a running session between Standard and Enhanced: codex
+```
+
+**The session.** The switch resumes the run's `harness_session_id`. An
+enhanced run records it when its session opens. A Standard run records the
+latest session its agent reports through its status reporter: Claude Code's
+hooks (`session_id`), Codex's notify (`thread-id`), and the pi and omp
+extension (the main session). OpenCode reports none. A Standard run whose
+agent has not reported yet (before its first turn, or with
+`--conflict-coordination=false`, which turns reporters off) is refused:
+
+```
+scheduler: invalid run state transition: the agent has not reported its session yet; it does on its first turn
+```
+
+**To Standard.** The server stops the ACP server, writes the agent's resume
+command (`ResumeArgs`, for Claude Code `claude --dangerously-skip-permissions
+--resume <session>`, plus the status and mail arguments a Standard run gets)
+to `/run/aether/next-command`, and signals the run supervisor, which ends
+the login shell and runs that command in its place. The command must still
+be running 3 seconds later.
+
+**To Enhanced.** The supervisor ends the agent's terminal (SIGTERM, SIGKILL
+10 seconds later) and starts a login shell; the server then starts the ACP
+server and restores the session with `session/resume` or `session/load`. A
+session the agent cannot restore fails the switch rather than starting a new
+one. The session starts in the last mode the log recorded, or the agent's
+automatic mode above, so it asks before risky actions that the terminal
+would have run without asking.
+
+**What carries over:** the container, checkout, shell tabs, control lease
+and the conversation. **What does not:** a turn in progress is interrupted,
+pending permission requests are dropped, the login shell in the Terminal tab
+is replaced, and turns taken in Standard mode are not in the session item
+log; a `Switched to Standard` or `Switched from Standard` notice marks the
+gap. `/ws/acp` serves only a run that is Enhanced at the time.
+
+While the switch runs, the run snapshot carries `switching` (`tui` or
+`acp`), a `run.mode` event `{mode, previous, switching: true, reason:
+"Switching to Enhanced…"}` announces it, and messages are refused, so a Run
+Room message reads `not_sent`. A second `run.mode` event `{mode, previous}`
+ends it.
+
+**Failure.** A failed switch puts the previous mode back (the login shell and
+a resumed ACP server, or the resumed terminal) and returns the real error,
+which the closing `run.mode` event carries in `reason`:
+
+```
+switch to Standard: the agent's terminal exited with code 1 as it started; the Terminal tab shows its output
+```
+
+The switch holds the run: Pause, Close and Kill wait for it, at most about
+two minutes when the ACP server is slow to start. A server that stops
+mid-switch brings the run back in the mode it recorded last, the previous
+one, even if the container had already swapped its child; switch again to
+line them up.
+
 ## Background runs
 
 A background run (`--mode background`, wire name `headless`) of `codex`,

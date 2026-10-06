@@ -385,7 +385,11 @@ optional `reason`, and optional `input_updates`:
 `waiting` reports idle execution, not an unresolved question. `state` can be
 omitted only when `input_updates` is nonempty; an input-only report preserves
 execution, including when the last request closes. `reason` is execution
-metadata, not a prompt body or evidence of input.
+metadata, not a prompt body or evidence of input. An optional `session_id`
+names the agent's own top-level session; a Standard run stores the latest one
+as `harness_session_id` so [a mode switch](enhanced-runs.md#switching-a-running-agent)
+can resume it. One that is not 1-128 characters of letters, digits, `.`,
+`_`, `:` and `-` is ignored and the rest of the report applies.
 
 | Operation | Fields | Meaning |
 | --- | --- | --- |
@@ -561,8 +565,16 @@ call is refused with `-32602`, and with a lease another session holds with
 | `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
 | `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...]}`, oldest first, cut like stream frames |
 | `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole |
+| `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |
 
 A run whose session is not running answers `-32004` with the reason.
+`run.mode.switch` also takes a Standard run, needs **Steer**, and while
+anyone holds the run's control needs that lease (`-32003` otherwise). It
+answers `-32002` with `data.reason` `not_switchable` for an agent whose
+`agent.list` entry has `switchable: false`, and `-32002` with the reason for
+a run it cannot switch now. A run snapshot carries `switching` (`tui` or
+`acp`) while a switch is in flight; a `run.mode` event
+`{mode, previous, switching, reason}` opens and closes each switch.
 `run.inject` takes `steer: true` to add a message to the agent's running
 turn, and `control_session_id`/`control_generation` to deliver it at once
 rather than after the Run Room's moderation delay; its result's `outcome` is
@@ -614,7 +626,7 @@ unavailable owned source remains the server's protocol error.
 | `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
-| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"login_found":true,"default_mode":"tui"\|"acp","login_missing":false,"own_account_only":false,"unavailable":"","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `default_mode` are described in [harnesses.md](harnesses.md#enhanced-mode-adapters). On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
+| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","login_missing":false,"own_account_only":false,"unavailable":"","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found` and `default_mode` are described in [harnesses.md](harnesses.md#enhanced-mode-adapters); `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
