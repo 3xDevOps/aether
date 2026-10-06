@@ -727,27 +727,29 @@ everyone watching sees who said it.
 
 ### Remote-only: commit, push and open a PR
 
-Open the run's **Diff** tab and expand **Native changes & publish**. The
-existing **Land**, candidate review and interval timeline remain separate:
-a GitHub PR is not an internal candidate proposal.
+Open the run's **Changes** view and click **Publish…**. The dialog runs
+native Git and `gh` in the run's checkout as the run's account. **Land**,
+candidate review and the interval menu stay in the Changes view: a GitHub PR
+is not an internal candidate proposal.
 
-1. Inspect **Run checkout**: the native branch and HEAD, **Selected run
-   account**, **GitHub identity** (or its real authentication error), and
-   changed, staged and untracked paths. Connect GitHub in that account's
-   environment first; mirror deploy keys do not provide push credentials.
+1. Inspect the checkout facts at the top: **Branch**, **HEAD**, **Agent
+   account**, **GitHub identity** (or its real authentication error) and
+   **Upstream**. Connect GitHub in that account's environment first; mirror
+   deploy keys do not provide push credentials.
 2. Check exact paths, then click **Review selected paths**. The view shows
    worktree and staged diffs separately, with content previews for selected
-   untracked files. Enter a **Commit message** and click **Commit selected
-   paths**. This commits those paths' current worktree contents, not only
+   untracked files. Enter a **Commit message** and click **Commit
+   selected**. This commits those paths' current worktree contents, not only
    their staged hunks; unselected staged paths are preserved. Native identity
    and signing apply, but commit hooks do not run.
 3. Inspect **Commit outcome** and native diagnostics. **Committed: yes** with
    **Index updated: no** means the commit exists but index reconciliation
    failed: inspect the checkout instead of repeating the commit. A branch/HEAD
-   mismatch requires **Refresh native status** and a fresh review.
-4. Under **Push branch**, choose **Push remote**, its exact **Writable push
-   URL**, and **Push head branch**. Check the account/branch/HEAD/destination
-   review box, then **Push reviewed branch**. Add any missing fork remote using
+   mismatch requires **Refresh status** and a fresh review.
+4. Switch to **2 · Push and pull request**. Under **Push branch**, choose
+   **Push remote**, its exact **Writable push URL**, and **Push head
+   branch**. Check the account/branch/HEAD/destination review box, then
+   **Push reviewed branch**. Add any missing fork remote using
    native Git in the run terminal first. Push is non-force and does not switch
    branches or change workspace Origin, source mirror or accepted base.
 5. Under **GitHub pull request**, explicitly enter **PR repository

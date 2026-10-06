@@ -569,8 +569,7 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   rather than the app setting.
 
 A layout that only changes size belongs in CSS. Layouts that mount different
-elements for a finger than for a mouse, such as the diff timeline's disclosure
-and activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
+elements for a finger than for a mouse, such as the activity filter bar, ask `useMediaQuery` in `src/lib/hooks.ts`. Named
 constants there include `coarsePointer`, Tailwind's `belowSm` breakpoint and
 `phoneScreen`; the `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. Terminal utility controls respond to their
@@ -2110,88 +2109,91 @@ deterministic harness only holds the run alive: these are not proof of an
 authenticated vendor model/tool loop, nor an authenticated Tailscale-hosted
 device run.
 
-## Diff timeline and conflict chips
+## Changes view and Publish dialog
 
 `src/routes/diff/` is the run's Changes view, and `src/store/diff.ts` holds
 both what it renders and the overlap set the conflict chips read.
 
+- **One strip, then the files.** A 32px strip (`strip.tsx`) holds the file
+  count and `+a −d` totals, the interval menu, the conflict chips, and on the
+  right **Wrap lines**, **Refresh**, **More** (**Expand all files**,
+  **Collapse all files**, **Review locally…**) and **Publish…**. Below it a
+  file list (`file-list.tsx`: status letter, name, folder, `+a −d`) sits
+  beside the patch once the view itself is 1000px wide - a container query,
+  so opening Details narrows it too; narrower, the count in the strip is a
+  menu of the same files. Picking a file opens it and scrolls to it. With
+  nothing changed the view is the "No changes yet." empty state. `Land`
+  (`land.tsx`) adds a row above the strip only after a pull put the run branch
+  on this machine.
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no patch text, so a snapshot bumps the run's `revision`
-  and the tab re-fetches the current diff from `GET /api/v1/run/<id>/patch`
+  and the view re-fetches the current diff from `GET /api/v1/run/<id>/patch`
   (`docs/local-gateway.md`) whenever that has moved past the `fetched`
   revision the stored patch answers for. Counters rather than a stale flag,
   because a snapshot landing *during* a request would write true over true
   and then be cleared by the response: the answer records the revision it was
-  issued at, and anything newer asks again instead of showing a diff that is
-  behind while calling itself fresh.
-  A failure records the revision too, so it cannot spin; the next snapshot or
-  the Refresh button asks again.
-- **Selecting a snapshot renders that interval.** The chronological list is
-  the `run.diff` events themselves - time, file count, totals - and each one
-  also carries the tree it wrote and the tree before it. Selecting a snapshot
+  issued at, and anything newer asks again. A failure records the revision
+  too, so it cannot spin; the next snapshot or **Refresh** asks again.
+- **An interval is a menu row.** The interval menu lists **Current diff**
+  (against the fork point) and then the `run.diff` snapshots, newest first,
+  as "What changed 5 min ago" with their file count and totals. Choosing one
   fetches `GET /api/v1/run/<id>/patch?from=<parent_tree>&to=<tree>`, the diff
-  between those two trees, which is what the run changed in that interval;
-  clearing the selection goes back to the current diff against the fork point.
-  An interval is addressed by two tree ids and so can never change: the tab
-  keeps each one it has fetched and never asks again, and the revision
-  counters above are only for the cumulative patch, which does move. The
-  selection keys on the snapshot's timestamp, so a new snapshot prepending to
-  the list never retargets it. A snapshot carrying no tree - one from a server
-  that predates them - is not selectable. The list is capped at 40 per run and
-  starts empty on every page load, because there is no history to replay.
-- **The timeline yields to the patch on a narrow screen.** Beside the patch
-  from `md` up it is a list. Below that it sits above the patch, where the
-  header, the tabs, Land, the stats row and the local-review block are
-  already between the member and the first line of code, so it becomes a
-  disclosure that starts closed. With no snapshots the stacked layout drops
-  it entirely and the grid is one column, because two lines saying the list
-  is empty are two lines of the phone's screen; beside the patch it stays,
-  and says "Nothing since you opened the dashboard." - there it is the only
-  thing that explains why there are no intervals to pick. The list starts
-  empty on every page load and fills as the run works, so empty is the
-  normal state either way.
-- **Colour is the whole of the highlighting.** `parse.ts` splits the unified
-  diff into files, hunks and line kinds; `patch-view.tsx` paints those kinds.
-  The dashboard never edits code, so there is no editor and no language
-  grammar - why neither Monaco nor CodeMirror is a dependency. The server
-  sends complete run diffs up to 64 MiB, and the parser remains tolerant of
-  incomplete input from a failed transport.
-- **Long lines wrap or scroll, and the pointer picks which first.** Wrapping
-  breaks the column alignment a diff is read by, and side-scrolling means
-  panning every file section separately - which a phone cannot do well. So
-  **Wrap lines** in the stats row is a toggle, starting on for a coarse
-  pointer and off for a mouse. The choice itself is a view preference on the
-  UI slice (`diffWrap`), stored like the sidebar width, because only one
-  run-detail route is active at a time and component state would forget it
-  on every trip to the Terminal tab. The Files tab's diff pane reads the same
-  preference: it has no toolbar to put a toggle in, so it never sets one, but
-  a member who turned wrapping off on the Changes view meant it for diffs and not
-  for one tab of them.
-- **The verbs are not here, the answers are.** The tab keeps what is only
-  about reading the diff - the refresh, the snapshot list, the two copyable
-  `git` commands that review the run branch in the linked repository, and the
-  output of the last pull (`review-commands.tsx`). Fetching the branch and
-  closing the run are verbs, so they sit in the run action bar in the header
-  with every other verb rather than a second time in the tab; the fetch output
-  is an answer rather than a verb, so the pull records it on the `local` slice
-  and the tab shows it where a member reviewing the branch will look. The
-  whole block is gated on the `pull` local verb, the same one that fetches
-  the run branch into the repository it explains: a gateway without it - a
-  phone on the server's dashboard - has no repository for those commands to
-  run in. Workspace Source control is separate from this run-branch pull.
+  between the two trees, which is what the run changed in that interval. An
+  interval is addressed by two tree ids and so never changes: each fetched
+  one is kept and never asked for again. The selection keys on the snapshot's
+  timestamp, so a new snapshot never retargets it. A snapshot with no tree -
+  from a server that predates them - is a disabled row whose description says
+  why. The list is capped at 40 per run and starts empty on every page load,
+  because there is no history to replay.
+- **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
+  sticky header with a chevron, its path, a status word and `+a −d`. A file
+  over 500 lines, a binary file and a deleted file start collapsed; the header
+  then also gives the line count. An opened file over 500 lines renders its
+  lines through `virtua` in a box of its own, so a large diff costs the rows
+  on screen rather than one DOM node per line. Lines carry old and new line
+  numbers, which `parse.ts` reads from the hunk headers.
+- **The path opens the file.** Clicking a file's path opens it in Files on
+  the run's checkout (`routes/files/open.ts`): a Files tab for that run and
+  path, then the Files route. It needs `files.tree`, a run the Files tree
+  still lists, and a file that still exists.
+- **Colour is the whole of the highlighting.** Added and removed lines use the
+  `diff-add` and `diff-del` tokens. The dashboard never edits code, so there
+  is no editor and no language grammar. The server sends complete run diffs
+  up to 64 MiB, and the parser stays tolerant of incomplete input.
+- **Long lines wrap or scroll, and the pointer picks which first.** **Wrap
+  lines** starts on for a coarse pointer and off for a mouse. The choice is a
+  view preference on the UI slice (`diffWrap`), because the Changes view
+  unmounts on every trip to another view. The Files diff pane and the Publish
+  dialog's diffs read the same preference.
+- **Review locally is a dialog.** **More → Review locally…** shows the two
+  copyable `git` commands that read the run branch in the linked repository
+  and the output of the last pull (`review-commands.tsx`). It is gated on the
+  `pull` local verb: a gateway without it - a phone on the server's
+  dashboard - has no repository for those commands to run in.
+- **Publish is two steps.** **Publish…** appears with `run.git.status` and
+  opens `publish-dialog.tsx`, a bottom sheet on a phone. The run checkout's
+  branch, HEAD, agent account, GitHub identity and upstream sit above both
+  steps, with **Refresh status**. **1 · Commit** selects changed paths,
+  reviews their worktree and staged diffs and untracked contents, and runs
+  **Commit selected**. **2 · Push and pull request** picks a remote and its
+  exact push URL and runs **Push reviewed branch**, then discovers or creates
+  the pull request and sends checked PR feedback to the agent through the run
+  room. Every mutation names the branch and HEAD that were reviewed and needs
+  its attestation checkbox; a refresh clears them. Each RPC's error shows
+  under the button that sent it. The dialog's state lives in
+  `publish-state.ts` and stays mounted while the Changes view is open, so a
+  typed message, or a PR creation whose outcome is uncertain, survives
+  closing the dialog.
 - **Conflict chips write their list out for a finger.** The overlapping file
-  names live in the chip's hover tooltip, which a touch screen has no way to
-  open, so on a coarse pointer the same list is rendered as visible text
-  beside the chip. A tooltip is a hint for a pointer, never the only copy of
-  a fact.
+  names live in the chip's tooltip, which a touch screen cannot open, so on a
+  coarse pointer the same list is rendered as visible text beside the chip.
 - **Conflict chips are advisory.** `conflict-chips.tsx` registers an overlap
   count into `card:meta`, whose popover lists the chips, and the Changes view
-  renders the chips in its header. It
-  reads the overlap set the conflict radar reports (`run.overlaps` at
-  hydration, then `run.overlap` events), names the file and the other member,
-  and navigates to their run. The event payload names peer runs but not their
-  owners, so attribution comes from the runs the store already holds; an
-  empty peer list means the overlap cleared and the chip goes.
+  renders the chips in its strip. It reads the overlap set the conflict radar
+  reports (`run.overlaps` at hydration, then `run.overlap` events), names the
+  file and the other member, and navigates to their run. Attribution comes
+  from the runs the store already holds; an empty peer list means the overlap
+  cleared and the chip goes.
 
 ## Team surfaces
 

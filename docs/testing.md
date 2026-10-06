@@ -119,7 +119,7 @@ Layers, per the design spec's testing strategy:
   viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
   protocol replies, control, geometry and process lifetime), and
   `web/e2e/remote-development-git/` (remote import, native selected-path commit
-  and push, plus opt-in actual GitHub PR publication). These use deterministic
+  and push through the Changes view's Publish dialog, plus opt-in actual GitHub PR publication). These use deterministic
   harness fixtures, not authenticated vendor-agent loops.
 
 CI's native `windows` job builds, vets, and tests the full Windows client
@@ -1054,7 +1054,7 @@ covered - WebKit is not installed.
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell a sheet from a centred box opening as a full-width sheet along the bottom edge, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `swarm.mobile.spec.ts` | On a phone, a swarm created over RPC with a shell-fixture integrator: its card names the question, the detail repeats the objective in the body, the question is answered from its own card and folds to an `Answered by` row at least 44px tall, and two messages from a real worker fold into `2 messages` and expand, with no sideways scroll |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling 8px clear of the bottom edge, which is what `sonner` needs `mobileOffset` for |
-| `run-views.mobile.spec.ts` | On a phone, protecting a real run through the header's More menu, keeping the selected Browser, Session and Changes views fully visible in the switch after touch navigation, then reading the changes: menu items are finger-sized, protection shows by the title, and a file section wider than the screen scrolls sideways only once wrap is off |
+| `run-views.mobile.spec.ts` | On a phone, protecting a real run through the header's More menu, keeping the selected Browser, Session and Changes views fully visible in the switch after touch navigation, then reading the changes: menu items are finger-sized, protection shows by the title, the first file sits right under the Changes strip, and a file section wider than the screen scrolls sideways only once wrap is off |
 | `run-room.mobile.spec.ts` | The Details bottom sheet leaves the desktop-controlled PTY geometry unchanged, contains keyboard focus and returns it to the Details button. A short tap on Take control does not request occupied control. Separate scenarios read Captures as a full-width sheet and use two real sessions to deny incoming control over Details and Captures: the decision remains visible and keyboard/pointer-operable at 390×524 and across the 700→960 breakpoint, then restores the interrupted focus and note draft without transferring control. Screenshots: `phone-run-details`, `phone-captures`, and `holder-over-{details,captures}-{390,700}` |
 | `run-evidence.mobile.spec.ts` | Captures at 390x600 with coarse-pointer touch input: open them from More, tap through Patch and Summary, read retained file content, and close with focus returned to More. The scenario attaches `short phone evidence sheet` |
 | `development-browser/browser.mobile.spec.ts` | Shared login and live app update on a phone viewport, control handoff, cancellation of Reset session from Browser tools without losing the login, expanded browser input, Chromium composition and multi-touch without horizontal page overflow. The scenario attaches `phone shared app`; viewport and CDP input do not prove a physical phone keyboard |
