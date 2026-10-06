@@ -251,14 +251,14 @@ func (e *dockerManagedExec) Resize(ctx context.Context, cols, rows uint) error {
 	if cols == 0 || rows == 0 || cols > 65535 || rows > 65535 {
 		return errors.New("runtime: execution terminal dimensions must be between 1 and 65535")
 	}
-	if !e.tty {
-		return errors.New("runtime: resize: execution has no terminal")
-	}
 	e.mu.Lock()
 	attached := e.attachment != nil && e.attachment.connected()
 	e.mu.Unlock()
 	if !attached {
 		return fmt.Errorf("%w: cannot resize an unavailable PTY", ErrExecUnavailable)
+	}
+	if !e.tty {
+		return errors.New("runtime: resize: execution has no terminal")
 	}
 	_, err := e.docker.cli.ExecResize(ctx, e.identity.ExecID, client.ExecResizeOptions{Width: cols, Height: rows})
 	return err
