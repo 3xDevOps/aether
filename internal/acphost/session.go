@@ -20,7 +20,7 @@ import (
 )
 
 // ErrClosed is returned once the agent connection has ended.
-var ErrClosed = errors.New("acphost: session closed")
+var ErrClosed = errors.New("acphost: agent connection closed")
 
 const subscriberBuffer = 1024
 
@@ -238,7 +238,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.conn.closed() {
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
@@ -288,7 +288,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{}, fmt.Errorf("acphost: %s: unknown outcome %q", methodSteering, outcome)
 	}
-	if s.closed {
+	if s.closed || s.conn.closed() {
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
@@ -631,7 +631,7 @@ func (s *Session) requestClosed(r Request) {
 }
 
 // watch records the end of the connection: an interrupted turn, cancelled
-// requests, cleared inputs and an idle state.
+// requests, undelivered queued prompts, cleared inputs and an idle state.
 func (s *Session) watch() {
 	<-s.conn.Done()
 	s.conn.delivered()
@@ -648,6 +648,16 @@ func (s *Session) watch() {
 				s.cfg.OnState(false, "interrupted", nil)
 			}
 		})
+	}
+	for _, blocks := range s.queue {
+		var text strings.Builder
+		for _, b := range blocks {
+			if b.Text != nil {
+				text.WriteString(b.Text.Text)
+			}
+		}
+		body, _ := cutTail(text.String(), maxTextSegment)
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Message not delivered: agent connection closed", Description: body}})
 	}
 	if s.cfg.OnInputs != nil {
 		s.callback(func() { s.cfg.OnInputs(nil) })

@@ -605,6 +605,59 @@ func TestConnectionLossMidTurn(t *testing.T) {
 	}
 }
 
+func TestQueuedPromptFailsWhenTheConnectionCloses(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	started := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+		close(started)
+		<-call.ctx.Done()
+		return nil, acp.NewRequestCancelled(nil)
+	}
+	s, _ := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false); err != nil || r.Outcome != OutcomeQueued {
+		t.Fatalf("second: %+v %v", r, err)
+	}
+	_ = m.stdout.Close()
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("session did not end")
+	}
+	if _, err := s.Prompt(context.Background(), textPrompt("third"), false); !errors.Is(err, ErrClosed) || !strings.Contains(err.Error(), "agent connection closed") {
+		t.Fatalf("prompt after close: %v", err)
+	}
+	log, err := OpenLog(s.cfg.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	its, err := log.ReadAfter(0, 0)
+	_ = log.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lost []*Notice
+	for _, n := range ofKind(its, KindNotice) {
+		if n.Notice.Title == "Message not delivered: agent connection closed" {
+			lost = append(lost, n.Notice)
+		}
+	}
+	if len(lost) != 1 || lost[0].Description != "second" || messageText(its, "user") != "first" {
+		t.Fatalf("items %+v", its)
+	}
+
+	resumed := newMockAgent(t, loadFixture(t, "codex"))
+	_, rec := startMock(t, resumed, Config{LogPath: s.cfg.LogPath, SessionID: s.SessionID()})
+	rec.waitIdle(t)
+	if resumed.called(acp.AgentMethodSessionPrompt) {
+		t.Fatalf("resume sent a prompt: %v", resumed.methods)
+	}
+}
+
 // The SDK still hands queued notifications over after the agent's output
 // ends; every update the agent sent before exiting must be recorded, ahead of
 // the interruption.

@@ -141,11 +141,14 @@ func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
 func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, message string, steer bool) (string, error) {
 	sess, err := d.live(run.ID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", ptyhost.ErrNoSession, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, acpSteerTimeout)
 	defer cancel()
 	receipt, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(message)}, steer)
+	if errors.Is(err, acphost.ErrClosed) {
+		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
+	}
 	return receipt.Outcome, err
 }
 

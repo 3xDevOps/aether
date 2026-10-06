@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -333,6 +334,30 @@ func TestEnhancedRunCancel(t *testing.T) {
 	}
 	waitItems(t, e.sched, run.ID, "cancelled turn", turnEnded("cancelled", 1))
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+}
+
+func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run := e.launchACP(t, acpmock.PromptWait)
+	e.waitAgentState(t, run.ID, agentstatus.Working)
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "queued behind the turn", false)
+	if err != nil || outcome != acphost.OutcomeQueued {
+		t.Fatalf("Inject = %q, %v", outcome, err)
+	}
+	if _, err := rt.all()[0].Stop(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "undelivered notice", func(items []acphost.Item) bool {
+		return slices.ContainsFunc(items, func(it acphost.Item) bool {
+			return it.Kind == acphost.KindNotice && it.Notice.Title == "Message not delivered: agent connection closed" &&
+				it.Notice.Description == "queued behind the turn"
+		})
+	})
+	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, "after exit", false)
+	if got := collab.ClassifyReceipt(err); got != collab.ReceiptNotSent {
+		t.Fatalf("receipt %q for %v", got, err)
+	}
 }
 
 func TestEnhancedRunResumesAfterRestart(t *testing.T) {

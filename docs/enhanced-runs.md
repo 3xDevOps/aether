@@ -86,7 +86,10 @@ the agent refuses at once (an error such as `authRequired`) returns that
 error and the message is not sent. During a turn it waits
 for the turn to end (`queued`) unless `steer: true` is set and the agent
 advertised steering when the session opened, which adds it to the running
-turn (`injected`).
+turn (`injected`). If the agent connection closes before a queued message
+starts its turn, the transcript records a `Message not delivered: agent
+connection closed` notice with its text; it is not resent when the session
+resumes. A message posted after the connection closed reads `not_sent`.
 
 ## Status
 
