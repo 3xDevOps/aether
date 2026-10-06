@@ -25,7 +25,7 @@ export function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title={tab === 'devices' ? 'Devices' : 'Members'}
-        actions={canInvite && <Button size="sm" onClick={() => setInviting(true)}>Invite…</Button>}
+        actions={canInvite && tab === 'members' && <Button size="sm" onClick={() => setInviting(true)}>Invite…</Button>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Tabs value={tab} onValueChange={(value) => navigate(value)}>

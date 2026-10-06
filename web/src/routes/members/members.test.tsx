@@ -222,12 +222,13 @@ describe('members page', () => {
     expect(useStore.getState().route).toEqual({ name: 'devices', params: {} })
   })
 
-  it('opens the Devices route on its tab', async () => {
+  it('opens the Devices route on its tab, without the Members-only Invite…', async () => {
     seed({ route: { name: 'devices', params: {} } })
     render(<MembersRoute params={{}} client={fakeApi()} />)
 
     expect(screen.getByRole('tab', { name: 'Devices', selected: true })).toBeDefined()
     expect(await screen.findByRole('form', { name: 'Approve a device' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Invite…' })).toBeNull()
   })
 
   it('keeps focus on the tab it switched to, since both tabs are one mounted page', async () => {
