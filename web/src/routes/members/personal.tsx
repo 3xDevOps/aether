@@ -8,7 +8,7 @@ import { message } from '@/lib/format'
 import type { Member } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { MemberAvatar } from '@/routes/board/member-avatar'
-import { StopEnvironmentDialog } from '@/routes/board/stop-environment-dialog'
+import { StopEnvironmentDialog } from '@/routes/environment/stop-environment-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 

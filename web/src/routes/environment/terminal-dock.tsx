@@ -33,7 +33,7 @@ import {
   replayGate,
   standardGeometry,
 } from '@/routes/terminal/attach'
-import { StopEnvironmentDialog } from '@/routes/board/stop-environment-dialog'
+import { StopEnvironmentDialog } from '@/routes/environment/stop-environment-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import {
@@ -528,7 +528,7 @@ export function TerminalDock({
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {loading ? (
-              <p className="bg-background p-3 text-[13px] text-muted-foreground">Checking environment...</p>
+              <p className="h-full bg-background p-3 text-[13px] text-muted-foreground">Checking environment...</p>
             ) : dock.statusError ? (
               <div className="h-full min-h-0 min-w-0 space-y-2 overflow-y-auto break-words whitespace-pre-wrap bg-background p-3 text-[13px]">
                 <p className="text-state-failed">{dock.statusError}</p>
@@ -546,14 +546,14 @@ export function TerminalDock({
                 )}
               </div>
             ) : empty ? (
-              <div className="space-y-2 bg-background p-3 text-[13px]">
+              <div className="h-full space-y-2 bg-background p-3 text-[13px]">
                 <p>Your environment starts on first open</p>
                 <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>
               </div>
             ) : activeTab === null ? (
-              <div className="bg-background p-3">
+              <div className="h-full bg-background p-3">
                 <Button ref={openTrigger} type="button" size="sm" onClick={open}>
                   Open
                 </Button>

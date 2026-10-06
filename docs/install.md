@@ -435,7 +435,7 @@ stop shared runs before or after upgrading to end that exposure immediately
 (**Kill** in the run's header, or `aether kill <run-id>`). A member who
 already shares stops and reopens their environment terminal once after the
 upgrade, so a Claude Code login refreshed there reaches recipients' runs:
-**Stop environment**, then **Open**, in the terminal dock on the Board, or
+**Stop environment**, then **Open**, in the dashboard's **Environment** view, or
 `aether terminal stop`, then `aether terminal`.
 
 ## Manual install

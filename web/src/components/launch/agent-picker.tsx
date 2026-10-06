@@ -93,7 +93,7 @@ export function RefusalNotes({ agents, accountName, accountField }: { agents: Ag
     <Callout tone="needs-you" role="status">
       {loggedOut.length > 0 && (
         <p>
-          {accountName} is not logged in to {names(loggedOut)}, so {loggedOut.length === 1 ? 'it' : 'they'} cannot launch on this account. {accountName} logs in from the terminal dock on their own Board; then open this dialog again.
+          {accountName} is not logged in to {names(loggedOut)}, so {loggedOut.length === 1 ? 'it' : 'they'} cannot launch on this account. {accountName} logs in from their own Environment terminal; then open this dialog again.
         </p>
       )}
       {ownOnly.length > 0 && (

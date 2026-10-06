@@ -880,8 +880,7 @@ requirement, with one sentence and one button:
    container." and **New run**, for members who may launch.
 
 Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
-An unreachable server shows its error in place of the columns. The
-environment terminal dock (`terminal-dock.tsx`) sits under the board.
+An unreachable server shows its error in place of the columns.
 
 ### Run state
 
@@ -1173,7 +1172,7 @@ member-defined name that is also a server-wide definition launches the
 server-wide one, so it can be `login_missing`. Refused rows are disabled
 ("Not logged in", "Your account only", "Unavailable"), and one note under
 the picker says "<owner> is not logged in to <agent>" and that the owner logs
-in from their own terminal dock, that the caller's own definitions run only
+in from their own Environment terminal, that the caller's own definitions run only
 on their own account, and "<agent> cannot launch on this account: " with
 the server's error unchanged. On a shared account with nothing installed the
 heading reads "Neither you nor <owner> has an agent installed." and the note
@@ -1193,6 +1192,17 @@ server would refuse.
 Base capture is server-side and precedes row creation. A mirror or local-base
 failure is reported by Launch and leaves no run row; the dashboard does not run
 a client-side base refresh before trying again.
+
+## Environment
+
+`src/routes/environment/` is the one place for the member's environment
+terminal: the shell into their long-lived environment container, where they
+install tools and save the environment. It is reached through the sidebar's
+**Environment** row or `g e`, and only when the gateway advertises the
+`terminal` WebSocket. The view mounts `TerminalDock` (`terminal-dock.tsx`)
+with `containment="fill"`, so the dock fills the view with no resize handle
+and no collapse control. The Agents and GitHub onboarding steps mount the same
+dock inline.
 
 ## Keyboard and focus
 
@@ -1787,11 +1797,11 @@ expanded, a resizer on a fine pointer. A finger cannot drag an edge, so under
 second header control instead, toggling between half of the room it has and
 all of it; collapsed, half and full are the three states touch has. Half is
 measured from the dock's own maximum rather than stored, so it follows the
-screen. Both docks start collapsed
-(`initialRunShellDock`, `initialEnvTerminal`), so the terminal a member came
-for owns the window until they ask for a shell. Neither flag is persisted, so a
-reload starts collapsed again, and the run dock's is per run because
-`shellDocks` is keyed by run id. The header strip stays live while a dock is
+screen. The run dock starts collapsed (`initialRunShellDock`), so the
+terminal a member came for owns the window until they ask for a shell. The
+flag is not persisted, so a reload starts collapsed again, and it is per run
+because `shellDocks` is keyed by run id. Environment's fill dock is never
+collapsed. The header strip stays live while a dock is
 shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
 xterm host and would never attach. Expanded-only dock actions are omitted while
 collapsed, but `persistentActions` keeps Evidence reachable even with no shell.
@@ -1818,7 +1828,7 @@ The primary agent attach closes when its route unmounts. A return visit
 opens a new compact current-screen attach rather than revealing a retained
 terminal.
 
-The board's `TerminalDock` exposes **Save environment** as its primary action
+The Environment view's `TerminalDock` exposes **Save environment** as its primary action
 while the member's terminal is running. **More** contains capability-gated
 **Forward port**, **Stop environment** and **Reset to standard**. Stopping the
 container and discarding the saved image remain separate decisions with

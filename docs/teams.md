@@ -884,8 +884,8 @@ scheduler: harness "<name>" is your own agent definition, which runs only on you
 ```
 
 An agent whose owner has no login for it, or only an empty file at its login
-path, is listed as `<name> (not logged in)`. The owner logs in from the
-terminal dock on their own Board, and the recipient presses **Refresh
+path, is listed as `<name> (not logged in)`. The owner logs in from
+their own **Environment** terminal, and the recipient presses **Refresh
 agents**. A launch from the CLI fails with a reason like:
 
 ```
@@ -900,8 +900,8 @@ A Claude Code login refreshed in the owner's environment terminal reaches
 recipients' runs only if that terminal was started after the owner's first
 share ([security.md](security.md#account-sharing) explains why). When the
 terminal is running at that share, **Members** says so and offers **Stop
-environment**; the owner then reopens it with **Open** in the terminal dock
-on the Board. From the CLI: `aether terminal stop`, then `aether terminal`.
+environment**; the owner then reopens it with **Open** in the **Environment**
+view. From the CLI: `aether terminal stop`, then `aether terminal`.
 
 Runs on a shared account, and every container that mounts a sharing owner's
 home - their runs, their environment terminal, and candidate verification

@@ -10,7 +10,6 @@ import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { EmptyBoard, type AgentsState } from '@/routes/board/empty-board'
-import { TerminalDock } from '@/routes/board/terminal-dock'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -24,7 +23,6 @@ export function Board() {
   const dead = useStore((s) => s.streamDead)
   const stacked = useMediaQuery(belowLg)
   const agents = useAgents()
-  const caps = useCapability()
   const [showArchived, setShowArchived] = useState(false)
   const [focusedCard, setFocusedCard] = useState<Element | null>(null)
 
@@ -97,10 +95,7 @@ export function Board() {
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Board" />
-      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="flex min-h-24 min-w-0 flex-1 flex-col overflow-hidden">{body}</div>
-        {caps.hasWS('terminal') && <TerminalDock containment="parent" />}
-      </div>
+      {body}
     </div>
   )
 }

@@ -22,10 +22,9 @@ test('uploads a chosen image and verifies it from the target shell', async ({ pa
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.agents.skip().click()
-  await page.getByRole('button', { name: 'Board', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Environment', exact: true }).click()
 
   const dock = page.getByRole('region', { name: 'Terminal dock' })
-  await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
   await dock.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(dock.getByRole('status')).toBeHidden({ timeout: 60_000 })
 

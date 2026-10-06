@@ -194,8 +194,8 @@ a recipient's `claude` launch is refused. A login file with another hard link
 is neither mounted in place nor shared. A container the owner started before
 sharing, typically the long-lived environment terminal, lacks that mount, so
 stop it and open it again. When the terminal is running at a first share, or
-its state cannot be read, **Members** says so and offers **Stop environment**; **Open** in the terminal
-dock on the Board starts it again. From the CLI: `aether terminal stop`, then
+its state cannot be read, **Members** says so and offers **Stop environment**; **Open** in the
+**Environment** view starts it again. From the CLI: `aether terminal stop`, then
 `aether terminal`. In a container with the mount, Claude's `/logout` revokes
 the login at Anthropic and reports success but cannot delete the file; the
 dead tokens are cleared on the next refresh. Members who share nothing are

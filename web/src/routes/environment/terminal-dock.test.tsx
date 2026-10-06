@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { api } from '@/lib/api'
-import { TerminalDock } from '@/routes/board/terminal-dock'
+import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { standardGeometry } from '@/routes/terminal/attach'
 import type { AttachHandlers } from '@/routes/terminal/attach'
 import type * as attachModule from '@/routes/terminal/attach'

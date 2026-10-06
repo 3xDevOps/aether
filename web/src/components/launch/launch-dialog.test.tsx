@@ -218,7 +218,7 @@ describe('new run', () => {
 
       const notes = await screen.findByRole('status')
       expect(notes.textContent).toBe(
-        'Bob is not logged in to Claude Code, so it cannot launch on this account. Bob logs in from the terminal dock on their own Board; then open this dialog again.'
+        'Bob is not logged in to Claude Code, so it cannot launch on this account. Bob logs in from their own Environment terminal; then open this dialog again.'
           + 'Your own agent definitions run only on your own account: myagent. To launch one, choose your own account, marked (you), under Account.'
           + `codex cannot launch on this account: ${refusal}`,
       )

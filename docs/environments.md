@@ -122,8 +122,8 @@ container or run receives the setting.
 
 ## Install in the environment terminal
 
-Open the environment terminal with `aether terminal`, or open the dashboard's
-terminal dock from the chevron in its header strip. This is where a member installs system tools and language
+Open the environment terminal with `aether terminal`, or select
+**Environment** in the dashboard's sidebar. This is where a member installs system tools and language
 runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
@@ -140,7 +140,7 @@ runs. They are workspace settings, not image selection.
 
 ## Save the environment
 
-Save from the terminal dock with **Save environment**, or run:
+Save from the **Environment** view with **Save environment**, or run:
 
 ```sh
 aether env save
@@ -170,7 +170,7 @@ first and then save.
 
 ## Reset to standard
 
-Reset from **Reset to standard** in the terminal dock, or run:
+Reset from **Reset to standard** in the **Environment** view, or run:
 
 ```sh
 aether env reset

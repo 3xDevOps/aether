@@ -16,10 +16,9 @@ aether terminal status
 aether terminal stop
 ```
 
-In the dashboard, open the terminal dock on the Board view. The dock starts
-collapsed, so the board keeps the window; the chevron in its header strip opens
-it, and so does `+` or a tab in that strip. It stays open until you reload the
-page. The first open starts the environment; the dock says **Starting your
+In the dashboard, select **Environment** in the sidebar (or press `g` then
+`e`). The terminal fills that view; **Open** or `+` in its header strip opens a
+tab. The first open starts the environment; the dock says **Starting your
 environment container** until the shell attaches, and shows the server's own
 error if the start fails. Later tabs and tab switches reach a container that is
 already up, so those say **Connecting to your environment**. The dock reconnects
@@ -340,8 +339,8 @@ your home is available to later runs without saving the environment.
 ## Save your environment
 
 Install system tools and toolchains in this terminal, then select **Save
-environment** in the terminal dock. The same actions are available from the
-CLI:
+environment** in the dashboard's **Environment** view. The same actions are
+available from the CLI:
 
 ```sh
 aether env save

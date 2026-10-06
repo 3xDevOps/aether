@@ -1,5 +1,5 @@
 import { ViewHeader } from '@/components/view-header'
-import { TerminalDock } from '@/routes/board/terminal-dock'
+import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { registerRoute } from '@/routes/registry'
 
 function Environment() {

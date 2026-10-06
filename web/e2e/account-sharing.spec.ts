@@ -78,8 +78,9 @@ test('a member shares their agent account and a teammate launches on it', async 
     // Alice's environment terminal is running when she first shares, so
     // Members offers to stop it.
     await page.goto(alice.url)
+    await page.getByRole('navigation', { name: 'Aether' })
+      .getByRole('button', { name: 'Environment', exact: true }).click()
     const dock = page.getByRole('region', { name: 'Terminal dock' })
-    await dock.getByRole('button', { name: 'Expand terminal dock' }).click()
     await dock.getByRole('button', { name: 'Open', exact: true }).click()
     await expect(dock.getByRole('button', { name: 'Save environment' })).toBeVisible({
       timeout: 60_000,
@@ -109,7 +110,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     dialog = await openLaunch()
     await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to Claude Code, Codex, so they cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
+      `${aliceName} is not logged in to Claude Code, Codex, so they cannot launch on this account. ${aliceName} logs in from their own Environment terminal; then open this dialog again.`,
     )
     for (const agent of [/^Claude Code/, /^Codex/]) {
       await expect(dialog.getByRole('radio', { name: agent })).toBeDisabled()
@@ -126,7 +127,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     await chooseAliceAccount(dialog)
     await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     await expect(dialog.getByRole('status')).toHaveText(
-      `${aliceName} is not logged in to Codex, so it cannot launch on this account. ${aliceName} logs in from the terminal dock on their own Board; then open this dialog again.`,
+      `${aliceName} is not logged in to Codex, so it cannot launch on this account. ${aliceName} logs in from their own Environment terminal; then open this dialog again.`,
     )
     await dialog.getByLabel('Task').fill(task)
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
