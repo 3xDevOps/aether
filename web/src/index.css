@@ -390,52 +390,6 @@
   }
 }
 @layer components {
-  /* The box is the state dot's 0.5rem and the three dots overflow it, so a
-     row's leading column does not resize when its run starts or stops
-     working. */
-  .working-dots {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    gap: 0.125rem;
-    width: 0.5rem;
-    height: 0.5rem;
-    color: var(--state-working);
-  }
-
-  .working-dots span {
-    display: block;
-    flex: none;
-    width: 0.25rem;
-    height: 0.25rem;
-    border-radius: 999px;
-    background: currentColor;
-    opacity: 0.5;
-    animation: working-bounce 1.05s ease-in-out infinite;
-  }
-
-  .working-dots span:nth-child(2) {
-    animation-delay: 0.15s;
-  }
-
-  .working-dots span:nth-child(3) {
-    animation-delay: 0.3s;
-  }
-
-  @keyframes working-bounce {
-    0%,
-    60%,
-    100% {
-      opacity: 0.5;
-      transform: translateY(0);
-    }
-    30% {
-      opacity: 1;
-      transform: translateY(-0.125rem);
-    }
-  }
-
   /* Both loops step rather than tween: a handful of frames per cycle instead
      of one per display refresh. */
   .state-pulse {
@@ -473,24 +427,7 @@
     }
   }
 
-  /* One dot at the static mark's size, so the fallback is the same 0.5rem
-     round mark every other state draws. */
   @media (prefers-reduced-motion: reduce) {
-    .working-dots span {
-      opacity: 1;
-      animation: none;
-    }
-
-    .working-dots span:first-child,
-    .working-dots span:last-child {
-      display: none;
-    }
-
-    .working-dots span:nth-child(2) {
-      width: 0.5rem;
-      height: 0.5rem;
-    }
-
     .state-pulse {
       animation: none;
     }

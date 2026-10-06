@@ -1,6 +1,6 @@
-import { FolderGit2 } from '@/components/icons'
 import { useRef, useState } from 'react'
-import { StateDot } from '@/components/state-dot'
+import { FolderGit2 } from '@/components/icons'
+import { StatusDot } from '@/components/ui/status-dot'
 import {
   CommandEmpty,
   CommandGroup,
@@ -168,7 +168,7 @@ export function PaletteBody({
               onSelect={() => go('run', { runId: run.id })}
               className="items-start py-1"
             >
-              <StateDot state={state} decorative className="mx-1 mt-1 shrink-0" />
+              <StatusDot tone={state} className="mx-1 mt-1 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{runLabel(run)}</span>
                 <span className="block truncate text-ui-sm text-muted">

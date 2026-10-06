@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import { StateIndicator } from '@/components/state-dot'
+import { StatusDot } from '@/components/ui/status-dot'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -84,7 +84,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                 )}
               >
                 <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2 md:col-auto md:row-auto">
-                  <StateIndicator state={state} className="mt-1.5" />
+                  <StatusDot tone={state} label={stateLabel[state]} className="mt-1.5" />
                   <div className="min-w-0 flex-1">
                     <button
                       type="button"
@@ -163,7 +163,7 @@ export function RunStatusChip({ run }: { run: RunRecord }) {
 export function StatusChip({ state }: { state: PresentationState }) {
   return (
     <span className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
-      <StateIndicator state={state} decorative />
+      <StatusDot tone={state} />
       <span>{stateLabel[state]}</span>
     </span>
   )

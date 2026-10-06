@@ -103,12 +103,3 @@ export const groupLabel: Record<RunGroup, string> = {
   working: 'Working',
   finished: 'Finished',
 }
-
-// Token classes only - no colour literals in components.
-export const stateDotClass: Record<PresentationState, string> = {
-  'needs-you': 'bg-state-needs-you',
-  working: 'bg-state-working',
-  paused: 'bg-state-paused',
-  done: 'bg-state-done',
-  failed: 'bg-state-failed',
-}

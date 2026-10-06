@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { RunList } from '@/components/run-list'
 import { listedRuns } from '@/store/selectors'
 import { useStore } from '@/store'
@@ -6,13 +6,13 @@ import { toRecord } from '@/store/runs'
 import { run, runRecords, stateContext } from '@/test/fixtures'
 
 describe('run list', () => {
-  it('bounces a working row and opens it on the terminal', () => {
+  it('marks a working row and opens it', () => {
     useStore.setState({ hydrated: true, hydrationError: null, streamDead: false })
     const listed = toRecord(run())
     const rows = listedRuns('', stateContext({ runs: runRecords(run()) }))
     const { container } = render(<RunList runs={rows} empty="No runs yet" />)
 
-    expect(container.querySelector('.working-dots')).not.toBeNull()
+    expect(within(container).getByRole('img', { name: 'Working' })).toBeDefined()
 
     fireEvent.click(screen.getByText('rewrite the checkout flow'))
 
