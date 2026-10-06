@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -634,5 +636,44 @@ func TestStartFailsWithTheAgentError(t *testing.T) {
 	_, err := Start(context.Background(), r, w, Config{LogPath: t.TempDir() + "/x.jsonl", Cwd: "/workspace", Logger: discard})
 	if err == nil || !strings.Contains(err.Error(), "session/new") || !strings.Contains(err.Error(), "Authentication required") {
 		t.Fatalf("Start: %v", err)
+	}
+}
+
+// A viewer that subscribes while the agent streams sees every item once, in
+// order, split between the replay and the channel.
+func TestSubscribeHasNoGap(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	started := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		for i := range 600 {
+			if i == 200 {
+				close(started)
+			}
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": fmt.Sprint("t", i), "title": "read", "status": "completed"})
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	const after = 3
+	replay, ch, cancel, err := s.Subscribe(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	got := seqs(replay)
+	for it := range ch {
+		got = append(got, it.Seq)
+		if it.Kind == KindTurnEnd {
+			break
+		}
+	}
+	rec.waitIdle(t)
+	want := seqs(items(t, s))[after:]
+	if !slices.Equal(got, want) {
+		t.Fatalf("subscriber saw %d items, log has %d after seq %d", len(got), len(want), after)
 	}
 }

@@ -132,29 +132,33 @@ func (l *Log) Append(it *Item) error {
 // first. A limit of zero or less means no limit.
 func (l *Log) ReadAfter(seq int64, limit int) ([]Item, error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	start := sort.Search(len(l.seqs), func(i int) bool { return l.seqs[i] > seq })
 	end := len(l.seqs)
 	if limit > 0 && end-start > limit {
 		end = start + limit
 	}
-	return l.read(start, end)
+	buf, err := l.read(start, end)
+	l.mu.Unlock()
+	return decodeItems(buf, err)
 }
 
 // ReadBefore returns up to limit items with Seq less than seq, oldest
 // first. A limit of zero or less means no limit.
 func (l *Log) ReadBefore(seq int64, limit int) ([]Item, error) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	end := sort.Search(len(l.seqs), func(i int) bool { return l.seqs[i] >= seq })
 	start := 0
 	if limit > 0 && end > limit {
 		start = end - limit
 	}
-	return l.read(start, end)
+	buf, err := l.read(start, end)
+	l.mu.Unlock()
+	return decodeItems(buf, err)
 }
 
-func (l *Log) read(start, end int) ([]Item, error) {
+// read returns the lines of items start to end. Decoding happens outside
+// the lock so a long replay does not hold up appends.
+func (l *Log) read(start, end int) ([]byte, error) {
 	if l.f == nil {
 		return nil, ErrLogClosed
 	}
@@ -170,7 +174,14 @@ func (l *Log) read(start, end int) ([]Item, error) {
 	if _, err := l.f.ReadAt(buf, from); err != nil {
 		return nil, fmt.Errorf("acphost: read item log: %w", err)
 	}
-	items := make([]Item, 0, end-start)
+	return buf, nil
+}
+
+func decodeItems(buf []byte, err error) ([]Item, error) {
+	if err != nil || len(buf) == 0 {
+		return nil, err
+	}
+	var items []Item
 	for line := range bytes.Lines(buf) {
 		var it Item
 		if err := json.Unmarshal(line, &it); err != nil {

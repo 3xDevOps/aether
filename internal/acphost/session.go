@@ -386,17 +386,18 @@ func (s *Session) State() State {
 // resubscribes from its last seq. The channel is closed when the session
 // ends or cancel is called.
 func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error) {
+	// The replay is read outside the session lock: holding it would stall
+	// session/update handling, and the SDK closes the agent connection when
+	// its notification queue overflows.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil, nil, nil, ErrClosed
 	}
-	replay, err := s.log.ReadAfter(afterSeq, 0)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	last := s.log.LastSeq()
 	ch := make(chan Item, subscriberBuffer)
 	s.subs[ch] = struct{}{}
+	s.mu.Unlock()
 	cancel := func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -404,6 +405,16 @@ func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error)
 			delete(s.subs, ch)
 			close(ch)
 		}
+	}
+	if afterSeq >= last {
+		return nil, ch, cancel, nil
+	}
+	// Sequence numbers are contiguous from 1, so this stops at last, where
+	// the channel takes over.
+	replay, err := s.log.ReadAfter(afterSeq, int(last-max(afterSeq, 0)))
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
 	}
 	return replay, ch, cancel, nil
 }
