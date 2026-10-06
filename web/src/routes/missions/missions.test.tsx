@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError, type Api } from '@/lib/api'
 import type { Mission, MissionAttempt, MissionQuestion, MissionTask, RunMessage } from '@/lib/types'
@@ -309,6 +309,17 @@ describe('swarm detail', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: 'Cancel swarm' }))
     const [first, second] = vi.mocked(client.missionCancel).mock.calls.map(([params]) => params.idempotency_key)
     expect(first).toBe(second)
+  })
+
+  it('returns focus to More when the cancel confirmation closes', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator()) } })
+    await mount(showing())
+    const more = screen.getByRole('button', { name: 'More swarm actions' })
+    await userEvent.click(more)
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Cancel swarm…' }))
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(more))
   })
 
   it('hides Cancel swarm from a member who is neither accountable nor admin', async () => {

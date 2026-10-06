@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -140,11 +140,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const self = useSelf()
   const cap = useCapability()
   const [dialog, setDialog] = useState<'replace' | 'cancel' | null>(null)
-  const moreRef = useRef<HTMLButtonElement>(null)
-  const closeDialog = () => {
-    setDialog(null)
-    requestAnimationFrame(() => moreRef.current?.focus())
-  }
+  const closeDialog = () => setDialog(null)
   const mission = detail?.mission.id === missionID ? detail.mission : undefined
   const integratorRunID = mission?.current_integrator_run_id || undefined
   const lookup = useIntegratorLookup(integratorRunID, client, detail)
@@ -201,7 +197,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
       {(canReplace || canCancel) && (
         <Menu>
           <MenuTrigger asChild>
-            <Button ref={moreRef} variant="ghost" size="icon-sm" label="More swarm actions">
+            <Button variant="ghost" size="icon-sm" label="More swarm actions">
               <Ellipsis />
             </Button>
           </MenuTrigger>

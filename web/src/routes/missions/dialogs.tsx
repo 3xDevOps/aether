@@ -17,6 +17,7 @@ import { FormField } from '@/components/ui/form-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { useReturnFocus } from '@/lib/hooks'
 import { agentLabel } from '@/components/launch/modes'
 import type { AgentInfo, Mission } from '@/lib/types'
 import { useStore } from '@/store'
@@ -50,6 +51,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
   const harnesses = choices.filter((choice) => choice.account_member_id === account).map((choice) => choice.harness)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const returnFocus = useReturnFocus()
   const key = useRef(newKey())
 
   const chooseAccount = (next: string) => {
@@ -81,7 +83,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
+      <DialogContent {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Replace integrator</DialogTitle>
           <DialogDescription>
@@ -128,6 +130,7 @@ export function CancelSwarm({ mission, client, onClose, onCancelled }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const key = useRef(newKey())
+  const returnFocus = useReturnFocus()
 
   const cancel = async () => {
     setBusy(true)
@@ -144,7 +147,7 @@ export function CancelSwarm({ mission, client, onClose, onCancelled }: {
 
   return (
     <AlertDialog open onOpenChange={() => { if (!busy) onClose() }}>
-      <AlertDialogContent>
+      <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel this swarm?</AlertDialogTitle>
           <AlertDialogDescription>
