@@ -57,7 +57,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   return (
     <div className="w-full px-3 py-2 sm:px-4 sm:py-3">
       <div className="border-y border-seam">
-        <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-chrome/30 px-3 py-1.5 text-ui-xs font-medium tracking-wide text-muted uppercase md:grid">
+        <div className="hidden grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] gap-4 border-b bg-chrome/30 px-3 py-1.5 text-ui-sm font-medium text-muted md:grid">
           <span>Run</span>
           <span>Owner</span>
           <span>Status</span>

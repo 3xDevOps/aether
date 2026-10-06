@@ -45,6 +45,12 @@ const rules: Rule[] = [
     legacy: [],
   },
   {
+    name: 'sentence case',
+    why: 'Labels are sentence case; use SectionLabel for a group heading, never uppercase.',
+    pattern: /\buppercase\b/,
+    legacy: [],
+  },
+  {
     name: 'no HeroUI',
     why: 'HeroUI is gone; use the components/ui primitives.',
     pattern: /from\s+['"]@heroui\//,

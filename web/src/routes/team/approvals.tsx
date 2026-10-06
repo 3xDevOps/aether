@@ -137,7 +137,7 @@ function Row({
           </div>
           {approval.detail ? (
             <div className="mt-2 border-l-2 border-seam pl-2">
-              <p className="text-ui-xs font-medium uppercase tracking-wide text-muted">
+              <p className="text-ui-sm font-medium text-muted">
                 Reason
               </p>
               <p className="mt-1 whitespace-pre-wrap break-words text-ui leading-5 select-text">

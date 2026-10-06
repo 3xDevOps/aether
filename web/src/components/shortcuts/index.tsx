@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { SectionLabel } from '@/components/ui/section-label'
 import type { KeyScope } from '@/lib/key-scope'
 import {
   formatKeys,
@@ -111,12 +112,9 @@ function ShortcutGroup({
 }) {
   return (
     <section className="space-y-1" aria-labelledby={`shortcut-${name}`}>
-      <h3
-        id={`shortcut-${name}`}
-        className="px-2 text-ui-xs font-semibold uppercase tracking-[0.08em] text-muted"
-      >
+      <SectionLabel as="h3" id={`shortcut-${name}`} className="px-2">
         {name}
-      </h3>
+      </SectionLabel>
       <div role="list" className="space-y-px">
         {entries.map(([value, description]) => (
           <ShortcutRow key={value} value={value} description={description} />
