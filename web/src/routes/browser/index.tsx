@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
@@ -15,6 +16,15 @@ import { BrowserSurface } from './surface'
 // A tab-local identity survives pane detach but is never cloned through
 // sessionStorage into another window. Reloads observe first, then take control.
 let tabControlSession: string | undefined
+
+const stateWords: Record<string, string> = {
+  not_started: 'Browser not started',
+  creating: 'Browser starting',
+  running: 'Browser running',
+  paused: 'Browser paused',
+  session_lost: 'Browser session lost',
+  unavailable: 'Browser unavailable',
+}
 
 type BrowserConfirmation =
   | { action: 'close'; target: DevBrowserCloseParams }
@@ -223,66 +233,59 @@ function BrowserRoute({ runID }: { runID: string }) {
 
   if (!run) return <MissingRun />
   const writable = Boolean(fence && !busy && !blocked && status?.running)
-  const controllerName = controller ? controller.kind === 'run_agent' ? `Agent · ${controller.run_id}` : `Member · ${members[controller.member_id ?? '']?.display_name ?? controller.member_id}` : 'Nobody'
+  const driver = owns ? 'You are driving' : controller ? `${controller.kind === 'run_agent' ? 'The agent' : members[controller.member_id ?? '']?.display_name ?? 'Another member'} is driving` : 'Nobody is driving'
+  const state = `${status ? stateWords[status.state] ?? 'Browser unavailable' : error ? 'Browser unavailable' : 'Checking the browser'} · ${driver}`
+  const canOpen = Boolean(status?.available && (!status.session_id || fence))
+  const take = surface && (!owns || blocked) && (
+    <Button variant="secondary" disabled={busy} onClick={() => acquire(Boolean(controller && !owns))}>{controller && !owns ? 'Take over' : 'Take control'}</Button>
+  )
 
   return <div className="flex h-full min-h-0 min-w-0 flex-col">
     <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-seam pb-3 text-ui">
-        <div className="min-w-0 flex-1 basis-80 space-y-1">
-          <p role="status" hidden={expanded} className="break-words">
-            Browser: {status?.state ?? (error ? 'Unavailable' : 'Checking')}
-            {status?.session_id && <span className="ml-2 break-all text-ui-sm text-muted">{status.session_id}</span>}
-          </p>
-          <p className="break-words text-ui-sm text-muted">
-            <span className={owns ? 'font-medium text-accent' : 'text-text'}>{owns ? 'You control this browser' : 'Watch mode'}</span>
-            {' · Controller: '}{controllerName}{controller?.expires_at ? ` · expires ${new Date(controller.expires_at).toLocaleTimeString()}` : ''}
-          </p>
+      {selectedPage && <div className={`${expanded ? 'hidden' : 'flex'} shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-seam pb-3 text-ui`}>
+        <p role="status" className="min-w-0 flex-1 basis-60 break-words text-ui-sm text-muted">{state}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {take}
+          {fence && <Button variant="secondary" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
         </div>
-        <div className={`${expanded ? 'hidden' : 'flex'} flex-wrap items-center gap-2`}>
-          {surface && (!owns || blocked) && <Button variant="secondary" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
-          {surface && controller && !owns && <Button variant="secondary" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}
-          {surface && fence && <Button variant="secondary" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
-        </div>
-      </div>
+      </div>}
       {status?.reason && <p role="alert" className="break-words text-ui text-state-failed">{status.reason}</p>}
       {error && !confirmation && <p role="alert" className="break-words text-ui text-state-failed">{error}</p>}
-      <form className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-2`} onSubmit={(event) => { event.preventDefault(); if (selectedPage) navigatePage('url'); else open() }}>
-        {selectedPage && <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="secondary" aria-label="Back" disabled={!writable || !selectedPage} onClick={() => navigatePage('back')}>Back</Button>
-          <Button type="button" variant="secondary" aria-label="Forward" disabled={!writable || !selectedPage} onClick={() => navigatePage('forward')}>Forward</Button>
-          <Button type="button" variant="secondary" disabled={!writable || !selectedPage} onClick={() => navigatePage('reload')}>Reload page</Button>
-        </div>}
+      {selectedPage ? <>
+      <form className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-2`} onSubmit={(event) => { event.preventDefault(); navigatePage('url') }}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="secondary" aria-label="Back" disabled={!writable} onClick={() => navigatePage('back')}>Back</Button>
+          <Button type="button" variant="secondary" aria-label="Forward" disabled={!writable} onClick={() => navigatePage('forward')}>Forward</Button>
+          <Button type="button" variant="secondary" disabled={!writable} onClick={() => navigatePage('reload')}>Reload page</Button>
+        </div>
         <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
           <Input aria-label="Browser URL" type="url" value={address} onChange={(event) => setAddress(event.target.value)} className="min-w-0 flex-1" />
-          {selectedPage && <Button type="submit" disabled={!writable}>Go</Button>}
-          {!selectedPage && <Button type="submit" disabled={busy || !status?.available || Boolean(status.session_id && !fence)}>Open browser</Button>}
+          <Button type="submit" disabled={!writable}>Go</Button>
         </div>
       </form>
       <div className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-2`}>
         <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
-          <PopoverTrigger asChild><Button ref={toolsTrigger} variant="secondary">Browser tools</Button></PopoverTrigger>
-          <PopoverContent aria-label="Browser tools" className="space-y-3" onCloseAutoFocus={(event) => {
+          <PopoverTrigger asChild><Button ref={toolsTrigger} variant="secondary">Page tools</Button></PopoverTrigger>
+          <PopoverContent aria-label="Page tools" className="space-y-3" onCloseAutoFocus={(event) => {
             if (!openingDialog.current) return
             openingDialog.current = false
             event.preventDefault()
           }}>
-        {pages.length > 0 && <label className="flex min-w-0 items-center gap-1 text-ui">
+        <label className="flex min-w-0 items-center gap-1 text-ui">
           <span className="w-14 shrink-0">Page</span>
           <select aria-label="Browser page" value={selected} disabled={!writable} className={cn(field, 'min-w-0 flex-1 coarse:h-11 coarse:min-h-11')} onChange={(event) => {
             const page = pages.find((item) => item.page_id === event.target.value)
             if (!page || !fence) return
             void perform(async () => { await api.devBrowserAction({ run_id: runID, session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision, ...fence, action: 'select' }); setSelected(page.page_id) })
           }}>
-            {pages.map((page) => <option key={page.page_id} value={page.page_id}>{page.title || page.url || page.page_id}</option>)}
+            {pages.map((page) => <option key={page.page_id} value={page.page_id}>{page.title || page.url || 'Untitled page'}</option>)}
           </select>
-        </label>}
+        </label>
         <label className="flex min-w-0 items-center gap-1 text-ui">
           <span className="w-14 shrink-0">Viewport</span>
-          <select aria-label="Browser viewport" value={preset} className={cn(field, 'min-w-0 flex-1 coarse:h-11 coarse:min-h-11')} disabled={busy || Boolean(selectedPage && (!fence || blocked))} onChange={(event) => {
-            const value = event.target.value
-            if (!selectedPage) { setPreset(value); return }
+          <select aria-label="Browser viewport" value={preset} className={cn(field, 'min-w-0 flex-1 coarse:h-11 coarse:min-h-11')} disabled={busy || !fence || blocked} onChange={(event) => {
             if (!fence || blocked) return
-            const [width, height] = value.split('x').map(Number)
+            const [width, height] = event.target.value.split('x').map(Number)
             void perform(async () => { const result = await api.devBrowserViewport({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision, ...fence, width, height }); updatePage(result.page) })
           }}>
             <option value="1280x800">Desktop · 1280 × 800</option>
@@ -292,23 +295,32 @@ function BrowserRoute({ runID }: { runID: string }) {
           </select>
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          {pages.length > 0 && <Button variant="secondary" disabled={busy || blocked || !status?.available || !fence} onClick={open}>New page</Button>}
-          {selectedPage && <Button variant="secondary" disabled={busy} onClick={() => {
-            if (!selectedPage) return
+          <Button variant="secondary" disabled={busy || blocked || !status?.available || !fence} onClick={open}>New page</Button>
+          <Button variant="secondary" disabled={busy} onClick={() => {
             void perform(async () => { const result = await api.devBrowserScreenshot({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision }); setCapture(result.artifact.id) })
-          }}>Screenshot</Button>}
+          }}>Screenshot</Button>
           <Button variant="ghost" disabled={busy} onClick={() => void perform(async () => { await refresh(); setConnection((value) => value + 1); setBlocked(false) })}>Reconnect</Button>
         </div>
-        {surface && <div className="flex flex-wrap items-center gap-2 border-t border-seam pt-3">
-          {selectedPage && <Button variant="secondary" disabled={!writable} onClick={() => ask('close')}>Close page</Button>}
+        <div className="flex flex-wrap items-center gap-2 border-t border-seam pt-3">
+          <Button variant="secondary" disabled={!writable} onClick={() => ask('close')}>Close page</Button>
           <Button variant="secondary" disabled={!fence || busy || blocked} onClick={() => ask('reset')}>Reset session</Button>
-        </div>}
+        </div>
           </PopoverContent>
         </Popover>
       </div>
-      {capture && <p role="status" hidden={expanded} className="break-words text-ui-sm text-muted">Captured {capture}. Open Captures from More to keep it; nothing has been published.</p>}
-      {selectedPage ? <BrowserSurface key={`${selectedPage.session_id}:${selectedPage.page_id}`} runID={runID} page={selectedPage} control={!busy && !blocked ? fence : null} connection={connection}
-        expanded={expanded} onExpandedChange={setEnlarged} onPage={updatePage} onError={(text) => { setError(text); setBlocked(true); void release() }} /> : <p className="p-4 text-ui text-muted">Opening this pane only observes existing state. Use Open browser to start a page. Hiding the pane does not stop the app or clear its login.</p>}
+      {capture && <p role="status" hidden={expanded} className="break-words text-ui-sm text-muted">Screenshot saved. Open Captures from More to keep it; nothing has been published.</p>}
+      <BrowserSurface key={`${selectedPage.session_id}:${selectedPage.page_id}`} runID={runID} page={selectedPage} control={!busy && !blocked ? fence : null} connection={connection}
+        expanded={expanded} onExpandedChange={setEnlarged} onPage={updatePage} onError={(text) => { setError(text); setBlocked(true); void release() }} />
+      </> : (
+        <EmptyState
+          title="No page open"
+          action={canOpen
+            ? <Button disabled={busy} onClick={open}>Open {address}</Button>
+            : take || (fence && status?.session_id && <Button variant="secondary" disabled={busy || blocked} onClick={() => ask('reset')}>Reset session</Button>)}
+        >
+          <span role="status">{state}</span>
+        </EmptyState>
+      )}
     </section>
     <AlertDialog open={confirmation !== null} onOpenChange={(open) => { if (!open && !inFlight.current) setConfirmation(null) }}>
       <AlertDialogContent onCloseAutoFocus={(event) => { event.preventDefault(); toolsTrigger.current?.focus() }}>

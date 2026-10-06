@@ -309,7 +309,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
         <Button variant="secondary" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
         <Button variant="secondary" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
       </div>
-      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only - restore browser controls to acquire control.' : 'Watch only - acquire control to interact.'}</span>
+      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only - restore the browser controls to take control.' : 'Watch only - take control to interact.'}</span>
     </div>
     <div className="relative min-h-48 min-w-0 flex-1 overflow-hidden bg-chrome">
       <canvas ref={canvas} aria-label="Shared browser page" tabIndex={props.control ? 0 : -1}

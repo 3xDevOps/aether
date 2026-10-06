@@ -38,16 +38,15 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('releases only its own browser lease on window blur, not toolbar focus changes', async () => {
   const view = render(<BrowserView runID="run_1" />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
-  await screen.findByRole('button', { name: 'Release control' })
+  fireEvent.click(await screen.findByRole('button', { name: 'Take control' }))
+  fireEvent.focus(await screen.findByRole('button', { name: 'Open http://localhost:3000' }))
   const held = controller!
-  fireEvent.focus(screen.getByRole('textbox', { name: 'Browser URL' }))
   expect(api.devControlRelease).not.toHaveBeenCalled()
   fireEvent.blur(window)
   await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith({
     run_id: 'run_1', surface, control_session_id: held.control_session_id, control_generation: held.control_generation,
   }))
-  expect(screen.queryByRole('button', { name: 'Release control' })).toBeNull()
+  expect(await screen.findByRole('button', { name: 'Take control' })).toBeDefined()
   view.unmount()
   expect(api.devControlRelease).toHaveBeenCalledTimes(1)
 })
@@ -55,8 +54,10 @@ it('releases only its own browser lease on window blur, not toolbar focus change
 it('does not release another controller when a denied watcher loses focus or detaches', async () => {
   controller = { kind: 'member', member_id: 'peer', control_session_id: 'peer-tab', control_generation: 9, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
   vi.mocked(api.devControlAcquire).mockRejectedValue(new Error('Control is held by another member'))
+  useStore.setState({ members: { peer: { id: 'peer', display_name: 'Pat', color: '#000', role: 'collaborator' } } })
   const view = render(<BrowserView runID="run_1" />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
+  expect(await screen.findByText('Browser running · Pat is driving')).toBeDefined()
+  fireEvent.click(screen.getByRole('button', { name: 'Take over' }))
   await screen.findByRole('alert')
   fireEvent.blur(window)
   view.unmount()
@@ -68,7 +69,7 @@ it('releases an acquisition that completes after local focus was lost', async ()
   const pending = new Promise<DevControlAcquireResult>((resolve) => { finish = resolve })
   vi.mocked(api.devControlAcquire).mockReturnValueOnce(pending)
   const view = render(<BrowserView runID="run_1" />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Take control' }))
   const session = vi.mocked(api.devControlAcquire).mock.calls[0][0].control_session_id
   fireEvent.blur(window)
   await act(async () => {
@@ -76,16 +77,16 @@ it('releases an acquisition that completes after local focus was lost', async ()
     await pending
   })
   expect(api.devControlRelease).toHaveBeenCalledWith({ run_id: 'run_1', surface, control_session_id: session, control_generation: 11 })
-  expect(screen.queryByRole('button', { name: 'Release control' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Open http://localhost:3000' })).toBeNull()
   view.unmount()
 })
 
 async function openConfirmation(action: 'Close page' | 'Reset session') {
   vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page], selected_page_id: page.page_id })
   render(<BrowserView runID="run_1" />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Acquire control' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Take control' }))
   await waitFor(() => expect(screen.getByRole('button', { name: 'Go' }).hasAttribute('disabled')).toBe(false))
-  fireEvent.click(screen.getByRole('button', { name: 'Browser tools' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Page tools' }))
   fireEvent.click(screen.getByRole('button', { name: action }))
   return screen.findByRole('alertdialog')
 }
@@ -97,7 +98,7 @@ it.each(['Close page', 'Reset session'] as const)('cancels %s without mutating a
   const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
   await waitFor(() => expect(document.activeElement).toBe(cancel))
   fireEvent.click(cancel)
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Browser tools' })))
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Page tools' })))
   expect(close).not.toHaveBeenCalled()
   expect(reset).not.toHaveBeenCalled()
 })
@@ -149,7 +150,7 @@ it('submits the captured close once and keeps a raw refusal in the confirmation'
   expect(within(dialog).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false)
 })
 
-it('opens with the chosen preset before exposing page navigation', async () => {
+it('offers one Open button before a page exists, then the page navigation', async () => {
   vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: true, running: false, state: 'not_started' })
   const open = vi.spyOn(api, 'devBrowserOpen').mockImplementation(async (target) => {
     const opened = { ...page, width: target.width!, height: target.height! }
@@ -159,15 +160,13 @@ it('opens with the chosen preset before exposing page navigation', async () => {
     return { page: opened, control: controller }
   })
   render(<BrowserView runID="run_1" />)
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Open browser' }).hasAttribute('disabled')).toBe(false))
+  expect(await screen.findByRole('heading', { name: 'No page open' })).toBeDefined()
+  expect(screen.getByText('Browser not started · Nobody is driving')).toBeDefined()
   expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
-  expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Browser tools' }))
-  fireEvent.change(screen.getByRole('combobox', { name: 'Browser viewport' }), { target: { value: '390x844' } })
-  fireEvent.keyDown(screen.getByRole('dialog', { name: 'Browser tools' }), { key: 'Escape' })
-  fireEvent.click(screen.getByRole('button', { name: 'Open browser' }))
+  expect(screen.queryByRole('button', { name: 'Page tools' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Open http://localhost:3000' }))
   await screen.findByRole('button', { name: 'Back' })
-  expect(open).toHaveBeenCalledWith(expect.objectContaining({ width: 390, height: 844, url: page.url }))
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ width: 1280, height: 800, url: page.url }))
 })
 
 it('allows observers to capture evidence without granting page mutations', async () => {
@@ -177,7 +176,7 @@ it('allows observers to capture evidence without granting page mutations', async
   const reset = vi.spyOn(api, 'devBrowserReset')
   render(<BrowserView runID="run_1" />)
   await screen.findByRole('button', { name: 'Go' })
-  fireEvent.click(screen.getByRole('button', { name: 'Browser tools' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Page tools' }))
   for (const name of ['Close page', 'Reset session', 'New page']) {
     const button = screen.getByRole('button', { name })
     expect(button.hasAttribute('disabled')).toBe(true)
