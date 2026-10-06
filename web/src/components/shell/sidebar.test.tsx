@@ -4,7 +4,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
-import { fakeApi, otherWorkspace, run, updateStatus, workspace } from '@/test/fixtures'
+import { fakeApi, mission, otherWorkspace, run, updateStatus, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -137,6 +137,32 @@ describe('run rows', () => {
 
     expect(new Set([first.params.runId, second.params.runId])).toEqual(new Set(['run_2', 'run_3']))
     expect(useStore.getState().route).toEqual(first)
+  })
+
+  it('moves on from a swarm that needs you on u', () => {
+    act(() => {
+      useStore.setState((s) => ({
+        runs: {
+          ...s.runs,
+          run_integrator: toRecord(run({
+            id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+            started_at: '2026-08-14T09:00:00Z',
+          })),
+        },
+        missions: { mission_1: mission({ open_questions: 1 }) },
+      }))
+    })
+    render(<AppShell />)
+
+    const seen = []
+    for (let i = 0; i < 4; i++) {
+      fireEvent.keyDown(document.body, { key: 'u' })
+      const { route } = useStore.getState()
+      seen.push(route.params.runId ?? route.params.missionId)
+    }
+
+    expect(new Set(seen.slice(0, 3))).toEqual(new Set(['run_2', 'run_3', 'mission_1']))
+    expect(seen[3]).toBe(seen[0])
   })
 
   it('narrows Working and Finished to my runs, never Needs you', () => {

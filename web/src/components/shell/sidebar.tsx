@@ -38,7 +38,12 @@ function openNextNeedsYou() {
     ?.runs.flatMap((tree) => [tree, ...tree.children])
     .filter((row) => row.state === 'needs-you') ?? []
   if (waiting.length === 0) return
-  const current = waiting.findIndex((row) => isRunRoute(s.route, row.run.id))
+  const current = waiting.findIndex((row) => {
+    const route = needsYouRoute(row.run, ctx)
+    return route.name === 'missions'
+      ? s.route.name === 'missions' && s.route.params.missionId === route.params.missionId
+      : isRunRoute(s.route, row.run.id)
+  })
   const next = waiting[(current + 1) % waiting.length]!
   const route = needsYouRoute(next.run, ctx)
   s.navigate(route.name, route.params)
