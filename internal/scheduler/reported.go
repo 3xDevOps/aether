@@ -80,10 +80,10 @@ func retainedReason(status domain.RunStatus, reason string) bool {
 }
 
 // retentionValid reports whether a terminal row's reason matches the
-// retained container its sidecar records: a relaunchable TUI retention, or
+// retained container its sidecar records: a relaunchable interactive retention, or
 // a finished mission worker's, which never reopens.
 func retentionValid(mode domain.LaunchMode, missionAssigned bool, status domain.RunStatus, reason string) bool {
-	return (mode == domain.LaunchTUI && retainedReason(status, reason)) ||
+	return (mode.Interactive() && retainedReason(status, reason)) ||
 		(missionAssigned && reason == retainedCompletionReason)
 }
 

@@ -761,6 +761,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		if c.AccountMemberID == "" || c.Harness == "" || !mode.Valid() {
 			return protocol.MissionCreateResult{}, errors.New("execution choices must name account_member_id, harness, and valid mode")
 		}
+		if mode == domain.LaunchACP {
+			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice: " + domain.ErrLaunchModeUnavailable.Error())
+		}
 		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode})
 	}
 	m := &domain.Mission{
@@ -938,7 +941,7 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if in.AccountMemberID == "" || in.Harness == "" || !mode.Valid() {
 		return domain.MissionIntegrator{}, errors.New("integrator account_member_id, harness, and valid mode are required")
 	}
-	if mode != domain.LaunchTUI {
+	if !mode.Interactive() {
 		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told")
 	}
 	for _, c := range choices {

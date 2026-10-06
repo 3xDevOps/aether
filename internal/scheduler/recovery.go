@@ -50,7 +50,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
-	if old.Mode != domain.LaunchTUI || !retainedReason(old.Status, old.Reason) {
+	if !old.Mode.Interactive() || !retainedReason(old.Status, old.Reason) {
 		return nil, retainedTransitionError()
 	}
 
@@ -84,7 +84,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if entry == nil {
 		sc, serr := s.readSidecar(run)
 		if serr == nil && (sc.Retained || sc.RetainedUntil != nil) &&
-			sc.Mode == domain.LaunchTUI && sc.ContainerID != "" {
+			sc.Mode.Interactive() && sc.ContainerID != "" {
 			entry = s.entryFromSidecar(old, sc)
 			entry.retained = true
 			s.runs[run] = entry
@@ -115,7 +115,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, ferr
 	}
 	valid := s.runs[run] == entry && entry.retained && !entry.destroyPending && !entry.evidencePending &&
-		fresh.Mode == domain.LaunchTUI && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
+		fresh.Mode.Interactive() && !entry.missionAssigned && retainedReason(fresh.Status, fresh.Reason) &&
 		deadline != nil && time.Now().UTC().Before(*deadline)
 	paused, cid := entry.paused, entry.containerID
 	s.mu.Unlock()
@@ -169,7 +169,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.archiveMu.Unlock()
 		return nil, err
 	}
-	if latest.Mode != domain.LaunchTUI || !retainedReason(latest.Status, latest.Reason) {
+	if !latest.Mode.Interactive() || !retainedReason(latest.Status, latest.Reason) {
 		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}

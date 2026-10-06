@@ -821,7 +821,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 	if assigned {
 		closeReason = retainedCompletionReason
 	}
-	if (mode == domain.LaunchTUI || mission || assigned) && !status.Terminal() {
+	if (mode.Interactive() || mission || assigned) && !status.Terminal() {
 		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 			return err
 		}

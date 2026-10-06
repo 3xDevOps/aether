@@ -76,9 +76,9 @@ func (a coordWakeAdmission) Admit(ctx context.Context, run domain.RunID, dispatc
 		if err != nil {
 			return err
 		}
-		if current == nil || current.ID != run || current.Mode != domain.LaunchTUI || current.Protected ||
+		if current == nil || current.ID != run || !current.Mode.Interactive() || current.Protected ||
 			(current.Status != domain.RunRunning && current.Status != domain.RunNeedsAttention) {
-			return errors.New("coord wake: run is not an eligible live TUI")
+			return errors.New("coord wake: run is not an eligible live interactive run")
 		}
 		live, err := a.observe(checkCtx, run)
 		if err != nil {

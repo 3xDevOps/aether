@@ -99,7 +99,8 @@ func rpcError(err error) *protocol.Error {
 			// mission idempotency key (coord.missionRPCError); the control
 			// channel must not report the same caller mistake as internal.
 			code = protocol.CodeConflict
-		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
+		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab),
+			errors.Is(err, domain.ErrLaunchModeUnavailable):
 			code = protocol.CodeInvalidParams
 		case errors.Is(err, errInvalidTransition), errors.Is(err, scheduler.ErrTerminalTabLimit),
 			errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),

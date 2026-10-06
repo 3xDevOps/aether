@@ -7,6 +7,7 @@
 package domain
 
 import (
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -128,11 +129,25 @@ const (
 	LaunchTUI LaunchMode = "tui"
 	// LaunchHeadless runs the agent in its structured output mode.
 	LaunchHeadless LaunchMode = "headless"
+	// LaunchACP runs the agent behind the Agent Client Protocol, in the same
+	// container shape as LaunchTUI. It is reserved: no launch path accepts
+	// it yet.
+	LaunchACP LaunchMode = "acp"
 )
+
+// ErrLaunchModeUnavailable rejects a launch in a reserved mode.
+var ErrLaunchModeUnavailable = errors.New("enhanced mode (acp) is not available yet")
 
 // Valid reports whether m is a defined launch mode.
 func (m LaunchMode) Valid() bool {
-	return m == LaunchTUI || m == LaunchHeadless
+	return m == LaunchTUI || m == LaunchHeadless || m == LaunchACP
+}
+
+// Interactive reports whether a run in mode m is long-lived: it outlives
+// the agent's turn, can be closed, retained and reopened, and can be woken
+// by mail.
+func (m LaunchMode) Interactive() bool {
+	return m == LaunchTUI || m == LaunchACP
 }
 
 // LaunchOptions carries one-shot launch controls that are not part of the

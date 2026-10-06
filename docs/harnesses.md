@@ -786,6 +786,11 @@ replacement shell and are not relaunchable.
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
+A third mode, `acp`, is reserved for running the agent over the Agent Client
+Protocol. It will use the tui container shape: the same supervised PID 1,
+retention on Close, and relaunch. Until it ships, `run.launch`, templates, and
+swarm integrators reject it with `enhanced mode (acp) is not available yet`.
+
 The task prompt is optional in tui mode: launch without one and you land in
 the agent's interactive TUI with an empty composer, exactly as if you had
 started the CLI yourself, and type the first prompt there. Every argv token

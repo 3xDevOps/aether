@@ -76,8 +76,11 @@ func TestAllRunStatusesComplete(t *testing.T) {
 }
 
 func TestLaunchModeValid(t *testing.T) {
-	if !LaunchTUI.Valid() || !LaunchHeadless.Valid() {
+	if !LaunchTUI.Valid() || !LaunchHeadless.Valid() || !LaunchACP.Valid() {
 		t.Error("defined launch modes must be valid")
+	}
+	if !LaunchTUI.Interactive() || !LaunchACP.Interactive() || LaunchHeadless.Interactive() {
+		t.Error("tui and acp must be interactive, headless must not")
 	}
 	if LaunchMode("bogus").Valid() {
 		t.Error(`LaunchMode("bogus").Valid() = true, want false`)

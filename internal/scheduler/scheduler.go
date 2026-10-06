@@ -732,6 +732,8 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 		argv = tui
 	case domain.LaunchHeadless:
 		argv = headless
+	case domain.LaunchACP:
+		return nil, harness.Profile{}, domain.ErrLaunchModeUnavailable
 	default:
 		return nil, harness.Profile{}, fmt.Errorf("scheduler: invalid launch mode %q", mode)
 	}
@@ -929,7 +931,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
-	if run.Mode == domain.LaunchTUI || persistSupervisor {
+	if run.Mode.Interactive() || persistSupervisor {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{

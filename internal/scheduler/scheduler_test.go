@@ -804,6 +804,9 @@ func TestLaunchValidation(t *testing.T) {
 	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchMode("bogus")); err == nil {
 		t.Fatal("invalid mode accepted")
 	}
+	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "claude", domain.LaunchACP); !errors.Is(err, domain.ErrLaunchModeUnavailable) {
+		t.Fatalf("acp launch error = %v, want ErrLaunchModeUnavailable", err)
+	}
 	t.Setenv(fakeAgentEnv, "fake-agent")
 	if _, err := e.sched.Launch(ctx, "ws_missing", e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing workspace error = %v, want ErrNotFound", err)

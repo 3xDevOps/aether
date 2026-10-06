@@ -195,6 +195,9 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 	if !t.Mode.Valid() {
 		return fmt.Errorf("%w: invalid mode %q", ErrInvalidDefinition, t.Mode)
 	}
+	if t.Mode == domain.LaunchACP {
+		return fmt.Errorf("%w: %w", ErrInvalidDefinition, domain.ErrLaunchModeUnavailable)
+	}
 	if err := checkParams(t.Task, t.Params); err != nil {
 		return err
 	}
