@@ -502,7 +502,7 @@ describe('command palette', () => {
   it('launches a run into the active workspace', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
+    fireEvent.click(await screen.findByText('New run…'))
     const target = await screen.findByLabelText('Target workspace')
     expect(target.textContent).toContain(workspace.name)
     expect(target.textContent).toContain(workspace.base_branch)
@@ -519,22 +519,22 @@ describe('command palette', () => {
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
   })
 
-  it('opens the launch dialog on Swarm from Create swarm', async () => {
+  it('opens the launch dialog on Swarm from New swarm', async () => {
     useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     open()
 
-    fireEvent.click(await screen.findByText('Create swarm...'))
+    fireEvent.click(await screen.findByText('New swarm…'))
     expect(await screen.findByRole('dialog', { name: 'New swarm' })).toBeDefined()
     expect(screen.getByLabelText('Objective')).toBeDefined()
   })
 
-  it('offers Create swarm only where the gateway carries mission.create', async () => {
+  it('offers New swarm only where the gateway carries mission.create', async () => {
     open()
-    await screen.findByText('Launch a run...')
-    expect(screen.queryByText('Create swarm...')).toBeNull()
+    await screen.findByText('New run…')
+    expect(screen.queryByText('New swarm…')).toBeNull()
   })
 
-  it('hides Create swarm from a role that cannot launch', async () => {
+  it('hides New swarm from a role that cannot launch', async () => {
     useStore.setState({
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
       info: { ...serverInfo, member: vera },
@@ -544,13 +544,13 @@ describe('command palette', () => {
     })
     open()
     await screen.findByText('Open the board')
-    expect(screen.queryByText('Create swarm...')).toBeNull()
+    expect(screen.queryByText('New swarm…')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
+    fireEvent.click(await screen.findByText('New run…'))
     // agent.list is the source of truth, not the shipped names.
     expect(await screen.findByRole('radio', { name: /^myagent/ })).toBeDefined()
     expect(api.agentList).toHaveBeenCalled()
@@ -569,7 +569,7 @@ describe('command palette', () => {
     )
     open()
 
-    fireEvent.click(await screen.findByText('Launch a run...'))
+    fireEvent.click(await screen.findByText('New run…'))
     const options = await screen.findByRole('button', { name: /^Options/ })
     if (options.getAttribute('aria-expanded') === 'false') await userEvent.click(options)
     await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')

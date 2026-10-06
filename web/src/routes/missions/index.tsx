@@ -236,7 +236,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         actions={
           canLaunch ? (
             <Button size="sm" onClick={() => useStore.getState().openPaletteDialog('launch')}>
-              Create swarm
+              New swarm
             </Button>
           ) : undefined
         }
@@ -246,8 +246,8 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         {missionLoading && !missions.length && <p className="text-sm text-muted-foreground">Loading missions…</p>}
         {!missionLoading && !missions.length && !missionError && (
           <div className="border border-dashed p-6 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">No missions in this workspace.</p>
-            <p className="mt-1">Launch a swarm when one objective needs bounded parallel work.</p>
+            <p className="font-medium text-foreground">No swarms in this workspace.</p>
+            <p className="mt-1">Use New swarm when one objective needs bounded parallel work.</p>
           </div>
         )}
         <div className="grid gap-2">

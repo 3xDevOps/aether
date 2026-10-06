@@ -31,7 +31,7 @@ export const keybindings = [
     when: (event) => !keyboardBusy(event) && !inModal(event.target),
   },
   { id: 'shortcuts', keys: '[Shift]+?', scope: 'global', label: 'Open this reference' },
-  { id: 'launch', keys: 'n', scope: 'global', label: 'Launch a run' },
+  { id: 'launch', keys: 'n', scope: 'global', label: 'New run' },
   { id: 'next-needs-you', keys: 'u', scope: 'global', label: 'Open the next run that needs you' },
   { id: 'row-next', keys: 'j', scope: 'global', label: 'Focus the next run in the sidebar' },
   { id: 'row-previous', keys: 'k', scope: 'global', label: 'Focus the previous run in the sidebar' },

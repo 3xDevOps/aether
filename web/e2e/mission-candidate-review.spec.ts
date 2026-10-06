@@ -50,7 +50,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await page.goto(alice.url)
   const surfaces = page.getByRole('navigation', { name: 'Aether' })
   await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
-  await page.getByRole('button', { name: 'Create swarm', exact: true }).click()
+  await page.getByRole('button', { name: 'New swarm', exact: true }).click()
   const launch = page.getByRole('dialog', { name: 'New swarm' })
   await expect(launch).toBeVisible()
   await launch.getByLabel('Objective').fill(missionObjective)

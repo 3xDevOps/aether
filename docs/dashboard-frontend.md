@@ -1264,7 +1264,7 @@ scopes share keys, or one begins the other's sequence.
 | `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
 | `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
 | `?` | global | Open the shortcuts dialog |
-| `n` | global | Launch a run |
+| `n` | global | New run |
 | `u` | global | Open the next run that needs you |
 | `j` / `k` | global | Focus the next or previous run in the sidebar |
 | `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
@@ -3200,9 +3200,9 @@ request. **Create swarm** starts the integrator, not the workers, toasts
 such as `mission: coordination is unavailable`, appears in the dialog
 verbatim under "Swarm not created".
 
-The dialog opens on Swarm from the Missions route or the palette's **Create
-swarm...** entry (`openPaletteDialog('swarm')`, listed under the same two
-conditions) when both hold, and on Run otherwise. If either stops holding
+The dialog opens on Swarm from the Swarms view's **New swarm** button or the
+palette's **New swarm…** entry (`openPaletteDialog('swarm')`, listed under the
+same two conditions) when both hold, and on Run otherwise. If either stops holding
 while the dialog is open on Swarm - a re-hydration that could not read the
 capabilities, or a role change - the dialog stays on Swarm with **Create
 swarm** disabled and says why, naming missing capabilities before the role:

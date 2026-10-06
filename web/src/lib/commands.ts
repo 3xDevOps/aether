@@ -476,7 +476,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'launch',
-      label: 'Launch a run...',
+      label: 'New run…',
       Icon: Rocket,
       perform: (d) => d.openDialog('launch'),
     })
@@ -484,7 +484,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('mission.create') && allowed('launch', { id: null, role })) {
     list.push({
       id: 'swarm',
-      label: 'Create swarm...',
+      label: 'New swarm…',
       Icon: Network,
       perform: (d) => d.openDialog('swarm'),
     })
