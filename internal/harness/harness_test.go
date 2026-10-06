@@ -499,7 +499,7 @@ func TestUpdateScripts(t *testing.T) {
 func TestDashboardListsEveryShippedHarness(t *testing.T) {
 	for _, file := range []string{
 		"../../web/src/routes/templates/index.tsx",
-		"../../web/src/routes/board/harness-glyph.tsx",
+		"../../web/src/components/ui/agent-glyph.tsx",
 	} {
 		source, err := os.ReadFile(file)
 		if err != nil {
