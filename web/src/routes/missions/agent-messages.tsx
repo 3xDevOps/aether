@@ -41,7 +41,7 @@ function Participant({ runID, detail }: { runID: string; detail: MissionDetail }
   const navigate = useStore((s) => s.navigate)
   const label = useStore((s) => participantLabel(runID, detail, s.runs))
   return (
-    <Button variant="link" size="sm" className="min-w-0" title={label} onClick={() => navigate('terminal', { runId: runID })}>
+    <Button variant="link" size="sm" className="min-w-0" title={label} onClick={() => navigate('run', { runId: runID })}>
       <span className="max-w-40 truncate sm:max-w-56">{label}</span>
     </Button>
   )

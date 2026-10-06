@@ -225,7 +225,7 @@ describe('swarm detail', () => {
     expect(rows[1].textContent).toContain('No worker yet')
 
     await userEvent.click(within(rows[0]).getByRole('button', { name: /Claude Code/ }))
-    expect(useStore.getState().route).toMatchObject({ name: 'terminal', params: { runId: 'run_worker' } })
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_worker' } })
     await userEvent.click(within(rows[0]).getByRole('button', { name: 'Release control' }))
     expect(client.missionWorkerRelease).toHaveBeenCalledWith({ run_id: 'run_worker', expected_takeover_generation: 4 })
   })
@@ -251,7 +251,7 @@ describe('swarm detail', () => {
     expect(section.getByText('started')).toBeDefined()
     expect(section.getAllByRole('button', { name: 'rewrite the guest checkout flow' }).length).toBeGreaterThan(0)
     await userEvent.click(section.getAllByRole('button', { name: 'Integrator' })[0])
-    expect(useStore.getState().route).toMatchObject({ name: 'terminal', params: { runId: 'run_integrator' } })
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_integrator' } })
   })
 
   it('says how long the integrator has left mail unread', async () => {

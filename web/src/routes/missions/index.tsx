@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useAgentList } from '@/components/agents/agent-list'
+import { useAgentList } from '@/routes/agents/use-agents'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
