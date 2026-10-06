@@ -8,7 +8,9 @@
 //     and act through the Session.
 //   - Prompts are serialized. A second session/prompt is never sent while one
 //     is in flight: mid-turn input is steered where the agent supports it and
-//     queued until the turn ends otherwise.
+//     queued until the turn ends otherwise. A steer asks for idleBehavior
+//     promptRequired, so the agent never starts a turn the host did not
+//     open; one that does anyway has that turn cancelled.
 //   - Answers are forwarded verbatim. A permission answer is the option id the
 //     agent offered; the first answer to a request wins.
 package acphost
@@ -237,6 +239,14 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	if err != nil {
 		return Receipt{}, err
 	}
+	var cancelErr error
+	if outcome == "startedNewTurn" {
+		// The agent ignored idleBehavior promptRequired and ran the input as
+		// a turn of its own. ACP reports a turn's end only in the
+		// session/prompt response, so the host cannot see that turn end,
+		// and its next session/prompt would reach a busy agent. Stop it.
+		cancelErr = s.conn.cancel(ctx)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch outcome {
@@ -244,10 +254,14 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.userMessageLocked(blocks)
 		return Receipt{Outcome: OutcomeInjected}, nil
 	case "startedNewTurn":
-		// The agent ignored idleBehavior and ran the input as a turn of its
-		// own; it has the input, so re-sending it would deliver it twice.
+		// The agent has the input; re-sending it would deliver it twice.
 		s.userMessageLocked(blocks)
-		return Receipt{Outcome: OutcomeInjected}, nil
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{
+			Severity:    "warning",
+			Title:       "Steered message stopped",
+			Description: "The agent started a turn of its own for this message instead of adding it to the running turn, so Aether cancelled that turn. The agent has the message; send a new prompt to continue.",
+		}})
+		return Receipt{}, errors.Join(fmt.Errorf("acphost: %s: the agent answered startedNewTurn despite idleBehavior promptRequired; its turn was cancelled", methodSteering), cancelErr)
 	case "promptRequired":
 		// The turn ended before the steer reached the agent.
 	default:

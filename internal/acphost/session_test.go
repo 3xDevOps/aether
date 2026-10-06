@@ -465,52 +465,86 @@ func TestPromptsAreSerialized(t *testing.T) {
 	}
 }
 
-// An agent that answers a steer by starting its own turn already has the
-// input; sending it again as a prompt would deliver it twice.
-func TestSteerOutcomes(t *testing.T) {
-	for outcome, wantErr := range map[string]bool{"startedNewTurn": false, "somethingNew": true} {
-		t.Run(outcome, func(t *testing.T) {
-			m := newMockAgent(t, loadFixture(t, "codex"))
-			release := make(chan struct{})
-			var prompts int
-			m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
-				m.mu.Lock()
-				prompts++
-				m.mu.Unlock()
-				<-release
-				return map[string]any{"stopReason": "end_turn"}, nil
-			}
-			m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
-				return map[string]any{"outcome": outcome}, nil
-			}
-			s, rec := startMock(t, m, Config{})
-			if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
-				t.Fatal(err)
-			}
-			r, err := s.Prompt(context.Background(), textPrompt("steer"), true)
-			if wantErr {
-				if err == nil || !strings.Contains(err.Error(), outcome) {
-					t.Fatalf("got %+v %v, want an error naming %q", r, err, outcome)
-				}
-			} else if err != nil || r.Outcome != OutcomeInjected {
-				t.Fatalf("steer: %+v %v", r, err)
-			}
-			close(release)
-			rec.waitIdle(t)
-			m.mu.Lock()
-			n := prompts
-			m.mu.Unlock()
-			if n != 1 || s.State().Queued != 0 {
-				t.Fatalf("%d prompts sent, %d queued", n, s.State().Queued)
-			}
-			want := "firststeer"
-			if wantErr {
-				want = "first"
-			}
-			if got := messageText(items(t, s), "user"); got != want {
-				t.Fatalf("user messages %q, want %q", got, want)
-			}
-		})
+func TestUnknownSteerOutcomeIsAnError(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	release := make(chan struct{})
+	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
+		<-release
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
+		return map[string]any{"outcome": "somethingNew"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true); err == nil || !strings.Contains(err.Error(), "somethingNew") {
+		t.Fatalf("got %+v %v, want an error naming the outcome", r, err)
+	}
+	close(release)
+	rec.waitIdle(t)
+	if got := messageText(items(t, s), "user"); got != "first" {
+		t.Fatalf("user messages %q", got)
+	}
+}
+
+// A steer that races the end of the host's turn reaches an idle agent. One
+// that then starts a turn of its own has the input, so the host must not
+// send it again, and must stop that turn: it cannot see it end, and its next
+// session/prompt would reach a busy agent.
+func TestSteerStartingAnAgentTurnIsCancelled(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	release := make(chan struct{})
+	var prompts int
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		m.mu.Lock()
+		prompts++
+		first := prompts == 1
+		m.mu.Unlock()
+		if first {
+			<-release
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	turnEnded := make(chan struct{})
+	m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
+		close(release)
+		<-turnEnded
+		return map[string]any{"outcome": "startedNewTurn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		rec.waitIdle(t)
+		close(turnEnded)
+	}()
+	if r, err := s.Prompt(context.Background(), textPrompt("steer"), true); err == nil || !strings.Contains(err.Error(), "startedNewTurn") {
+		t.Fatalf("steer: %+v %v, want an error naming startedNewTurn", r, err)
+	}
+	select {
+	case <-m.cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent's own turn was not cancelled")
+	}
+	notices := ofKind(items(t, s), KindNotice)
+	if len(notices) != 1 || notices[0].Notice.Title != "Steered message stopped" {
+		t.Fatalf("notices %+v", notices)
+	}
+	if r, err := s.Prompt(context.Background(), textPrompt("next"), false); err != nil || r.Outcome != OutcomeSent {
+		t.Fatalf("next: %+v %v", r, err)
+	}
+	rec.waitIdle(t)
+	m.mu.Lock()
+	n := prompts
+	m.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("%d prompts sent, want 2", n)
+	}
+	if got := messageText(items(t, s), "user"); got != "firststeernext" {
+		t.Fatalf("user messages %q", got)
 	}
 }
 
