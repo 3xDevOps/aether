@@ -25,7 +25,8 @@ test('a confirm opens as a sheet along the bottom of a phone screen', async ({
     .getByRole('dialog', { name: 'Aether' })
     .getByRole('button', { name: 'Templates', exact: true })
     .tap()
-  await page.getByRole('button', { name: 'Delete', exact: true }).tap()
+  await page.getByRole('button', { name: 'More for nightly' }).tap()
+  await page.getByRole('menuitem', { name: 'Delete' }).tap()
 
   const confirm = page.getByRole('alertdialog')
   await expect(confirm).toBeVisible()
