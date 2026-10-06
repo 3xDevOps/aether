@@ -1026,7 +1026,8 @@ account, and the server refuses such a launch.
 
 For an unshipped name the command asks for interactive and headless launch
 templates first (`<name> {task}` and `<name> -p {task}` by default); `--acp
-<argv>` records the command that serves ACP. Install the
+<argv>` records the command that serves ACP, split on spaces; a shipped name
+refuses it. Install the
 executable into `~/.local/bin` using the vendor's documented procedure, then
 complete its login.
 

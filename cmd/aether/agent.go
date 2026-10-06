@@ -145,6 +145,9 @@ func agentAdd(args []string) error {
 		return listErr
 	}
 	if found && selected.Source == "shipped" {
+		if opts.acp != "" {
+			return fmt.Errorf("agent %s is shipped; its ACP server is fixed, so --acp applies only to your own agent", opts.name)
+		}
 		if opts.enhanced && selected.Enhanced == "none" {
 			return fmt.Errorf("agent %s has no enhanced mode", opts.name)
 		}
