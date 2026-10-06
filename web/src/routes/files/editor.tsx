@@ -92,7 +92,7 @@ export function FileEditor({
     const currentState = useStore.getState()
     const currentDocument = currentState.documents[key]
     const currentDraft = currentState.drafts[key]
-    if (!currentDocument || currentDocument.loading || currentDocument.binary || currentDocument.truncated || !currentDocument.writable || !currentDraft || currentDraft.saving || currentDraft.content === currentDraft.baseContent) return
+    if (!currentDocument || currentDocument.loading || currentDocument.binary || currentDocument.truncated || !currentDocument.writable || !currentDraft || currentDraft.saving || currentDraft.content === currentDraft.baseContent) return false
     const captured = currentDraft.content
     const revision = currentDraft.baseRevision
     const epochAtStart = currentState.identityEpoch
@@ -101,13 +101,15 @@ export function FileEditor({
       const result = selection.kind === 'config'
         ? await client.configWrite({ harness: selection.harness, path: selection.path, content: captured, revision })
         : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), path: selection.path, content: captured, revision })
-      if (useStore.getState().identityEpoch !== epochAtStart) return
+      if (useStore.getState().identityEpoch !== epochAtStart) return false
       markDraftSaved(key, captured, result)
+      return true
     } catch (err) {
-      if (useStore.getState().identityEpoch !== epochAtStart) return
+      if (useStore.getState().identityEpoch !== epochAtStart) return false
       const detail = message(err)
       const conflict = (err instanceof ApiError && err.status === 409) || /conflict|stale|revision/i.test(detail)
       markDraftError(key, detail, conflict)
+      return false
     }
   }
 
@@ -232,9 +234,9 @@ export function FileEditor({
           branch={branch}
           path={selection.path}
           onClose={() => setCommitting(false)}
+          error={draft?.error}
           onCommit={async () => {
-            await save()
-            setCommitting(false)
+            if (await save()) setCommitting(false)
           }}
         />
       )}
@@ -242,7 +244,7 @@ export function FileEditor({
   )
 }
 
-function CommitDialog({ branch, path, onClose, onCommit }: { branch: string; path: string; onClose: () => void; onCommit: () => Promise<void> }) {
+function CommitDialog({ branch, path, error, onClose, onCommit }: { branch: string; path: string; error?: string; onClose: () => void; onCommit: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
@@ -253,13 +255,14 @@ function CommitDialog({ branch, path, onClose, onCommit }: { branch: string; pat
             Commit creates a workspace commit on {branch} with your change to <span className="font-code text-text">{path}</span>; it does not push upstream.
           </DialogDescription>
         </DialogHeader>
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <DialogFooter>
           <Button variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button
             disabled={busy}
             onClick={() => {
               setBusy(true)
-              void onCommit()
+              void onCommit().finally(() => setBusy(false))
             }}
           >
             {busy ? 'Committing…' : 'Commit'}

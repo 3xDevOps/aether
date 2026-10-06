@@ -144,6 +144,18 @@ describe('Files editor', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
+  it('keeps the commit dialog open with the error when the commit fails', async () => {
+    const client = readmeApi()
+    vi.mocked(client.filesWrite).mockRejectedValue(new Error('files.write: stale revision'))
+    await openAndEdit(client)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Commit to main…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Commit to main' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Commit' }))
+    expect(await dialog.findByText('files.write: stale revision')).toBeDefined()
+    expect(dialog.getByRole('button', { name: 'Commit' })).toHaveProperty('disabled', false)
+  })
+
   it('closes an open file from its tab with Delete, and the tab list holds only tabs', async () => {
     const client = readmeApi()
     render(<FilesRoute params={{}} client={client} />)

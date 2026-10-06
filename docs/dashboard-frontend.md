@@ -467,7 +467,8 @@ oversized responses remain read-only.
 
 The action label states the write target: base files show **Commit to
 <branch>…**, which opens a dialog saying the commit lands on that branch and
-is not pushed upstream, then creates one file commit; live-run files
+is not pushed upstream, then creates one file commit (a failed commit keeps
+the dialog open with the error); live-run files
 show **Save**, changing the run's uncommitted checkout; configuration files
 show **Save**, changing only the authenticated member's persistent home.
 Base writes require **Push**, run writes require **Steer**, and config reads or
