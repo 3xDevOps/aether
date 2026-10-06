@@ -21,7 +21,7 @@ const patch = [
   'index 111..222 100644',
   '--- a/cmd/main.go',
   '+++ b/cmd/main.go',
-  '@@ -1,3 +1,3 @@',
+  '@@ -10,3 +10,3 @@',
   ' package main',
   '-old line',
   '+new line',
@@ -51,6 +51,18 @@ const newFile = [
   '',
 ].join('\n')
 
+function added(path: string, lines: number): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    'new file mode 100644',
+    '--- /dev/null',
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${lines} @@`,
+    ...Array.from({ length: lines }, (_, i) => `+row ${i + 1}`),
+    '',
+  ].join('\n')
+}
+
 const active = run({ id: 'run_1' })
 const peerRun = run({ id: 'run_2', member_id: bob.id, task: 'the other run' })
 
@@ -62,80 +74,142 @@ function seed(diff?: Partial<RunDiffState>) {
     runs: { [active.id]: toRecord(active), [peerRun.id]: toRecord(peerRun) },
     diffs: diff ? { [active.id]: { ...initialDiff, ...diff } } : {},
     overlaps: {},
-    // A stored view preference, so each test starts with the toggle back on
-    // the pointer default rather than on whatever the last one chose.
     diffWrap: null,
     route: { name: 'run', params: { runId: active.id, view: 'changes' } },
     hydrated: true,
   })
 }
 
-/** A timeline entry the server recorded trees for. `snapshots` is newest
- * first, the order `noteDiffSnapshot` builds. */
-function snapshot(time: string, parentTree: string, tree: string): DiffSnapshot {
-  return {
-    time,
-    files: [{ path: 'notes.md', additions: 1, deletions: 1 }],
-    tree,
-    parentTree,
-  }
-}
+const ready = { status: 'ready', base: 'abcdef1234567890', patch, revision: 0, fetched: 0 } as const
 
+/** `snapshots` is newest first, the order `noteDiffSnapshot` builds. */
+function snapshot(time: string, parentTree: string, tree: string): DiffSnapshot {
+  return { time, files: [{ path: 'notes.md', additions: 1, deletions: 1 }], tree, parentTree }
+}
 
 function renderDiff() {
   return render(<ChangesView runID={active.id} />)
+}
+
+function openMenu(name: RegExp | string) {
+  fireEvent.pointerDown(screen.getByRole('button', { name }), { button: 0, ctrlKey: false })
+}
+
+function chooseInterval(name: RegExp) {
+  openMenu(/Current diff|What changed/)
+  fireEvent.click(screen.getByRole('menuitemradio', { name }))
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-// The parser is the whole of the client's diff support, so the shapes it has
-// to survive are worth pinning: a deletion, a new file, and a removed line
-// that looks exactly like a file marker.
-test('parses a unified diff into files, kinds and counts', () => {
+test('parses a unified diff into files, kinds, counts and line numbers', () => {
   const files = parsePatch(patch)
 
   expect(files.map((f) => f.path)).toEqual(['cmd/main.go', 'db/schema.sql', 'notes.md'])
   expect(files.map((f) => f.status)).toEqual(['modified', 'deleted', 'added'])
   expect(files[0]).toMatchObject({ additions: 1, deletions: 1 })
-  expect(files[0].lines).toContainEqual({ kind: 'context', text: 'package main' })
+  expect(files[0].lines).toEqual([
+    { kind: 'hunk', text: '@@ -10,3 +10,3 @@' },
+    { kind: 'context', text: 'package main', old: 10, new: 10 },
+    { kind: 'del', text: 'old line', old: 11 },
+    { kind: 'add', text: 'new line', new: 11 },
+  ])
   // "--- a comment..." is a removed SQL comment inside a hunk, not a header.
   expect(files[1].deletions).toBe(2)
-  expect(files[1].lines).toContainEqual({ kind: 'del', text: '-- a comment git did not write' })
+  expect(files[1].lines).toContainEqual({ kind: 'del', text: '-- a comment git did not write', old: 1 })
 })
 
-test('renders the complete fetched patch without a truncation notice', async () => {
+test('the strip sums the files and the patch shows line numbers', async () => {
   seed()
-  vi.mocked(api.runPatch).mockResolvedValue({
-    run_id: active.id,
-    base: 'abcdef1234567890',
-    patch,
-    truncated: false,
-  })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef1234567890', patch, truncated: false })
   renderDiff()
 
-  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
-  expect(screen.getByText('notes.md')).toBeTruthy()
-  expect(screen.getByText('+new line')).toBeTruthy()
-  expect(screen.getByText('abcdef12')).toBeTruthy()
-  expect(screen.queryByText(/too large to render in full/)).toBeNull()
+  const strip = await screen.findByRole('toolbar', { name: 'Changes' })
+  await waitFor(() => expect(strip.textContent).toContain('3 files'))
+  expect(strip.textContent).toContain('+2')
+  expect(strip.textContent).toContain('−3')
+  const main = screen.getByRole('region', { name: 'cmd/main.go' })
+  expect(within(main).getByText('+new line')).toBeTruthy()
+  const context = within(main).getByText((_, el) => el?.tagName === 'CODE' && el.textContent === ' package main').parentElement!
+  expect(context.textContent).toBe('1010 package main')
   expect(api.runPatch).toHaveBeenCalledWith(active.id)
 })
 
-// The event stream carries no patch text: a snapshot is a timeline entry and
-// the signal to fetch the patch again.
-test('a diff snapshot refetches the patch and joins the timeline', async () => {
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+test('deleted, binary and large files start collapsed; the chevron opens them', () => {
+  const binary = 'diff --git a/logo.png b/logo.png\nnew file mode 100644\nBinary files /dev/null and b/logo.png differ\n'
+  seed({ ...ready, patch: patch + binary + added('big.txt', 501) + added('small.txt', 499) })
+  renderDiff()
+
+  expect(screen.getByRole('button', { name: 'Collapse cmd/main.go' }).getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Expand db/schema.sql' }).getAttribute('aria-expanded')).toBe('false')
+  expect(screen.getByRole('button', { name: 'Expand logo.png' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Collapse small.txt' })).toBeTruthy()
+  const big = screen.getByRole('region', { name: 'big.txt' })
+  expect(big.textContent).toContain('501 lines')
+  expect(within(screen.getByRole('region', { name: 'db/schema.sql' })).queryByText('-CREATE TABLE t (id INT);')).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Expand db/schema.sql' }))
+  expect(screen.getByText('-CREATE TABLE t (id INT);')).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse cmd/main.go' }))
+  expect(screen.queryByText('+new line')).toBeNull()
+})
+
+test('expand all and collapse all come from the strip', () => {
+  seed(ready)
+  renderDiff()
+
+  openMenu('More')
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Expand all files' }))
+  expect(screen.getByText('-CREATE TABLE t (id INT);')).toBeTruthy()
+
+  openMenu('More')
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Collapse all files' }))
+  expect(screen.queryByText('+new line')).toBeNull()
+  expect(screen.queryByText('+hello')).toBeNull()
+})
+
+// jsdom lays nothing out, so the virtual list mounts only the rows it can
+// measure: far fewer than the file has.
+test('a file over 500 lines renders its hunks virtually once opened', () => {
+  seed({ ...ready, patch: added('big.txt', 600) + added('small.txt', 400) })
+  renderDiff()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Expand big.txt' }))
+  const big = screen.getByRole('region', { name: 'big.txt' })
+  expect(within(big).queryAllByText(/^\+row /).length).toBeLessThan(600)
+  const small = screen.getByRole('region', { name: 'small.txt' })
+  expect(within(small).getAllByText(/^\+row /)).toHaveLength(400)
+})
+
+test('a file path opens that file in Files on the run checkout', () => {
+  seed(ready)
+  useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
+  renderDiff()
+
+  fireEvent.click(screen.getByRole('button', { name: 'notes.md' }))
+
+  const { route, fileTabs, activeFileKey } = useStore.getState()
+  expect(route.name).toBe('files')
+  expect(fileTabs.at(-1)).toMatchObject({ kind: 'workspace', workspaceID: active.workspace_id, runID: active.id, path: 'notes.md' })
+  expect(activeFileKey).toBe(fileTabs.at(-1)!.key)
+  expect(screen.queryByRole('button', { name: 'db/schema.sql' })).toBeNull()
+})
+
+test('nothing changed is an empty state, not a blank pane', async () => {
+  seed({ ...ready, patch: '' })
+  renderDiff()
+  expect(screen.getByRole('heading', { name: 'No changes yet.' })).toBeTruthy()
+})
+
+test('a diff snapshot refetches the patch and joins the interval menu', async () => {
+  seed(ready)
   renderDiff()
   expect(api.runPatch).not.toHaveBeenCalled()
 
-  vi.mocked(api.runPatch).mockResolvedValue({
-    run_id: active.id,
-    base: 'abcdef12',
-    patch,
-    truncated: false,
-  })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef12', patch, truncated: false })
   act(() =>
     useStore.getState().noteDiffSnapshot(active.id, {
       time: new Date().toISOString(),
@@ -146,162 +220,86 @@ test('a diff snapshot refetches the patch and joins the timeline', async () => {
   )
 
   await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
-  expect(api.runPatch).toHaveBeenCalledWith(active.id)
-  const timeline = screen.getByRole('complementary')
-  expect(within(timeline).getByRole('button').textContent).toContain('1 file')
+  openMenu('Current diff')
+  expect(screen.getByRole('menuitemradio', { name: /What changed/ }).textContent).toContain('1 file')
+  expect(screen.getByRole('menuitemradio', { name: /Current diff/ }).textContent).toContain('Against abcdef12')
 })
 
-// The point of a per-snapshot tree: the tab asks for that one interval, not a
-// filter over the current diff.
-test('selecting a snapshot fetches its interval and shows only that change', async () => {
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
-  })
-  vi.mocked(api.runPatch).mockResolvedValue({
-    run_id: active.id,
-    base: 'tree1',
-    patch: newFile,
-    truncated: false,
-  })
+test('selecting an interval fetches that change alone; Current diff goes back without refetching', async () => {
+  seed({ ...ready, snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')] })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
   renderDiff()
 
-  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button'))
+  chooseInterval(/What changed/)
 
-  expect(await screen.findByText('newer.txt')).toBeTruthy()
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
   expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'tree0', to: 'tree1' })
-  // Only the interval's file, and the header no longer claims a fork-point
-  // diff. The fork point the run's base names is untouched.
-  expect(screen.queryByText('cmd/main.go')).toBeNull()
-  expect(screen.getByText(/What changed/)).toBeTruthy()
-  expect(useStore.getState().diffs[active.id].base).toBe('abcdef12')
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  expect(screen.getByRole('button', { name: /What changed/ })).toBeTruthy()
+  expect(useStore.getState().diffs[active.id].base).toBe('abcdef1234567890')
+
+  chooseInterval(/Current diff/)
+  expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
 })
 
-// A file edited twice shows its second change alone, which the old filter
-// over the cumulative diff could not do.
 test('a second snapshot of the same file shows only the second change', async () => {
-  const first = [
-    'diff --git a/notes.md b/notes.md',
-    '--- a/notes.md',
-    '+++ b/notes.md',
-    '@@ -1 +1 @@',
-    '-hello',
-    '+first edit',
-    '',
-  ].join('\n')
-  const second = [
-    'diff --git a/notes.md b/notes.md',
-    '--- a/notes.md',
-    '+++ b/notes.md',
-    '@@ -1 +1 @@',
-    '-first edit',
-    '+second edit',
-    '',
-  ].join('\n')
+  const edit = (from: string, to: string) =>
+    ['diff --git a/notes.md b/notes.md', '--- a/notes.md', '+++ b/notes.md', '@@ -1 +1 @@', `-${from}`, `+${to}`, ''].join('\n')
   seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [
-      snapshot('2026-08-14T10:04:00Z', 'tree1', 'tree2'),
-      snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1'),
-    ],
+    ...ready,
+    snapshots: [snapshot('2026-08-14T10:04:00Z', 'tree1', 'tree2'), snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
   })
   vi.mocked(api.runPatch).mockImplementation(async (_runID, range) => ({
     run_id: active.id,
     base: range?.from ?? 'abcdef12',
-    patch: range?.to === 'tree2' ? second : range ? first : patch,
+    patch: range?.to === 'tree2' ? edit('first edit', 'second edit') : edit('hello', 'first edit'),
     truncated: false,
   }))
   renderDiff()
 
-  // Newest first: the second snapshot is the first row.
-  const rows = within(screen.getByRole('complementary')).getAllByRole('button')
-  fireEvent.click(rows[0])
-
+  openMenu('Current diff')
+  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[0])
   expect(await screen.findByText('+second edit')).toBeTruthy()
   expect(screen.queryByText('+first edit')).toBeNull()
 
-  fireEvent.click(rows[1])
+  openMenu(/What changed/)
+  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[1])
   expect(await screen.findByText('+first edit')).toBeTruthy()
   expect(screen.queryByText('+second edit')).toBeNull()
 })
 
-// An interval patch answers for two tree ids and the cumulative patch is
-// already in the store, so going back to it asks the server for nothing.
-test('deselecting returns to the cumulative patch without refetching', async () => {
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
-  })
-  vi.mocked(api.runPatch).mockResolvedValue({
-    run_id: active.id,
-    base: 'tree1',
-    patch: newFile,
-    truncated: false,
-  })
+test('an interval that fails shows the server message and Refresh retries it', async () => {
+  seed({ ...ready, snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')] })
+  vi.mocked(api.runPatch).mockRejectedValue(new Error("run.patch: that snapshot's tree is no longer on disk"))
   renderDiff()
 
-  const row = within(screen.getByRole('complementary')).getByRole('button')
-  fireEvent.click(row)
-  expect(await screen.findByText('newer.txt')).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledTimes(1)
+  chooseInterval(/What changed/)
+  expect(await screen.findByText("run.patch: that snapshot's tree is no longer on disk")).toBeTruthy()
 
-  fireEvent.click(row)
-  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
-  expect(screen.getByText('abcdef12')).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledTimes(1)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree0', patch: newFile, truncated: false })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
 })
 
-// The server says why an interval cannot be shown - a tree it no longer has
-// on disk, say. That message is what the tab shows.
-test('an interval that fails shows the server message', async () => {
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
-  })
-  vi.mocked(api.runPatch).mockRejectedValue(
-    new Error("run.patch: that snapshot's tree is no longer on disk"),
-  )
+test('a snapshot without a tree is a disabled row that says why', () => {
+  seed({ ...ready, snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }] })
   renderDiff()
 
-  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button'))
-
-  expect(
-    await screen.findByText("run.patch: that snapshot's tree is no longer on disk"),
-  ).toBeTruthy()
-
-  // An interval that answered is immutable and never refetched, but a
-  // failure has to be retryable or it is the one thing on the tab no button
-  // can recover.
-  vi.mocked(api.runPatch).mockResolvedValue({
-    run_id: active.id,
-    base: 'tree0',
-    patch: newFile,
-    truncated: false,
-  })
-  fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
-
-  expect(await screen.findByText('newer.txt')).toBeTruthy()
+  openMenu('Current diff')
+  const row = screen.getByRole('menuitemradio', { name: /What changed/ })
+  expect(row.getAttribute('aria-disabled')).toBe('true')
+  expect(row.textContent).toContain('did not record a tree')
+  expect(api.runPatch).not.toHaveBeenCalled()
 })
 
-// The cache is keyed by two tree ids, so nothing invalidates an entry; a
-// long-lived run would grow one patch per interval it ever rendered unless
-// the trim that drops old snapshots drops their patches too.
+test('with no snapshots the interval menu says why it is empty', () => {
+  seed(ready)
+  renderDiff()
+  openMenu('Current diff')
+  expect(screen.getByText('No intervals since you opened the dashboard.')).toBeTruthy()
+})
+
 test('snapshots falling off the timeline take their cached intervals with them', () => {
   const snapshots = Array.from({ length: 40 }, (_, i) =>
     snapshot(`2026-08-14T10:${String(i).padStart(2, '0')}:00Z`, `tree${i}`, `tree${i + 1}`),
@@ -310,18 +308,10 @@ test('snapshots falling off the timeline take their cached intervals with them',
   seed({
     status: 'ready',
     snapshots,
-    intervals: {
-      [intervalKey(oldest.parentTree!, oldest.tree!)]: {
-        patch: newFile,
-        truncated: false,
-        status: 'ready',
-      },
-    },
+    intervals: { [intervalKey(oldest.parentTree!, oldest.tree!)]: { patch: newFile, truncated: false, status: 'ready' } },
   })
 
-  act(() =>
-    useStore.getState().noteDiffSnapshot(active.id, snapshot('2026-08-14T11:00:00Z', 'treeX', 'treeY')),
-  )
+  act(() => useStore.getState().noteDiffSnapshot(active.id, snapshot('2026-08-14T11:00:00Z', 'treeX', 'treeY')))
 
   const state = useStore.getState().diffs[active.id]
   expect(state.snapshots).toHaveLength(40)
@@ -329,72 +319,16 @@ test('snapshots falling off the timeline take their cached intervals with them',
   expect(state.intervals).toEqual({})
 })
 
-// A server that predates per-snapshot trees sends no tree, and there is no
-// honest way to show that interval - so the row says so instead of falling
-// back to a filter.
-test('a snapshot without a tree is not selectable', async () => {
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }],
-  })
-  renderDiff()
-
-  const row = within(screen.getByRole('complementary')).getByRole('button')
-  expect(row.getAttribute('aria-disabled')).toBe('true')
-  expect(await hintOn(row)).toContain('did not record a tree')
-
-  fireEvent.click(row)
-  expect(screen.getByText('cmd/main.go')).toBeTruthy()
-  expect(api.runPatch).not.toHaveBeenCalled()
-})
-
-// The row that does open has nothing to explain, so it must not open a
-// tooltip at all: an empty one still aims the button's `aria-describedby` at
-// an element that is not there, and still eats the first Escape.
-test('a snapshot that opens carries no hint and no dangling reference', async () => {
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
-  })
-  renderDiff()
-
-  const row = within(screen.getByRole('complementary')).getByRole('button')
-  expect(row.getAttribute('aria-disabled')).toBeNull()
-
-  fireEvent.keyDown(document.body, { key: 'Tab' })
-  act(() => row.focus())
-
-  expect(screen.queryByRole('tooltip')).toBeNull()
-  expect(row.getAttribute('aria-describedby')).toBeNull()
-})
-
-// A slow request must not swallow the snapshot that lands while it is in
-// flight: the answer is for the revision it was issued at, and anything newer
-// asks again. Otherwise the tab shows a diff missing the newest changes while
-// reporting itself fresh, and only Refresh recovers it.
+// The answer is for the revision the request was issued at; anything newer
+// asks again, or the view would show a stale diff as fresh.
 test('a snapshot arriving mid-fetch is answered by a second fetch', async () => {
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
+  seed(ready)
   let land: (p: RunPatch) => void = () => {}
   const inFlight = new Promise<RunPatch>((resolve) => {
     land = resolve
   })
-  const answer = (text: string): RunPatch => ({
-    run_id: active.id,
-    base: 'abcdef12',
-    patch: text,
-    truncated: false,
-  })
-  vi.mocked(api.runPatch)
-    .mockReturnValueOnce(inFlight)
-    .mockResolvedValue(answer(patch + newFile))
+  const answer = (text: string): RunPatch => ({ run_id: active.id, base: 'abcdef12', patch: text, truncated: false })
+  vi.mocked(api.runPatch).mockReturnValueOnce(inFlight).mockResolvedValue(answer(patch + newFile))
   renderDiff()
 
   act(() =>
@@ -404,9 +338,6 @@ test('a snapshot arriving mid-fetch is answered by a second fetch', async () => 
     }),
   )
   await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
-
-  // Mid-flight: the second snapshot neither cancels the request nor starts
-  // another one of its own.
   act(() =>
     useStore.getState().noteDiffSnapshot(active.id, {
       time: '2026-08-14T10:04:00Z',
@@ -421,139 +352,53 @@ test('a snapshot arriving mid-fetch is answered by a second fetch', async () => 
   })
 
   await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(2))
-  expect(await screen.findByText('newer.txt')).toBeTruthy()
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
   expect(useStore.getState().diffs[active.id].fetched).toBe(2)
 })
 
 test('a conflict chip names the file and the member and opens their run', async () => {
-  seed({ status: 'ready', patch })
-  useStore.setState({
-    overlaps: {
-      [active.id]: [{ run_id: peerRun.id, member_id: bob.id, files: ['cmd/main.go', 'go.mod'] }],
-    },
-  })
+  seed(ready)
+  useStore.setState({ overlaps: { [active.id]: [{ run_id: peerRun.id, member_id: bob.id, files: ['cmd/main.go', 'go.mod'] }] } })
   render(<ConflictChips run={useStore.getState().runs[active.id]} />)
 
   const chip = screen.getByRole('button', { name: /2 overlapping files with Bob/ })
   expect(chip.textContent).toContain('main.go')
-  expect(chip.textContent).toContain('Bob')
-
-  // The chip only has room for one basename; the hint lists every file.
   expect(await hintOn(chip)).toBe('cmd/main.go\ngo.mod\n\nalso being changed by Bob')
 
   fireEvent.click(chip)
-  expect(useStore.getState().route).toEqual({
-    name: 'run',
-    params: { runId: peerRun.id },
-  })
+  expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: peerRun.id } })
 })
 
-// A tooltip is a hint for a pointer. A finger cannot open one, so the fact it
-// carries - which files two runs are both changing - has to be on the page.
 test('a conflict chip writes its file list out on a coarse pointer', () => {
   atViewport(390, { pointer: 'coarse' })
-  seed({ status: 'ready', patch })
-  useStore.setState({
-    overlaps: {
-      [active.id]: [{ run_id: peerRun.id, member_id: bob.id, files: ['cmd/main.go', 'go.mod'] }],
-    },
-  })
+  seed(ready)
+  useStore.setState({ overlaps: { [active.id]: [{ run_id: peerRun.id, member_id: bob.id, files: ['cmd/main.go', 'go.mod'] }] } })
   render(<ConflictChips run={useStore.getState().runs[active.id]} />)
 
-  expect(
-    screen.getByText('cmd/main.go go.mod - also being changed by Bob'),
-  ).toBeTruthy()
+  expect(screen.getByText('cmd/main.go go.mod - also being changed by Bob')).toBeTruthy()
 })
 
-// The Diff tab hands an unknown run to the shared component rather than
-// rendering a dead end of its own.
 it('sends an unknown run to the shared missing-run view', () => {
   seed()
   useStore.setState({ hydrationError: null, streamDead: false })
-
   render(<ChangesView runID="run_missing" />)
-
   expect(screen.getByRole('button', { name: 'Back to board' })).toBeDefined()
 })
 
-// The list starts empty on every page load and fills as the run works, so an
-// empty one is the normal state. Beside the patch it says so, because nothing
-// else explains why there is nothing to pick; above the patch that notice is
-// two lines between the header and the first line of code.
-test('an empty timeline explains itself beside the patch and goes above it', async () => {
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
-  const { unmount } = renderDiff()
-
-  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
-  expect(screen.getByText('Change intervals')).toBeTruthy()
-  expect(screen.getByText('Nothing since you opened the dashboard.')).toBeTruthy()
-  unmount()
-
+test('a coarse pointer wraps long lines until the toggle says otherwise, and the choice persists', async () => {
   atViewport(390, { pointer: 'coarse' })
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
-  renderDiff()
+  seed(ready)
+  const first = renderDiff()
 
-  expect(await screen.findByText('cmd/main.go')).toBeTruthy()
-  expect(screen.queryByText(/Change intervals/)).toBeNull()
-})
-
-test('below md the timeline is a disclosure that starts closed', async () => {
-  const resize = atViewport(390, { pointer: 'coarse' })
-  seed({
-    status: 'ready',
-    base: 'abcdef12',
-    patch,
-    revision: 0,
-    fetched: 0,
-    snapshots: [snapshot('2026-01-01T00:00:00Z', 'aaa', 'bbb')],
-  })
-  renderDiff()
-
-  const trigger = await screen.findByRole('button', { name: /Change intervals/ })
-  expect(screen.queryByRole('button', { name: /file/ })).toBeNull()
-
-  fireEvent.click(trigger)
-  expect(await screen.findByRole('button', { name: /1 file/ })).toBeTruthy()
-
-  // Beside the patch there is room for the list, so it is a list again.
-  resize(1200)
-  await waitFor(() =>
-    expect(screen.queryByRole('button', { name: /Change intervals/ })).toBeNull(),
-  )
-  expect(screen.getByText('Change intervals')).toBeTruthy()
-})
-
-// A phone cannot side-scroll each file section separately, so the pointer
-// picks the starting side of the trade and the member keeps the choice.
-test('a coarse pointer wraps long lines until the toggle says otherwise', async () => {
-  atViewport(390, { pointer: 'coarse' })
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
-  renderDiff()
-
-  const line = await screen.findByText('+new line')
   const toggle = screen.getByRole('button', { name: 'Wrap lines' })
   expect(toggle.getAttribute('aria-pressed')).toBe('true')
-  expect(line.className).toContain('whitespace-pre-wrap')
+  expect(screen.getByText('+new line').className).toContain('whitespace-pre-wrap')
 
   fireEvent.click(toggle)
   await waitFor(() => expect(toggle.getAttribute('aria-pressed')).toBe('false'))
-  expect(screen.getByText('+new line').className).toContain('whitespace-pre')
   expect(screen.getByText('+new line').className).not.toContain('whitespace-pre-wrap')
-})
-
-// Only one run-detail route is mounted at a time, so a toggle kept in the
-// view's own state would go back to the pointer default every time the member
-// tapped Terminal and came back - several times a minute on a phone.
-test('the wrap choice outlives the tab it was made in', async () => {
-  atViewport(390, { pointer: 'coarse' })
-  seed({ status: 'ready', base: 'abcdef12', patch, revision: 0, fetched: 0 })
-  const first = renderDiff()
-
-  fireEvent.click(await screen.findByRole('button', { name: 'Wrap lines' }))
-  await waitFor(() => expect(useStore.getState().diffWrap).toBe(false))
   first.unmount()
 
   renderDiff()
-  const toggle = await screen.findByRole('button', { name: 'Wrap lines' })
-  expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  expect(screen.getByRole('button', { name: 'Wrap lines' }).getAttribute('aria-pressed')).toBe('false')
 })

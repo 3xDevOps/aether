@@ -67,19 +67,18 @@ test('a phone protects a run from More and reads its changes', async ({
   const refresh = page.getByRole('button', { name: 'Refresh', exact: true })
   await expect(async () => {
     await refresh.tap()
-    await expect(page.getByText('result.txt')).toBeVisible({ timeout: 2000 })
+    await expect(page.getByRole('region', { name: 'result.txt' })).toBeVisible({ timeout: 2000 })
   }).toPass({ timeout: 60 * 1000 })
 
-  // Nothing stands between the header and the first line of the patch: with
-  // no snapshots there is no interval list below `md`.
-  await expect(page.getByText('result.txt')).toBeInViewport()
+  // Nothing stands between the strip and the first file: the file list and
+  // the intervals are menus in the strip on a phone.
+  await expect(page.getByRole('region', { name: 'result.txt' })).toBeInViewport()
   await expect(page.getByText('+hello-from-agent')).toBeVisible()
 
-  // The page itself can never scroll sideways - the patch column is
-  // `overflow-x-hidden` and each file section clips - so wrapping is only
-  // observable on the scroller inside the file section. The fixture commits
-  // one line far wider than the viewport for this.
-  const scroller = page.locator('section:has-text("result.txt") pre').locator('..')
+  // The page itself can never scroll sideways, so wrapping is only observable
+  // on the scroller inside the file section. The fixture commits one line far
+  // wider than the viewport for this.
+  const scroller = page.getByRole('region', { name: 'result.txt' }).locator('[data-slot=patch-lines]').locator('..')
   expect(await overflowOf(scroller)).toBe(0)
 
   await page.getByRole('button', { name: 'Wrap lines' }).tap()

@@ -98,12 +98,12 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
   }
   try {
     await page.getByRole('tab', { name: 'Changes', exact: true }).click()
-    await page.getByText('Native changes & publish', { exact: true }).click()
+    await page.getByRole('button', { name: 'Publish…', exact: true }).click()
     await page.getByRole('checkbox', { name: `Select ${file}`, exact: true }).check()
     await page.getByRole('button', { name: 'Review selected paths' }).click()
     await expect(page.getByRole('region', { name: `Untracked contents: ${file}` })).toContainText('reviewed remote change')
     await page.getByLabel('Commit message', { exact: true }).fill('Verify remote-only GitHub workflow')
-    await page.getByRole('button', { name: 'Commit selected paths' }).click()
+    await page.getByRole('button', { name: 'Commit selected' }).click()
     await expect(page.getByRole('region', { name: 'Commit outcome' })).toContainText('Committed: yes')
     const committed = await exec('docker', ['exec', '-w', '/workspace', container, 'git', 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'])
     expect(committed.stdout.trim()).toBe(file)
@@ -111,8 +111,11 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     expect(staged.stdout.trim()).toBe(unrelatedFile)
     evidence.selectedCommitPaths = committed.stdout.trim()
     evidence.preservedStagedPath = staged.stdout.trim()
-    await page.getByRole('combobox', { name: 'Push remote', exact: true }).selectOption('origin')
-    await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).selectOption(`https://github.com/${headRepository}.git`)
+    await page.getByRole('tab', { name: '2 · Push and pull request' }).click()
+    await page.getByRole('combobox', { name: 'Push remote', exact: true }).click()
+    await page.getByRole('option', { name: 'origin', exact: true }).click()
+    await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).click()
+    await page.getByRole('option', { name: `https://github.com/${headRepository}.git`, exact: true }).click()
     await page.getByLabel('Push head branch', { exact: true }).fill(headBranch)
     await page.getByRole('checkbox', { name: 'I reviewed the run account, branch, HEAD and exact push destination above.' }).check()
     await page.getByRole('button', { name: 'Push reviewed branch' }).click()
@@ -238,7 +241,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     // Remove only this disposable member's local credential. Never revoke
     // the user's token; finally uses a process-scoped token for cleanup.
     rmSync(credentialPath, { force: true })
-    await page.getByRole('button', { name: 'Refresh native status' }).click()
+    await page.getByRole('button', { name: 'Refresh status' }).click()
     await selectPR(headBranch)
     await expect(pr.getByRole('alert')).toBeVisible()
     await expect(pr.getByRole('button', { name: 'Create reviewed PR' })).toBeDisabled()
