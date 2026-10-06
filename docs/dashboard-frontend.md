@@ -2384,8 +2384,9 @@ count, and neither creates a second action inbox.
   answer carries the log head - and opens a window back from it. After that
   the feed is live without reading: while a feed view is mounted
   (`useLiveFeed`), `applyEvent` appends each event the filters select by the
-  server reader's own rule (workspace, run, actor, type; `run.diff`,
-  `run.title` and `run.agent` only when asked for by type), skipping a
+  server reader's own rule (workspace, run or mail to it, actor, type;
+  `run.diff`, `run.title`, `run.agent` and `coord.message.acked` only when
+  asked for by type), skipping a
   sequence already held. The cursor follows only while the window is whole -
   no read in flight, failed or cut short - and a view reads from the cursor
   again when the stream reconnects. A failed or cut-short read is retried on

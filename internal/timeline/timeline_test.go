@@ -66,13 +66,14 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 		filter Filter
 		want   []string
 	}{
-		"recipient run":    {Filter{Run: "run-integrator"}, []string{"integrator-up", "report", "overlap", "ack"}},
+		"recipient run":    {Filter{Run: "run-integrator"}, []string{"integrator-up", "report", "overlap"}},
 		"sender run":       {Filter{Run: "run-bystander"}, []string{"bystander-up", "overlap"}},
-		"mission":          {Filter{MissionID: "mission-1"}, []string{"integrator-up", "worker-up", "report", "overlap", "ack"}},
+		"mission":          {Filter{MissionID: "mission-1"}, []string{"integrator-up", "worker-up", "report", "overlap"}},
 		"run in mission":   {Filter{MissionID: "mission-1", Run: "run-worker"}, []string{"worker-up", "report"}},
 		"run outside":      {Filter{MissionID: "mission-1", Run: "run-bystander"}, nil},
 		"unknown mission":  {Filter{MissionID: "mission-2"}, nil},
 		"typed agent mail": {Filter{MissionID: "mission-1", Types: []events.Type{events.TypeCoordMessage}}, []string{"report", "overlap"}},
+		"typed acks":       {Filter{Run: "run-integrator", Types: []events.Type{events.TypeCoordMessageAcked}}, []string{"ack"}},
 	} {
 		if got := ids(tc.filter); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: events = %v, want %v", name, got, tc.want)

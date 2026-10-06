@@ -112,7 +112,7 @@ export const createTimelineSlice: SliceCreator<TimelineSlice> = (set, get) => ({
 })
 
 /** Per-run firehoses the server's reader leaves out unless asked for by type. */
-const detailTypes = new Set(['run.diff', 'run.title', 'run.agent'])
+const detailTypes = new Set(['run.diff', 'run.title', 'run.agent', 'coord.message.acked'])
 
 function mailTo(event: Event, runID: string): boolean {
   return event.type === 'coord.message' && (event.payload as CoordMessagePayload | undefined)?.to_run_id === runID

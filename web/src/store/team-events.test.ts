@@ -266,7 +266,15 @@ describe('team state from events', () => {
     store.getState().appendLiveEvent(mail(1, 'run_1'))
     store.getState().appendLiveEvent(mail(2, 'run_other'))
     store.getState().appendLiveEvent(event(3, 'run.status', { to: 'running' }, { run_id: 'run_worker' }))
+    store.getState().appendLiveEvent(
+      event(4, 'coord.message.acked', { message_id: 'msg_1', to_run_id: 'run_1', acked_at: '2026-08-14T11:00:00Z' }),
+    )
     expect(store.getState().feed.map((e) => e.seq)).toEqual([1])
+    store.getState().setFeedFilters({ type: 'coord.message.acked' })
+    store.getState().appendLiveEvent(
+      event(5, 'coord.message.acked', { message_id: 'msg_2', to_run_id: 'run_1', acked_at: '2026-08-14T11:00:00Z' }),
+    )
+    expect(store.getState().feed.map((e) => e.seq)).toEqual([1, 5])
     release()
   })
 })
