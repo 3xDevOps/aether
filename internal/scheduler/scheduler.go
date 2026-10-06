@@ -310,6 +310,7 @@ type supervised struct {
 	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
 	agentSessionID string
+	sessionMu      sync.Mutex
 	agentExec      *runtime.ExecIdentity
 	// switching is the mode a mode switch is moving the run to, empty when
 	// none is in flight. The switch holds lifecycleMu throughout.

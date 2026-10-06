@@ -528,3 +528,51 @@ func TestReportedSessionIsRecordedForStandardRunsOnly(t *testing.T) {
 		t.Fatalf("a hook replaced the enhanced session: %q", row.HarnessSessionID)
 	}
 }
+
+// heldSessionStore holds the write of session held until release closes.
+type heldSessionStore struct {
+	store.Store
+	held    string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *heldSessionStore) SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error {
+	if session == s.held {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Store.SetRunAgentSession(ctx, id, session)
+}
+
+func TestReportedSessionsReachTheRowInReportOrder(t *testing.T) {
+	t.Parallel()
+	held := &heldSessionStore{held: "s1", entered: make(chan struct{}), release: make(chan struct{})}
+	e := newSwitchEnv(t, func(cfg *Config) { held.Store = cfg.Store; cfg.Store = held })
+	run := e.launch(t, "t", domain.LaunchTUI)
+	report := func(session string) chan error {
+		done := make(chan error, 1)
+		go func() {
+			done <- e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: session})
+		}()
+		return done
+	}
+
+	first := report("s1")
+	<-held.entered
+	second := report("s2")
+	waitFor(t, "the second report", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID].agentSessionID == "s2"
+	})
+	close(held.release)
+	for _, done := range []chan error{first, second} {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if row, _ := e.db.GetRun(t.Context(), run.ID); row.HarnessSessionID != "s2" {
+		t.Fatalf("harness_session_id %q, want the later report's s2", row.HarnessSessionID)
+	}
+}
