@@ -705,6 +705,8 @@ export const api = {
     call<unknown>('member.remove', { member_id: memberID }),
   memberColor: (color: string) =>
     call<{ member: Member }>('member.color', { color }).then((r) => r.member),
+  memberRename: (displayName: string) =>
+    call<{ member: Member }>('member.rename', { display_name: displayName }).then((r) => r.member),
   /** An empty name or email clears that half back to the fallback. */
   memberGit: (name: string, email: string) =>
     call<{ member: Member }>('member.git', { name, email }).then((r) => r.member),

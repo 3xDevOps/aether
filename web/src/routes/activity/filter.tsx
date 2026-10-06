@@ -25,6 +25,7 @@ const filterTypes: EventType[] = [
   'run.protected',
   'sync.conflict',
   'server.update',
+  'member.changed',
 ]
 
 export const agentMessages = '@messages'

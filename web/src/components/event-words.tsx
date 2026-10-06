@@ -30,6 +30,12 @@ export function Who({ id, fallback = 'Someone', object = false }: { id: unknown;
   return name ?? fallback
 }
 
+function MemberRenamed({ member, actor, name }: { member: unknown; actor: unknown; name: unknown }) {
+  const self = useStore((s) => s.info?.member.id)
+  const whom = text(member) === text(actor) ? 'themselves' : text(member) === self ? 'you' : 'a teammate'
+  return <><Who id={actor} /> renamed {whom}{text(name) && <> to <Quote>{bounded(name, 80)}</Quote></>}</>
+}
+
 function MissionName({ id }: { id: unknown }) {
   const objective = useStore((s) => s.missions[text(id)]?.objective)
   return objective ? `“${objective.split('\n')[0]}”` : 'a swarm'
@@ -255,7 +261,8 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     </span>
   ),
   'coord.message.acked': () => 'An agent read its message',
-  'mission.changed': (p) => <>Swarm <MissionName id={p.mission_id} /> updated</>,
+  'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
+  'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
   'profile.change': (p, e) => <><Who id={p.member ?? e.actor_id} /> {profileWords[text(p.action)] ?? 'changed'} the {text(p.harness) || 'agent'} profile</>,
 }
 

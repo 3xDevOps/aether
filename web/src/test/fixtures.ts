@@ -629,6 +629,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberApprove: vi.fn(async () => bob),
     memberRemove: vi.fn(async () => ({})),
     memberColor: vi.fn(async () => alice),
+    memberRename: vi.fn(async (display_name: string) => ({ ...alice, display_name })),
     memberGit: vi.fn(async (name: string, email: string) => ({
       ...alice,
       git_name: name,

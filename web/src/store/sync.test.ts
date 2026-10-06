@@ -1407,6 +1407,32 @@ describe('applyEvent', () => {
     expect(store.getState().missionListWorkspace).toBe(workspace.id)
   })
 
+  it('drops a deleted mission and leaves its page without re-reading it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [mission()] })) }))
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const client = fakeApi()
+    await applyEvent(store, statusEvent({ run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1', deleted: true } }), client)
+
+    expect(store.getState().missions.mission_1).toBeUndefined()
+    expect(store.getState().route).toEqual({ name: 'missions', params: {} })
+    expect(client.missionShow).not.toHaveBeenCalled()
+  })
+
+  it('reads a renamed member back, including the viewer', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const self = store.getState().info!.member
+    const renamed = { ...self, display_name: 'Renamed' }
+    const client = fakeApi({ memberList: vi.fn(async () => [renamed, bob]) })
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'member.changed', actor_id: self.id, payload: { member_id: self.id, display_name: 'Renamed' },
+    }), client)
+
+    expect(store.getState().members[self.id].display_name).toBe('Renamed')
+    expect(store.getState().info?.member.display_name).toBe('Renamed')
+  })
+
   it('follows a server update and never moves it backwards', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -26,7 +27,14 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
   if (!self) return null
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent
+        className="sm:max-w-xl"
+        onOpenAutoFocus={(event) => {
+          // The display name field comes first; focusing it would raise a phone's keyboard on open.
+          event.preventDefault()
+          ;(event.currentTarget as HTMLElement).focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Profile</DialogTitle>
           <DialogDescription className="flex items-center gap-2">
@@ -36,6 +44,7 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-6">
+          {caps.hasMethod('member.rename') && <DisplayNameForm client={client} current={self.display_name} />}
           {caps.hasMethod('member.color') && <ColorPicker client={client} current={color ?? ''} />}
           {caps.hasMethod('member.git') && (
             <section aria-label="Git identity" className="flex min-w-0 flex-col gap-2">
@@ -47,6 +56,56 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function DisplayNameForm({ client, current }: { client: Api; current: string }) {
+  const setMembers = useStore((s) => s.setMembers)
+  const [name, setName] = useState(current)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const member = await client.memberRename(name)
+      const s = useStore.getState()
+      if (s.info) s.setInfo({ ...s.info, member: { ...s.info.member, display_name: member.display_name } })
+      setName(member.display_name)
+      setMembers(await client.memberList())
+      toast.success('Display name saved')
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form
+      aria-label="Display name"
+      className="flex min-w-0 flex-col gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <SectionLabel as="h3">Display name</SectionLabel>
+      <p className="text-ui-sm text-muted">Shown to teammates on your avatar, runs and messages.</p>
+      <div className="flex min-w-0 items-center gap-2">
+        <Input
+          aria-label="Display name"
+          className="min-w-0 flex-1"
+          value={name}
+          maxLength={64}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Button type="submit" size="sm" variant="secondary" disabled={busy || !name.trim() || name.trim() === current}>
+          Save
+        </Button>
+      </div>
+      {error && <Callout tone="failed" role="alert">{error}</Callout>}
+    </form>
   )
 }
 

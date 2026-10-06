@@ -299,7 +299,7 @@ export async function applyEvent(
       .catch(ignore)
   }
 
-  // No member.* event exists; without this a new teammate renders as a raw ID.
+  // A new teammate has no event of their own; without this they render as a raw ID.
   if (ev.actor_id && !store.getState().members[ev.actor_id]) {
     await client.memberList().then(store.getState().setMembers).catch(ignore)
   }
@@ -378,6 +378,15 @@ export async function applyEvent(
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break
+    case 'member.changed': {
+      const p = ev.payload as { member_id: string; display_name: string }
+      await client.memberList().then(store.getState().setMembers).catch(ignore)
+      const info = store.getState().info
+      if (info && info.member.id === p.member_id) {
+        store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })
+      }
+      break
+    }
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {

@@ -31,6 +31,28 @@ describe('profile dialog', () => {
     await waitFor(() => expect(client.memberColor).toHaveBeenCalledWith('#3cb44b'))
   })
 
+  it('renames you, updates the header and roster, and keeps a refusal inline', async () => {
+    const renamed = { ...alice, display_name: 'Alicia' }
+    const client = fakeApi({
+      memberRename: vi.fn().mockRejectedValueOnce(new Error('member.rename: display_name is longer than 64 characters')).mockResolvedValue(renamed),
+      memberList: vi.fn(async () => [renamed, bob]),
+    })
+    seed()
+    render(<ProfileDialog open onOpenChange={() => {}} client={client} />)
+    const form = within(screen.getByRole('form', { name: 'Display name' }))
+    const save = form.getByRole('button', { name: 'Save' })
+    expect(save.hasAttribute('disabled')).toBe(true)
+    fireEvent.change(form.getByLabelText('Display name'), { target: { value: '  Alicia ' } })
+    fireEvent.click(save)
+    expect((await form.findByRole('alert')).textContent).toBe('member.rename: display_name is longer than 64 characters')
+    fireEvent.click(save)
+    await waitFor(() => expect(useStore.getState().info?.member.display_name).toBe('Alicia'))
+    expect(client.memberRename).toHaveBeenLastCalledWith('  Alicia ')
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alicia')
+    expect(within(screen.getByRole('dialog', { name: 'Profile' })).getByText('Alicia')).toBeDefined()
+    expect(form.queryByRole('alert')).toBeNull()
+  })
+
   it('edits the git identity your agents commit as', () => {
     seed()
     render(<ProfileDialog open onOpenChange={() => {}} client={fakeApi()} />)

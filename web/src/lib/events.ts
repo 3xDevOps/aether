@@ -28,6 +28,7 @@ export const eventLabel = {
   'coord.message': 'Agent message sent',
   'coord.message.acked': 'Agent message read',
   'mission.changed': 'Swarm changes',
+  'member.changed': 'Member renames',
   'profile.change': 'Agent profiles',
 } satisfies Record<string, string>
 
