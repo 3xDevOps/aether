@@ -303,10 +303,14 @@ AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
 # Install the dashboard driver's Chromium once; it is separate from the companion.
 (cd web && bunx playwright install chromium)
 
-# Real dashboard interaction through the built gateway/server.
-AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \
-AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
-AETHER_BROWSER_IMAGE=aether/browser:test make test-e2e
+# Real dashboard interaction through the built gateway/server, as root like the
+# installed service: an unprivileged server leaves run checkouts owned by your
+# uid, and Git in the root standard image refuses them as "dubious ownership".
+sudo env "PATH=$PATH" "HOME=$HOME" \
+  "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
+  AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \
+  AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+  AETHER_BROWSER_IMAGE=aether/browser:test make test-e2e
 ```
 
 `make browser-smoke BROWSER_IMAGE=<reference>` exercises another exact image.
