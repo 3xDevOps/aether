@@ -9,7 +9,7 @@ import { message } from '@/lib/format'
 import { githubLoginCommand, typedLoginCommand } from '@/lib/github'
 import type { GitHubConnectResult, GitHubProbeResult } from '@/lib/types'
 import { TerminalDock } from '@/routes/environment/terminal-dock'
-import { pane } from '@/routes/onboarding/steps'
+import { pane } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
@@ -25,23 +25,12 @@ export function GitHubSection({
   onOpen: () => void
 }) {
   return (
-    <section
-      aria-label="Connect GitHub"
-      className="min-w-0 space-y-3 border-t border-border/70 py-3"
-    >
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold">Connect GitHub</h3>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Runs push branches and open pull requests from the server as you.
-          Commits are signed with a key kept in your environment home, which
-          never leaves the server.
-        </p>
-      </div>
-      {connection && (
-        <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
-          Connected in this session as {connection.login}
-        </p>
-      )}
+    <section aria-label="Connect GitHub" className="flex min-w-0 flex-col items-start gap-2">
+      <p className="text-ui text-text">
+        Runs push branches and open pull requests from the server as you. Commits are signed with a key kept in your
+        environment, which never leaves the server.
+      </p>
+      {connection && <p role="status" className="text-ui text-state-done">Connected in this session as {connection.login}</p>}
       <Button size="sm" variant="secondary" onClick={onOpen}>
         Connect GitHub
       </Button>

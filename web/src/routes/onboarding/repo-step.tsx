@@ -15,7 +15,7 @@ import type { LinkStatus, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useSelfRole, type Capability } from '@/store/hooks'
 import type { OnboardingRepo } from '@/store/ui'
-import { actionRow, pane } from '@/routes/onboarding/steps'
+import { actionRow, pane } from '@/routes/onboarding/layout'
 
 /** Accepts every platform's shape: gating on this platform could refuse the
  * path the shell's folder dialog returned, and git reports a foreign one. */
@@ -43,6 +43,7 @@ export function RepoStep({
   caps,
   workspace,
   back,
+  cancel,
   onNext,
   mirrored = false,
   sourcePending = true,
@@ -51,6 +52,8 @@ export function RepoStep({
   caps: Capability
   workspace: Workspace | null
   back?: ReactNode
+  /** Closes the link form; `back` sits with Continue once a clone is linked. */
+  cancel?: ReactNode
   onNext: () => void
   mirrored?: boolean
   sourcePending?: boolean
@@ -284,34 +287,21 @@ export function RepoStep({
   }
 
   if (!caps.hasLocal('link.repo')) {
-    return <section aria-label="Local repository" className="space-y-3 border-t py-3 text-sm">
-      <h3 className="font-semibold">Link from the computer holding your clone</h3>
+    return <section aria-label="Local repository" className="flex flex-col gap-3 text-ui">
+      <h4 className="font-medium">Link from the computer holding your clone</h4>
       <p>This hosted gateway cannot read your filesystem or use your SSH identity. Open the desktop app or run <code>aether gui</code> on that computer, connected to this server, then open this workspace's repository settings.</p>
-      <p className="text-xs text-muted-foreground">Replace <code>&lt;server-address-or-id&gt;</code> with this server's SSH address (including its SSH port) or server ID from your administrator, not this page's HTTP address. This hosted gateway does not expose that connection target. Replace the absolute clone path below.</p>
-      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
-      {workspace && <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace ${shellQuote(workspace.id)}${canWrite && !mirrored && !sourcePending ? ` &&\ngit -C /absolute/path/to/clone push -u aether ${shellQuote(branch)}` : `\n${mirrored ? '# The mirrored base is server-owned; do not push it.' : '# Base pushes require write access and confirmed local-only ownership.'}`}`}</pre>}
+      <p className="text-ui-sm text-muted">Replace <code>&lt;server-address-or-id&gt;</code> with this server's SSH address (including its SSH port) or server ID from your administrator, not this page's HTTP address. This hosted gateway does not expose that connection target. Replace the absolute clone path below.</p>
+      {sourcePending && <p className="text-ui text-muted">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
+      {workspace && <pre className="overflow-auto whitespace-pre-wrap break-words bg-chrome p-3 text-ui-sm">{`aether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace ${shellQuote(workspace.id)}${canWrite && !mirrored && !sourcePending ? ` &&\ngit -C /absolute/path/to/clone push -u aether ${shellQuote(branch)}` : `\n${mirrored ? '# The mirrored base is server-owned; do not push it.' : '# Base pushes require write access and confirmed local-only ownership.'}`}`}</pre>}
       {back}
     </section>
   }
 
   return (
-    <section
-      aria-label="Repository"
-      className="min-w-0 space-y-4 border-b border-border/70 py-4"
-    >
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">Connect your local repository</h2>
-        <p className="text-sm leading-6 text-muted-foreground">
-          The gateway adds an <span className="font-mono">aether</span> git
-          remote to a clone on the gateway's computer for <strong>{workspace?.name}</strong>, base <code>{branch}</code>.{' '}
-          {canPush
-            ? 'Aether can then push your base branch for you. The history stays yours.'
-            : 'Linking does not publish to the upstream or grant credentials.'}
-        </p>
-      </div>
-      {mirrored && <p className="text-sm text-muted-foreground">This workspace has a server-owned source. Link the clone to pull run branches; {role === 'admin' ? 'use Source control to verify or adopt the base instead of pushing it.' : 'ask an administrator to verify or adopt the base in Source control instead of pushing it.'}</p>}
-      {sourcePending && <p className="text-sm text-muted-foreground">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
-      {remembered && !connected && <p className="text-sm text-muted-foreground">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
+    <section aria-label="Local repository" className="flex min-w-0 flex-col gap-3 self-stretch">
+      {mirrored && <p className="text-ui text-muted">This workspace has a server-owned source. Link the clone to pull run branches; {role === 'admin' ? 'use Source control to verify or adopt the base instead of pushing it.' : 'ask an administrator to verify or adopt the base in Source control instead of pushing it.'}</p>}
+      {sourcePending && <p className="text-ui text-muted">Source ownership is unconfirmed. You can link the clone, but base pushes are unavailable until local-only ownership is confirmed.</p>}
+      {remembered && !connected && <p className="text-ui text-muted">The saved connection is not confirmed as this gateway's current clone. Link the intended repository again. Each server profile keeps one current clone, not one per workspace.</p>}
       {!connected && (
         <>
           <form
@@ -362,45 +352,45 @@ export function RepoStep({
               >
                 Add remote
               </Button>
-              {back}
+              {cancel}
             </div>
           </form>
           {repo.trim() !== '' && !absolute && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-ui text-muted">
               The path must be absolute.
             </p>
           )}
           {error && (
-            <p className="border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" aria-live="polite">
+            <p className="rounded-panel bg-state-failed-soft px-3 py-2 text-ui text-state-failed" aria-live="polite">
               {error}
             </p>
           )}
         </>
       )}
       {connected && (
-        <div className="min-w-0 space-y-4 border-t border-border/70 py-3">
-          <p className="text-sm">
-            Connected <span className="break-all font-mono">{connected.path}</span>.
-            Remote <span className="break-all font-mono">{connected.remote.remote}</span>{' '}
+        <div className="flex min-w-0 flex-col items-start gap-3">
+          <p className="text-ui">
+            Connected <span className="break-all font-code">{connected.path}</span>.
+            Remote <span className="break-all font-code">{connected.remote.remote}</span>{' '}
             points at{' '}
-            <span className="break-all font-mono">{connected.remote.url}</span>.{' '}
+            <span className="break-all font-code">{connected.remote.url}</span>.{' '}
             {connected.remote.origin && (
               <>
                 Runs push to{' '}
-                <span className="break-all font-mono">{connected.remote.origin}</span>.{' '}
+                <span className="break-all font-code">{connected.remote.origin}</span>.{' '}
               </>
             )}
             {pushed?.state === 'pushed' && (
               <>
-                Pushed <span className="font-mono">{pushed.branch}</span> to{' '}
-                <span className="font-mono">{pushed.remote}</span>.
+                Pushed <span className="font-code">{pushed.branch}</span> to{' '}
+                <span className="font-code">{pushed.remote}</span>.
               </>
             )}
             {pushed?.state === 'up-to-date' && (
               <>
                 Workspace already has{' '}
-                <span className="font-mono">{pushed.branch}</span> at{' '}
-                <span className="font-mono">
+                <span className="font-code">{pushed.branch}</span> at{' '}
+                <span className="font-code">
                   {short(pushed.workspace_commit)}
                 </span>
                 . Nothing to push.
@@ -409,20 +399,20 @@ export function RepoStep({
             {!pushed && !mirrored && !sourcePending && canWrite && (
               <>
                 Seed the workspace with{' '}
-                <span className="font-mono">{branch}</span>:
+                <span className="font-code">{branch}</span>:
               </>
             )}
           </p>
           {pushed?.state === 'behind' && !forwarded && caps.hasLocal('repo.fast-forward') && (
-            <div className="space-y-3 border-l-2 border-state-waiting/60 bg-state-waiting/5 px-3 py-2" aria-live="polite">
-              <p className="text-sm">
+            <div className="flex flex-col gap-2 rounded-panel bg-state-needs-you-soft px-3 py-2" aria-live="polite">
+              <p className="text-ui">
                 The workspace is {commits(pushed.behind)} ahead of your clone.
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-ui-sm text-muted">
                 Your clone{' '}
-                <span className="font-mono">{short(pushed.local_commit)}</span>{' '}
+                <span className="font-code">{short(pushed.local_commit)}</span>{' '}
                 - workspace{' '}
-                <span className="font-mono">
+                <span className="font-code">
                   {short(pushed.workspace_commit)}
                 </span>
                 .
@@ -436,38 +426,38 @@ export function RepoStep({
               </Button>
               {forwardError && (
                 <div className="space-y-1">
-                  <p className="text-xs text-state-failed">
+                  <p className="text-ui-sm text-state-failed">
                     The fast-forward failed:
                   </p>
-                  <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 ${pane}`}>
+                  <pre className={`rounded-panel bg-state-failed-soft px-3 py-2 ${pane}`}>
                     {forwardError}
                   </pre>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
+              <p className="text-ui-sm text-muted">
                 Fast-forward only. Your history is never merged or rewritten.
               </p>
             </div>
           )}
           {pushed?.state === 'diverged' && !mirrored && !sourcePending && canWrite && (
-            <div className="space-y-3 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/5 px-3 py-2" aria-live="polite">
-              <p className="text-sm">
+            <div className="flex flex-col gap-2 rounded-panel bg-state-needs-you-soft px-3 py-2" aria-live="polite">
+              <p className="text-ui">
                 Your clone and the workspace have both moved on:{' '}
                 {commits(pushed.ahead)} here, {pushed.behind} there. Aether
                 never force-pushes.
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-ui-sm text-muted">
                 Your clone{' '}
-                <span className="font-mono">{short(pushed.local_commit)}</span>{' '}
+                <span className="font-code">{short(pushed.local_commit)}</span>{' '}
                 - workspace{' '}
-                <span className="font-mono">
+                <span className="font-code">
                   {short(pushed.workspace_commit)}
                 </span>
                 .
               </p>
-              <p className="text-sm">Resolve it by hand, then push again:</p>
+              <p className="text-ui">Resolve it by hand, then push again:</p>
               <div className="flex min-w-0 items-start gap-2">
-                <pre className={`min-w-0 flex-1 border border-border/70 bg-background ${pane}`}>
+                <pre className={`min-w-0 flex-1 border border-seam bg-canvas ${pane}`}>
                   {resolveCmds}
                 </pre>
                 <Button
@@ -482,18 +472,18 @@ export function RepoStep({
             </div>
           )}
           {forwarded && (
-            <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done" aria-live="polite">
+            <p className="rounded-panel bg-state-done-soft px-3 py-2 text-ui text-state-done" aria-live="polite">
               {forwarded.current ? (
                 <>
                   Fast-forwarded{' '}
-                  <span className="font-mono">{forwarded.branch}</span> to{' '}
-                  <span className="font-mono">{short(forwarded.commit)}</span>.
+                  <span className="font-code">{forwarded.branch}</span> to{' '}
+                  <span className="font-code">{short(forwarded.commit)}</span>.
                 </>
               ) : (
                 <>
-                  Updated <span className="font-mono">{forwarded.branch}</span>{' '}
+                  Updated <span className="font-code">{forwarded.branch}</span>{' '}
                   to{' '}
-                  <span className="font-mono">{short(forwarded.commit)}</span>.
+                  <span className="font-code">{short(forwarded.commit)}</span>.
                   Another branch is checked out, so the fast-forward left your
                   working tree alone.
                 </>
@@ -504,8 +494,8 @@ export function RepoStep({
           )}
           {settled ? (
             // Open by default: whoever needs git's distinction would not look for it.
-            <Collapsible defaultOpen className="min-w-0 border-t border-border/70">
-              <CollapsibleTrigger className="px-3 py-2 text-sm">
+            <Collapsible defaultOpen className="min-w-0 self-stretch">
+              <CollapsibleTrigger>
                 What git did
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -525,10 +515,10 @@ export function RepoStep({
                 </Button>
                 {pushError && (
                   <div className="space-y-1">
-                    <p className="text-xs text-state-failed">
+                    <p className="text-ui-sm text-state-failed">
                       The push failed. Git said:
                     </p>
-                    <pre className={`border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 ${pane}`}>
+                    <pre className={`rounded-panel bg-state-failed-soft px-3 py-2 ${pane}`}>
                       {pushError}
                     </pre>
                   </div>
@@ -539,16 +529,16 @@ export function RepoStep({
           {manual && (
             <>
               {canPush && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-ui-sm text-muted">
                   {settled ? 'The same push, by hand:' : 'or run it yourself:'}
                 </p>
               )}
-              <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="grid min-w-0 gap-2 self-stretch sm:grid-cols-[minmax(0,1fr)_auto]">
                 <Input
                   ref={cmdRef}
                   readOnly
                   aria-label="Push command"
-                  className="min-w-0 font-mono"
+                  className="min-w-0 font-code"
                   value={pushCmd}
                   onFocus={(e) => e.target.select()}
                 />
@@ -562,15 +552,14 @@ export function RepoStep({
               </div>
             </>
           )}
-          <div className={actionRow}>
+          <div className={`${actionRow} self-stretch`}>
             <Button
-              size="sm"
               variant={canPush && !settled ? 'secondary' : 'primary'}
               onClick={onNext}
             >
               Continue
             </Button>
-            <Button size="sm" variant="secondary" onClick={repoint}>
+            <Button variant="secondary" onClick={repoint}>
               Use a different repository
             </Button>
             {back}

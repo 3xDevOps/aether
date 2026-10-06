@@ -1,9 +1,13 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
+import { Code, CodeBlock } from '@/components/ui/code'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type Api } from '@/lib/api'
 import { shellQuote } from '@/lib/shell'
 import type { Workspace, WorkspaceMirrorResult } from '@/lib/types'
+import { actionRow } from '@/routes/onboarding/layout'
 import { RepoStep } from '@/routes/onboarding/repo-step'
 import { OnboardingSourceOption } from '@/routes/onboarding/source-option'
 import { useStore } from '@/store'
@@ -36,32 +40,47 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
   const onStatusChange = useCallback((status: WorkspaceMirrorResult) => {
     if (scope.current.generation === generation) setOwnership({ generation, status })
   }, [generation])
-  // Reset only source requests and dialogs. RepoStep retains its connection
-  // guards; remounting it here would issue a new old-client link.status read.
 
-  return <section aria-label="Workspace repository" className="space-y-4 py-4">
-    <div className="space-y-1">
-      <h2 className="text-base font-semibold">Repository for {workspace.name}</h2>
-      <p className="text-sm text-muted-foreground">Workspace <code>{workspace.id}</code> · base branch <code>{workspace.base_branch}</code>. Runs need this branch on the server, not just an empty workspace.</p>
-    </div>
-    {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-sm text-muted-foreground">Source ownership cannot be checked because this gateway does not offer source status. Linking remains available, but base pushes are unavailable until local-only ownership is confirmed. An administrator manages remote sources and candidate adoption in Source control; ask them to verify the source and accepted base before launching.</p>}
-    <div className="space-y-2 border-t pt-3">
-      <h3 className="text-sm font-semibold">Local clone</h3>
-      <p className="text-xs leading-5 text-muted-foreground">Link or relink a clone to this workspace. Linking changes its aether remote, not its origin or history. A mirrored base stays server-owned.</p>
+  const notReady = source?.enabled === true && (source.status !== 'ready' || !source.accepted_commit)
+
+  return <section aria-label="Workspace repository" className="flex min-w-0 flex-col gap-4">
+    {notReady && (
+      <Callout tone="needs-you" title={`The server's copy is ${source.status ?? 'pending'}`}>
+        {source.last_error || 'Runs start once it is verified and adopted. Open Advanced to review it.'}
+      </Callout>
+    )}
+    <div className="flex flex-col items-start gap-2">
+      <h3 className="text-ui font-medium text-text">Local clone</h3>
+      <p className="text-ui-sm text-muted">
+        {source?.enabled
+          ? 'Link a clone on this computer to pull run branches. The base branch stays server-owned.'
+          : <>Link a clone on this computer and Aether pushes <Code>{workspace.base_branch}</Code> for you. Linking adds an <Code>aether</Code> remote; your history and origin stay as they are.</>}
+      </p>
       {!local && <Button size="sm" variant="secondary" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
-      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={<>{back}<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Back to repository choices</Button></>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
+      {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={back} cancel={<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Cancel</Button>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
     </div>
-    <div className="space-y-2 border-t pt-3 text-sm">
-      <h3 className="font-semibold">Checkout Origin</h3>
-      <p className="break-all font-mono text-xs">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>
-      <p className="text-xs text-muted-foreground">Origin is the upstream URL for new run checkouts, not the read-only mirror source. To change it deliberately, run this on your linked computer with the intended URL:</p>
-      <pre className="overflow-auto whitespace-pre-wrap break-words bg-muted p-3 text-xs">{`aether workspace origin --workspace ${shellQuote(workspace.id)} https://your-git-host/your-team/your-repository.git`}</pre>
+    <div className="border-t border-seam pt-1">
+      <Collapsible>
+        <CollapsibleTrigger>
+          <span className="font-medium">Advanced</span>
+          <span className="min-w-0 truncate text-muted">Server-fetched source, checkout origin, deploy keys</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent forceMount className="flex flex-col gap-4 pt-2 pl-5 data-[state=closed]:hidden">
+          {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source in Source control before launching.</p>}
+          <div className="flex flex-col gap-1.5">
+            <h4 className="text-ui font-medium text-text">Checkout origin</h4>
+            <p className="break-all font-code text-ui-sm">{workspace.origin || 'Not configured; new run checkouts have no publishing remote.'}</p>
+            <p className="text-ui-sm text-muted">The upstream URL a run checkout publishes to, not the read-only source. To change it, run this on your linked computer with the intended URL:</p>
+            <CodeBlock className="whitespace-pre-wrap break-words">{`aether workspace origin --workspace ${shellQuote(workspace.id)} https://your-git-host/your-team/your-repository.git`}</CodeBlock>
+          </div>
+          <p className="text-ui-sm text-muted">A read-only deploy key only lets the server fetch. To publish branches or pull requests, set up your own Git or gh credentials in your environment and get upstream permission.</p>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
-    {!local && <div className="flex flex-wrap gap-2 border-t pt-3">
-      {onNext && <Button size="sm" onClick={onNext}>Continue to agents</Button>}
+    {!local && (onNext || back) && <div className={actionRow}>
+      {onNext && <Button onClick={onNext}>Continue</Button>}
       {back}
     </div>}
-    <p className="text-xs leading-5 text-muted-foreground">A read-only deploy key only lets the server fetch. To publish branches or pull requests, configure your own native Git/gh credentials in your environment terminal and obtain upstream permission. Agent vendor login and Git author identity are separate.</p>
   </section>
 }
 
@@ -73,7 +92,7 @@ export function WorkspaceRepositoryDialog({ workspace, client = api, onClose, in
 }) {
   const caps = useCapability()
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-    <DialogContent className="grid-cols-1 max-h-[calc(100dvh-2rem)] max-w-[min(800px,calc(100%-2rem))] overflow-y-auto">
+    <DialogContent className="grid-cols-1 max-w-[min(800px,calc(100%-2rem))] overflow-y-auto">
       <DialogHeader><DialogTitle>Workspace repository</DialogTitle><DialogDescription>{workspace.name} · source and local clone settings</DialogDescription></DialogHeader>
       <WorkspaceRepository key={workspace.id} client={client} caps={caps} workspace={workspace} initialLocal={initialLocal} />
       <Button size="sm" variant="secondary" onClick={onClose}>Close repository settings</Button>

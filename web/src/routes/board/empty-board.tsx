@@ -36,7 +36,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentsState; hidd
     return (
       <EmptyState
         title="No workspace yet"
-        action={<Button onClick={() => onboard('Workspace')}>Add your repository</Button>}
+        action={<Button onClick={() => onboard('Repository')}>Add your repository</Button>}
       >
         A workspace is a repository and the base branch every run starts from.
       </EmptyState>

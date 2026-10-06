@@ -34,14 +34,7 @@ export interface OnboardingRepo {
 
 /** The resume point is persisted by name, not position, so inserting a step
  * never relocates someone mid-wizard. */
-export const onboardingSteps = [
-  'Link',
-  'Git identity',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-] as const
+export const onboardingSteps = ['Connect', 'Repository', 'Agent', 'First run'] as const
 
 export type OnboardingStep = (typeof onboardingSteps)[number]
 
@@ -54,8 +47,8 @@ const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }
 
 /** What leaving the wizard clears: the walk, not the member's preferences. */
 const wizardReset = {
-  onboardingStep: 'Link',
-  onboardingFurthest: 'Link',
+  onboardingStep: 'Connect',
+  onboardingFurthest: 'Connect',
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
@@ -146,6 +139,7 @@ export interface UiSlice {
   setActiveWorkspace: (workspaceID: string) => void
   setMineOnly: (mineOnly: boolean) => void
   rememberLaunch: (agent: string, mode: LaunchMode) => void
+  setLaunchDefault: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
@@ -164,8 +158,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   singleKeyShortcuts: true,
   diffWrap: null,
   onboarded: false,
-  onboardingStep: 'Link',
-  onboardingFurthest: 'Link',
+  onboardingStep: 'Connect',
+  onboardingFurthest: 'Connect',
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
@@ -220,6 +214,9 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setMineOnly: (mineOnly) => set({ mineOnly }),
   rememberLaunch: (agent, mode) =>
     set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: Date.now() } } })),
+  // Keeps `at`, which ranks the agent the launch dialog preselects.
+  setLaunchDefault: (agent, mode) =>
+    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: s.launchDefaults[agent]?.at ?? 0 } } })),
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },

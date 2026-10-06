@@ -153,7 +153,7 @@ export function WorkspaceView({ params }: RouteProps) {
           <Button size="sm" variant="secondary" onClick={() => {
             const state = useStore.getState()
             state.setOnboardingWorkspace(workspace.id)
-            state.setOnboardingStep('Agents')
+            state.setOnboardingStep('Agent')
             state.navigate('onboarding')
           }}>Set up agents / first run</Button>
         </div>

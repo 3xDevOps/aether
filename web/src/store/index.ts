@@ -33,13 +33,17 @@ import {
  * Versions up to 2 persisted the onboarding resume point as an index into the
  * step list before "Git identity" was inserted at position two.
  */
-const v0OnboardingSteps: OnboardingStep[] = [
-  'Link',
-  'Workspace',
-  'Repository',
-  'Agents',
-  'First run',
-]
+const v0OnboardingSteps = ['Link', 'Workspace', 'Repository', 'Agents', 'First run']
+
+/** Before 8 the wizard had six steps; each maps to the step that absorbed it. */
+const v7OnboardingSteps: Record<string, OnboardingStep> = {
+  Link: 'Connect',
+  'Git identity': 'Connect',
+  Workspace: 'Repository',
+  Repository: 'Repository',
+  Agents: 'Agent',
+  'First run': 'First run',
+}
 
 export type RootState = ServerSlice &
   WorkspacesSlice &
@@ -113,12 +117,13 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 7,
+        version: 8,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
         // stands in, or the header would turn every later step inert. Before 6
-        // the stored width sized the old run pane, not the sidebar.
+        // the stored width sized the old run pane, not the sidebar. Before 8
+        // the step names are the six-step wizard's.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -129,10 +134,10 @@ export function createRootStore() {
             // name type and the compiler stops checking this conversion.
             const step = (persisted as { onboardingStep?: unknown } | null)
               ?.onboardingStep
-            state.onboardingStep =
+            ;(state as { onboardingStep?: string }).onboardingStep =
               typeof step === 'number' && v0OnboardingSteps[step]
                 ? v0OnboardingSteps[step]
-                : onboardingSteps[0]
+                : 'Link'
           }
           if (version < 4 && state.onboardingStep) {
             state.onboardingFurthest = state.onboardingStep
@@ -143,6 +148,11 @@ export function createRootStore() {
           if (version < 7) {
             delete (state as { boardView?: unknown }).boardView
             delete (state as { boardMapViewports?: unknown }).boardMapViewports
+          }
+          if (version < 8) {
+            const walk = state as { onboardingStep?: string; onboardingFurthest?: string }
+            state.onboardingStep = v7OnboardingSteps[walk.onboardingStep ?? ''] ?? onboardingSteps[0]
+            state.onboardingFurthest = v7OnboardingSteps[walk.onboardingFurthest ?? ''] ?? state.onboardingStep
           }
           return state
         },

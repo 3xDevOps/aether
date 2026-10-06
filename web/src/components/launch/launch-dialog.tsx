@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AgentPicker, customAgent, launchable, RefusalNotes } from '@/components/launch/agent-picker'
+import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
-import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
+import { modeRefusal } from '@/components/launch/modes'
+import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -30,17 +31,6 @@ function idempotencyKey(): string {
 // and resending the same contents under the same key replays it.
 const swarmKeys = new Map<string, string>()
 
-function preselect(list: AgentInfo[]): string {
-  const { launchDefaults, runs } = useStore.getState()
-  const ok = list.filter(launchable)
-  const remembered = ok.filter((agent) => launchDefaults[agent.name]).sort((a, b) => launchDefaults[b.name].at - launchDefaults[a.name].at)[0]
-  if (remembered) return remembered.name
-  const recent = Object.values(runs)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .find((run) => ok.some((agent) => agent.name === run.harness))
-  return recent?.harness ?? ok[0]?.name ?? ''
-}
-
 export function LaunchDialog() {
   const workspaceID = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
@@ -60,10 +50,8 @@ export function LaunchDialog() {
   })
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
-  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
-  const [agentError, setAgentError] = useState<string | null>(null)
-  const [harness, setHarness] = useState('')
-  const [mode, setMode] = useState<LaunchMode>('tui')
+  const choice = useAgentChoice({ account, ownAccountID })
+  const { agents, agentError, harness, mode, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
@@ -74,14 +62,10 @@ export function LaunchDialog() {
   const [launching, setLaunching] = useState(false)
 
   const errorCallout = useRef<HTMLDivElement>(null)
-  const choice = useRef({ harness, mode })
-  choice.current = { harness, mode }
-  const agent = agents?.find((item) => item.name === harness)
   const sharedAccount = account !== '' && account !== ownAccountID
   const accountName = accounts.find((member) => member.id === account)?.display_name ?? account
   const accountField = kind === 'swarm' ? 'Integrator account' : 'Account'
-  const needsTask = kind === 'run' && mode === 'headless' && task.trim() === ''
-  const noAgents = agents !== null && agentError === null && !agents.some((item) => item.installed)
+  const taskMissing = kind === 'run' && needsTask(mode, task)
   // Availability can drop while open; stay on Swarm and say why rather than
   // switching under the reader.
   const swarmUnavailable = kind !== 'swarm' || swarmAvailable
@@ -91,13 +75,6 @@ export function LaunchDialog() {
       : !allowed('launch', identity)
         ? 'Swarm launch is unavailable: your role cannot launch.'
         : 'Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Run to launch a run.'
-
-  const chooseAgent = (name: string, list: AgentInfo[]) => {
-    setError(null)
-    setHarness(name)
-    const info = list.find((item) => item.name === name)
-    setMode(initialMode(info, name, useStore.getState().launchDefaults[name]?.mode))
-  }
 
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
@@ -112,25 +89,6 @@ export function LaunchDialog() {
     }).catch(() => {})
     return () => { live = false }
   }, [])
-
-  useEffect(() => {
-    let live = true
-    setAgents(null)
-    setAgentError(null)
-    api.agentList(account && account !== ownAccountID ? account : undefined).then((list) => {
-      if (!live) return
-      setAgents(list)
-      const current = choice.current
-      const keep = current.harness === customAgent || list.some((item) => item.name === current.harness && launchable(item))
-      if (!keep) chooseAgent(preselect(list), list)
-      else if (modeRefusal(list.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
-    }).catch((err) => {
-      if (!live) return
-      setAgents([])
-      setAgentError(message(err))
-    })
-    return () => { live = false }
-  }, [account, ownAccountID])
 
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return
@@ -223,14 +181,14 @@ export function LaunchDialog() {
     }
   }
 
-  const picker = agents === null
+  const integratorPicker = agents === null
     ? <p className="text-ui-sm text-muted">Loading agents…</p>
     : (
         <AgentPicker
-          label={kind === 'swarm' ? 'Integrator agent' : 'Agent'}
+          label="Integrator agent"
           agents={agents}
           value={harness}
-          onChange={(name) => chooseAgent(name, agents)}
+          onChange={(name) => { setError(null); choice.choose(name) }}
           onSetUp={noAgents ? undefined : setUp}
           disabled={launching}
         />
@@ -280,25 +238,14 @@ export function LaunchDialog() {
             onSubmit={(event) => { event.preventDefault(); void submit() }}
           >
             <TabsContent value="run" className="flex flex-col gap-4">
-              <FormField
-                label="Task"
-                help={mode === 'headless'
-                  ? 'Required. A Background run starts with this task and takes no input.'
-                  : 'Optional. Leave it blank to open the agent with no prompt.'}
-              >
-                <Textarea autoFocus required={mode === 'headless'} rows={3} placeholder="What should the agent do?" value={task} onChange={(event) => setTask(event.target.value)} />
-              </FormField>
-              {picker}
-              {harness && (
-                <ModeControl label="Mode" value={mode} onChange={(next) => { setMode(next); setError(null) }} refused={refusals(agent, harness)} onSetUp={setUp} />
-              )}
+              <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
               <FormField label="Objective" help="Required. The integrator asks you clarifying questions only if it needs answers, then runs the swarm to completion.">
                 <Textarea autoFocus required rows={3} placeholder="What outcome should the integrator coordinate?" value={objective} onChange={(event) => setObjective(event.target.value)} />
               </FormField>
-              {picker}
+              {integratorPicker}
               <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} />
               <ModeControl
                 label="Worker mode"
@@ -322,7 +269,7 @@ export function LaunchDialog() {
             type="submit"
             form="launch-form"
             aria-describedby={swarmUnavailable ? 'launch-swarm-unavailable' : undefined}
-            disabled={launching || !workspaceID || !account || !harness || needsTask || swarmUnavailable !== null || (kind === 'swarm' && objective.trim() === '')}
+            disabled={launching || !workspaceID || !account || !harness || taskMissing || swarmUnavailable !== null || (kind === 'swarm' && objective.trim() === '')}
           >
             {kind === 'swarm' ? 'Create swarm' : 'Launch'}
           </Button>
