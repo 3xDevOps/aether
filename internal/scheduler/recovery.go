@@ -213,7 +213,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
-		_ = s.driver(entry.acp).Stop(context.WithoutCancel(ctx), run)
+		_ = s.entryDriver(entry).Stop(context.WithoutCancel(ctx), run)
 		mustPause := resumed || !paused
 		var pauseErr error
 		if mustPause {
@@ -327,7 +327,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, rollback(err)
 	}
-	if startSessionErr := s.driver(entry.acp).Resume(ctx, entry, att); startSessionErr != nil {
+	if startSessionErr := s.entryDriver(entry).Resume(ctx, entry, att); startSessionErr != nil {
 		_ = att.Close()
 		return nil, rollback(startSessionErr)
 	}
@@ -1352,7 +1352,7 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 }
 
 func (s *Scheduler) resumeRecoveredAgent(ctx context.Context, entry *supervised, att runtime.Attachment) error {
-	driver := s.driver(entry.acp)
+	driver := s.entryDriver(entry)
 	backoff := recoveryPTYRetryInitial
 	for {
 		if err := ctx.Err(); err != nil {

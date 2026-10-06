@@ -463,15 +463,19 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	d.setRun(entry.runID, &acpRun{err: err})
 	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
-	if entry.launchMode == domain.LaunchHeadless {
+	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)
 		return
 	}
 	go d.report(entry.runID, idle)
 }
 
-// switchNotice records a mode switch in the item log of a run with no live
-// session.
+func (d *acpDriver) oneShot(entry *supervised) bool {
+	d.s.mu.Lock()
+	defer d.s.mu.Unlock()
+	return entry.launchMode == domain.LaunchHeadless
+}
+
 func (d *acpDriver) switchNotice(run domain.RunID, severity, title, description string) {
 	defer d.lockOp(run)()
 	d.notice(run, severity, title, description)
@@ -526,7 +530,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	}
 	d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
-	if entry.launchMode == domain.LaunchHeadless {
+	if d.oneShot(entry) {
 		d.endOneShot(entry, false, idle)
 		return
 	}

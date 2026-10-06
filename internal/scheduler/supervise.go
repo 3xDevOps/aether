@@ -267,7 +267,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		if settleErr := s.settleRetainedCompletion(ctx, entry); settleErr != nil {
 			slog.Warn("scheduler: settle completed worker retention", "run", entry.runID, "error", settleErr)
 		}
-		_ = s.driver(entry.acp).Stop(ctx, entry.runID)
+		_ = s.entryDriver(entry).Stop(ctx, entry.runID)
 		s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
 		return
 	}
@@ -291,7 +291,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// Keep the recording available through the capture above. A process that
 	// exits has already stopped producing PTY bytes, so stopping the session
 	// now cannot change the captured transcript.
-	if err := s.driver(entry.acp).Stop(ctx, entry.runID); err != nil {
+	if err := s.entryDriver(entry).Stop(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
 	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
@@ -537,13 +537,13 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	for _, e := range entries {
 		s.mu.Lock()
 		live := s.runs[e.runID] == e
-		paused, status, started := e.paused, e.status, e.startedAt
+		paused, status, started, acp := e.paused, e.status, e.startedAt, e.acp
 		s.mu.Unlock()
 		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
 			continue
 		}
 		activity, observed := started, false
-		if t := s.driver(e.acp).LastActivity(e.runID); t.After(activity) {
+		if t := s.driver(acp).LastActivity(e.runID); t.After(activity) {
 			activity, observed = t, true
 		}
 		if t, ok := s.cfg.Git.LastFileChange(e.runID); ok && t.After(activity) {
