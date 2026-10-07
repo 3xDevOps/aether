@@ -134,11 +134,12 @@ type Conn struct {
 	resolved map[string]bool
 }
 
-// agentInput records a failed write: the agent takes no more input, though
-// its output may not have ended yet. It also reports when a turn's
-// session/prompt is on the wire.
+// agentInput ends the connection on a failed write: the agent takes no more
+// input, and its output may stay open long after. It also reports when a
+// turn's session/prompt is on the wire.
 type agentInput struct {
 	io.WriteCloser
+	output *io.PipeWriter
 	broken atomic.Bool
 
 	mu     sync.Mutex
@@ -149,6 +150,7 @@ func (in *agentInput) Write(p []byte) (int, error) {
 	n, err := in.WriteCloser.Write(p)
 	if err != nil {
 		in.broken.Store(true)
+		_ = in.output.Close()
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -188,8 +190,13 @@ func (in *agentInput) promptUnsent() <-chan struct{} {
 }
 
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
+	outR, outW := io.Pipe()
+	go func() {
+		_, err := io.Copy(outW, r)
+		_ = outW.CloseWithError(err)
+	}()
 	c := &Conn{
-		w:          &agentInput{WriteCloser: w},
+		w:          &agentInput{WriteCloser: w, output: outW},
 		logger:     logger,
 		events:     events,
 		inboundSet: make(chan struct{}),
@@ -200,7 +207,7 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 	c.sessionID.Store("")
 	c.touch()
 	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
-	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, r))
+	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, outR))
 	c.rpc.SetLogger(logger)
 	return c
 }
@@ -210,7 +217,7 @@ func (c *Conn) touch() { c.lastActivity.Store(time.Now().UnixNano()) }
 // LastActivity is when the agent last sent anything.
 func (c *Conn) LastActivity() time.Time { return time.Unix(0, c.lastActivity.Load()) }
 
-// Done is closed when the agent's output ends.
+// Done is closed when the agent's output ends or a write to its input fails.
 func (c *Conn) Done() <-chan struct{} { return c.rpc.Done() }
 
 // delivered returns once the connection has ended and every notification

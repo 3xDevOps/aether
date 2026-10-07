@@ -3,6 +3,7 @@ package acphost
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +114,60 @@ func TestQueuedPromptReportsABrokenAgentInputAsClosed(t *testing.T) {
 	close(release)
 	if err := lost.next(t); !errors.Is(err, ErrClosed) {
 		t.Fatalf("lost prompt: %v", err)
+	}
+}
+
+func TestBrokenAgentInputSettlesTheQueueWhileItsOutputStaysOpen(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	release := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+		<-release
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	path := filepath.Join(t.TempDir(), "run.items.jsonl")
+	s, _ := startMock(t, m, Config{LogPath: path})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	sent, waiting := make(deliveries, 1), make(deliveries, 1)
+	for _, p := range []struct {
+		text   string
+		report deliveries
+	}{{"second", sent}, {"third", waiting}} {
+		if r, err := s.Prompt(context.Background(), textPrompt(p.text), false, p.report.report); err != nil || r.Outcome != OutcomeQueued {
+			t.Fatalf("%s: %+v %v", p.text, r, err)
+		}
+	}
+	_ = m.stdin.Close()
+	close(release)
+	for _, d := range []deliveries{sent, waiting} {
+		select {
+		case err := <-d:
+			if !errors.Is(err, ErrClosed) {
+				t.Fatalf("lost prompt: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a queued prompt waited for the agent's output to close")
+		}
+	}
+	<-s.Done()
+	log, err := OpenLogReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = log.Close() }()
+	its, err := log.ReadAfter(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notice bool
+	for _, it := range its {
+		if it.Kind == KindNotice && strings.HasPrefix(it.Notice.Title, "Message not delivered") && it.Notice.Description == "third" {
+			notice = true
+		}
+	}
+	if !notice {
+		t.Fatal("no Message not delivered notice for the third prompt")
 	}
 }

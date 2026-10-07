@@ -195,7 +195,8 @@ and the dashboard reads **Queued** on it. When its turn starts and the agent
 accepts it, `agent_delivery` becomes `delivered` and the dashboard reads
 **Sent**. If the agent refuses it, the message becomes `not_sent` with
 `failure.code: "agent_refused"` and the agent's error. If the agent
-connection closes before the agent accepts it, the message becomes
+connection closes before the agent accepts it, including a failed write to
+the agent's stdin while its output is still open, the message becomes
 `not_sent` with `failure.code: "agent_disconnected"` and the transcript
 records a `Message not delivered: agent connection closed` notice with its
 text; it is not resent when the session resumes. Each change publishes a
