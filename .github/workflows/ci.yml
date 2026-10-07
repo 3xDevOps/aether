@@ -529,7 +529,9 @@ jobs:
       # cache that restored nothing usable then costs a download, never the
       # suite.
       - name: Install the browser
-        run: bunx playwright install --with-deps chromium
+        run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
+          bunx playwright install --with-deps chromium
         working-directory: web
       - uses: actions/download-artifact@v4
         with:
@@ -611,7 +613,10 @@ jobs:
           restore-keys: |
             npm-${{ runner.os }}-${{ runner.environment }}-
       - name: Install desktop validation tools
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils
+        run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y desktop-file-utils
       - name: Build the CLI
         run: mkdir -p web/dist && go build -o "$HOME/.local/bin/aether" ./cmd/aether
       - name: aether gui build
