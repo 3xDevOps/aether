@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
+import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
 import { WindowBar } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
@@ -64,6 +65,7 @@ export function App() {
   return (
     <>
       <ThemeEffect />
+      <LaunchSplash />
       {/* Frameless desktop window: its bar stays outside the error branch so
           an offline user can still move or close the window. */}
       <div className="flex min-w-0 h-full flex-col">

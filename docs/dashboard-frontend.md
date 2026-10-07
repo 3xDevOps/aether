@@ -444,6 +444,26 @@ caller can say what went wrong. It is optional on the type for the same
 reason `shellVersion` exists: a shell built by an older `aether gui build`
 does not have it.
 
+### Launch splash
+
+`App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
+startup. It intentionally preserves the original animated night sky, logo
+and pixel wordmark, not the workbench's visual language
+([Styles](styles.md#run-state-and-motion)).
+
+The splash requires `window.aetherDesktop` and plays once per shell session,
+recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
+reloads in the same shell session and `prefers-reduced-motion: reduce` skip
+it. A reduced-motion launch still marks the session. If storage cannot be
+read, the splash is skipped; a failed write never prevents startup. The
+session is marked in an effect rather than during rendering so React
+StrictMode does not suppress its own first launch.
+
+It stays for at least 600ms, then fades when hydration succeeds or fails.
+A hung connection starts the fade at 2500ms even without a result. The fade
+lasts 260ms, releases pointer input as it begins and unmounts the splash at
+its end, exposing the shell or the raw connection error and window controls.
+
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
