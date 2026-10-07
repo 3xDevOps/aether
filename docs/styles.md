@@ -186,6 +186,13 @@ Use compact workbench geometry rather than landing-page ornament:
   name, owner avatar, `+a −d`, the `card:meta` slot). A Needs you reason reads
   in the text colour, the others in `muted`, never with a second dot or a
   **New** pill. See [Dashboard SPA: Board](dashboard-frontend.md#board).
+- Board's **Map** reuses those cards at 320×160 inside a bounded pan/zoom
+  canvas. Owner groups use `bg-chrome` and `border-seam`, cards `bg-canvas`;
+  identity colour stays on the shared avatars. Muted directed connectors
+  link integrators to workers, dashed across owners. The Runs toolbar wraps
+  its scope, Mine, archive and camera controls on phones. Fixed geometry
+  accommodates the larger text settings and coarse-pointer card actions;
+  live presentation updates do not move nodes or reset the camera.
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main

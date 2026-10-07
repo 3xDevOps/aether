@@ -3,10 +3,12 @@ import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ViewHeader } from '@/components/view-header'
 import { clearDonePlan, releaseFinishedPlan } from '@/lib/commands'
 import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
+import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
@@ -18,6 +20,8 @@ import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hoo
 export function Board() {
   const { columns, archivedCards, hiddenByMine } = useBoard()
   const activeWorkspace = useStore((s) => s.activeWorkspace)
+  const view = useStore((s) => s.boardViews[s.activeWorkspace] ?? 'board')
+  const setView = useStore((s) => s.setBoardView)
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -43,7 +47,9 @@ export function Board() {
   const finished = showArchived ? { ...column('finished'), cards: archivedCards } : column('finished')
 
   let body: ReactNode
-  if (unreachable && total === 0) {
+  if (view === 'map') {
+    body = <BoardMap agentNames={agentNames} />
+  } else if (unreachable && total === 0) {
     body = (
       <div className="p-4">
         <Callout role="alert" tone="failed" title="Cannot reach the server">
@@ -61,12 +67,6 @@ export function Board() {
     body = (
       <div
         className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
-        onFocus={(event) => setFocusedCard(event.target.closest('[data-run-id]'))}
-        onBlur={(event) => {
-          if (!(event.relatedTarget instanceof Element && event.currentTarget.contains(event.relatedTarget))) {
-            setFocusedCard(null)
-          }
-        }}
       >
         <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
@@ -86,16 +86,33 @@ export function Board() {
             />
           }
         />
-        {focusedCard && <CardKeys card={focusedCard} />}
       </div>
     )
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
-      <ViewHeader title="Board" />
-      {body}
-    </div>
+    <Tabs value={view} onValueChange={(value) => setView(activeWorkspace, value === 'map' ? 'map' : 'board')} asChild>
+      <div className="flex h-full min-w-0 flex-col">
+        <ViewHeader title="Board" titleAdornment={
+          <TabsList look="segmented" aria-label="Board view">
+            <TabsTrigger value="board">Board</TabsTrigger>
+            <TabsTrigger value="map">Map</TabsTrigger>
+          </TabsList>
+        } />
+        <TabsContent
+          key={view}
+          value={view}
+          className="flex min-w-0 flex-1 flex-col"
+          onFocus={(event) => setFocusedCard(event.target.closest('[data-run-id]'))}
+          onBlur={(event) => {
+            if (!(event.relatedTarget instanceof Element && event.currentTarget.contains(event.relatedTarget))) setFocusedCard(null)
+          }}
+        >
+          {body}
+          {focusedCard?.isConnected && <CardKeys card={focusedCard} />}
+        </TabsContent>
+      </div>
+    </Tabs>
   )
 }
 

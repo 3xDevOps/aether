@@ -21,7 +21,11 @@ const phaseWord: Record<MissionPhase, string> = {
   cancelled: 'Swarm cancelled',
 }
 
-export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardCard; agentName?: string }) {
+export const RunCard = memo(function RunCard({ card, agentName, variant = 'board' }: {
+  card: BoardCard
+  agentName?: string
+  variant?: 'board' | 'map'
+}) {
   const { run } = card
   const navigate = useStore((s) => s.navigate)
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
@@ -40,11 +44,11 @@ export const RunCard = memo(function RunCard({ card, agentName }: { card: BoardC
   return (
     <Popover open={replying} onOpenChange={setReplying}>
       <PopoverAnchor asChild>
-        <Card ref={cardRef} data-run-id={run.id} selected={replying}>
+        <Card ref={cardRef} data-run-id={run.id} selected={replying} style={variant === 'map' ? { height: '100%' } : undefined}>
           <StateLine tone={tone} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
             {reason}
           </StateLine>
-          <CardTitle onOpen={() => openCard(card, navigate)}>{title}</CardTitle>
+          <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>
           <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-ui-sm text-muted">
             {card.swarm ? (
               <span className="min-w-0 truncate">{swarmCounts(card.swarm)}</span>

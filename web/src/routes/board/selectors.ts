@@ -7,7 +7,7 @@ import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
 import { isArchivable, type RunRecord } from '@/store/runs'
-import { listedRuns, runGroups, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
+import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
 
@@ -62,6 +62,31 @@ export function board(s: RunsInput): BoardData {
         (run) => (!s.workspace || run.workspace_id === s.workspace) && run.member_id !== s.ctx.viewerID,
       ),
   }
+}
+
+export function mapRuns(s: RunsInput): { cards: BoardCard[]; archivedCards: BoardCard[] } {
+  const individual = (row: RunRow): BoardCard => ({
+    ...row,
+    children: [],
+    workspaceName: !s.workspace || row.run.workspace_id !== s.workspace
+      ? s.ctx.workspaces[row.run.workspace_id]?.name ?? row.run.workspace_id
+      : undefined,
+  })
+  return {
+    cards: runRows(s.ctx)
+      .filter((row) => row.group === 'needs-you' || (
+        (!s.workspace || row.run.workspace_id === s.workspace) &&
+        (!s.mineOnly || row.run.member_id === s.ctx.viewerID)
+      ))
+      .map(individual),
+    archivedCards: archivedRows(s).map(individual),
+  }
+}
+
+export function useMapRuns(workspace: string) {
+  const ctx = useStateContext()
+  const mineOnly = useStore((s) => s.mineOnly)
+  return useMemo(() => mapRuns({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
 }
 
 // Unchanged cards keep their previous object so the memoized RunCard skips them.

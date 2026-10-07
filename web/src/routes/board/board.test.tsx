@@ -56,6 +56,9 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     diffs: {},
     overlaps: {},
     mineOnly: false,
+    boardViews: {},
+    boardMapAllWorkspaces: false,
+    boardMapViewports: {},
     hydrated: true,
     hydrationError: null,
     paletteDialog: null,
@@ -521,5 +524,36 @@ describe('empty board', () => {
     useStore.setState({ hydrated: false, hydrationError: 'dial tcp: connection refused', streamDead: true })
     renderBoard()
     expect(screen.getByRole('alert').textContent).toContain('dial tcp: connection refused')
+  })
+})
+
+describe('map view', () => {
+  it('switches from an aggregated swarm to individual runs and opens the selected worker', async () => {
+    seed([
+      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
+      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+    ])
+    useStore.setState({ missions: { mission_1: mission() } })
+    renderBoard()
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
+    expect(screen.getAllByRole('article').map((card) => card.dataset.runId).sort()).toEqual(['run_integrator', 'worker'])
+    await userEvent.click(screen.getByRole('button', { name: 'implement checkout' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'worker' } })
+  })
+
+  it('reveals archived workers without hiding live runs, and keeps the all-workspaces choice out of Board', async () => {
+    seed([working, merged, archivedMerged, run({ id: 'other', task: 'other workspace', workspace_id: otherWorkspace.id })])
+    renderBoard()
+    await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
+    expect(screen.getByRole('button', { name: working.task })).toBeDefined()
+    expect(screen.getByRole('button', { name: archivedMerged.task })).toBeDefined()
+    expect(screen.queryByRole('button', { name: merged.task })).toBeNull()
+    act(() => useStore.getState().setBoardMapAllWorkspaces(true))
+    expect(screen.getByRole('button', { name: 'other workspace' })).toBeDefined()
+    await userEvent.click(screen.getByRole('tab', { name: 'Board' }))
+    expect(screen.queryByRole('button', { name: 'other workspace' })).toBeNull()
+    expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   })
 })

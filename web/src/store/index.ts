@@ -25,6 +25,8 @@ import {
   createUiSlice,
   maxSidebarWidth,
   minSidebarWidth,
+  normalizeBoardMapViewports,
+  normalizeBoardViews,
   onboardingSteps,
   type OnboardingStep,
   type UiSlice,
@@ -80,6 +82,9 @@ const persistedUi = (s: RootState) => ({
   diffWrap: s.diffWrap,
   activeWorkspace: s.activeWorkspace,
   mineOnly: s.mineOnly,
+  boardViews: s.boardViews,
+  boardMapAllWorkspaces: s.boardMapAllWorkspaces,
+  boardMapViewports: s.boardMapViewports,
   launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
@@ -170,6 +175,9 @@ export function createRootStore() {
           return {
             ...current,
             ...stored,
+            boardViews: normalizeBoardViews(stored.boardViews),
+            boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
+            boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
