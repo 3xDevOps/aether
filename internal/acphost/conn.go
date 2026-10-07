@@ -114,7 +114,7 @@ type pendingRequest struct {
 // fs or terminal methods; the agent uses its own tools inside the container.
 type Conn struct {
 	rpc    *acp.Connection
-	w      io.WriteCloser
+	w      *agentInput
 	logger *slog.Logger
 	events connEvents
 
@@ -134,9 +134,24 @@ type Conn struct {
 	resolved map[string]bool
 }
 
+// agentInput records a failed write: the agent takes no more input, though
+// its output may not have ended yet.
+type agentInput struct {
+	io.WriteCloser
+	broken atomic.Bool
+}
+
+func (in *agentInput) Write(p []byte) (int, error) {
+	n, err := in.WriteCloser.Write(p)
+	if err != nil {
+		in.broken.Store(true)
+	}
+	return n, err
+}
+
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
 	c := &Conn{
-		w:          w,
+		w:          &agentInput{WriteCloser: w},
 		logger:     logger,
 		events:     events,
 		inboundSet: make(chan struct{}),
@@ -147,7 +162,7 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 	c.sessionID.Store("")
 	c.touch()
 	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
-	c.rpc = acp.NewConnection(c.handle, w, io.MultiReader(marker, r))
+	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, r))
 	c.rpc.SetLogger(logger)
 	return c
 }
@@ -175,6 +190,8 @@ func (c *Conn) closed() bool {
 		return false
 	}
 }
+
+func (c *Conn) inputBroken() bool { return c.w.broken.Load() }
 
 // Close closes the agent's stdin; adapters exit on EOF.
 func (c *Conn) Close() error { return c.w.Close() }

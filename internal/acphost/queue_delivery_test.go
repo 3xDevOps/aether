@@ -92,3 +92,26 @@ func TestQueuedPromptReportsTheConnectionClosing(t *testing.T) {
 		t.Fatalf("lost prompt: %v", err)
 	}
 }
+
+func TestQueuedPromptReportsABrokenAgentInputAsClosed(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	release := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+		<-release
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, _ := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	lost := make(deliveries, 1)
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, lost.report); err != nil || r.Outcome != OutcomeQueued {
+		t.Fatalf("second: %+v %v", r, err)
+	}
+	_ = m.stdin.Close()
+	close(release)
+	if err := lost.next(t); !errors.Is(err, ErrClosed) {
+		t.Fatalf("lost prompt: %v", err)
+	}
+}

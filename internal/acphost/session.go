@@ -115,7 +115,9 @@ func (s *Session) resolveLocked(a *turnAck, err error) {
 	s.callback(func() { a.delivered(err) })
 }
 
-func (s *Session) closingLocked() bool { return s.closed || s.hostClosed || s.conn.closed() }
+func (s *Session) closingLocked() bool {
+	return s.closed || s.hostClosed || s.conn.closed() || s.conn.inputBroken()
+}
 
 type queuedPrompt struct {
 	blocks    []acp.ContentBlock
@@ -440,7 +442,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	reason := stop
 	var failed error
 	switch {
-	case err != nil && s.conn.closed():
+	case err != nil && (s.conn.closed() || s.conn.inputBroken()):
 		reason = "interrupted"
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
 	case s.hostClosed && (err != nil || stop == "cancelled"):
