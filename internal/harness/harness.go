@@ -203,8 +203,9 @@ func isPathWithin(candidate, root string) bool {
 }
 
 // Profile converts a generic definition to a launch profile. The registry
-// entry of the same name still supplies EnvPassthrough and Env, so an
-// override that renames the executable keeps the variables the CLI needs.
+// entry of the same name still supplies EnvPassthrough, Env and
+// PermissionEnv, so an override that renames the executable keeps the
+// variables the CLI needs.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -218,6 +219,7 @@ func (d Definition) Profile() Profile {
 	if registered, ok := profiles[d.Name]; ok {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
+		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
 	}
 	return p
 }
@@ -236,13 +238,9 @@ type Profile struct {
 	// ACPSessionShared means the ACP server and the TUI keep one session
 	// store, so a session started in one resumes in the other.
 	ACPSessionShared bool
-	// ACPMode is the session mode an enhanced run starts in, for agents whose
-	// default mode asks before most actions. Empty keeps the agent's default.
+	// ACPMode is the session mode a new enhanced session starts in: the
+	// agent's mode that acts without asking. Empty keeps the agent's default.
 	ACPMode string
-	// ACPAutoMode is the session mode a background run's one-shot session
-	// starts in: the agent's mode that acts without asking. Empty keeps
-	// ACPMode.
-	ACPAutoMode string
 	// ACPDefault makes an enhanced run the agent's default once its ACP
 	// server is installed. Claude stays on its terminal by default: its
 	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
@@ -259,6 +257,13 @@ type Profile struct {
 	// Env are fixed variables the CLI needs to start at all; a workspace
 	// variable never overrides them.
 	Env map[string]string
+	// PermissionEnv turns the agent's permission prompts off in every launch
+	// mode, for an agent with no flag for it. MergeEnv combines it with the
+	// workspace's value and Aether's other overlays.
+	PermissionEnv map[string]string
+	// NoPermissionPrompt declares an agent that never asks, so it has no
+	// permission setting to apply.
+	NoPermissionPrompt bool
 	// CredentialPaths is the allowlist of paths an account share exposes from
 	// the owner's home. Resolve them with LoginPaths.
 	CredentialPaths []string
@@ -355,7 +360,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:     []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:          []string{claudeACP.Binary},
 		ACPInstall:       claudeACP,
-		ACPMode:          "auto",
+		ACPMode:          "bypassPermissions",
 		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		ACPSessionShared: true,
 		SwitchVerified:   true,
@@ -392,8 +397,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		ACPArgs:         []string{codexACP.Binary},
 		ACPInstall:      codexACP,
-		ACPMode:         "agent",
-		ACPAutoMode:     "agent-full-access",
+		ACPMode:         "agent-full-access",
 		ACPDefault:      true,
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},
@@ -412,13 +416,13 @@ var profiles = map[string]Profile{
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
 	},
 	"pi": {
-		Name:         "pi",
-		DisplayName:  "pi",
-		TUIArgs:      []string{"pi", TaskPlaceholder},
-		HeadlessArgs: []string{"pi", "-p", TaskPlaceholder},
-		ACPArgs:      []string{piACP.Binary},
-		ACPInstall:   piACP,
-		// pi has no permission prompt, so there is no bypass flag to apply.
+		Name:               "pi",
+		DisplayName:        "pi",
+		TUIArgs:            []string{"pi", TaskPlaceholder},
+		HeadlessArgs:       []string{"pi", "-p", TaskPlaceholder},
+		ACPArgs:            []string{piACP.Binary},
+		ACPInstall:         piACP,
+		NoPermissionPrompt: true,
 		EnvPassthrough:     []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths:    []string{".pi/agent/auth.json"},
 		LocalRoot:          ".pi",
@@ -441,7 +445,7 @@ var profiles = map[string]Profile{
 		DisplayName:  "oh-my-pi",
 		TUIArgs:      []string{"omp", "--auto-approve", TaskPlaceholder},
 		HeadlessArgs: []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
-		ACPArgs:      []string{"omp", "acp"},
+		ACPArgs:      []string{"omp", "acp", "--auto-approve"},
 		// omp acp and the TUI read and write one session store.
 		ACPSessionShared: true,
 		ACPDefault:       true,
@@ -470,6 +474,7 @@ var profiles = map[string]Profile{
 		ACPArgs:         []string{"opencode", "acp"},
 		ACPDefault:      true,
 		ResumeArgs:      []string{"opencode", "--session=" + SessionPlaceholder},
+		PermissionEnv:   map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":"allow"}`},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".config/opencode",

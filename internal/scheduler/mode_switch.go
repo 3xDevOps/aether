@@ -287,7 +287,7 @@ func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
 	var native harness.NativeLaunch
 	if m.c.enabled && m.run.Task != "" {
 		var err error
-		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, nil); err != nil {
+		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, m.profile.PermissionEnv); err != nil {
 			return "", 0, fmt.Errorf("prepare native coordination: %w", err)
 		}
 	}
@@ -297,8 +297,13 @@ func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	env := make(map[string]string)
-	maps.Copy(env, launch.env)
+	env := maps.Clone(m.profile.PermissionEnv)
+	if env == nil {
+		env = make(map[string]string)
+	}
+	if err := harness.MergeEnv(env, launch.env); err != nil {
+		return "", 0, err
+	}
 	maps.Copy(env, native.Env)
 	nonce := rand.Text()
 	files := maps.Clone(launch.files)
