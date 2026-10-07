@@ -116,6 +116,12 @@ jobs:
         run: make vet
       - name: Lint workflows
         run: make lint-workflows
+      # Advisory only: the reachable Moby CVEs have no fixed release and
+      # govulncheck cannot suppress individual findings, so a hard gate would
+      # keep CI permanently red. Read the step output, do not ignore it.
+      - name: Vulnerability scan (advisory)
+        run: make vulncheck
+        continue-on-error: true
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -149,18 +155,8 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
-      # Advisory only: the reachable Moby CVEs have no fixed release and
-      # govulncheck cannot suppress individual findings, so a hard gate would
-      # keep CI permanently red. Read the step output, do not ignore it.
-      - name: Vulnerability scan (advisory)
-        run: make vulncheck
-        continue-on-error: true
       - name: Unit tests
         run: make test
-      - name: Shell script tests
-        run: make test-scripts
-      - name: Native hook lifecycle tests
-        run: make test-native-hooks
       - name: Build binaries
         run: make build
       # Own the Linux amd64 module and native compiler archives, plus bun.
@@ -178,6 +174,30 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+
+  scripts:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Shell script tests
+        run: make test-scripts
+      - name: Native hook lifecycle tests
+        run: make test-native-hooks
 
   # internal/harness needs the agent images built here. The independent
   # integration shards start without waiting for these images.

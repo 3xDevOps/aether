@@ -1224,7 +1224,7 @@ into, and every directory above it, is root's alone
 ## Dependency and toolchain vulnerability scanning
 
 `make vulncheck` runs `govulncheck` over the whole module. CI runs it in the
-`build-and-test` job. A docs-only pull request does not run it, because it
+`lint` job. A docs-only pull request does not run it, because it
 does not change module dependencies.
 
 The step is **advisory** (`continue-on-error: true`), not a gate. Two reachable
