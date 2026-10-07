@@ -47,6 +47,10 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	p.waitForOutput(t, "resumed-up")
 	waitState("n1 exited 7")
 	p.waitForOutput(t, "[aether] harness exited with code 7")
+	if _, err := p.master.Write([]byte("printf 'fallback-%s\\n' ready\n")); err != nil {
+		t.Fatal(err)
+	}
+	p.waitForOutput(t, "fallback-ready")
 
 	swap("# n2\n")
 	waitState("n2 started")
