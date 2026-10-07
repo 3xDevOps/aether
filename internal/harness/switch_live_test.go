@@ -58,7 +58,7 @@ var liveAgents = map[string]liveAgent{
 		},
 	},
 	"omp": {
-		acp:   []string{"omp", "acp"},
+		acp:   profiles["omp"].ACPArgs,
 		model: ompLiveModel,
 		start: func(ctx context.Context, dir, prompt string) (string, error) {
 			id, _, err := ompPrint(ctx, dir, "-p", "--mode", "json", prompt)

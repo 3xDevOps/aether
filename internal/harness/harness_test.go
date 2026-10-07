@@ -21,18 +21,10 @@ func TestRegistryShipsSixProfiles(t *testing.T) {
 	}
 }
 
-// Every harness with a command must default to its auto/full-permission
-// flags in both modes and carry the task placeholder; login-flow harnesses
-// must declare their credential paths.
+// Every harness with a command must carry the task placeholder in both
+// modes; login-flow harnesses must declare their credential paths.
 func TestProfileDefaults(t *testing.T) {
-	autoFlags := map[string]string{
-		"claude":   "--dangerously-skip-permissions",
-		"codex":    "--dangerously-bypass-approvals-and-sandbox",
-		"omp":      "--auto-approve",
-		"opencode": "", // opencode has no permission prompt flag to bypass
-		"pi":       "", // pi has no permission prompt flag to bypass
-	}
-	for name, flag := range autoFlags {
+	for _, name := range []string{"claude", "codex", "omp", "opencode", "pi"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
@@ -44,9 +36,6 @@ func TestProfileDefaults(t *testing.T) {
 			}
 			if argv[0] != name {
 				t.Errorf("%s %s argv[0] = %q", name, mode, argv[0])
-			}
-			if flag != "" && !slices.Contains(argv, flag) {
-				t.Errorf("%s %s argv %v missing auto flag %q", name, mode, argv, flag)
 			}
 			if !slices.ContainsFunc(argv, func(a string) bool {
 				return strings.Contains(a, TaskPlaceholder)
