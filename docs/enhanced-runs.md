@@ -44,7 +44,7 @@ agent's terminal, **Enhanced** shows it as a tool line among the messages.
 | --- | --- | --- |
 | What you see | The agent's own terminal, exactly as on your machine | Messages, tool activity, file changes, approvals and progress as native controls |
 | Trade-off | No structured view; the agent acts without asking, and anything it asks is answered in the terminal | Runs through an adapter, not the agent's own screen; some agent-specific commands and screens are missing; starts a few seconds slower |
-| Permissions | Never asks | Never asks by default; switch the session's mode in the run to be asked |
+| Permissions | Never asks | Never asks by default; for Claude Code and Codex, switch the session's mode in the run to be asked. The card's note says how the chosen agent runs without asking |
 
 Under the cards one line each comes from `agent.list`: how the agent serves
 ACP (`enhanced`), whether its adapter is installed (`enhanced_installed`),

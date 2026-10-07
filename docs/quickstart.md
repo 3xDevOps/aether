@@ -464,8 +464,9 @@ account, not to one workspace. **Set up** opens three numbered steps:
      activity, file changes, approvals and progress appear as native
      controls. It runs through an adapter, misses some agent-specific
      commands and screens, and starts a few seconds slower. Like Standard,
-     it acts without asking by default; switch its mode in the run to be
-     asked ([enhanced-runs.md](enhanced-runs.md)).
+     it acts without asking by default; for Claude Code and Codex, switch
+     its mode in the run to be asked. The card's note says how the chosen
+     agent runs without asking ([enhanced-runs.md](enhanced-runs.md)).
 
    Below the cards, one line each says how the agent supports Enhanced, how
    it is installed, whether a running agent can switch, what happens when the

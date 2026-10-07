@@ -81,6 +81,24 @@ describe('the Standard and Enhanced comparison', () => {
     expect(lines.textContent).not.toContain('adapter')
   })
 
+  it.each([
+    ['claude', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
+    ['codex', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
+    ['omp', 'Runs with full permissions; its ACP mode has no asking option.'],
+    ['pi', 'pi never asks for permission.'],
+    ['opencode', "Runs with full permissions through its config; a workspace's own permission rules still apply."],
+  ])('says how %s handles permissions in Enhanced', (name, note) => {
+    render(<ModeComparison agent={{ ...codex, name }} value="acp" onChange={vi.fn()} />)
+    expect(screen.getByRole('radio', { name: 'Enhanced' }).textContent).toContain(note)
+  })
+
+  it('gives a custom agent with Enhanced a neutral permission note', () => {
+    render(<ModeComparison agent={{ ...custom, enhanced: 'native' }} value="acp" onChange={vi.fn()} />)
+    const enhanced = screen.getByRole('radio', { name: 'Enhanced' })
+    expect(enhanced.textContent).toContain("Permissions follow the agent's enhanced command.")
+    expect(enhanced.textContent).not.toContain('switch its mode')
+  })
+
   it('disables Enhanced with the reason for an agent that has none', () => {
     render(<ModeComparison agent={custom} value="tui" onChange={vi.fn()} />)
     const enhanced = screen.getByRole('radio', { name: 'Enhanced' })

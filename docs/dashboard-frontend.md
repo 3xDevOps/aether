@@ -2514,7 +2514,9 @@ trade-off are its `aria-describedby`. Below the cards a `dl` gives the
 per-agent lines from `agent-copy.ts`: support, setup, switching (from
 `switchable`, otherwise "Chosen when the run starts"), fallback, and billing
 for Claude Code. An agent whose `enhanced` is not `native` or `adapter` gets
-the Enhanced card disabled with the reason as its note. The selection starts
+the Enhanced card disabled with the reason as its note; otherwise the note
+is `permissionNote` from `agent-copy.ts`, which says per shipped agent how it
+runs without asking and whether a session mode can ask. The selection starts
 on the remembered default, else Enhanced when `enhanced_default` is set,
 else `default_mode`.
 
