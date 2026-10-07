@@ -430,6 +430,9 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 	if !maps.Equal(override.Env, claude.Env) {
 		t.Errorf("override env = %v, want %v", override.Env, claude.Env)
 	}
+	if override.ACPMode != claude.ACPMode {
+		t.Errorf("override enhanced mode = %q, want %q", override.ACPMode, claude.ACPMode)
+	}
 	// The copy must not alias the registry: a caller editing an override's
 	// environment would otherwise change every later launch.
 	override.Env["IS_SANDBOX"] = "0"

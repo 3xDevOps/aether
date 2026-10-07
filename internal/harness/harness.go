@@ -203,9 +203,8 @@ func isPathWithin(candidate, root string) bool {
 }
 
 // Profile converts a generic definition to a launch profile. The registry
-// entry of the same name still supplies EnvPassthrough, Env and
-// PermissionEnv, so an override that renames the executable keeps the
-// variables the CLI needs.
+// entry of the same name still supplies what is not part of the argv:
+// EnvPassthrough, Env, PermissionEnv and ACPMode.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -220,6 +219,7 @@ func (d Definition) Profile() Profile {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
+		p.ACPMode = registered.ACPMode
 	}
 	return p
 }
@@ -257,9 +257,7 @@ type Profile struct {
 	// Env are fixed variables the CLI needs to start at all; a workspace
 	// variable never overrides them.
 	Env map[string]string
-	// PermissionEnv turns the agent's permission prompts off in every launch
-	// mode, for an agent with no flag for it. MergeEnv combines it with the
-	// workspace's value and Aether's other overlays.
+	// PermissionEnv turns off the prompts of an agent with no flag for it.
 	PermissionEnv map[string]string
 	// NoPermissionPrompt declares an agent that never asks, so it has no
 	// permission setting to apply.

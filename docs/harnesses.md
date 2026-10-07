@@ -1033,8 +1033,8 @@ Environment. The installed executable lives in that member's home.
 An argv override replaces the shipped template wholesale, so a registry fix
 never reaches it: a deployment's `--agent-definitions` entry that redefines
 a shipped agent has to be updated on its own. It keeps the registry's key
-passthrough, launch env and OpenCode's permission overlay for that name,
-since none is part of the command line.
+passthrough, launch env, OpenCode's permission overlay and Enhanced starting
+mode for that name, since none is part of the command line.
 
 ## Setting up an agent
 
@@ -1257,8 +1257,8 @@ generic denylist knows about:
 {
   "omp": {
     "Name": "omp",
-    "TUIArgs": ["omp", "{task}"],
-    "HeadlessArgs": ["omp", "-p", "{task}"],
+    "TUIArgs": ["omp", "--auto-approve", "{task}"],
+    "HeadlessArgs": ["omp", "-p", "--auto-approve", "{task}"],
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
     "CredentialPaths": ["/home/aether/.omp/agent"],
