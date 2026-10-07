@@ -69,3 +69,18 @@ to 10-12 fps, scale to 1000px wide, reduce the palette
 Commit the GIF, replace the placeholder comment and the "Demo recording wanted"
 note in the README with the image, and delete this paragraph's obligation from
 the top of this file.
+
+## Restoration verification captures
+
+These screenshots are browser verification evidence, not the live-agent demo
+described above:
+
+- `run-map-restored.png`: the actual Board, run cards and store with
+  deterministic fixture runs, including swarm workers, a paused run and a
+  failed run. No live gateway was connected.
+- `launch-splash-restored.png`: the restored animation paused at 700ms by a
+  temporary browser harness. Production animation timings were unchanged.
+- `launch-splash-lifecycle.png`: 27 browser checkpoints covering the minimum
+  display time, timeout, fade, session reuse, reduced motion and storage
+  failures. The desktop bridge and startup failures were injected; this was
+  not a native Electron test.
