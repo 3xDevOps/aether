@@ -350,9 +350,9 @@ jobs:
     uses: ./.github/workflows/edge-image.yml
 
   # Five shards cover internal/server by test name, balanced by the durations
-  # -v prints; scheduler is its own package; rest dynamically discovers every
-  # other integration package. Only server-rest needs the browser image, so
-  # the six image-independent shards do not wait for or transfer it.
+  # -v prints; rest dynamically discovers every other integration package.
+  # Only server-rest needs the browser image, so the five image-independent
+  # shards do not wait for or transfer it.
   integration:
     name: integration (${{ matrix.shard }})
     needs: changes
@@ -372,10 +372,8 @@ jobs:
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
           - shard: server-heavy
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
-          - shard: scheduler
-            make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
-            make: INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
+            make: INTEGRATION_SKIP="./internal/harness ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
     steps:
       - uses: actions/checkout@v4
         with:
