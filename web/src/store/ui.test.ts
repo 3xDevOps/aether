@@ -68,13 +68,6 @@ describe('terminal zoom', () => {
     expect(hydrated.theme).toBe('dark')
   })
 
-  it('drops the board map view from a version 6 payload', () => {
-    const hydrated = rehydrate({ boardView: 'map', boardMapViewports: { '': { x: 0, y: 0, zoom: 1 } }, theme: 'dark' }, 6)
-    expect(hydrated).not.toHaveProperty('boardView')
-    expect(hydrated).not.toHaveProperty('boardMapViewports')
-    expect(hydrated.theme).toBe('dark')
-  })
-
   it('drops the run dock height from a version 7 payload', () => {
     const hydrated = rehydrate({ runDockHeight: 240, theme: 'dark' }, 7)
     expect(hydrated).not.toHaveProperty('runDockHeight')
@@ -400,5 +393,42 @@ describe('a persisted store from an older release', () => {
     expect(migrated.onboardingStep).toBe('Agent')
     expect(migrated.onboardingFurthest).toBe('First run')
     window.localStorage.removeItem('aether.ui')
+  })
+})
+
+describe('scoped Board preferences', () => {
+  it('restores each workspace view and exact map cameras after a reload', () => {
+    const store = createRootStore().getState()
+    store.setBoardView('first', 'map')
+    store.setBoardView('second', 'board')
+    store.setBoardMapAllWorkspaces(true)
+    store.setBoardMapViewport('["",false,false]', { x: -3100.25, y: 87.5, zoom: 0.73 })
+    store.setBoardMapViewport('["first",true,true]', { x: 1, y: 2, zoom: 1.4 })
+    const restored = createRootStore().getState()
+    expect(restored.boardViews).toEqual({ first: 'map', second: 'board' })
+    expect(restored.boardMapAllWorkspaces).toBe(true)
+    expect(restored.boardMapViewports).toEqual({
+      '["",false,false]': { x: -3100.25, y: 87.5, zoom: 0.73 },
+      '["first",true,true]': { x: 1, y: 2, zoom: 1.4 },
+    })
+  })
+
+  it('rejects corrupt cameras and unknown views instead of losing the canvas on reload', () => {
+    window.localStorage.setItem('aether.ui', JSON.stringify({
+      version: 8,
+      state: {
+        boardViews: { good: 'map', bad: 'unknown' },
+        boardMapViewports: {
+          valid: { x: 10, y: 20, zoom: 100 },
+          invalid: { x: null, y: 20, zoom: 1 },
+          zero: { x: 0, y: 0, zoom: 0 },
+        },
+      },
+    }))
+    const restored = createRootStore().getState()
+    expect(restored.boardViews).toEqual({ good: 'map' })
+    expect(restored.boardMapViewports).toEqual({ valid: { x: 10, y: 20, zoom: 2 } })
+    restored.setBoardMapViewport('valid', { x: Infinity, y: 0, zoom: 1 })
+    expect(createRootStore().getState().boardMapViewports.valid).toEqual({ x: 10, y: 20, zoom: 2 })
   })
 })

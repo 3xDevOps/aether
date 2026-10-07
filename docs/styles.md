@@ -5,6 +5,8 @@
 The dashboard is a dense developer workbench on graphite surfaces with one
 teal accent. Adjoining panes are flat and quiet: do not add saturated colours,
 gradients, blurred cards or elevated nested panels.
+The desktop launch splash is an intentional original-animation exception;
+see [Run state and motion](#run-state-and-motion).
 
 ## Type
 
@@ -14,12 +16,17 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | --- | --- | --- |
 | Inter (variable, Latin subset) | All UI text | `@fontsource-variable/inter`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
+| VT323 (Latin subset, 400) | Original launch-splash wordmark only | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`) | system |
 
 Inter loads with `font-display: swap` behind `Inter Fallback`, Arial scaled
 to Inter's metrics, so the swap does not reflow text. Characters outside
 Latin render in the fallback.
+
+The splash keeps VT323's original metrics: 400 weight, a
+`clamp(32px, 4vw, 48px)` size, line height 1 and `0.12em` letter spacing.
+Its scoped `--font-pixel` does not change workbench typography.
 
 The type scale, in `web/src/index.css`:
 
@@ -186,6 +193,13 @@ Use compact workbench geometry rather than landing-page ornament:
   name, owner avatar, `+a −d`, the `card:meta` slot). A Needs you reason reads
   in the text colour, the others in `muted`, never with a second dot or a
   **New** pill. See [Dashboard SPA: Board](dashboard-frontend.md#board).
+- Board's **Map** reuses those cards at 320×160 inside a bounded pan/zoom
+  canvas. Owner groups use `bg-chrome` and `border-seam`, cards `bg-canvas`;
+  identity colour stays on the shared avatars. Muted directed connectors
+  link integrators to workers, dashed across owners. The Runs toolbar wraps
+  its scope, Mine, archive and camera controls on phones. Fixed geometry
+  accommodates the larger text settings and coarse-pointer card actions;
+  live presentation updates do not move nodes or reset the camera.
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
@@ -264,6 +278,18 @@ change instantly. The `state-pulse` dot (the run header's working dot and the
 Session view's live row) and the `live-shimmer` text sweep step through a few
 frames per cycle rather than tweening, and stop under
 `prefers-reduced-motion: reduce`, where the shimmer leaves plain muted text.
+
+The desktop launch splash deliberately retains its original animation,
+independent of these workbench motion tokens: the grain, three drifting cloud
+layers, stepped starfield and coloured stars, satellites and shooting stars,
+700ms logo entrance and 260ms fade. Its status dot uses the local
+`launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
+to 0.4 and back, not the shared stepped `state-pulse`. The splash's original
+palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
+do not restyle them to match the workbench. Reduced motion skips the splash
+entirely, and its CSS stops animation if the preference changes while it is
+visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
+session and startup timing.
 
 Live local control draws a 1px `--accent-fill` outline around the terminal
 viewport, alongside the toolbar's **You control** and **Release**. The

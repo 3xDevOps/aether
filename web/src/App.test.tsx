@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import type { AetherDesktop } from '@/components/shell/window-bar'
 import type * as apiModule from '@/lib/api'
 import { App } from '@/App'
 import { useStore } from '@/store'
@@ -84,5 +85,49 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: 'New run' })).toBeDefined()
     expect(await screen.findByLabelText('Target workspace')).toBeDefined()
     expect(useStore.getState().paletteOpen).toBe(false)
+  })
+
+  it('reveals a failed desktop launch and lets retry restore the shell without replaying', async () => {
+    const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
+    const previous = useStore.getState()
+    window.sessionStorage.clear()
+    shellWindow.aetherDesktop = { platform: 'linux' }
+    useStore.setState({
+      hydrated: false,
+      hydrationError: null,
+      gatewayRestarting: false,
+      streamDead: false,
+      unreachable: null,
+      paletteDialog: null,
+    })
+    vi.useFakeTimers()
+    const app = render(<App />)
+
+    try {
+      act(() => useStore.setState({
+        hydrationError: 'dial tcp: connection refused',
+        unreachable: 'server',
+      }))
+      expect(app.container.querySelector('.launch-splash')).not.toBeNull()
+      await act(async () => vi.advanceTimersByTime(600))
+      await act(async () => vi.advanceTimersByTime(260))
+
+      expect(app.container.querySelector('.launch-splash')).toBeNull()
+      expect(screen.getByRole('alert').textContent).toContain('dial tcp: connection refused')
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry connection' })))
+      await act(async () => {
+        const socket = StubSocket.last()
+        socket.onopen?.()
+        socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
+      })
+      expect(screen.getByRole('navigation', { name: 'Aether' })).toBeDefined()
+      expect(app.container.querySelector('.launch-splash')).toBeNull()
+    } finally {
+      app.unmount()
+      vi.useRealTimers()
+      delete shellWindow.aetherDesktop
+      window.sessionStorage.clear()
+      useStore.setState(previous, true)
+    }
   })
 })

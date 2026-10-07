@@ -665,6 +665,10 @@ diff and interrupts a turn:
 make build && (cd web && bunx playwright test run-session.spec.ts)
 ```
 
+`TestSupervisorSwapsItsChild` waits for the fallback login shell to execute a
+readiness command before requesting another swap. The harness exit banner
+is printed before that shell starts.
+
 [Mode switching](enhanced-runs.md#switching-a-running-agent) is proven the
 same way. `TestIntegrationModeSwitchDocker` switches a run in a real
 container both ways, with acpmock as omp's ACP server and a script as its

@@ -444,6 +444,26 @@ caller can say what went wrong. It is optional on the type for the same
 reason `shellVersion` exists: a shell built by an older `aether gui build`
 does not have it.
 
+### Launch splash
+
+`App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
+startup. It intentionally preserves the original animated night sky, logo
+and pixel wordmark, not the workbench's visual language
+([Styles](styles.md#run-state-and-motion)).
+
+The splash requires `window.aetherDesktop` and plays once per shell session,
+recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
+reloads in the same shell session and `prefers-reduced-motion: reduce` skip
+it. A reduced-motion launch still marks the session. If storage cannot be
+read, the splash is skipped; a failed write never prevents startup. The
+session is marked in an effect rather than during rendering so React
+StrictMode does not suppress its own first launch.
+
+It stays for at least 600ms, then fades when hydration succeeds or fails.
+A hung connection starts the fade at 2500ms even without a result. The fade
+lasts 260ms, releases pointer input as it begins and unmounts the splash at
+its end, exposing the shell or the raw connection error and window controls.
+
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
@@ -780,8 +800,9 @@ update.
 
 `src/routes/board/` is the default center view and the triage surface,
 reached through the sidebar's **Board** row; the sidebar is navigation and
-owns the primary New run action. The board shows three columns, **Needs
-you**, **Working** and **Finished**, each headed by its name and count.
+owns the primary New run action. The header's **Board / Map** choice switches
+between triage columns and a run canvas. **Board** shows three columns,
+**Needs you**, **Working** and **Finished**, each headed by its name and count.
 `board()` in `src/routes/board/selectors.ts` reads `runGroups`, so the board
 has the sidebar's scoping, ordering and Mine filter: Needs you spans every
 workspace and sorts oldest wait first. Under the `lg`/1024px breakpoint the
@@ -797,12 +818,12 @@ A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
    the `card:meta` slot (file overlaps, sync, and on a swarm card the swarm's
    conflict count).
 
-A click anywhere on the card opens the run. A swarm is one card: the
-objective, a phase word ("Swarm active") and its workers' counts; it opens
+A click anywhere on the card opens the run. In **Board**, a swarm is one
+card: the objective, a phase word ("Swarm active") and its workers' counts; it opens
 the swarm page, or acts for the root run when the root itself needs you, and
-renders `card:meta` for its root run. Workers never
-appear as cards of their own, archived ones included; a swarm whose
-integrator is not listed is rooted at its oldest worker. `useBoard` reuses a
+renders `card:meta` for its root run. Workers never appear as separate
+**Board** cards, archived ones included; a swarm whose integrator is not
+listed is rooted at its oldest worker. `useBoard` reuses a
 card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
 
@@ -861,6 +882,54 @@ requirement, with one sentence and one button:
 
 Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
 An unreachable server shows its error in place of the columns.
+
+### Map
+
+**Map** exposes every individual run, including each swarm integrator and
+worker. `mapRuns()` reads the unaggregated `runRows()` presentation rather
+than Board's swarm cards. Both views reuse `RunCard`, the five run states,
+agent display names, owner avatars and card actions. A map card opens that
+individual run; its primary action still targets the condition that needs
+the viewer.
+
+The **Map workspace scope** picker selects the active workspace or **All
+workspaces**, without changing the sidebar's selected workspace or Board's
+triage scope. **Mine** filters individual Working and Finished runs by their
+owner. As in Board, Needs you stays visible across workspaces and Mine.
+Cards from another workspace, and all cards in All workspaces, name their
+workspace. **Archived (n)** replaces Finished runs with individual archived
+runs while keeping Needs you and Working visible; **Back to Finished**
+returns. Archived runs obey workspace and Mine, and an all-archived scope
+keeps the toggle available.
+
+Named owner boundaries keep workers with their actual owners. Relationships
+require an explicit worker role, matching `workspace_id` and `mission_id`,
+and an `integrator_run_id` identifying a visible integrator. Directed
+connectors cross owner boundaries as dashed lines. A worker whose integrator
+is filtered, archived or not listed remains reachable and is labelled
+"integrator not visible". Task text never establishes a relationship.
+`map-layout.ts` packs fixed 320×160 cards into deterministic owner shelves;
+run state, timestamps and input ordering do not reposition nodes.
+Title, timestamp and owner-profile updates reuse geometry. Changes to visible
+run identities, ownership or swarm relationships repack it.
+
+- Drag the canvas or a card to pan; releasing a drag never opens the card.
+  A press released outside the canvas cannot pan on hover or consume the next
+  deliberate card click.
+- Scroll to pan; Shift-scroll pans horizontally. Ctrl/Cmd-scroll zooms around
+  the pointer. Touch supports dragging and two-finger pinch zoom.
+- With the canvas focused, arrow keys pan, Shift increases the step,
+  `+` / `-` zoom, and `Home` / `0` fit all runs.
+- **Zoom out**, the zoom percentage, **Zoom in** and **Fit** remain available
+  in the wrapping Runs toolbar. Tab reaches every run and its actions,
+  bringing an offscreen focused card into view.
+
+`aether.ui` stores Board/Map per active workspace and the map camera per
+workspace/all-workspaces, Mine and archive scope. These origin-local
+preferences survive view switches, navigation and reloads. A new camera
+fits once; live metadata, added or removed runs and viewport resizing never
+reset a chosen camera. Use **Fit** to frame the changed set. Layout switches
+are instant, like other workbench panels.
 
 ### Run state
 
