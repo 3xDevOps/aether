@@ -143,8 +143,9 @@ func (e *acpExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus
 	if e.stopErr != nil {
 		return runtime.ExitStatus{}, e.stopErr
 	}
-	_ = e.agentIn.Close()
+	// Output first: a killed adapter cannot answer the prompt it was given.
 	_ = e.agentOut.Close()
+	_ = e.agentIn.Close()
 	return e.Wait(ctx)
 }
 
