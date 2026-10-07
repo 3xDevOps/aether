@@ -220,6 +220,12 @@ receive a false positive on another machine.
 
 ## Workflow and release-build gates
 
+Before installing Playwright's system dependencies or desktop validation
+tools, CI sets `/etc/apt/apt-mirrors.txt` to
+`https://archive.ubuntu.com/ubuntu/`. This bypasses the hosted runner's
+`azure.archive.ubuntu.com` mirror, which can stall `apt-get update` until the
+job times out. Both jobs still install their required packages.
+
 `make lint-workflows` runs pinned actionlint v1.7.12 and requires ShellCheck
 on `PATH` so embedded shell commands are checked locally as well as in CI.
 On Linux, install it with `sudo apt-get install shellcheck`; GitHub's Ubuntu
