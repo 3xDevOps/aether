@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type candidateLifecycleFixture struct {
@@ -92,7 +93,7 @@ func newCandidateLifecycleFixture(t *testing.T, transcript io.Reader, withAdmiss
 	if err := os.MkdirAll(checkouts, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(filepath.Join(root, "aether.db"))
+	db, err := storetest.Open(filepath.Join(root, "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

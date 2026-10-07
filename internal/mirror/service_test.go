@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 const testSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -110,7 +111,7 @@ func TestRefreshFailurePreservesPersistedCommits(t *testing.T) {
 		{name: "accepted", observed: testSHA, accepted: testSHA},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := store.Open(filepath.Join(t.TempDir(), "mirror.db"))
+			db, err := storetest.Open(filepath.Join(t.TempDir(), "mirror.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

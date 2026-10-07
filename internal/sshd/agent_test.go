@@ -13,13 +13,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func newAgentTestServer(t *testing.T) (*Server, *domain.Member) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

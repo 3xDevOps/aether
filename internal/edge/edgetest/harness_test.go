@@ -38,6 +38,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // waitTimeout bounds every wait for something asynchronous: a directory
@@ -681,7 +682,7 @@ func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
 func (s *serverNode) start() {
 	t := s.h.t
 	t.Helper()
-	db, err := store.Open(filepath.Join(s.dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(s.dir, "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

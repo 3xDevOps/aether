@@ -17,11 +17,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func testService(t *testing.T) (*Service, *store.DB, *domain.Member) {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type mutableEvidenceReader struct {
@@ -44,7 +45,7 @@ func (r *mutableEvidenceReader) WithSubmissionSources(ctx context.Context, works
 
 func openMissionRegressionDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "mission.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "mission.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

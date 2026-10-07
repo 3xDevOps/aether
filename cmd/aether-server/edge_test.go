@@ -21,6 +21,7 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -71,7 +72,7 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 // refused before a code exists.
 func TestClaimCodeForAnAdmin(t *testing.T) {
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +228,7 @@ func TestEdgeTrustNeedsConfirmation(t *testing.T) {
 // member, and that member's devices of the given statuses.
 func newDeviceStore(t *testing.T, statuses ...domain.DeviceStatus) (*store.DB, []*domain.Device) {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

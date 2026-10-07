@@ -22,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type wakeNoPeers struct{}
@@ -51,7 +52,7 @@ func newWakeServerFixture(t *testing.T, worker bool) *wakeServerFixture {
 		t.Fatal(tempErr)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	db, openErr := store.Open(filepath.Join(dir, "state.db"))
+	db, openErr := storetest.Open(filepath.Join(dir, "state.db"))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}

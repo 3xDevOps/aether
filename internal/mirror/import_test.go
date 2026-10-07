@@ -12,7 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func importGit(t *testing.T, dir string, args ...string) string {
@@ -57,7 +57,7 @@ func newImportService(t *testing.T, st Store) (*Service, *gitengine.Engine, stri
 }
 
 func TestImportNewWorkspacePreservesExplicitCheckoutOrigin(t *testing.T) {
-	db, openErr := store.Open(filepath.Join(t.TempDir(), "import.db"))
+	db, openErr := storetest.Open(filepath.Join(t.TempDir(), "import.db"))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}
@@ -139,7 +139,7 @@ func TestImportReportsGitStateWhenPersistenceFails(t *testing.T) {
 }
 
 func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
-	db, openErr := store.Open(filepath.Join(t.TempDir(), "import.db"))
+	db, openErr := storetest.Open(filepath.Join(t.TempDir(), "import.db"))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}

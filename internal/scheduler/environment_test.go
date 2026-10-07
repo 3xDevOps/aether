@@ -10,7 +10,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
@@ -19,7 +19,7 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // waitTimeout is generous because CI runs these with the race detector, in
@@ -124,7 +125,7 @@ func testPublicKey(t *testing.T) string {
 func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

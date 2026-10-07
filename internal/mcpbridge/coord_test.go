@@ -18,7 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // These tests compose the real thing: a real coord.Service over a real
@@ -66,7 +66,7 @@ func newCoordStack(t *testing.T) *coordStack {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
