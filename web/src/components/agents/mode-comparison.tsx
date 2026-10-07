@@ -126,7 +126,7 @@ export function ModeComparison({
         <ModeCard value="tui" note="Works with every agent." />
         <ModeCard
           value="acp"
-          note={unavailable ?? 'It asks before risky actions by default; you can change that in the run.'}
+          note={unavailable ?? 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'}
           disabled={unavailable !== null}
         />
       </RadioGroupPrimitive.Root>
