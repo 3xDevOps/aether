@@ -44,9 +44,9 @@ function expectCamera(expected: BoardMapViewport) {
   expect(actual.zoom).toBeCloseTo(expected.zoom, 8)
 }
 
-function pointer(target: Element, type: string, x: number, y: number, id = 1, pointerType = 'mouse') {
+function pointer(target: Element, type: string, x: number, y: number, id = 1, pointerType = 'mouse', buttons = type === 'pointerup' || type === 'pointercancel' ? 0 : 1) {
   // jsdom has MouseEvent coordinates but no PointerEvent constructor/capture.
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons, clientX: x, clientY: y })
   Object.defineProperties(event, { pointerId: { value: id }, pointerType: { value: pointerType } })
   fireEvent(target, event)
 }
@@ -212,8 +212,12 @@ it('does not refit an intentional blank pan for new arrays or live status and me
   saveCamera()
   view.rerender(<RunMap cards={[original]} scope={workspace.id} agentNames={{}} />)
   expect(camera()).toEqual(blank)
-  view.rerender(<RunMap cards={[{ ...card({ id: 'stable', status: 'completed', task: 'Updated live task' }), state: 'done' }]} scope={workspace.id} agentNames={{}} />)
+  view.rerender(<RunMap cards={[{
+    ...card({ id: 'stable', status: 'completed', task: 'Updated live task' }), state: 'done',
+    owner: { ...alice, display_name: 'Renamed member' },
+  }]} scope={workspace.id} agentNames={{}} />)
   expect(screen.getByRole('button', { name: 'Updated live task' })).toBeDefined()
+  expect(screen.getByRole('heading', { name: 'Renamed member' })).toBeDefined()
   expect(camera()).toEqual(blank)
   // A live replacement cannot reset an intentionally blank pan either.
   view.rerender(<RunMap cards={[card({ id: 'replacement' })]} scope={workspace.id} agentNames={{}} />)
@@ -265,6 +269,23 @@ it.each(['mouse', 'touch'])('pans from a card with %s without opening it, then p
   expect(useStore.getState().route.name).toBe('board')
   pointer(title, 'pointerdown', 200, 190, 1, pointerType)
   pointer(title, 'pointerup', 200, 190, 1, pointerType)
+  fireEvent.click(title, { detail: 1 })
+  expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
+})
+
+it('ends a card press released outside the canvas before capture, without hover panning or swallowing the next click', () => {
+  const initial = { x: 0, y: 0, zoom: 1 }
+  seedCamera(initial)
+  render(<RunMap cards={[card()]} scope={workspace.id} agentNames={{}} />)
+  const surface = canvas()
+  const title = screen.getByRole('button', { name: run().task })
+  pointer(title, 'pointerdown', 160, 160)
+  pointer(document.body, 'pointerup', 1200, 160)
+  pointer(surface, 'pointermove', 200, 190, 1, 'mouse', 0)
+  pointer(surface, 'pointermove', 240, 220, 1, 'mouse', 0)
+  expectCamera(initial)
+  pointer(title, 'pointerdown', 160, 160)
+  pointer(title, 'pointerup', 160, 160)
   fireEvent.click(title, { detail: 1 })
   expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
 })

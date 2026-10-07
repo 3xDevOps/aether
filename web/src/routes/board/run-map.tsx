@@ -21,7 +21,12 @@ type MapProps = {
 }
 
 export function RunMap({ cards, ...props }: MapProps & { cards: BoardCard[] }) {
-  const layout = useMemo(() => layoutRunMap(cards), [cards])
+  const previous = useRef<RunMapLayout | undefined>(undefined)
+  const layout = useMemo(() => {
+    const next = layoutRunMap(cards, previous.current)
+    previous.current = next
+    return next
+  }, [cards])
   return <MapViewport key={props.scope} layout={layout} {...props} />
 }
 
@@ -147,6 +152,11 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
   function pointerMove(event: PointerEvent<HTMLDivElement>) {
     const previous = pointers.current.get(event.pointerId)
     if (!previous) return
+    if (event.pointerType === 'mouse' && event.buttons === 0) {
+      pointerEnd(event)
+      if (!pointers.current.size) suppressClick.current = false
+      return
+    }
     const before = [...pointers.current.values()]
     pointers.current.set(event.pointerId, { ...previous, x: event.clientX, y: event.clientY })
     if (before.length === 1 && !suppressClick.current) {

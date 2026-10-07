@@ -110,8 +110,36 @@ it('does not move nodes when input order, heartbeat timestamps or live presentat
   const after = layoutRunMap([...cards].reverse().map<BoardCard>((entry) => ({
     ...entry, state: 'needs-you',
     run: { ...entry.run, status: 'needs-attention', stateChangedAt: '2026-09-29T12:00:00Z' },
-  })))
+  })), before)
   expect(after.nodes.map(({ key, x, y, width, height }) => ({ key, x, y, width, height })))
     .toEqual(before.nodes.map(({ key, x, y, width, height }) => ({ key, x, y, width, height })))
   expect(after.connectors).toEqual(before.connectors)
+})
+
+it('updates cached owner boundaries and connectors when ownership or swarm relationships change', () => {
+  const first = card({ id: 'first', mission_id: 'mission', mission_role: 'integrator' })
+  const second = card({ id: 'second', mission_id: 'mission', mission_role: 'integrator' })
+  const worker = card({ id: 'worker', member_id: bob.id, mission_id: 'mission', mission_role: 'worker', integrator_run_id: first.run.id })
+  let layout = layoutRunMap([first, second, worker])
+  expect(layout.connectors[0].crossMember).toBe(true)
+
+  const moved = card({ ...worker.run, member_id: alice.id })
+  layout = layoutRunMap([first, second, moved], layout)
+  expect(layout.groups.map((group) => [group.key, group.count])).toEqual([[alice.id, 3]])
+  expect(layout.connectors).toEqual([expect.objectContaining({ crossMember: false })])
+  expectDisjoint(layout.nodes)
+
+  const reassigned = card({ ...moved.run, integrator_run_id: second.run.id })
+  layout = layoutRunMap([first, second, reassigned], layout)
+  expect(layout.connectors).toEqual([expect.objectContaining({ from: JSON.stringify([workspace.id, second.run.id]) })])
+
+  const detached = card({ ...reassigned.run, mission_id: 'another-mission' })
+  layout = layoutRunMap([first, second, detached], layout)
+  expect(layout.connectors).toEqual([])
+  expect(layout.groups[0].units.find((unit) => unit.nodes.some((node) => node.card.run.id === worker.run.id))?.label)
+    .toBe('Workers · integrator not visible')
+
+  const standalone = card({ ...detached.run, mission_role: undefined })
+  layout = layoutRunMap([first, second, standalone], layout)
+  expect(layout.nodes.find((node) => node.card.run.id === worker.run.id)?.role).toBe('standalone')
 })

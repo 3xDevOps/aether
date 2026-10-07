@@ -910,8 +910,12 @@ is filtered, archived or not listed remains reachable and is labelled
 "integrator not visible". Task text never establishes a relationship.
 `map-layout.ts` packs fixed 320×160 cards into deterministic owner shelves;
 run state, timestamps and input ordering do not reposition nodes.
+Title, timestamp and owner-profile updates reuse geometry. Changes to visible
+run identities, ownership or swarm relationships repack it.
 
 - Drag the canvas or a card to pan; releasing a drag never opens the card.
+  A press released outside the canvas cannot pan on hover or consume the next
+  deliberate card click.
 - Scroll to pan; Shift-scroll pans horizontally. Ctrl/Cmd-scroll zooms around
   the pointer. Touch supports dragging and two-finger pinch zoom.
 - With the canvas focused, arrow keys pan, Shift increases the step,

@@ -150,8 +150,31 @@ function makeUnit(key: string, cards: BoardCard[], parents: Map<string, string>)
 }
 
 /** Only explicit workspace, mission and integrator IDs establish a relationship. */
-export function layoutRunMap(cards: BoardCard[]): RunMapLayout {
+export function layoutRunMap(cards: BoardCard[], previous?: RunMapLayout): RunMapLayout {
   const byKey = new Map(cards.map((card) => [runKey(card), card]))
+  if (previous && previous.nodes.length === byKey.size && previous.nodes.every((node) => {
+    const run = byKey.get(node.key)?.run
+    const old = node.card.run
+    return run && run.member_id === old.member_id && run.mission_id === old.mission_id
+      && run.mission_role === old.mission_role && run.integrator_run_id === old.integrator_run_id
+  })) {
+    const nodes: MapNode[] = []
+    const groups = previous.groups.map((group) => {
+      let member: Member | undefined
+      const units = group.units.map((unit) => ({
+        ...unit,
+        nodes: unit.nodes.map((node) => {
+          const card = byKey.get(node.key)!
+          const next = { ...node, card }
+          nodes.push(next)
+          if (card.owner?.id === group.key) member ??= card.owner
+          return next
+        }),
+      }))
+      return { ...group, units, member, label: member?.display_name || group.key || 'Unknown member' }
+    })
+    return { ...previous, groups, nodes }
+  }
   const ordered = [...byKey.values()].sort((a, b) => compare(runKey(a), runKey(b)))
   const parents = new Map<string, string>()
   for (const card of ordered) {
