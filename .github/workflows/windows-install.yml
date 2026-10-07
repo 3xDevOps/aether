@@ -66,6 +66,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=v0.5.1-alpha.4 -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # CI's native Windows job owns module-cache writes and the localops
+      # unit regressions. Only this lane writes the shared installer caches,
+      # before Defender is armed: archiving them under its realtime scan took
+      # eight minutes.
+      - uses: ./.github/actions/go-cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
+        with:
+          mode: save
+          variant: windows-install
+          save-modules: 'false'
+      - uses: ./.github/actions/bun-cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
+        with:
+          mode: save
       - name: Enable Defender realtime and cloud protection
         shell: powershell
         run: |
@@ -94,15 +108,3 @@ jobs:
           path: ${{ runner.temp }}/windows-desktop.png
           if-no-files-found: ignore
           retention-days: 7
-      # CI's native Windows job owns module-cache writes and the localops
-      # unit regressions. Only this lane writes the shared installer caches.
-      - uses: ./.github/actions/go-cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
-        with:
-          mode: save
-          variant: windows-install
-          save-modules: 'false'
-      - uses: ./.github/actions/bun-cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
-        with:
-          mode: save
