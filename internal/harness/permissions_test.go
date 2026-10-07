@@ -9,20 +9,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 )
 
-// noPrompt is how one shipped agent is kept from asking for permission.
 type noPrompt struct {
-	// flag must be in the TUI, headless and resume argv, and in the ACP argv
-	// when inACP is set.
-	flag  string
-	inACP bool
-	// env are the fixed variables the flag needs.
-	env map[string]string
-	// acpMode is the adapter's session mode that acts without asking.
-	acpMode string
-	// permissionEnv carries the setting for an agent with no flag.
+	// flag must also be in the ACP argv when inACP is set.
+	flag          string
+	inACP         bool
+	env           map[string]string
+	acpMode       string
 	permissionEnv map[string]string
-	// optOut is for an agent that never asks.
-	optOut bool
+	optOut        bool
 }
 
 var noPromptSettings = map[string]noPrompt{
