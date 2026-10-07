@@ -53,16 +53,15 @@ describe('the Standard and Enhanced comparison', () => {
     expect(lines.textContent).toContain('Uses your Claude login through the Claude Agent SDK; the run shows which account pays')
   })
 
-  it('shows the same moment in both mocks, with the permission only in Enhanced, hidden from assistive tech', () => {
+  it('shows the same moment in both mocks, with no permission prompt in either, hidden from assistive tech', () => {
     const { container } = render(<ModeComparison agent={claude} value="tui" onChange={vi.fn()} />)
     const [terminal, session] = container.querySelectorAll('[aria-hidden="true"].min-h-40')
     expect(terminal.textContent).toContain('Fix the flaky login test')
     expect(terminal.textContent).toContain('Run go test ./auth/...')
     expect(terminal.textContent).not.toContain('Approve')
     expect(session.textContent).toContain('Fix the flaky login test')
-    expect(session.textContent).toContain('Permission')
     expect(session.textContent).toContain('go test ./auth/...')
-    expect(session.textContent).toContain('Approve')
+    expect(session.textContent).not.toContain('Approve')
   })
 
   it('says when a running agent can switch, and leaves billing to Claude', () => {

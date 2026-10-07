@@ -37,9 +37,8 @@ versions, how updates reach them, and `agent.list`'s `enhanced_installed`.
 The dashboard's agent setup (**Set up** on onboarding's **Agent** step or the
 **Agents** page) puts the two modes side by side before anything installs.
 Both cards draw the same moment of one run, the same task and the same
-`go test` call: **Standard** shows it running in the agent's terminal with no
-prompt, **Enhanced** shows the permission request as a card with **Approve**
-and **Deny**.
+`go test` call, and neither stops to ask: **Standard** shows it in the
+agent's terminal, **Enhanced** shows it as a tool line among the messages.
 
 | | Standard | Enhanced |
 | --- | --- | --- |
