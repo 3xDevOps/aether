@@ -741,6 +741,47 @@ func TestTurnAnsweredAfterCloseIsInterrupted(t *testing.T) {
 	}
 }
 
+// The running turn may end as the host closes the agent's input, before the
+// connection itself ends; the queued prompt must not start a turn then.
+func TestQueuedPromptIsNotSentAfterClose(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+		<-call.ctx.Done()
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	delivered := make(chan error, 1)
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, func(err error) { delivered <- err }); err != nil || r.Outcome != OutcomeQueued {
+		t.Fatalf("second: %+v %v", r, err)
+	}
+	_ = s.Close()
+	rec.waitIdle(t)
+	_ = m.stdout.Close()
+	<-s.Done()
+	if err := <-delivered; !errors.Is(err, ErrClosed) {
+		t.Fatalf("queued prompt delivered with %v, want ErrClosed", err)
+	}
+	if _, err := s.Prompt(context.Background(), textPrompt("third"), false, nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("prompt after close: %v", err)
+	}
+	log, err := OpenLog(s.cfg.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = log.Close() }()
+	its, err := log.ReadAfter(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ofKind(its, KindTurnStart)) != 1 || messageText(its, "user") != "first" {
+		t.Fatalf("items %+v", its)
+	}
+}
+
 func TestRestartClosesAnOpenTurn(t *testing.T) {
 	path := t.TempDir() + "/run.items.jsonl"
 	log, err := OpenLog(path)
