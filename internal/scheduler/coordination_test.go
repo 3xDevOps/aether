@@ -469,9 +469,13 @@ func TestOpenCodeDiscoveryReferencesOnlyProvisionedAssets(t *testing.T) {
 			var config struct {
 				Plugins      []string `json:"plugin"`
 				Instructions []string `json:"instructions"`
+				Permission   string   `json:"permission"`
 			}
 			if err := json.Unmarshal([]byte(spec.Env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil {
 				t.Fatal(err)
+			}
+			if config.Permission != "allow" {
+				t.Fatalf("discovery and status overlays dropped the permission setting: %q", config.Permission)
 			}
 			if len(config.Instructions) != 1 {
 				t.Fatalf("discovery instruction files = %v", config.Instructions)

@@ -63,6 +63,7 @@ func (r *acpRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec runtim
 		stdin:    hostOut,
 		stdout:   hostIn,
 		agentIn:  agentIn,
+		agentOut: agentOut,
 		done:     make(chan struct{}),
 	}
 	go func() {
@@ -100,6 +101,7 @@ type acpExec struct {
 	stdin    *io.PipeWriter
 	stdout   *io.PipeReader
 	agentIn  *io.PipeReader
+	agentOut *io.PipeWriter
 	done     chan struct{}
 	stopErr  error
 }
@@ -141,6 +143,8 @@ func (e *acpExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus
 	if e.stopErr != nil {
 		return runtime.ExitStatus{}, e.stopErr
 	}
+	// Output first: a killed adapter cannot answer the prompt it was given.
+	_ = e.agentOut.Close()
 	_ = e.agentIn.Close()
 	return e.Wait(ctx)
 }

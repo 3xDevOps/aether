@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -161,6 +162,23 @@ func tuiHarnessCommand(t *testing.T, command []string) []string {
 
 // Both OpenCode API generations get separate native and status assets, while
 // launch-time version selection leaves the member's configuration untouched.
+func TestOpenCodeKeepsWorkspacePermissionRules(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	const workspaceConfig = `{"model":"m","permission":{"bash":"ask"}}`
+	e.ws.Environment.Variables["OPENCODE_CONFIG_CONTENT"] = workspaceConfig
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "ship it", "opencode", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("launch opencode run: %v", err)
+	}
+	if got := e.rt.byName(string(run.ID)).spec.Env["OPENCODE_CONFIG_CONTENT"]; got != workspaceConfig {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want the workspace's own permission rules %q", got, workspaceConfig)
+	}
+}
+
 func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
@@ -171,6 +189,7 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	}
 	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
 	const workspaceConfig = `{"model":"anthropic/claude-sonnet-4-5"}`
+	const launchConfig = `{"model":"anthropic/claude-sonnet-4-5","permission":"allow"}`
 	e.ws.Environment.Variables["OPENCODE_CONFIG_CONTENT"] = workspaceConfig
 	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
 		t.Fatalf("UpdateWorkspace: %v", err)
@@ -184,8 +203,11 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 		t.Fatalf("plugin written for the run = %s, want the embedded asset", got)
 	}
 	spec := e.rt.byName(string(tui.ID)).spec
-	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != workspaceConfig {
-		t.Fatalf("workspace inline config changed before version selection: %q", got)
+	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != launchConfig {
+		t.Fatalf("inline config before version selection = %q, want the workspace value with permissions allowed %q", got, launchConfig)
+	}
+	if got := string(coord.file(tui.ID, "opencode-native-v1.json")); !strings.Contains(got, `"permission":"allow"`) {
+		t.Fatalf("V1 inline config %s lost the permission setting", got)
 	}
 	for id, file := range map[string]string{
 		"aether-mailbox": "opencode-v2.js",
@@ -215,10 +237,8 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	if got := coord.file(headless.ID, agentstatus.OpenCodePluginName); got != nil {
 		t.Fatalf("headless run had the plugin written: %s", got)
 	}
-	// A headless run gets no reporter at all, so nothing replaces the
-	// workspace's own value of the variable there.
-	if got := e.rt.byName(string(headless.ID)).spec.Env["OPENCODE_CONFIG_CONTENT"]; got != workspaceConfig {
-		t.Fatalf("headless opencode run carries OPENCODE_CONFIG_CONTENT = %q, want the workspace value %q", got, workspaceConfig)
+	if got := e.rt.byName(string(headless.ID)).spec.Env["OPENCODE_CONFIG_CONTENT"]; got != launchConfig {
+		t.Fatalf("headless opencode run carries OPENCODE_CONFIG_CONTENT = %q, want %q", got, launchConfig)
 	}
 	if got := e.reporterOf(t, headless.ID); got != harness.ReporterNone {
 		t.Fatalf("headless opencode run recorded reporter %s, want %s", got, harness.ReporterNone)

@@ -680,6 +680,15 @@ omp's model when its default cannot answer:
 ACP_LIVE=1 go test -tags integration -run TestLiveSwitch -v ./internal/harness/
 ```
 
+`TestLiveEnhancedRunsWithoutPermissionPrompts` opens a Claude Code and an
+omp session the way an Enhanced run does and has each run `echo ok >
+ran.txt` in its shell; a `session/request_permission` or a missing file
+fails it:
+
+```sh
+ACP_LIVE=1 go test -tags integration -run TestLiveEnhancedRunsWithoutPermissionPrompts -v ./internal/harness/
+```
+
 ### Native mailbox lifecycle and idle-wake smoke
 
 Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures

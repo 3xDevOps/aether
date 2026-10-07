@@ -262,9 +262,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	fresh := how == openNew
 	sessionID, mode := "", profile.ACPMode
-	if oneShot && profile.ACPAutoMode != "" {
-		mode = profile.ACPAutoMode
-	}
 	if !fresh {
 		sessionID = run.HarnessSessionID
 		if sessionID == "" {

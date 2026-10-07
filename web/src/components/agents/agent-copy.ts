@@ -15,6 +15,16 @@ const logins: Record<string, { command: string; hint: string }> = {
   opencode: { command: 'opencode auth login', hint: 'Pick your provider.' },
 }
 
+const switchToAsk = 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'
+
+const permissionNotes: Record<string, string> = {
+  claude: switchToAsk,
+  codex: switchToAsk,
+  omp: 'Runs with full permissions; its ACP mode has no asking option.',
+  pi: 'pi never asks for permission.',
+  opencode: "Runs with full permissions through its config; a workspace's own permission rules still apply.",
+}
+
 export function label(agent: AgentInfo): string {
   return agentLabel(agent, agent.name)
 }
@@ -38,6 +48,10 @@ export function defaultMode(agent: AgentInfo, remembered: LaunchMode | undefined
 export function setupMode(agent: AgentInfo, remembered: LaunchMode | undefined): 'tui' | 'acp' {
   if (!remembered && agent.enhanced_default && enhancedSupported(agent)) return 'acp'
   return defaultMode(agent, remembered) === 'acp' ? 'acp' : 'tui'
+}
+
+export function permissionNote(agent: AgentInfo): string {
+  return (agent.source === 'shipped' && permissionNotes[agent.name]) || "Permissions follow the agent's enhanced command."
 }
 
 export function supportWords(agent: AgentInfo): string {

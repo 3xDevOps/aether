@@ -1,6 +1,6 @@
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { type ReactNode, useId } from 'react'
-import { enhancedUnavailable, label, modeLines } from '@/components/agents/agent-copy'
+import { enhancedUnavailable, label, modeLines, permissionNote } from '@/components/agents/agent-copy'
 import { mockMoment } from '@/components/agents/mock-moment'
 import { SessionMock } from '@/components/agents/session-mock'
 import { TerminalMock } from '@/components/agents/terminal-mock'
@@ -126,7 +126,7 @@ export function ModeComparison({
         <ModeCard value="tui" note="Works with every agent." />
         <ModeCard
           value="acp"
-          note={unavailable ?? 'It asks before risky actions by default; you can change that in the run.'}
+          note={unavailable ?? permissionNote(agent)}
           disabled={unavailable !== null}
         />
       </RadioGroupPrimitive.Root>

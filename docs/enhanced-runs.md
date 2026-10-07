@@ -11,14 +11,17 @@ run.
 
 ## Which agents
 
-| Agent | How it serves ACP | Starts in mode |
+| Agent | How it serves ACP | Runs without asking through |
 | --- | --- | --- |
-| `claude` | adapter `claude-agent-acp` | `auto` |
-| `codex` | adapter `codex-acp` | `agent` (Auto review) |
-| `pi` | adapter `pi-acp` | the agent's default |
-| `omp` | `omp acp` | the agent's default |
-| `opencode` | `opencode acp` | the agent's default |
-| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | the agent's default |
+| `claude` | adapter `claude-agent-acp` | session mode `bypassPermissions` |
+| `codex` | adapter `codex-acp` | session mode `agent-full-access` |
+| `pi` | adapter `pi-acp` | nothing: pi never asks |
+| `omp` | `omp acp --auto-approve` | the `--auto-approve` flag |
+| `opencode` | `opencode acp` | `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT` |
+| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | whatever the definition passes |
+
+Like Standard, an Enhanced run acts without asking by default. The session
+mode stays yours to change in the run.
 
 An adapter installs with the agent:
 
@@ -34,15 +37,14 @@ versions, how updates reach them, and `agent.list`'s `enhanced_installed`.
 The dashboard's agent setup (**Set up** on onboarding's **Agent** step or the
 **Agents** page) puts the two modes side by side before anything installs.
 Both cards draw the same moment of one run, the same task and the same
-`go test` call: **Standard** shows it running in the agent's terminal with no
-prompt, **Enhanced** shows the permission request as a card with **Approve**
-and **Deny**.
+`go test` call, and neither stops to ask: **Standard** shows it in the
+agent's terminal, **Enhanced** shows it as a tool line among the messages.
 
 | | Standard | Enhanced |
 | --- | --- | --- |
 | What you see | The agent's own terminal, exactly as on your machine | Messages, tool activity, file changes, approvals and progress as native controls |
 | Trade-off | No structured view; the agent acts without asking, and anything it asks is answered in the terminal | Runs through an adapter, not the agent's own screen; some agent-specific commands and screens are missing; starts a few seconds slower |
-| Permissions | Never asks | Asks before risky actions by default; changeable in the run |
+| Permissions | Never asks | Never asks by default; for Claude Code and Codex, switch the session's mode in the run to be asked. The card's note says how the chosen agent runs without asking |
 
 Under the cards one line each comes from `agent.list`: how the agent serves
 ACP (`enhanced`), whether its adapter is installed (`enhanced_installed`),
@@ -160,8 +162,10 @@ a docked request at 40% of the screen and the composer at four lines.
 
 ## Permissions and input
 
-The session starts in the agent's automatic mode: routine actions proceed
-and only risky ones ask, so requests are uncommon. Each request becomes
+A new session starts in the agent's no-prompt setting ([Which
+agents](#which-agents)), so a permission request comes only after you switch
+the session to a mode that asks, or from an agent whose own configuration
+still asks. Each request becomes
 pending input on the run (the run shows **Needs you**) and a `request` item
 in the log. The dashboard answers it in the [Session view](#the-session-view);
 a client answers with `run.input.answer`, the request id and the option id
@@ -191,7 +195,8 @@ and the dashboard reads **Queued** on it. When its turn starts and the agent
 accepts it, `agent_delivery` becomes `delivered` and the dashboard reads
 **Sent**. If the agent refuses it, the message becomes `not_sent` with
 `failure.code: "agent_refused"` and the agent's error. If the agent
-connection closes before the agent accepts it, the message becomes
+connection closes before the agent accepts it, including a failed write to
+the agent's stdin while its output is still open, the message becomes
 `not_sent` with `failure.code: "agent_disconnected"` and the transcript
 records a `Message not delivered: agent connection closed` notice with its
 text; it is not resent when the session resumes. Each change publishes a
@@ -375,8 +380,7 @@ and starts a login shell; the server then starts the ACP
 server and restores the session with `session/resume` or `session/load`. A
 session the agent cannot restore fails the switch rather than starting a new
 one. The session starts in the last mode the log recorded, or the agent's
-automatic mode above, so it asks before risky actions that the terminal
-would have run without asking.
+no-prompt mode above.
 
 **What carries over:** the container, checkout, shell tabs, control lease
 and the conversation. **What does not:** a turn in progress is interrupted,
@@ -426,13 +430,7 @@ favour API keys over the subscription login a member shares.
 Such a run has the enhanced container shape and session item log, and
 `/ws/acp/<run_id>` streams it while it works; its Session view has no
 composer ("Background runs take no input."). The task is the session's
-only prompt, and the session starts in the agent's mode that acts without
-asking:
-
-| Agent | Background session mode |
-| --- | --- |
-| `codex` | `agent-full-access` |
-| others | the enhanced mode above |
+only prompt, and the session starts in the no-prompt setting above.
 
 A permission request that still arrives is answered with its `allow_once`
 option, or its first `allow_*` option when it has none, and logged as

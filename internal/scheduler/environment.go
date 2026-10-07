@@ -94,9 +94,12 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			env[key] = value
 		}
 	}
+	if err := harness.MergeEnv(env, profile.PermissionEnv); err != nil {
+		return nil, fmt.Errorf("scheduler: apply %s's permission setting: %w", profile.Name, err)
+	}
 	if ws != nil {
-		for key, value := range ws.Environment.Variables {
-			env[key] = value
+		if err := harness.MergeEnv(env, ws.Environment.Variables); err != nil {
+			return nil, fmt.Errorf("scheduler: apply the workspace variables over %s's permission setting: %w", profile.Name, err)
 		}
 	}
 	// The harness's own launch requirements come after workspace

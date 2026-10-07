@@ -114,7 +114,7 @@ type pendingRequest struct {
 // fs or terminal methods; the agent uses its own tools inside the container.
 type Conn struct {
 	rpc    *acp.Connection
-	w      io.WriteCloser
+	w      *agentInput
 	logger *slog.Logger
 	events connEvents
 
@@ -134,9 +134,69 @@ type Conn struct {
 	resolved map[string]bool
 }
 
+// agentInput ends the connection on a failed write: the agent takes no more
+// input, and its output may stay open long after. It also reports when a
+// turn's session/prompt is on the wire.
+type agentInput struct {
+	io.WriteCloser
+	output *io.PipeWriter
+	broken atomic.Bool
+
+	mu     sync.Mutex
+	unsent chan struct{}
+}
+
+func (in *agentInput) Write(p []byte) (int, error) {
+	n, err := in.WriteCloser.Write(p)
+	if err != nil {
+		in.broken.Store(true)
+		_ = in.output.Close()
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.unsent != nil {
+		var m struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(p, &m) == nil && m.Method == acp.AgentMethodSessionPrompt {
+			close(in.unsent)
+			in.unsent = nil
+		}
+	}
+	return n, err
+}
+
+// sendingPrompt holds a cancel back until the next session/prompt is
+// written, or until the returned release is called.
+func (in *agentInput) sendingPrompt() func() {
+	unsent := make(chan struct{})
+	in.mu.Lock()
+	in.unsent = unsent
+	in.mu.Unlock()
+	return func() {
+		in.mu.Lock()
+		defer in.mu.Unlock()
+		if in.unsent == unsent {
+			close(unsent)
+			in.unsent = nil
+		}
+	}
+}
+
+func (in *agentInput) promptUnsent() <-chan struct{} {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.unsent
+}
+
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
+	outR, outW := io.Pipe()
+	go func() {
+		_, err := io.Copy(outW, r)
+		_ = outW.CloseWithError(err)
+	}()
 	c := &Conn{
-		w:          w,
+		w:          &agentInput{WriteCloser: w, output: outW},
 		logger:     logger,
 		events:     events,
 		inboundSet: make(chan struct{}),
@@ -147,7 +207,7 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 	c.sessionID.Store("")
 	c.touch()
 	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
-	c.rpc = acp.NewConnection(c.handle, w, io.MultiReader(marker, r))
+	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, outR))
 	c.rpc.SetLogger(logger)
 	return c
 }
@@ -157,7 +217,7 @@ func (c *Conn) touch() { c.lastActivity.Store(time.Now().UnixNano()) }
 // LastActivity is when the agent last sent anything.
 func (c *Conn) LastActivity() time.Time { return time.Unix(0, c.lastActivity.Load()) }
 
-// Done is closed when the agent's output ends.
+// Done is closed when the agent's output ends or a write to its input fails.
 func (c *Conn) Done() <-chan struct{} { return c.rpc.Done() }
 
 // delivered returns once the connection has ended and every notification
@@ -175,6 +235,8 @@ func (c *Conn) closed() bool {
 		return false
 	}
 }
+
+func (c *Conn) inputBroken() bool { return c.w.broken.Load() }
 
 // Close closes the agent's stdin; adapters exit on EOF.
 func (c *Conn) Close() error { return c.w.Close() }
@@ -299,6 +361,16 @@ func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock) (string, er
 // cancel asks the agent to stop the turn and answers every pending request
 // cancelled, as the protocol requires.
 func (c *Conn) cancel(ctx context.Context) error {
+	// A turn's prompt is written from its own goroutine; a cancel that
+	// reached the agent first would be ignored and the turn would run on.
+	if unsent := c.w.promptUnsent(); unsent != nil {
+		select {
+		case <-unsent:
+		case <-c.rpc.Done():
+		case <-ctx.Done():
+			return fmt.Errorf("acphost: session/cancel: %w", ctx.Err())
+		}
+	}
 	err := c.rpc.SendNotification(ctx, acp.AgentMethodSessionCancel, acp.CancelNotification{SessionId: acp.SessionId(c.SessionID())})
 	c.cancelPending()
 	if err != nil {

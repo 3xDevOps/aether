@@ -22,6 +22,9 @@ one entry to the `profiles` map:
 | `HeadlessArgs` | Argv for the machine-readable mode. Same placeholder. |
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
+| `ACPMode` | The session mode a new Enhanced session starts in: the adapter's mode that acts without asking (`bypassPermissions` for Claude Code). Empty keeps the agent's default. |
+| `PermissionEnv` | Variables that turn the agent's permission prompts off in every launch mode, for an agent with no flag for it. OpenCode's `OPENCODE_CONFIG_CONTENT` is merged key by key with the workspace's value. |
+| `NoPermissionPrompt` | Set for an agent that never asks (pi), so it has no setting to apply. |
 | `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `InstallPaths` | Home-relative directories the CLI's `~/.local/bin` launcher links into, outside `~/.local/bin` and `~/.local/lib`; `claude` names `.local/share/claude`, where its native installer puts the versions it links to. A recipient's run that borrows the owner's installation mounts each read-only from the owner's home at the same path. Leave empty for an npm install (under `~/.local/lib`) or a single binary in `~/.local/bin`. |
 | `BorrowedState` | A home-relative JSON file and the keys a launch that borrows this login sets in the launcher's copy when they are absent, so the CLI starts signed in with the owner's login instead of running first-time setup against an empty home. `claude` sets `hasCompletedOnboarding: true` in `.claude.json`, because Claude Code's setup wizard shows its sign-in step regardless of an existing login. The file is created with mode 0600 when missing, rewritten in place when it is a JSON object, and left alone otherwise. |
@@ -32,9 +35,13 @@ one entry to the `profiles` map:
 
 Rules that are easy to get wrong:
 
-- **Apply the agent's full-permission flag in both modes.** Auto-permission is
-  the default stance: the container is the isolation boundary, and an agent
-  stopping to ask for approval in a headless fleet is a hang, not a safeguard.
+- **Turn permission prompts off in every mode.** Put the agent's flag in
+  `TUIArgs`, `HeadlessArgs`, `ResumeArgs` and a native `ACPArgs`, set
+  `ACPMode` for an adapter, or use `PermissionEnv`. Auto-permission is the
+  default stance: the container is the isolation boundary, and an agent
+  stopping to ask for approval in a headless fleet is a hang, not a
+  safeguard. `TestEveryShippedAgentRunsWithoutPermissionPrompts` fails until
+  the new agent's setting is listed in it.
 - **`LocalRoot` names native configuration, not login storage.** OpenCode uses
   `.config/opencode` for configuration and `.local/share/opencode/auth.json`
   for account sharing. Registry roots are home-relative defaults, not

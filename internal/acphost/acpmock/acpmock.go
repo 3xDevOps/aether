@@ -3,6 +3,7 @@
 package acpmock
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
@@ -74,21 +75,60 @@ type Agent struct {
 	conn  *acp.Connection
 	ready chan struct{}
 
-	mu        sync.Mutex
-	session   string
-	methods   []string
-	cancelled chan struct{}
+	mu      sync.Mutex
+	session string
+	methods []string
+	// turn ends at a session/cancel that follows the latest session/prompt
+	// on the wire.
+	turn       context.Context
+	cancelTurn context.CancelFunc
 }
 
 func New(fix Fixture) *Agent {
-	return &Agent{fix: fix, ready: make(chan struct{}), cancelled: make(chan struct{}, 1)}
+	return &Agent{fix: fix, ready: make(chan struct{})}
 }
 
 func (a *Agent) Serve(r io.Reader, w io.Writer) {
-	a.conn = acp.NewConnection(a.handle, w, r)
+	in, out := io.Pipe()
+	go a.route(r, out)
+	a.conn = acp.NewConnection(a.handle, w, in)
 	a.conn.SetLogger(slog.New(slog.DiscardHandler))
 	close(a.ready)
 	<-a.conn.Done()
+	_ = in.Close()
+}
+
+// route ties each session/cancel to the prompt before it in wire order: the
+// SDK runs every request handler on its own goroutine, so a cancel sent right
+// after a prompt can be handled before that prompt's handler starts.
+func (a *Agent) route(r io.Reader, out *io.PipeWriter) {
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadBytes('\n')
+		if len(line) > 0 {
+			var m struct {
+				Method string `json:"method"`
+			}
+			_ = json.Unmarshal(line, &m)
+			a.mu.Lock()
+			switch m.Method {
+			case acp.AgentMethodSessionPrompt:
+				a.turn, a.cancelTurn = context.WithCancel(context.Background())
+			case acp.AgentMethodSessionCancel:
+				if a.cancelTurn != nil {
+					a.cancelTurn()
+				}
+			}
+			a.mu.Unlock()
+			if _, werr := out.Write(line); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			_ = out.CloseWithError(err)
+			return
+		}
+	}
 }
 
 func (a *Agent) Methods() []string {
@@ -149,10 +189,6 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		}
 		return a.prompt(ctx, text.String())
 	case acp.AgentMethodSessionCancel:
-		select {
-		case a.cancelled <- struct{}{}:
-		default:
-		}
 		return nil, nil
 	case acp.AgentMethodSessionSetMode:
 		return map[string]any{}, nil
@@ -168,10 +204,9 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 }
 
 func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError) {
-	select {
-	case <-a.cancelled:
-	default:
-	}
+	a.mu.Lock()
+	cancelled := a.turn.Done()
+	a.mu.Unlock()
 	switch text {
 	case PromptAskPermission:
 		a.mu.Lock()
@@ -217,10 +252,10 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptDemo:
-		return a.demo(ctx)
+		return a.demo(ctx, cancelled)
 	case PromptWait:
 		select {
-		case <-a.cancelled:
+		case <-cancelled:
 		case <-ctx.Done():
 		}
 		return map[string]any{"stopReason": "cancelled"}, nil
@@ -265,7 +300,7 @@ func demoTool(id, kind, title, status string, extra map[string]any) json.RawMess
 	return b
 }
 
-func (a *Agent) demo(ctx context.Context) (any, *acp.RequestError) {
+func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) (any, *acp.RequestError) {
 	thought, _ := json.Marshal(map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
 		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
@@ -294,7 +329,7 @@ func (a *Agent) demo(ctx context.Context) (any, *acp.RequestError) {
 	}
 	for _, step := range steps {
 		select {
-		case <-a.cancelled:
+		case <-cancelled:
 			return map[string]any{"stopReason": "cancelled"}, nil
 		case <-ctx.Done():
 			return map[string]any{"stopReason": "cancelled"}, nil

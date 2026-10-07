@@ -45,6 +45,7 @@ type mockAgent struct {
 	t      *testing.T
 	fix    fixture
 	conn   *acp.Connection
+	stdin  io.Closer
 	stdout io.WriteCloser
 
 	// Overrides, set before the session starts.
@@ -68,7 +69,7 @@ func newMockAgent(t *testing.T, fix fixture) *mockAgent {
 func (m *mockAgent) pipes() (io.Reader, io.WriteCloser) {
 	hostIn, agentOut := io.Pipe()
 	agentIn, hostOut := io.Pipe()
-	m.stdout = agentOut
+	m.stdin, m.stdout = agentIn, agentOut
 	m.conn = acp.NewConnection(m.handle, agentOut, agentIn)
 	m.conn.SetLogger(discard)
 	m.t.Cleanup(func() { _ = agentOut.Close(); _ = hostOut.Close() })

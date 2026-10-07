@@ -360,26 +360,8 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 		}
 		maps.Copy(l.files, profile.DiscoveryFiles)
 		l.args = append(l.args, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
-		for key, value := range profile.DiscoveryLaunchEnv(coordtransport.MountDir) {
-			if key == "OPENCODE_CONFIG_CONTENT" && l.env[key] != "" {
-				// OpenCode has one inline config variable. Preserve the reporter
-				// only when it was actually provisioned above, rather than making
-				// discovery reference an absent plugin with conflict policy off.
-				var statusConfig, discoveryConfig map[string]json.RawMessage
-				if err := json.Unmarshal([]byte(l.env[key]), &statusConfig); err != nil {
-					return coordinationLaunch{}, fmt.Errorf("decode harness status config: %w", err)
-				}
-				if err := json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
-					return coordinationLaunch{}, fmt.Errorf("decode harness discovery config: %w", err)
-				}
-				maps.Copy(statusConfig, discoveryConfig)
-				combined, err := json.Marshal(statusConfig)
-				if err != nil {
-					return coordinationLaunch{}, fmt.Errorf("combine harness config: %w", err)
-				}
-				value = string(combined)
-			}
-			l.env[key] = value
+		if err := harness.MergeEnv(l.env, profile.DiscoveryLaunchEnv(coordtransport.MountDir)); err != nil {
+			return coordinationLaunch{}, err
 		}
 	}
 	return l, nil

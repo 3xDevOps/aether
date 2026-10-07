@@ -200,7 +200,8 @@ run. See the launch table below for why `claude` needs one. Optional reporter
 environment (OpenCode V1's `OPENCODE_CONFIG_CONTENT`) is not a required
 **Launch env** value; see "Status reporting" for its Standard-only scope.
 
-Fixed launch values replace workspace values of the same name. Native
+Fixed launch values replace workspace values of the same name;
+`OPENCODE_CONFIG_CONTENT` is merged key by key instead. Native
 OpenCode coordination has version-specific merge/discovery behavior,
 described under [managed loading](#managed-native-loading).
 
@@ -1012,6 +1013,17 @@ vendor's own answer is to run the container as a non-root user. It is a
 stopgap until the standard image ships one. The Environment launches no
 agent, so it gets none of this.
 
+No shipped agent asks for permission by default, in any mode. Enhanced runs
+start Claude Code in session mode `bypassPermissions` and Codex in
+`agent-full-access`, and run `omp acp --auto-approve`. OpenCode has no flag
+for it, so every `opencode` launch - Standard, Background, Enhanced and
+resume - gets `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. The
+workspace's own value of that variable is merged over it key by key, so a
+workspace that sets `permission` keeps its rules; Aether's plugin and
+instruction overlays are merged over both. pi never asks.
+`TestEveryShippedAgentRunsWithoutPermissionPrompts` in `internal/harness`
+names each agent's setting.
+
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
 `--verbose` comes with it. If a launch fails with the CLI rejecting its own
@@ -1021,8 +1033,8 @@ Environment. The installed executable lives in that member's home.
 An argv override replaces the shipped template wholesale, so a registry fix
 never reaches it: a deployment's `--agent-definitions` entry that redefines
 a shipped agent has to be updated on its own. It keeps the registry's key
-passthrough and launch env for that name, since neither is part of the
-command line.
+passthrough, launch env, OpenCode's permission overlay and Enhanced starting
+mode for that name, since none is part of the command line.
 
 ## Setting up an agent
 
@@ -1245,8 +1257,8 @@ generic denylist knows about:
 {
   "omp": {
     "Name": "omp",
-    "TUIArgs": ["omp", "{task}"],
-    "HeadlessArgs": ["omp", "-p", "{task}"],
+    "TUIArgs": ["omp", "--auto-approve", "{task}"],
+    "HeadlessArgs": ["omp", "-p", "--auto-approve", "{task}"],
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
     "CredentialPaths": ["/home/aether/.omp/agent"],

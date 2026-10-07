@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 )
 
 func TestReplayRecordedAgents(t *testing.T) {
@@ -278,6 +282,34 @@ func TestCancelAnswersPendingRequests(t *testing.T) {
 	reqs := ofKind(items(t, s), KindRequest)
 	if len(reqs) != 2 || reqs[1].Request.Status != RequestCancelled {
 		t.Fatalf("request items %+v", reqs)
+	}
+}
+
+func TestCancelRightAfterATurnStartsReachesTheAgentAfterItsPrompt(t *testing.T) {
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	agent := acpmock.New(loadFixture(t, "claude"))
+	go func() {
+		agent.Serve(agentIn, agentOut)
+		_ = agentOut.Close()
+	}()
+	rec := newRecorder()
+	s, err := Start(t.Context(), hostIn, hostOut, rec.config(Config{LogPath: filepath.Join(t.TempDir(), "run.items.jsonl"), Cwd: "/workspace", Logger: discard}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(); <-s.Done() })
+	for turn := range 100 {
+		go func() { _, _ = s.Prompt(context.Background(), textPrompt(acpmock.PromptWait), false, nil) }()
+		for !s.State().TurnInFlight {
+			time.Sleep(time.Microsecond)
+		}
+		if err := s.Cancel(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if reason := rec.waitIdle(t); reason != "cancelled" {
+			t.Fatalf("turn %d ended with %q, want cancelled", turn, reason)
+		}
 	}
 }
 

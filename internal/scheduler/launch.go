@@ -414,7 +414,9 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's: what the server
 	// needs the container to have is not a preference.
-	maps.Copy(plan.Env, coordEnv)
+	if err = harness.MergeEnv(plan.Env, coordEnv); err != nil {
+		return err
+	}
 	maps.Copy(plan.Env, native.Env)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
