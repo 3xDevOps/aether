@@ -135,10 +135,14 @@ type Conn struct {
 }
 
 // agentInput records a failed write: the agent takes no more input, though
-// its output may not have ended yet.
+// its output may not have ended yet. It also reports when a turn's
+// session/prompt is on the wire.
 type agentInput struct {
 	io.WriteCloser
 	broken atomic.Bool
+
+	mu     sync.Mutex
+	unsent chan struct{}
 }
 
 func (in *agentInput) Write(p []byte) (int, error) {
@@ -146,7 +150,41 @@ func (in *agentInput) Write(p []byte) (int, error) {
 	if err != nil {
 		in.broken.Store(true)
 	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.unsent != nil {
+		var m struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(p, &m) == nil && m.Method == acp.AgentMethodSessionPrompt {
+			close(in.unsent)
+			in.unsent = nil
+		}
+	}
 	return n, err
+}
+
+// sendingPrompt holds a cancel back until the next session/prompt is
+// written, or until the returned release is called.
+func (in *agentInput) sendingPrompt() func() {
+	unsent := make(chan struct{})
+	in.mu.Lock()
+	in.unsent = unsent
+	in.mu.Unlock()
+	return func() {
+		in.mu.Lock()
+		defer in.mu.Unlock()
+		if in.unsent == unsent {
+			close(unsent)
+			in.unsent = nil
+		}
+	}
+}
+
+func (in *agentInput) promptUnsent() <-chan struct{} {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.unsent
 }
 
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
@@ -316,6 +354,16 @@ func (c *Conn) steer(ctx context.Context, blocks []acp.ContentBlock) (string, er
 // cancel asks the agent to stop the turn and answers every pending request
 // cancelled, as the protocol requires.
 func (c *Conn) cancel(ctx context.Context) error {
+	// A turn's prompt is written from its own goroutine; a cancel that
+	// reached the agent first would be ignored and the turn would run on.
+	if unsent := c.w.promptUnsent(); unsent != nil {
+		select {
+		case <-unsent:
+		case <-c.rpc.Done():
+		case <-ctx.Done():
+			return fmt.Errorf("acphost: session/cancel: %w", ctx.Err())
+		}
+	}
 	err := c.rpc.SendNotification(ctx, acp.AgentMethodSessionCancel, acp.CancelNotification{SessionId: acp.SessionId(c.SessionID())})
 	c.cancelPending()
 	if err != nil {

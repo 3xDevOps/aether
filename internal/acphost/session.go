@@ -393,7 +393,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 			s.cfg.OnState(true, "prompt", nil)
 		}
 	})
-	go s.runTurn(blocks, ack)
+	go s.runTurn(blocks, ack, s.conn.w.sendingPrompt())
 	return ack
 }
 
@@ -422,8 +422,9 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	}})
 }
 
-func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
+func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
+	sent()
 	if err != nil && s.conn.closed() {
 		// Record what the agent sent before it went away ahead of the
 		// interruption.
