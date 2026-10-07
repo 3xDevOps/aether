@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // A service built the way anything but cmd/aether-server builds it - no
@@ -25,7 +26,7 @@ func TestServiceWithoutAHostCannotTouchTheMachine(t *testing.T) {
 	if err := os.WriteFile(self, []byte("the installed binary"), 0o755); err != nil {
 		t.Fatalf("write %s: %v", self, err)
 	}
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestPartialHostIsNoHost(t *testing.T) {
 	if err := os.WriteFile(self, []byte("x"), 0o755); err != nil {
 		t.Fatalf("write %s: %v", self, err)
 	}
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestHostProcessIsComplete(t *testing.T) {
 // still serve runs.
 func TestUnresolvableBinaryDisablesRatherThanFails(t *testing.T) {
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestApplyRefusesOnAnIncapableServer(t *testing.T) {
 	if err := os.WriteFile(self, []byte("the installed binary"), 0o755); err != nil {
 		t.Fatalf("write %s: %v", self, err)
 	}
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // env is one service under test with everything the real one talks to
@@ -153,7 +154,7 @@ func newEnv(t *testing.T, poison bool) *env {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

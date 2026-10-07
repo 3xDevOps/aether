@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type captureFileSource struct {
@@ -78,7 +79,7 @@ func newDurableCaptureFixture(t *testing.T) *durableCaptureFixture {
 	t.Helper()
 	f := &durableCaptureFixture{dbPath: filepath.Join(t.TempDir(), "evidence.db"), now: time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)}
 	var err error
-	f.db, err = store.Open(f.dbPath)
+	f.db, err = storetest.Open(f.dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

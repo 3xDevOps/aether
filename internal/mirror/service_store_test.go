@@ -8,10 +8,11 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 func TestDisableWithSQLiteStoreDeletesRow(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "mirror.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "mirror.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

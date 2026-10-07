@@ -11,7 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // A run agent verifies in the home its run's container mounts, recorded on
@@ -23,7 +23,7 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "state.db")
-	db, err := store.Open(dbPath)
+	db, err := storetest.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type recordingLauncher struct {
@@ -66,7 +67,7 @@ func (c *fakeClock) set(t time.Time) {
 // storm at boot.
 func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestScheduleMissedWhileDownIsSkippedNotCaughtUp(t *testing.T) {
 // stays quiet instead of being due on every scan forever.
 func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestImpossibleCronRuleIsRefusedAndNeverFires(t *testing.T) {
 // template cannot later be edited into a prompt it can never render.
 func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -345,7 +346,7 @@ type gateEnv struct {
 func newGateEnv(t *testing.T, clock *fakeClock) *gateEnv {
 	t.Helper()
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

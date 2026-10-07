@@ -9,6 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // TestRollUpAttributesPerMemberAndKeepsUnmeteredOut proves the rollup
@@ -61,7 +62,7 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 // workspace's independent spend.
 func TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -241,7 +242,7 @@ func TestUnmeteredSpendNeverCountsTowardTheCap(t *testing.T) {
 // not drop just because the run that earned it is gone.
 func TestDeletedRunSpendStillCountsAgainstTheBudget(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -308,7 +309,7 @@ func TestDeletedRunSpendStillCountsAgainstTheBudget(t *testing.T) {
 // (there is no run left to show).
 func TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

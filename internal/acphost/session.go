@@ -101,20 +101,21 @@ func (s *Session) resolveLocked(a *turnAck, err error) {
 		return
 	default:
 	}
+	if err != nil && s.closingLocked() {
+		err = ErrClosed
+	}
 	a.err = err
 	close(a.done)
 	if a.delivered == nil {
 		return
 	}
-	switch {
-	case err == nil || errors.Is(err, ErrClosed):
-	case s.conn.closed():
-		err = ErrClosed
-	default:
+	if err != nil && !errors.Is(err, ErrClosed) {
 		err = fmt.Errorf("acphost: the agent refused the prompt: %w", err)
 	}
 	s.callback(func() { a.delivered(err) })
 }
+
+func (s *Session) closingLocked() bool { return s.closed || s.hostClosed || s.conn.closed() }
 
 type queuedPrompt struct {
 	blocks    []acp.ContentBlock
@@ -277,7 +278,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
 	s.mu.Lock()
-	if s.closed || s.conn.closed() {
+	if s.closingLocked() {
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
@@ -327,7 +328,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{}, fmt.Errorf("acphost: %s: unknown outcome %q", methodSteering, outcome)
 	}
-	if s.closed || s.conn.closed() {
+	if s.closingLocked() {
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
@@ -362,7 +363,7 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 // queued, and reports whether it did once the agent accepted the prompt.
 func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bool, error) {
 	s.mu.Lock()
-	if s.closed || s.conn.closed() {
+	if s.closingLocked() {
 		s.mu.Unlock()
 		return false, ErrClosed
 	}
@@ -453,7 +454,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck) {
 	}
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: reason})
 	s.turnActive = false
-	if len(s.queue) > 0 && !s.conn.closed() {
+	if len(s.queue) > 0 && !s.closingLocked() {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
 		s.startTurnLocked(next.blocks, next.delivered)

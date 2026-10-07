@@ -4,10 +4,13 @@ Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
   (race detector on). `TEST_PKGS` narrows it to some packages and
-  `TEST_SKIP` leaves some out. CI's `unit` matrix gives `internal/sshd`,
-  `internal/scheduler`, and `internal/coord` with `internal/mission` a runner
-  each, the packages listed in `UNIT_SHARDED` in
-  `.github/workflows/ci.yml`; `build-and-test` runs the rest. Permission matrices, budget math, configuration import
+  `TEST_SKIP` leaves some out. CI's `build-and-test` job runs the whole
+  suite. A test that needs a database outside `internal/store` opens it with
+  `storetest.Open` (`internal/store/storetest`), which starts a new file as a
+  copy of one migrated once per test binary: applying every migration costs
+  seconds per database under the race detector. The `scripts` job runs
+  `make test-scripts` and `make test-native-hooks`, and `lint` runs the
+  advisory `make vulncheck`. Permission matrices, budget math, configuration import
   and file revision rules, tailnet auth edge cases, scheduler transitions, and
   the local gateway's own behaviors are proven there, once, and the E2E suite
   does not restate them.
@@ -272,7 +275,9 @@ compiler archives; each Go release-build lane owns its
 `release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
 The installer uses a separate `windows-install` compiler lane; only its
 PowerShell/system-Node main lane saves that cache and its Bun dependency
-cache, leaving Windows module writes to CI's `windows` job. Before compressing
+cache, leaving Windows module writes to CI's `windows` job. It saves them
+right after the build, before arming Defender, whose realtime scan made
+archiving the Bun cache take eight minutes. Before compressing
 an archive, each writer checks whether its exact key already exists and skips
 the save on a hit. Cache reuse does not replace any build or validation gate.
 

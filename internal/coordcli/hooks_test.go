@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 type hookPeers []overlap.Entry
@@ -37,7 +38,7 @@ func hookRun(t *testing.T, mission coord.MissionService, files []string, unread 
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	t.Setenv("TMPDIR", dir)
-	db, err := store.Open(filepath.Join(dir, "mail.db"))
+	db, err := storetest.Open(filepath.Join(dir, "mail.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

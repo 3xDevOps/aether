@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // fakePeers stands in for the conflict radar index. reads counts how often
@@ -127,7 +128,7 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 			t.Errorf("remove coordination fixture directory: %v", cleanupErr)
 		}
 	})
-	db, err := store.Open(filepath.Join(dir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

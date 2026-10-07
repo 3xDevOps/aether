@@ -18,7 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 // chaosAgent is the deterministic agent for the reboot scenarios. It makes
@@ -369,7 +369,7 @@ func (e *chaosEnv) seedStore(t *testing.T) {
 	if err := os.MkdirAll(e.dataDir, 0o700); err != nil {
 		t.Fatalf("create data dir: %v", err)
 	}
-	db, err := store.Open(filepath.Join(e.dataDir, "aether.db"))
+	db, err := storetest.Open(filepath.Join(e.dataDir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

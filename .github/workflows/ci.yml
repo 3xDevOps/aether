@@ -29,11 +29,6 @@ concurrency:
 # native Go, and smoke owns Linux arm64 native Go. These three Go owners
 # also save modules for their host. runner.environment stays in every key
 # so a self-hosted archive is never restored onto a hosted VM.
-# The unit-test packages the `unit` matrix runs on runners of their own.
-# build-and-test runs every other package. Keep this list and the matrix in
-# step.
-env:
-  UNIT_SHARDED: ./internal/sshd ./internal/scheduler ./internal/coord ./internal/mission
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
@@ -121,12 +116,17 @@ jobs:
         run: make vet
       - name: Lint workflows
         run: make lint-workflows
+      # Advisory only: the reachable Moby CVEs have no fixed release and
+      # govulncheck cannot suppress individual findings, so a hard gate would
+      # keep CI permanently red. Read the step output, do not ignore it.
+      - name: Vulnerability scan (advisory)
+        run: make vulncheck
+        continue-on-error: true
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.10.1
-          skip-cache: false
-          skip-save-cache: ${{ github.event_name != 'push' }}
+          skip-cache: true
 
   build-and-test:
     needs: changes
@@ -155,24 +155,8 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
-      # Advisory only: the reachable Moby CVEs have no fixed release and
-      # govulncheck cannot suppress individual findings, so a hard gate would
-      # keep CI permanently red. Read the step output, do not ignore it.
-      - name: Vulnerability scan (advisory)
-        run: make vulncheck
-        continue-on-error: true
       - name: Unit tests
-        run: make test TEST_SKIP="$UNIT_SHARDED"
-      # The `unit` jobs never save the Go cache, so this is what puts their
-      # race-built test binaries into the one this job saves.
-      - name: Compile the sharded unit tests
-        run: |
-          read -r -a packages <<< "$UNIT_SHARDED"
-          go test -race -run '^$' "${packages[@]}"
-      - name: Shell script tests
-        run: make test-scripts
-      - name: Native hook lifecycle tests
-        run: make test-native-hooks
+        run: make test
       - name: Build binaries
         run: make build
       # Own the Linux amd64 module and native compiler archives, plus bun.
@@ -191,25 +175,11 @@ jobs:
         with:
           mode: save
 
-  # The unit-test packages that take minutes under -race, each on its own
-  # runner so they do not compete for its CPUs. Their tests wait on real
-  # timers, so a starved runner makes them slower still.
-  unit:
-    name: unit (${{ matrix.shard }})
+  scripts:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - shard: sshd
-            pkgs: ./internal/sshd
-          - shard: scheduler
-            pkgs: ./internal/scheduler
-          - shard: coord-mission
-            pkgs: ./internal/coord ./internal/mission
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -221,12 +191,13 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      # internal/sshd takes about 450 seconds here, and go test stops a
-      # package at 600 unless told otherwise.
-      - name: Unit tests
-        env:
-          GOFLAGS: -timeout=30m
-        run: make test TEST_PKGS="${{ matrix.pkgs }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Shell script tests
+        run: make test-scripts
+      - name: Native hook lifecycle tests
+        run: make test-native-hooks
 
   # internal/harness needs the agent images built here. The independent
   # integration shards start without waiting for these images.
