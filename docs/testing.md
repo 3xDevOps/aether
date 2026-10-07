@@ -31,17 +31,17 @@ Layers, per the design spec's testing strategy:
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
   GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
-  job log. Five browser-independent shards in the `integration` matrix in
+  job log. Six browser-independent shards in the `integration` matrix in
   `.github/workflows/ci.yml` start without waiting for browser images:
   `server-chaos` (`INTEGRATION_RUN=^TestIntegrationChaos`),
   `server-coordination` (`INTEGRATION_RUN=^TestIntegrationCoordination`),
   `server-mission` (`INTEGRATION_RUN=^TestIntegrationMission`),
   `server-heavy`
   (`INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'`),
-  and `rest`.
+  `scheduler` (`INTEGRATION_PKGS=./internal/scheduler`), and `rest`.
   The four named server shards use `INTEGRATION_PKGS=./internal/server`.
   `rest` dynamically discovers integration packages, excluding
-  `./internal/harness` and `./internal/server`;
+  `./internal/harness`, `./internal/scheduler`, and `./internal/server`;
   it skips `^TestDockerBrowser`, whose coverage belongs to the native
   amd64/arm64 `browser` jobs. The separate `integration-server-rest` job
   loads `browser-image-amd64` and runs `./internal/server` with
