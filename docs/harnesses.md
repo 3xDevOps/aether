@@ -1017,10 +1017,10 @@ No shipped agent asks for permission by default, in any mode. Enhanced runs
 start Claude Code in session mode `bypassPermissions` and Codex in
 `agent-full-access`, and run `omp acp --auto-approve`. OpenCode has no flag
 for it, so every `opencode` launch - Standard, Background, Enhanced and
-resume - gets `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`, merged
-key by key with the workspace's own value of that variable and with
-Aether's plugin and instruction overlays; permission rules in the member's
-OpenCode config files still merge with it. pi never asks.
+resume - gets `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. The
+workspace's own value of that variable is merged over it key by key, so a
+workspace that sets `permission` keeps its rules; Aether's plugin and
+instruction overlays are merged over both. pi never asks.
 `TestEveryShippedAgentRunsWithoutPermissionPrompts` in `internal/harness`
 names each agent's setting.
 

@@ -162,6 +162,23 @@ func tuiHarnessCommand(t *testing.T, command []string) []string {
 
 // Both OpenCode API generations get separate native and status assets, while
 // launch-time version selection leaves the member's configuration untouched.
+func TestOpenCodeKeepsWorkspacePermissionRules(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	const workspaceConfig = `{"model":"m","permission":{"bash":"ask"}}`
+	e.ws.Environment.Variables["OPENCODE_CONFIG_CONTENT"] = workspaceConfig
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "ship it", "opencode", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("launch opencode run: %v", err)
+	}
+	if got := e.rt.byName(string(run.ID)).spec.Env["OPENCODE_CONFIG_CONTENT"]; got != workspaceConfig {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want the workspace's own permission rules %q", got, workspaceConfig)
+	}
+}
+
 func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
