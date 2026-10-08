@@ -200,13 +200,13 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await expect(row).toBeFocused()
   expectVisibleFocus('the sidebar run row', await indicator(row))
 
-  const surfaces = page.getByRole('navigation', { name: 'Aether' })
+  const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   const board = surfaces.getByRole('button', { name: 'Board', exact: true })
   await board.focus()
   await page.keyboard.press('Tab')
   const missions = surfaces.getByRole('button', { name: 'Swarms', exact: true })
   await expect(missions).toBeFocused()
-  expectVisibleFocus('the Swarms sidebar row', await indicator(missions))
+  expectVisibleFocus('the Swarms navigation button', await indicator(missions))
 
   await closeFirstRun(page)
   await page.keyboard.press('Escape')

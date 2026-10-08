@@ -23,7 +23,7 @@ test('a template schedules from its row menu and launches from its row', async (
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Templates', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Templates', exact: true }).click()
   const row = page.getByRole('listitem', { name: 'Template nightly' })
   await expect(row).toContainText(`Background · ${task}`)
   await expect(page.getByRole('form')).toHaveCount(0)

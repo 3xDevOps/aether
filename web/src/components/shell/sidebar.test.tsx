@@ -56,7 +56,6 @@ describe('shell landmarks', () => {
 
     expect(screen.getAllByRole('main')).toHaveLength(1)
     expect(within(screen.getByRole('main')).getAllByRole('heading', { level: 1 })).toHaveLength(1)
-    expect(topBanners()).toHaveLength(0)
     expect(screen.queryByRole('contentinfo')).toBeNull()
   })
 
@@ -213,10 +212,11 @@ describe('navigation rows', () => {
     useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'collaborator' } } }))
     render(<AppShell />)
 
-    fireEvent.click(nav().getByRole('button', { name: 'Environment' }))
+    const navigation = within(screen.getByRole('navigation', { name: 'Main navigation' }))
+    fireEvent.click(navigation.getByRole('button', { name: 'Environment' }))
     expect(useStore.getState().route.name).toBe('environment')
-    expect(nav().getByRole('button', { name: 'Environment' }).getAttribute('aria-current')).toBe('page')
-    expect(nav().getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBeNull()
+    expect(navigation.getByRole('button', { name: 'Environment' }).getAttribute('aria-current')).toBe('page')
+    expect(navigation.getByRole('button', { name: 'Board' }).getAttribute('aria-current')).toBeNull()
     expect(nav().queryByRole('button', { name: 'Members' })).toBeNull()
 
     act(() => useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'admin' } } })))
@@ -303,15 +303,13 @@ describe('phone shell', () => {
 
     expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
     const banner = within(topBanners()[0]!)
-    expect(banner.getByText('Board')).toBeDefined()
     fireEvent.click(banner.getByRole('button', { name: 'Open sidebar, 2 runs need you' }))
 
     const drawer = within(await screen.findByRole('dialog', { name: 'Aether' }))
-    fireEvent.click(drawer.getByRole('button', { name: 'Activity' }))
+    fireEvent.click(drawer.getByRole('button', { name: 'Settings' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Aether' })).toBeNull())
-    expect(banner.getByText('Activity')).toBeDefined()
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Activity' })))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Settings' })))
   })
 
   it('titles a run page "Run" and shrinks New run to an icon there', () => {

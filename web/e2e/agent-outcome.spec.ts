@@ -42,7 +42,7 @@ test('an agent success report waits in Needs you until its owner opens the run',
   await expect
     .poll(async () => (await alice.api.rpc<{ run: { outcome_unseen?: boolean } }>('run.get', { run_id: run.id })).run.outcome_unseen ?? false)
     .toBe(false)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Board', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Board', exact: true }).click()
   await expect(card('Finished')).toBeVisible()
   await expect(card('Needs you')).toHaveCount(0)
 })

@@ -78,7 +78,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     // Alice's environment terminal is running when she first shares, so
     // Profile offers to stop it.
     await page.goto(alice.url)
-    await page.getByRole('navigation', { name: 'Aether' })
+    await page.getByRole('navigation', { name: 'Main navigation' })
       .getByRole('button', { name: 'Environment', exact: true }).click()
     const dock = page.getByRole('region', { name: 'Environment terminal' })
     await dock.getByRole('button', { name: 'Open', exact: true }).click()

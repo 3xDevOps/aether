@@ -59,7 +59,7 @@ test('cancels, archives, unarchives and deletes a swarm from its page', async ({
   const archivedRun = await alice.api.rpc<{ run: { archived_at?: string } }>('run.get', { run_id: integratorRun })
   expect(archivedRun.run.archived_at).toBeTruthy()
 
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Swarms', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Swarms', exact: true }).click()
   await expect(page.getByRole('list', { name: 'Swarms' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Archived (1)' }).click()
   await page.getByRole('list', { name: 'Archived swarms' }).getByRole('button', { name: objective }).click()

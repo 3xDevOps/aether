@@ -500,7 +500,7 @@ Protocol. Install that executable into `~/.local/bin` from the terminal in its
 setup.
 
 Your environment's home persists the executable and vendor login state across
-containers. The **Environment** page in the sidebar opens the same shell;
+containers. **Environment** in the header (or **More navigation**) opens the same shell;
 [terminal.md](terminal.md) covers its tabs and **Stop environment**.
 
 No vendor login yet? [Prove the plumbing without an agent

@@ -1137,7 +1137,7 @@ covered - WebKit is not installed.
 
 | Spec | Scenario |
 | --- | --- |
-| `files-browser.mobile.spec.ts` | On a phone, opening Files through the top bar's sidebar sheet, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
+| `files-browser.mobile.spec.ts` | On a phone, opening Files through the header's **More navigation** menu, opening a real repository file, returning with Browse, and opening another file without losing the tree - every control tapped |
 | `onboarding-link.mobile.spec.ts` | The Connect step at the height a keyboard leaves: the focused field stays on screen, typing lands, the page does not grow, and the submit can still be scrolled into reach; after linking and pushing a real clone at 390px from the repository page, opened from the Manage workspaces row's **More actions > Repository**, the page has no horizontal overflow and its heading and introductory text stay inside the viewport |
 | `shell-drawer.mobile.spec.ts` | On a phone, the sidebar as a modal sheet: it opens from the top bar, its rows are finger-sized, and tapping a run closes the sheet onto that run with focus on its heading, the top bar naming it and no page overflow |
 | `dialog-anchor.mobile.spec.ts` | On a phone, a template's Delete confirm, opened from the template row's More menu and short enough to tell a sheet from a centred box, opening as a full-width sheet along the bottom edge; the launch form, opened from **New run** in the top bar (the unnamed `banner` landmark), keeping its Launch button on screen on a viewport as short as a soft keyboard leaves; and a launch refusal sitting below the Mode choice with Launch still more than half the sheet wide |

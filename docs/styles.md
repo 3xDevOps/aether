@@ -172,9 +172,10 @@ importing `lucide-react`.
 
 Use compact workbench geometry rather than landing-page ornament:
 
-- One sidebar, 260px by default and resizable from 220px to 400px; under
-  768px a 48px top bar and the sidebar as a side sheet. The desktop window
-  bar is 35px.
+- A branded header with horizontal navigation; destinations that do not fit
+  move into **More navigation**, except Board and Swarms. One sidebar, 260px
+  by default and resizable from 220px to 400px; under 768px it is a side
+  sheet, opened from a second, 48px toolbar. The desktop window bar is 35px.
 - 44px view headers (`PaneHeader`), 56px for a run's header, 32px terminal
   toolbars, 28px list rows and menu items (44px coarse).
 - 28px fields and buttons, 24px small and toolbar icon buttons (44px on a
@@ -224,21 +225,25 @@ control** or **Release** ([terminal.md](terminal.md)). A run shell adds
 
 ## Shell, palette and focus
 
-The shell is one sidebar beside the content view, with no icon rail, title
-bar, status bar or stacked banners. The sidebar is `bg-chrome` with a seam on
-its right; its rows are `ListRow`s with 16px muted icons, the open page in
-`bg-selection`. **New run** at its top is the only filled button in the shell.
+The shell has a branded navigation header above one sidebar and the content
+view, with no icon rail or status bar. The Aether mark and title sit at its
+left; Board through Templates follow as horizontal `ListRow`s. Measure
+available width rather than assuming every label fits a breakpoint, and
+keep Board and Swarms outside the overflow menu. The header and sidebar use
+`bg-chrome` with seams against the content; navigation rows have muted icons
+and the open page in `bg-selection`. **New run** at the sidebar's top is the
+only filled button in the shell.
 Run rows carry a shaped `StatusDot`, the title and a monochrome `AgentGlyph`;
 a row that does not need the viewer shows its title in `text-muted`, never
 with opacity. Group headers are sentence-case 12px muted disclosure buttons
 with their count. The footer holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
 
-Under 768px the 48px top bar (`bg-chrome`) holds the sidebar button, with a
-needs-you dot while anything needs the viewer, the view title in 13/20
-medium, **Search** and **New run**. When the page has its own primary action,
-the top bar's **New run** becomes a ghost `+` icon so the screen keeps one
-filled button. The sidebar opens as a left side sheet. Content views draw
+Under 768px a second, 48px toolbar (`bg-chrome`) holds the sidebar button,
+with a needs-you dot while anything needs the viewer, the view title in
+13/20 medium, **Search** and **New run**. When the page has its own primary
+action, the toolbar's **New run** becomes a ghost `+` icon so the screen keeps
+one filled button. The sidebar opens as a left side sheet. Content views draw
 `PaneHeader`: the title in `text-title`, one optional muted line under it,
 and actions on the right. A connection problem is a failed-tone `StateLine`,
 in the header on desktop and under the top bar on a phone.

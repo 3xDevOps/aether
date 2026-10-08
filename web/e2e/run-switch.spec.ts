@@ -322,7 +322,7 @@ done
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
   const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
-  const surfaces = page.getByRole('navigation', { name: 'Aether' })
+  const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
   await open(launched[0].task)
