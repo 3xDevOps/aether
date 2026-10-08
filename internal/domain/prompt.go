@@ -1,6 +1,16 @@
 package domain
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
+
+// ErrPromptNotSent marks a delivery failure before the prompt reached the
+// agent transport. It must not wrap failures after delivery was attempted.
+var ErrPromptNotSent = errors.New("agent prompt was not sent")
+
+// MaxImageBytes bounds decoded image uploads and previews on every transport.
+const MaxImageBytes = 8 << 20
 
 // AgentPrompt preserves validated attachment references and the persisted room
 // message identity until the delivery driver selects its wire representation.

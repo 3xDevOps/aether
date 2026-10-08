@@ -159,7 +159,7 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	for index, reference := range prompt.Attachments {
 		data, mimeType, readErr := d.s.ReadImage(ctx, run.ID, reference)
 		if readErr != nil {
-			return "", fmt.Errorf("scheduler: read prompt image: %w", readErr)
+			return "", fmt.Errorf("%w: scheduler: read prompt image: %w", domain.ErrPromptNotSent, readErr)
 		}
 		uri := "aether://room/" + url.PathEscape(prompt.MessageID) + "/" + strconv.Itoa(index)
 		block := acp.ImageBlock(base64.StdEncoding.EncodeToString(data), mimeType)

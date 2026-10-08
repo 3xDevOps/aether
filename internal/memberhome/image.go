@@ -19,9 +19,7 @@ import (
 )
 
 const (
-	terminalImageDir = ".aether/terminal-images"
-	// MaxImageBytes is the maximum decoded image upload and preview size.
-	MaxImageBytes          = 8 << 20
+	terminalImageDir       = ".aether/terminal-images"
 	terminalImageNameBytes = 16
 )
 
@@ -39,7 +37,7 @@ func ValidateImage(data []byte) (extension, mimeType string, err error) {
 	if len(data) == 0 {
 		return "", "", fmt.Errorf("image content is empty")
 	}
-	if len(data) > MaxImageBytes {
+	if len(data) > domain.MaxImageBytes {
 		return "", "", fmt.Errorf("image exceeds the 8 MiB limit")
 	}
 	switch {
@@ -96,15 +94,15 @@ func (m *Manager) ReadImage(member domain.MemberID, name string) ([]byte, string
 }
 
 func readImageFile(f *os.File, info fs.FileInfo) ([]byte, error) {
-	if info.Size() > MaxImageBytes {
+	if info.Size() > domain.MaxImageBytes {
 		return nil, fmt.Errorf("image exceeds the 8 MiB limit")
 	}
 	// Read one extra byte to reject files that grow after the descriptor stat.
-	data, err := io.ReadAll(io.LimitReader(f, MaxImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, domain.MaxImageBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > MaxImageBytes {
+	if len(data) > domain.MaxImageBytes {
 		return nil, fmt.Errorf("image exceeds the 8 MiB limit")
 	}
 	return data, nil
@@ -115,8 +113,8 @@ func readImageFile(f *os.File, info fs.FileInfo) ([]byte, error) {
 // operations stay confined to that home; callers receive a home-relative path
 // to combine with the target container's HOME.
 func (m *Manager) SaveImage(member domain.MemberID, extension string, data []byte) (string, error) {
-	if len(data) == 0 || len(data) > MaxImageBytes {
-		return "", fmt.Errorf("memberhome: image is empty or exceeds %d bytes", MaxImageBytes)
+	if len(data) == 0 || len(data) > domain.MaxImageBytes {
+		return "", fmt.Errorf("memberhome: image is empty or exceeds %d bytes", domain.MaxImageBytes)
 	}
 	switch extension {
 	case ".png", ".jpg", ".gif", ".webp":

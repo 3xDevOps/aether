@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func encodedTestImage(t *testing.T, extension string) []byte {
@@ -111,7 +113,7 @@ func TestReadImageRejectsUnsafeFiles(t *testing.T) {
 			case "invalid":
 				err = os.WriteFile(file, []byte("private non-image content"), 0o600)
 			case "oversized":
-				large := make([]byte, MaxImageBytes+1)
+				large := make([]byte, domain.MaxImageBytes+1)
 				copy(large, data)
 				err = os.WriteFile(file, large, 0o600)
 			case "directory":
@@ -199,7 +201,7 @@ func TestReadImageFileRejectsGrowthAfterStat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, MaxImageBytes)
+	data := make([]byte, domain.MaxImageBytes)
 	copy(data, encodedTestImage(t, ".png"))
 	rel, err := manager.SaveImage("member-1", ".png", data)
 	if err != nil {

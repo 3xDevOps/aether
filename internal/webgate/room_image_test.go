@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -155,7 +155,7 @@ func TestRoomImageRouteRejectsMismatchedOrUnsafeMetadata(t *testing.T) {
 		{"foreign index", func(a *protocol.DevArtifact) { a.ID = "room:message:1" }},
 		{"zero size", func(a *protocol.DevArtifact) { a.Bytes = 0 }},
 		{"negative size", func(a *protocol.DevArtifact) { a.Bytes = -1 }},
-		{"oversized", func(a *protocol.DevArtifact) { a.Bytes = memberhome.MaxImageBytes + 1 }},
+		{"oversized", func(a *protocol.DevArtifact) { a.Bytes = domain.MaxImageBytes + 1 }},
 		{"active content", func(a *protocol.DevArtifact) { a.ContentType = "image/svg+xml" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

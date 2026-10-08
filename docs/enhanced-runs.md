@@ -151,6 +151,8 @@ history. Viewing them requires **View** on the run; a completed run's images
 remain readable while its message and member-home file are retained. Removing
 a draft thumbnail does not delete the stored file. Failed uploads show the
 server error, and failed sends keep the text and image previews for retry.
+An image-read failure before delivery is **Not sent**, not **Delivery uncertain**.
+After restoring or reattaching the image, retrying can submit a new request.
 
 The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`). The model picker searches names, IDs, descriptions and

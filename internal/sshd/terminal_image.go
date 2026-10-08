@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	maxTerminalImageEncodedBytes = 4 * ((memberhome.MaxImageBytes + 2) / 3)
+	maxTerminalImageEncodedBytes = 4 * ((domain.MaxImageBytes + 2) / 3)
 )
 
 func init() {

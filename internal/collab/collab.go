@@ -92,13 +92,13 @@ type ProtectedStore interface {
 }
 
 // ClassifyReceipt maps delivery outcomes to the wire contract. Missing terminal
-// sessions and unsupported image prompts prove no write occurred; other errors
-// are uncertain.
+// sessions, unsupported images, and explicit pre-delivery failures prove no
+// write occurred; other errors are uncertain.
 func ClassifyReceipt(err error) Receipt {
 	if err == nil {
 		return ReceiptSent
 	}
-	if errors.Is(err, ptyhost.ErrNoSession) || errors.Is(err, ptyhost.ErrSessionEnded) || errors.Is(err, acphost.ErrUnsupportedImage) {
+	if errors.Is(err, ptyhost.ErrNoSession) || errors.Is(err, ptyhost.ErrSessionEnded) || errors.Is(err, acphost.ErrUnsupportedImage) || errors.Is(err, domain.ErrPromptNotSent) {
 		return ReceiptNotSent
 	}
 	return ReceiptUncertain

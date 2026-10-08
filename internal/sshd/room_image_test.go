@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -201,7 +200,7 @@ func TestRoomImageBoundsMetadataAndPropagatesMissingBytes(t *testing.T) {
 		err  error
 	}{
 		{"empty", nil, "image/png", nil},
-		{"oversized", make([]byte, memberhome.MaxImageBytes+1), "image/png", nil},
+		{"oversized", make([]byte, domain.MaxImageBytes+1), "image/png", nil},
 		{"unsafe MIME", []byte("html"), "text/html", nil},
 		{"missing bytes", nil, "", store.ErrNotFound},
 	} {

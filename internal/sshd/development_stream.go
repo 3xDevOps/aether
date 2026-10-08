@@ -13,7 +13,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/evidence"
-	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -328,7 +327,7 @@ func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req 
 	if err != nil {
 		return protocol.DevArtifact{}, nil, nil, err
 	}
-	if len(data) == 0 || len(data) > memberhome.MaxImageBytes {
+	if len(data) == 0 || len(data) > domain.MaxImageBytes {
 		return protocol.DevArtifact{}, nil, nil, invalidParams("invalid room image size")
 	}
 	switch mimeType {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -25,14 +25,14 @@ var onePixelPNG = []byte{
 
 func TestDecodeTerminalImageAcceptsExactDecodedLimit(t *testing.T) {
 	t.Parallel()
-	data := make([]byte, memberhome.MaxImageBytes)
+	data := make([]byte, domain.MaxImageBytes)
 	copy(data, onePixelPNG)
 	encoded := base64.StdEncoding.EncodeToString(data)
 	got, ext, err := decodeTerminalImage(encoded)
 	if err != nil {
 		t.Fatalf("decode exact-limit PNG: %v", err)
 	}
-	if ext != ".png" || len(got) != memberhome.MaxImageBytes || !bytes.Equal(got[:len(onePixelPNG)], onePixelPNG) {
+	if ext != ".png" || len(got) != domain.MaxImageBytes || !bytes.Equal(got[:len(onePixelPNG)], onePixelPNG) {
 		t.Fatalf("decoded image = extension %q, %d bytes", ext, len(got))
 	}
 }
@@ -42,7 +42,7 @@ func TestDecodeTerminalImageRejectsInvalidAndOversizedContent(t *testing.T) {
 	if _, _, err := decodeTerminalImage(base64.StdEncoding.EncodeToString([]byte("not an image"))); err == nil {
 		t.Fatal("invalid image accepted")
 	}
-	oversize := make([]byte, memberhome.MaxImageBytes+1)
+	oversize := make([]byte, domain.MaxImageBytes+1)
 	if _, _, err := decodeTerminalImage(base64.StdEncoding.EncodeToString(oversize)); err == nil {
 		t.Fatal("oversized image accepted")
 	}

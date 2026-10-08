@@ -10,7 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -210,7 +210,7 @@ func (g *Gateway) handleDevelopmentArtifact(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.RoomMessageID != "" {
-		if artifact.Bytes == 0 || artifact.Bytes > memberhome.MaxImageBytes {
+		if artifact.Bytes == 0 || artifact.Bytes > domain.MaxImageBytes {
 			WriteError(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "invalid room image size"})
 			return
 		}
