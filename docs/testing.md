@@ -78,6 +78,18 @@ Layers, per the design spec's testing strategy:
   ```
 
   These jobs are the merge gate the E2E suite owns.
+  The runtime capacity scenario starts its own Docker and containerd daemons
+  with private sockets and storage roots; it never reconfigures the host's
+  daemon. It needs root plus `dockerd` and `containerd` on `PATH`. The other
+  resource scenarios observe actual cgroup limits, PID exhaustion and OOM
+  containment, not agent-session isolation:
+
+  ```sh
+  sudo env "PATH=$PATH" "HOME=$HOME" go test -race -tags=integration \
+    ./internal/runtime \
+    -run '^TestDocker(CapacityContainerdIsolated|ResourceLimits|PIDLimitEnforced|OOMContained)$' -v
+  ```
+
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,27 @@ type ID string
 // ErrNotFound reports that no container matches a lookup. Returned by
 // FindByCreationKey when no container carries the key.
 var ErrNotFound = errors.New("runtime: container not found")
+
+// FilesystemCapacity is available capacity at a verified runtime storage root.
+// Name describes its role, not a private host path. Roots may share a filesystem.
+type FilesystemCapacity struct {
+	Name       string
+	TotalBytes uint64
+	FreeBytes  uint64
+}
+
+// HostCapacity samples actual available host resources, not container ceilings.
+type HostCapacity struct {
+	Filesystems          []FilesystemCapacity
+	MemoryTotalBytes     uint64
+	MemoryAvailableBytes uint64
+}
+
+// CapacityRuntime optionally provides verified host capacity for admission.
+// An error means capacity is unknown; callers must not interpret it as zero.
+type CapacityRuntime interface {
+	Capacity(context.Context) (HostCapacity, error)
+}
 
 // Mount is one additional mount into a run container. Host paths are
 // validated against Aether-owned roots by the mount validator (see
@@ -99,6 +121,8 @@ type Spec struct {
 	CPULimit float64
 	// MemoryLimitBytes caps memory usage; 0 means unlimited.
 	MemoryLimitBytes int64
+	// PidsLimit caps the number of processes and threads; 0 means unlimited.
+	PidsLimit int64
 	// Mounts are additional bind mounts (credential homes, materialized
 	// profiles, coordination assets), applied after the worktree mount.
 	// Callers must pass them through ValidateMounts first.
@@ -139,11 +163,17 @@ func (s Spec) Validate() error {
 	if s.WorkingDir != "" && !path.IsAbs(s.WorkingDir) {
 		errs = append(errs, fmt.Errorf("working dir %q must be absolute", s.WorkingDir))
 	}
-	if s.CPULimit < 0 {
-		errs = append(errs, fmt.Errorf("cpu limit must not be negative, got %v", s.CPULimit))
+	if s.CPULimit < 0 || math.IsNaN(s.CPULimit) || math.IsInf(s.CPULimit, 0) {
+		errs = append(errs, fmt.Errorf("cpu limit must be finite and nonnegative, got %v", s.CPULimit))
+	}
+	if s.CPULimit > 0 && (s.CPULimit < 0.5e-9 || s.CPULimit >= float64(math.MaxInt64)/1e9) {
+		errs = append(errs, fmt.Errorf("cpu limit cannot be represented in nanocpus, got %v", s.CPULimit))
 	}
 	if s.MemoryLimitBytes < 0 {
 		errs = append(errs, fmt.Errorf("memory limit must not be negative, got %d", s.MemoryLimitBytes))
+	}
+	if s.PidsLimit < 0 {
+		errs = append(errs, fmt.Errorf("pid limit must not be negative, got %d", s.PidsLimit))
 	}
 	for k := range s.Env {
 		if k == "" || strings.ContainsAny(k, "=\x00") {

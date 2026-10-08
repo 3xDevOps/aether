@@ -186,9 +186,15 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		Init:        &initEnabled,
 		NetworkMode: container.NetworkMode(d.networkMode),
 		Resources: container.Resources{
-			NanoCPUs: nanoCPUs(spec.CPULimit),
-			Memory:   spec.MemoryLimitBytes,
+			NanoCPUs:   nanoCPUs(spec.CPULimit),
+			Memory:     spec.MemoryLimitBytes,
+			MemorySwap: spec.MemoryLimitBytes,
 		},
+		LogConfig: container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+	}
+	if spec.PidsLimit > 0 {
+		pids := spec.PidsLimit
+		hostCfg.PidsLimit = &pids
 	}
 	if spec.WorktreeHostPath != "" {
 		hostCfg.Mounts = []mount.Mount{bindMount(Mount{

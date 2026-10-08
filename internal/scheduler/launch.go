@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -178,27 +177,6 @@ func (s *Scheduler) reserveRunUser(entry *supervised, user string, sharedHome bo
 // in-flight run; failProvisioning turns it into abandoned ("killed").
 var errKillRequested = errors.New("scheduler: kill requested during provisioning")
 
-// checkFreeSpace runs before the run row exists so a refusal leaves nothing
-// behind. An unreadable filesystem is not treated as full: the floor exists
-// to stop a disk filling, not to stop the server.
-func (s *Scheduler) checkFreeSpace() error {
-	if s.cfg.MinFreeBytes < 0 {
-		return nil
-	}
-	free, err := disk.Free(s.cfg.StateDir)
-	if err != nil {
-		slog.Warn("scheduler: free-space floor: reading the filesystem failed; allowing the run",
-			"dir", s.cfg.StateDir, "error", err)
-		return nil
-	}
-	if free >= uint64(s.cfg.MinFreeBytes) {
-		return nil
-	}
-	return fmt.Errorf("%w: %d bytes free, floor is %d bytes; finished-run checkouts are "+
-		"garbage-collected after their TTL, and the dashboard's disk gauge shows what is holding the space",
-		ErrDiskFull, free, s.cfg.MinFreeBytes)
-}
-
 // Launch uses a strict base capture; callers that accept a displayed cached
 // base use LaunchWithOptions.
 func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
@@ -213,9 +191,6 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	defer lock.RUnlock()
 	if mode == "" {
 		mode = domain.LaunchTUI
-	}
-	if err := s.checkFreeSpace(); err != nil {
-		return nil, err
 	}
 	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, task)
 	if err != nil {
@@ -251,6 +226,11 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			return nil, getErr
 		}
 	}
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	s.mu.Lock()
 	bases := s.cfg.Bases
 	s.mu.Unlock()

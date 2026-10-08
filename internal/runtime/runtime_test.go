@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,7 @@ func validSpec() Spec {
 		SetupScript:       "echo hi",
 		CPULimit:          1.5,
 		MemoryLimitBytes:  64 << 20,
+		PidsLimit:         4096,
 	}
 }
 
@@ -39,6 +41,12 @@ func TestSpecValidate(t *testing.T) {
 		{"relative mount path", func(s *Spec) { s.WorktreeMountPath = "workspace" }, "must be absolute"},
 		{"relative working dir", func(s *Spec) { s.WorkingDir = "workspace" }, "must be absolute"},
 		{"negative cpu", func(s *Spec) { s.CPULimit = -1 }, "cpu limit"},
+		{"nan cpu", func(s *Spec) { s.CPULimit = math.NaN() }, "cpu limit"},
+		{"infinite cpu", func(s *Spec) { s.CPULimit = math.Inf(1) }, "cpu limit"},
+		{"negative infinite cpu", func(s *Spec) { s.CPULimit = math.Inf(-1) }, "cpu limit"},
+		{"underflow cpu", func(s *Spec) { s.CPULimit = math.SmallestNonzeroFloat64 }, "cpu limit"},
+		{"overflow cpu", func(s *Spec) { s.CPULimit = math.MaxFloat64 }, "cpu limit"},
+		{"negative pids", func(s *Spec) { s.PidsLimit = -1 }, "pid limit"},
 		{"negative memory", func(s *Spec) { s.MemoryLimitBytes = -1 }, "memory limit"},
 		{"empty env key", func(s *Spec) { s.Env = map[string]string{"": "x"} }, "invalid env var name"},
 		{"env key with equals", func(s *Spec) { s.Env = map[string]string{"A=B": "x"} }, "invalid env var name"},

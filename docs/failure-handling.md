@@ -8,10 +8,9 @@ drive these paths are in [testing.md](testing.md).
 
 ## The tuning knobs
 
-Five `aether-server serve` flags, all with working defaults. For duration
-settings, zero means "use the default". A negative value disables a guard
-where noted; for `--run-container-ttl`, negative means no retention and
-immediate cleanup.
+`aether-server serve` flags have automatic defaults. For duration settings,
+zero means "use the default". A negative value disables a guard where noted;
+for `--run-container-ttl`, negative means no retention and immediate cleanup.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
@@ -19,11 +18,16 @@ immediate cleanup.
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
 | `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
-| `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
+| `--min-free-disk` | `0` (automatic) | Per-filesystem reserve: `max(5 GiB, min(5% of capacity, 20 GiB))`, plus provisioning headroom. Positive values override the reserve in bytes; negative disables the disk guard. |
+| `--run-cpus` | `0` (automatic) | New run/member container CPU ceiling: up to 8 cores, capped at the server host CPU count. Positive values override; negative/non-finite values are invalid. |
+| `--run-memory` | `0` (automatic) | New run/member container memory ceiling: 8 GiB. Positive values override in bytes; negative is invalid. |
+| `--run-pids` | `0` (automatic) | New run/member container task ceiling: 4096 processes/threads. Positive values override; negative is invalid. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
-`CheckoutTTL`, `RunContainerTTL`, `MinFreeDiskBytes`) and pass straight through
-to the scheduler.
+`CheckoutTTL`, `RunContainerTTL`, `MinFreeDiskBytes`, `RunCPULimit`,
+`RunMemoryBytes`, `RunPidsLimit`) and pass through to the scheduler.
+Resource limits apply at container creation, not retroactively; browser
+companions keep separate caps. See [resource limits and admission](environments.md#resource-limits-and-launch-admission).
 
 ### Picking a stall threshold
 
@@ -72,16 +76,37 @@ The run parks on silence from the agent, not on silence from the stream.
 
 ### Picking a disk floor
 
-The floor is headroom for what a *new* run is about to write: its checkout,
-the container's writes, its transcript, and its share of the event log. It
-is checked before the run row is created, so a refusal leaves nothing
-behind. Runs already on the disk are never touched - a half-written checkout
-is worse than a refused one.
+The floor leaves headroom for new work: its checkout, container writes,
+transcript and event log. Admission checks the Aether data filesystem and
+actual Docker storage filesystems before provisioning. It also requires
+available host memory of at least `max(2 GiB, 10% of host RAM)`. The new
+provisioning and each outstanding provisioning add 1 GiB disk and 512 MiB
+memory to those requirements, preventing simultaneous launches from spending
+the same measured headroom. Reservations end on success, error or cancellation.
 
-Raise the floor if your workspaces are large (the checkout is a full clone)
-or if the data directory shares a filesystem with something that must not be
-starved. The refusal names the numbers, and the disk usage in Settings > **Server**
-says what is holding the space.
+Admission covers launch/relaunch and new member-environment, browser and agent
+updater containers, with a five-second probe deadline. It does not re-admit
+existing-environment execs or idempotent lookups of already-created runs.
+It does not evict or pause existing runs under pressure. Checks precede
+mutation where possible; a failed provisioning after admission still uses
+the ordinary launch-failure lifecycle.
+
+Raise `--min-free-disk` for large checkouts or shared filesystems. Negative
+disables the disk guard, **not** host-memory admission or the requirement for
+a truthful Docker capacity probe. Container maxima are not memory reservations:
+admission uses actual available memory, so idle agents can coexist.
+
+Refusals distinguish insufficient disk headroom, insufficient host memory
+headroom and unavailable capacity. Read the named filesystem, available bytes,
+reserve and outstanding-provisioning count in a pressure error. A capacity
+error can mean a failed/timed-out probe or an unsupported, remote or
+unverifiable Docker layout; fix that cause rather than trusting local `df`
+output for a different daemon. The probe must include containerd content and
+snapshot storage when used, not merely Docker's data directory.
+Settings > **Server** shows the storage breakdown and any unknown measurement.
+Free capacity or adjust the configured ceiling/reserve, then retry the
+original authorized operation; changing a swarm dispatch key can duplicate
+work whose launch outcome is still unknown.
 
 ## Capture an unresponsive host
 
@@ -345,10 +370,12 @@ every retained TUI or completed swarm run against the runtime's actual
 containers:
 
 - **An active container survived** (the server died, the container did not):
-  supervision reattaches to it, the PTY session is re-adopted, the diff watch
-  restarts from the tree its last snapshot wrote so the next interval
-  continues the chain, and the run stays `running`. Attaches, messages and the
-  eventual exit all work as if nothing happened. A kill that was accepted
+  supervision reattaches to its primary terminal, the diff watch restarts
+  from the tree its last snapshot wrote, and the run remains supervised.
+  A Standard agent continues only if its own process survived. Enhanced
+  agents instead follow the [ACP replacement/restore path](#enhanced-runs);
+  additional Docker exec terminals cannot recover their old streams.
+  A kill that was accepted
   before the crash is re-issued. A run the agent had parked stays parked
   with its reason: the last execution report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
@@ -414,13 +441,12 @@ Saved swarms and attempt reservations are not deleted.
 
 ### TUI lifecycle and reopening
 
-For `--mode standard` (`tui`), container PID 1 supervises the agent. After any normal
-agent exit, PID 1 opens a login shell; when that shell exits, another login
-shell opens. The run and its container therefore remain `running` until an
-explicit Close, Kill, or Delete, or until the agent reports its own outcome.
-An agent terminated by a signal or other non-normal error does not get a
-replacement shell; supervision records the failure and cleans up the
-container.
+For `--mode standard` (`tui`), the run supervisor launches the agent. When
+that child exits and the supervisor remains alive, it opens a login shell;
+when the shell exits, another opens. This includes a signalled agent child:
+the supervisor does not restart the agent or replay its tools. The container
+can therefore stay `running` without a live agent until an explicit Close,
+Kill or Delete, an agent outcome report, or a container-level exit.
 
 An agent finishes its own run with a terminal report from inside the
 container:
@@ -497,14 +523,15 @@ reason drops `; retained container`.
 ### Enhanced runs
 
 An enhanced run ([enhanced-runs.md](enhanced-runs.md)) has the tui container
-and lifecycle above; the agent's ACP server is a separate exec the server
-replaces at every reattach.
+and lifecycle above; the agent's ACP server is a separate exec in that same
+container, replaced at every reattach. The shell-survival cases below assume
+the container and shell are still healthy, not that an OOM spared them.
 
 | Failure | What happens |
 | --- | --- |
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
-| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and resumes the stored session in a fresh one: `session/resume`, else `session/load` without re-logging the replay. A turn cut off by the restart is logged as **Turn interrupted**. |
+| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted**. |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
 | The agent sends more than 64 MiB to the item log | From then on only requests, turn boundaries and notices are recorded, with a **Session log is full** notice. |
@@ -516,6 +543,39 @@ run records `failed` with `agent exited 1: <cause>`, for example
 `agent exited 1: the agent's turn ended: cancelled`. The item log's notice
 carries the full error. A server restart mid-turn resumes the session and asks the
 agent to continue; a turn that had already ended finishes the run.
+
+### Resource exhaustion and agent survival
+
+Run CPU, memory and PID limits contain the container's workload; they do not
+split the native agent from its tools. CPU saturation throttles that workload,
+the task limit can prevent new processes/threads, and a memory limit can
+trigger a container-cgroup OOM kill. No extra swap allowance is added to the
+configured memory ceiling. The OOM victim might be a tool, the agent or a
+process needed by the whole container. Host-wide exhaustion is still possible
+if running workloads grow after admission; limits and launch headroom are not
+a promise of continuous host or agent uptime.
+
+A surviving supervisor may offer a shell after the agent dies; a surviving
+shell does not mean the conversation is still running. An Enhanced adapter
+failure is surfaced with its real error and can be retried explicitly.
+Container loss follows the interrupted/failed lifecycle above. Aether does
+not generally restart an OOM-killed native agent automatically, and an exit
+code alone does not establish that OOM was the cause. Inspect Docker state,
+kernel logs and the run's error before drawing that conclusion.
+
+Completed writes in the host-mounted checkout and member home are distinct
+from in-memory context, in-flight writes and the disposable container layer.
+Retained files and the ACP display log do not reconstruct a dead agent's
+private session. Restore depends on that agent's own stored session and login;
+when restore fails, Enhanced mode reports a new session instead.
+
+Before retrying a command, inspect its files and process state: losing a
+connection does not prove that a side effect failed. Interactive Enhanced
+recovery marks interrupted work and undelivered queued messages; it is not
+tool replay. Background ACP recovery can prompt the agent to continue, as
+documented above, so there is no universal exactly-once/no-replay guarantee
+for native agent actions. The [execution-boundary decision](harness-integration.md#execution-boundary-keep-native-tools-with-the-agent)
+states the evidence required before claiming stronger isolation.
 
 ### Disk pressure
 
@@ -732,15 +792,15 @@ Either way the run remains supervised in its run container: while unpaused,
 members with the `steer` permission can attach, send messages, and
 open or reconnect a writable run-container shell to investigate it.
 
-A clean TUI agent exit returns to the supervisor, which opens a login shell
-instead of finalizing the run. Explicit Close commits and publishes the latest
-work, records merged or abandoned, and applies the retention policy. An agent
-terminated by a signal or other non-normal error marks the run `failed` and
-cleans up the container; it does not receive a replacement shell. Headless
-clean exit of an ordinary run still commits and publishes, records `completed`,
-and destroys the container immediately. Swarm-assigned runs instead retain
-the exact stopped container for the configured TTL. A failed run's partial
-work is committed as `wip:`.
+A TUI agent exit returns to a surviving supervisor, which opens a login shell
+instead of restarting the agent. Explicit Close commits and publishes the
+latest work, records merged or abandoned, and applies the retention policy.
+If the container itself exits, supervision follows its actual exit outcome;
+agent-child death alone is not proof of container death. An ordinary headless
+run's clean exit still commits and publishes, records `completed`, and destroys
+the container immediately. Swarm-assigned runs instead retain the exact stopped
+container for the configured TTL. A failed run's partial work is committed
+as `wip:`.
 
 ### Pending structured input
 
@@ -834,5 +894,6 @@ backend instead of leaving a stuck dial behind.
 
 ## Where each row is proven
 
-Every row above has a covering scenario or unit test; the map lives in
-[testing.md](testing.md) so the suite and the map stay in one place.
+The covering scenarios and unit-test map live in [testing.md](testing.md).
+The native execution-boundary conditions linked above are acceptance criteria,
+not a claim that live per-harness OOM/session-isolation proofs have passed.

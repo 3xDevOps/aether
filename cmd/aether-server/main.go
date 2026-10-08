@@ -115,6 +115,9 @@ type serveOptions struct {
 	checkoutTTL          *time.Duration
 	runContainerTTL      *time.Duration
 	minFreeDisk          *int64
+	runCPUs              *runCPUValue
+	runMemory            *runCountValue
+	runPids              *runCountValue
 }
 
 // serveFlags declares the server options on fs. It is the single definition
@@ -157,7 +160,13 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
 		"how long closed or agent-finished Standard and Enhanced run containers and completed swarm run containers are retained (0 = 168h / 7 days, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
-		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
+		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")
+	o.runCPUs = new(runCPUValue)
+	fs.Var(o.runCPUs, "run-cpus", "CPU ceiling per run/member environment (0 = automatic, up to 8 host CPUs)")
+	o.runMemory = new(runCountValue)
+	fs.Var(o.runMemory, "run-memory", "memory ceiling in bytes per run/member environment (0 = automatic 8GiB)")
+	o.runPids = new(runCountValue)
+	fs.Var(o.runPids, "run-pids", "process ceiling per run/member environment (0 = automatic 4096)")
 	return o
 }
 
@@ -209,6 +218,9 @@ func serve(args []string) error {
 		CheckoutTTL:      *o.checkoutTTL,
 		RunContainerTTL:  *o.runContainerTTL,
 		MinFreeDiskBytes: *o.minFreeDisk,
+		RunCPULimit:      float64(*o.runCPUs),
+		RunMemoryBytes:   int64(*o.runMemory),
+		RunPidsLimit:     int64(*o.runPids),
 	})
 	if err != nil {
 		return err

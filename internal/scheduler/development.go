@@ -160,7 +160,11 @@ func (s *Scheduler) HandleAgent(ctx context.Context, id domain.RunID, method str
 	if err := protocol.DecodeDevAgentParams(params, &shape); err != nil {
 		return nil, err
 	}
-	return s.CallDevelopment(ctx, id, control.Principal{Kind: control.PrincipalRunAgent, RunID: id}, method, params, func() error { return nil })
+	result, err := s.CallDevelopment(ctx, id, control.Principal{Kind: control.PrincipalRunAgent, RunID: id}, method, params, func() error { return nil })
+	if errors.Is(err, ErrDiskFull) || errors.Is(err, ErrMemoryPressure) || errors.Is(err, ErrCapacityUnknown) || errors.Is(err, ErrBrowserCPUCapacity) {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	}
+	return result, err
 }
 func decodeDevelopment(raw json.RawMessage, target any) error {
 	if len(raw) > protocol.MaxDevParamsBytes {

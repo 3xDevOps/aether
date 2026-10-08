@@ -99,8 +99,10 @@ func rpcError(err error) *protocol.Error {
 		case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
 			errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):
 			code = protocol.CodeDenied
-		case errors.Is(err, errNoSession), errors.Is(err, errSessionEnded), errors.Is(err, errDiskFull):
-			// The free-space floor is a "not right now", not a bad request.
+		case errors.Is(err, errNoSession), errors.Is(err, errSessionEnded), errors.Is(err, errDiskFull),
+			errors.Is(err, scheduler.ErrMemoryPressure), errors.Is(err, scheduler.ErrCapacityUnknown),
+			errors.Is(err, scheduler.ErrBrowserCPUCapacity):
+			// Capacity refusals are retryable availability failures, not bad requests.
 			code = protocol.CodeUnavailable
 		}
 	}

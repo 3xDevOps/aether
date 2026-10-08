@@ -133,6 +133,11 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		}
 		return nil, retainedTransitionError()
 	}
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	// Re-read so a stale snapshot cannot clobber metadata. The sidecar's
 	// closing report and turn end are cleared on disk before the row reopens,

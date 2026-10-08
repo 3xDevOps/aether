@@ -99,8 +99,11 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 			User:       plan.User,
 			WorkingDir: plan.Home,
 			// Outlives the execs, and ends on its own if the server dies first.
-			Command:     []string{"/bin/sh", "-c", "sleep 900"},
-			CreationKey: name,
+			Command:          []string{"/bin/sh", "-c", "sleep 900"},
+			CreationKey:      name,
+			CPULimit:         s.cfg.RunCPULimit,
+			MemoryLimitBytes: s.cfg.RunMemoryBytes,
+			PidsLimit:        s.cfg.RunPidsLimit,
 		}
 		go s.runHarnessUpdate(state, update, run.WorkspaceID, run.ID, spec, exe, profile)
 	}
@@ -185,6 +188,11 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 	if err = checkCoordinationMounts(spec.Mounts[1:]); err != nil {
 		return "", "", fmt.Errorf("resolve updater helper: %w", err)
 	}
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	defer release()
 	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
 		return "", "", err
@@ -199,6 +207,7 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 	if err = s.cfg.Runtime.Start(ctx, cid); err != nil {
 		return "", "", err
 	}
+	release()
 	before = s.harnessVersion(ctx, cid, exe, spec.WorkingDir)
 	s.mu.Lock()
 	update.before = before
