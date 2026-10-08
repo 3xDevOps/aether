@@ -54,7 +54,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
               {submission.ref.evidence_ref && ` · evidence ${submission.ref.evidence_ref}`}
               {submission.evidence
                 .filter((source) => !source.available || source.truncated)
-                .map((source) => `\n${source.kind}: ${source.available ? 'partial (truncated) at acceptance' : 'unavailable at acceptance'}`)
+                .map((source) => `\n${source.kind}: ${source.available ? 'partial (truncated) at acceptance' : 'unavailable at acceptance'}${source.detail ? ` (${source.detail})` : ''}`)
                 .join('')}
               {(submission.scope_violations ?? []).length > 0 && `\nScope violations: ${submission.scope_violations!.join(', ')}`}
               {submission.acceptance?.scope_disposition && `\nScope disposition: ${submission.acceptance.scope_disposition}`}

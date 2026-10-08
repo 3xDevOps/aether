@@ -554,8 +554,9 @@ func cloneScreenSnapshot(in ScreenSnapshot) ScreenSnapshot {
 }
 
 type recordedScreen struct {
-	screen *terminalScreen
-	modes  modeScanner
+	screen   *terminalScreen
+	modes    modeScanner
+	position TerminalPosition
 }
 
 // readCastScreen restores a durable compact checkpoint when it is valid and

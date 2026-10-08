@@ -233,19 +233,19 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 		t.Fatalf("preserved transcript = %q, want %q", got, "first-life")
 	}
 
-	replay, replayBytes, err := h.Replay(run)
+	window, err := h.Replay(run)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
-	got, err := io.ReadAll(replay)
+	got, err := io.ReadAll(window.Reader)
 	if err != nil {
 		t.Fatalf("read Replay: %v", err)
 	}
-	if err := replay.Close(); err != nil {
+	if err := window.Reader.Close(); err != nil {
 		t.Fatalf("close Replay: %v", err)
 	}
-	if replayBytes != len(got) {
-		t.Fatalf("Replay byte count = %d, want %d", replayBytes, len(got))
+	if window.Bytes != len(got) {
+		t.Fatalf("Replay byte count = %d, want %d", window.Bytes, len(got))
 	}
 	if string(got) != "first-lifesecond-life" {
 		t.Fatalf("full replay = %q, want both transcript incarnations", got)
@@ -354,8 +354,8 @@ func TestLegacyCastDiscoveryIsBounded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := priorCastPaths(path); err == nil || !strings.Contains(err.Error(), "discovery limit exceeded") {
-		t.Fatalf("priorCastPaths error = %v, want legacy discovery limit", err)
+	if _, err := discoverPriorCastPaths(t.Context(), path, maxLegacyCastHeaderInspections); err == nil || !strings.Contains(err.Error(), "discovery limit exceeded") {
+		t.Fatalf("discoverPriorCastPaths error = %v, want legacy discovery limit", err)
 	}
 }
 

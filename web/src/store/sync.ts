@@ -506,6 +506,8 @@ export async function applyEvent(
         files: p.files ?? [],
         tree: p.tree,
         parentTree: p.parent_tree,
+        historyGap: p.history_gap,
+        snapshotError: p.snapshot_error,
       })
       break
     }

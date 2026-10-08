@@ -42,6 +42,7 @@ const (
 
 var (
 	ErrInvalidHistoryCursor  = errors.New("ptyhost: invalid terminal history cursor")
+	ErrHistoryCursorExpired  = errors.New("ptyhost: terminal history cursor expired; retained history no longer includes this page")
 	ErrHistoryQueryTooLong   = errors.New("ptyhost: terminal history query is too long")
 	ErrHistoryDiscoveryLimit = errors.New("ptyhost: terminal history discovery limit exceeded")
 	errHistoryWorkDeadline   = errors.New("ptyhost: terminal history work deadline reached")
@@ -93,9 +94,10 @@ type HistoryLine struct {
 }
 
 type HistoryPage struct {
-	Lines      []HistoryLine
-	NextCursor string
-	HasMore    bool
+	Lines           []HistoryLine
+	NextCursor      string
+	HasMore         bool
+	TruncatedBefore bool
 }
 
 type historySegment struct {
@@ -182,15 +184,24 @@ func (h *Host) History(ctx context.Context, run domain.RunID, before, query stri
 			return HistoryPage{}, ctx.Err()
 		}
 	}
+	s := h.lookup(RunSession(run))
+	if s != nil {
+		s.mu.Lock()
+	}
 	lifecycle := acquireTranscriptLifecycle(path)
-	lifecycle.entry.mu.RLock()
+	lifecycle.entry.mu.Lock()
 	defer func() {
-		lifecycle.entry.mu.RUnlock()
+		lifecycle.entry.mu.Unlock()
 		lifecycle.release()
 	}()
-	if session := h.lookup(RunSession(run)); session != nil {
-		if err := session.flushLiveTranscript(); err != nil {
-			return HistoryPage{}, err
+	if s != nil {
+		var flushErr error
+		if s.tr != nil {
+			flushErr = s.tr.flush()
+		}
+		s.mu.Unlock()
+		if flushErr != nil {
+			return HistoryPage{}, flushErr
 		}
 	}
 	set := ""
@@ -213,13 +224,21 @@ func (h *Host) History(ctx context.Context, run domain.RunID, before, query stri
 		segments = []historySegment{segment}
 		cutoff.segment = 0
 	}
-	if err := ctx.Err(); err != nil {
+	if err = ctx.Err(); err != nil {
 		return HistoryPage{}, err
 	}
-	if query != "" {
-		return searchHistory(ctx, h.historyCursorKey[:], run, query, limit, cutoff, set, path, segments, &discovery)
+	retention, err := readCastRetention(path)
+	if err != nil {
+		return HistoryPage{}, err
 	}
-	return pageHistory(ctx, h.historyCursorKey[:], run, limit, cutoff, set, path, segments, &discovery)
+	var page HistoryPage
+	if query != "" {
+		page, err = searchHistory(ctx, h.historyCursorKey[:], run, query, limit, cutoff, set, path, segments, &discovery)
+	} else {
+		page, err = pageHistory(ctx, h.historyCursorKey[:], run, limit, cutoff, set, path, segments, &discovery)
+	}
+	page.TruncatedBefore = retention.Before != 0
+	return page, err
 }
 
 func loadNewestHistorySegments(ctx context.Context, path string, discovery *historySegmentDiscovery) ([]historySegment, error) {
@@ -303,6 +322,10 @@ func (d *historySegmentDiscovery) initialize(ctx context.Context, work *historyW
 	if d.initialized {
 		return nil
 	}
+	retention, err := readCastRetention(rootPath)
+	if err != nil {
+		return err
+	}
 	dir, err := os.Open(filepath.Dir(rootPath))
 	if err != nil {
 		return err
@@ -350,6 +373,9 @@ func (d *historySegmentDiscovery) initialize(ctx context.Context, work *historyW
 		entriesSeen += len(entries)
 		for _, entry := range entries {
 			if entry.IsDir() {
+				continue
+			}
+			if retention.expired(rootPath, entry.Name()) {
 				continue
 			}
 			order, stable := historySegmentIncarnation(rootPath, entry.Name())
@@ -537,6 +563,13 @@ func authenticateHistoryCursor(key []byte, encoded string, run domain.RunID, que
 func resolveHistoryCursor(ctx context.Context, cursor historyCursor, path string) (historyPosition, historySegment, error) {
 	invalid := func() (historyPosition, historySegment, error) {
 		return historyPosition{}, historySegment{}, ErrInvalidHistoryCursor
+	}
+	retention, err := readCastRetention(path)
+	if err != nil {
+		return historyPosition{}, historySegment{}, err
+	}
+	if retention.expired(path, cursor.SegmentID) {
+		return historyPosition{}, historySegment{}, ErrHistoryCursorExpired
 	}
 	candidates := []string{filepath.Join(filepath.Dir(path), cursor.SegmentID)}
 	if cursor.Current {

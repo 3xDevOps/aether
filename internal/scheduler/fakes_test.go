@@ -751,6 +751,7 @@ type fakePTY struct {
 	nextGeneration uint64
 	injects        []fakeInject
 	logDir         string
+	pruneCalls     int
 }
 
 type fakePTYSession struct {
@@ -827,6 +828,13 @@ func (p *fakePTY) RemoveRunTranscripts(_ context.Context, run domain.RunID) erro
 	if err := os.Remove(p.ItemLogPath(run)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	return nil
+}
+
+func (p *fakePTY) PruneTranscripts(_ context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pruneCalls++
 	return nil
 }
 

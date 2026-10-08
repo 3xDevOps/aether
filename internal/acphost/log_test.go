@@ -155,22 +155,26 @@ func TestItemCap(t *testing.T) {
 	}
 
 	segment := strings.Repeat("z", maxTextSegment)
-	for {
-		if _, size, _ := s.log.state(); size >= MaxRunBytes {
-			break
-		}
+	for range MaxRunBytes/maxTextSegment + 32 {
 		s.emitLocked(Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m2", Text: segment}})
 	}
 	last := s.log.LastSeq()
-	s.emitLocked(Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m3", Text: "dropped"}})
+	s.emitLocked(Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m3", Text: "latest"}})
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "end_turn"})
 	s.emitLocked(Item{Kind: KindUsage, Usage: &Usage{Used: 1}})
 	tail, err := s.log.ReadAfter(last, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tail) != 2 || tail[0].Kind != KindNotice || tail[1].Kind != KindTurnEnd {
+	if len(tail) != 3 || tail[0].Message.Text != "latest" || tail[1].Kind != KindTurnEnd || tail[2].Kind != KindUsage {
 		t.Fatalf("after the cap: %+v", tail)
+	}
+	page, err := s.log.History(last+4, 3)
+	if err != nil || !page.TruncatedBefore || page.OldestSeq <= 1 || len(page.Items) != 3 {
+		t.Fatalf("retained page: %+v, %v", page, err)
+	}
+	if _, size, _ := s.log.state(); size > MaxRunBytes {
+		t.Fatalf("retained %d bytes", size)
 	}
 }
 

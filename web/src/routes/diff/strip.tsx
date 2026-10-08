@@ -196,9 +196,10 @@ function IntervalMenu({
                     <>
                       {snapshot.files.length} file{snapshot.files.length === 1 ? '' : 's'} ·{' '}
                       <Counts additions={additions} deletions={deletions} />
+                      {snapshot.historyGap && ' · History gap'}
                     </>
                   ) : (
-                    noTree
+                    snapshot.snapshotError ?? (snapshot.historyGap ? 'Snapshot history is unavailable for this interval.' : noTree)
                   )
                 }
               >

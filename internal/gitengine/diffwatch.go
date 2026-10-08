@@ -44,7 +44,8 @@ type diffWatch struct {
 	// polling is set when the kernel refused the watcher or a directory
 	// watch, and makes loop attempt a snapshot every MaxInterval. watcher is
 	// nil when the checkout root could not be watched at all.
-	polling bool
+	polling    bool
+	historyGap bool
 
 	// gitIgnoredDirs is the repository-relative set of ignored directories
 	// reported by git. visibleFiles and visibleDirs are the tracked or
@@ -82,7 +83,6 @@ type diffWatch struct {
 	headRetryAt      time.Time
 	lastSnap         time.Time
 	lastHead         string
-	lastFiles        []events.FileDiffStat
 	lastTree         string
 	lastSnapshotWarn time.Time
 	lastPublishWarn  time.Time
@@ -145,6 +145,13 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		lastSnap: time.Now().Add(-e.cfg.MinInterval),
 		lastHead: head,
 		lastTree: lastTree,
+	}
+	_, gapErr := os.Stat(filepath.Join(checkout+snapshotStoreSuffix, "history-gap"))
+	w.historyGap = !errors.Is(gapErr, os.ErrNotExist)
+	// A durable unacknowledged gap needs a retry even in a quiet checkout.
+	w.dirty = w.historyGap
+	if w.dirty {
+		w.lastEvent = time.Now()
 	}
 	if err := w.watchCheckout(ctx, refDir); err != nil {
 		// The kernel caps inotify instances and watches per user, and run
@@ -746,52 +753,68 @@ func (w *diffWatch) snapshot() {
 		w.warnSnapshot(err)
 		return
 	}
-	tree, treeErr := w.e.writeSnapshotTree(ctx, w.run, w.checkout)
-	if treeErr != nil {
-		w.warnTree(treeErr)
-	}
-	// The tree decides, with the stat set as the fallback for a store that
-	// cannot be written. The tree is the stricter gate - an edit that keeps
-	// the line counts identical moves the tree but not the stats - and it is
-	// also the only one that holds across a restart, where lastTree is
-	// restored from the store but lastFiles starts empty: ORing the two
-	// would publish an interval whose ends are the same tree.
-	changed := tree != w.lastTree
-	if treeErr != nil {
-		changed = !slices.Equal(files, w.lastFiles)
-	}
-	if changed {
+	publish := func(payload events.RunDiffPayload) error {
 		if w.polling {
 			w.lastChange.Store(time.Now().UnixNano())
 		}
-		w.lastFiles = files
-		payload := events.RunDiffPayload{Files: files}
-		if treeErr == nil {
-			payload.Tree = tree
-			payload.ParentTree = w.lastTree
-			// Persist the tree before publishing its event. A subscriber can
-			// receive the event immediately, and a restart must resume from
-			// the tree named by that event.
-			if err := w.e.setLastSnapshotTree(w.run, tree); err != nil {
-				slog.Warn("gitengine: snapshot tree not recorded; a restart will diff from the fork point",
-					"run", string(w.run), "error", err)
+		if w.e.cfg.Bus == nil {
+			return nil
+		}
+		// The registry entry outlives the watch.
+		w.e.mu.Lock()
+		workspace := w.e.registry[w.run].workspace
+		w.e.mu.Unlock()
+		_, err := w.e.cfg.Bus.Publish(ctx, events.Event{
+			WorkspaceID: workspace,
+			RunID:       w.run,
+			Payload:     payload,
+		})
+		return err
+	}
+	attempted := false
+	tree, treeErr := w.e.writeWatchSnapshot(ctx, w.run, w.checkout, func(tree string) error {
+		// Only a durable unchanged boundary suppresses publication. A failed
+		// append must retry even if the checkout has not changed again.
+		if tree == w.lastTree && !w.historyGap {
+			return nil
+		}
+		attempted = true
+		return publish(events.RunDiffPayload{
+			Files: files, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
+		})
+	})
+	// Acknowledgement cleanup can fail after both the event and ref pair
+	// committed. Keep the in-memory parent aligned with that durable pair.
+	if tree != "" {
+		w.lastTree = tree
+	}
+	if treeErr != nil {
+		w.warnTree(treeErr)
+		w.historyGap = true
+		// Retry failed captures/publications on the normal watch timer, even
+		// when no further filesystem event arrives.
+		w.dirty = true
+		w.lastEvent = time.Now()
+		if !attempted {
+			payload := events.RunDiffPayload{
+				Files: files, HistoryGap: true,
+				SnapshotError: "Snapshot history unavailable; current change statistics remain live.",
+			}
+			if errors.Is(treeErr, ErrSnapshotStorageLimit) {
+				payload.SnapshotError = "Snapshot history unavailable: visible input exceeds 128 MiB or free disk headroom."
+			}
+			if err := publish(payload); err != nil {
+				w.warnSnapshot(err)
 			}
 		}
-		if w.e.cfg.Bus != nil {
-			// The registry entry outlives the watch, so the workspace scope
-			// is read from it rather than duplicated onto the watch.
-			w.e.mu.Lock()
-			workspace := w.e.registry[w.run].workspace
-			w.e.mu.Unlock()
-			_, _ = w.e.cfg.Bus.Publish(ctx, events.Event{
-				WorkspaceID: workspace,
-				RunID:       w.run,
-				Payload:     payload,
-			})
+	} else {
+		// A recovered inflight tree may predate the current checkout. Take
+		// one more normal-timer snapshot, even if that checkout is now quiet.
+		w.dirty = w.historyGap
+		if w.dirty {
+			w.lastEvent = time.Now()
 		}
-		if treeErr == nil {
-			w.lastTree = tree
-		}
+		w.historyGap = false
 	}
 	w.checkHead(ctx)
 }

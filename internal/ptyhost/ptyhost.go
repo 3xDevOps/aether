@@ -301,6 +301,10 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	}
 
 	path := h.transcriptPath(key)
+	if err = recoverCastRotation(path); err != nil {
+		h.unreserve(key)
+		return err
+	}
 	_, isRun := key.Run()
 	var seed []byte
 	var modes modeScanner
@@ -338,9 +342,14 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 			resumeID = string(position.Epoch)
 			recoveredTranscript = true
 		} else {
-			// Member terminals have no durable screen checkpoint. Recover only a
-			// fixed recent suffix under a new epoch, forcing a full replay for old
-			// clients rather than claiming continuity we cannot prove.
+			// New member transcripts have the same compact checkpoint as runs.
+			// Legacy recordings without one still recover a bounded recent tail.
+			if recovered, segments, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false); checkpointErr == nil {
+				screen, modes, recoveredHistory = recovered.screen, recovered.modes, segments
+				position = recoveredPosition
+				resumeID = string(position.Epoch)
+				recoveredTranscript = true
+			}
 			seed, err = readRecentCast(path, h.cfg.ReplayBytes)
 			if err != nil {
 				slog.Warn("ptyhost: seed recent terminal replay", "path", path, "error", err)
@@ -377,10 +386,21 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		h.unreserve(key)
 		return err
 	}
-	var history []castSegment
-	if isRun && len(recoveredHistory) > 0 {
-		history = recoveredHistory
-		relocateCheckpointSegments(history, path)
+	if len(recoveredHistory) > 0 {
+		tr.history = recoveredHistory
+		for i := range tr.history {
+			if tr.history[i].path == path {
+				tr.history[i].path = filepath.Join(filepath.Dir(path), stableCastSegmentName(path, tr.history[i].incarnation))
+			}
+		}
+	} else {
+		tr.history, err = priorCastSegments(path)
+		if err != nil {
+			_ = tr.close()
+			screen.dispose()
+			h.unreserve(key)
+			return err
+		}
 	}
 	if recoveredTranscript {
 		tr.seed(makeScreenSnapshot(screen, modes, position).Data)
@@ -395,7 +415,6 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		resumeID:         resumeID,
 		att:              att,
 		tr:               tr,
-		history:          history,
 		checkpoint:       checkpointPath(path),
 		stdin:            att.Stdin(),
 		clients:          make(map[*client]struct{}),
@@ -416,7 +435,7 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		s.enableProtocolResponder()
 	}
 	if len(seed) > 0 {
-		if isRun {
+		if isRun || position.Sequence > 0 {
 			if TerminalSequence(len(seed)) <= position.Sequence {
 				s.ring.seed(seed, position)
 			}
@@ -429,13 +448,11 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 			h.cfg.OnTitle(key, title)
 		}
 	}
-	if isRun {
-		if err := s.checkpointNow(); err != nil {
-			_ = tr.close()
-			screen.dispose()
-			h.unreserve(key)
-			return err
-		}
+	if err := s.checkpointNow(); err != nil {
+		_ = tr.close()
+		screen.dispose()
+		h.unreserve(key)
+		return err
 	}
 	h.mu.Lock()
 	delete(h.starting, key)
@@ -460,9 +477,7 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		go s.respond()
 	}
 	go s.pump()
-	if isRun {
-		go s.checkpointLoop()
-	}
+	go s.checkpointLoop()
 	return nil
 }
 
@@ -494,29 +509,43 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	}
 	name := string(run)
 	transcript := filepath.Join(h.cfg.TranscriptDir, name+".cast")
-	archives, err := removablePriorCastPaths(ctx, transcript)
-	if err != nil {
-		return fmt.Errorf("ptyhost: find run transcript history: %w", err)
-	}
-	paths := append(archives, transcript, checkpointPath(transcript), h.ItemLogPath(run))
-	patterns := []string{
-		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
-		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
-	}
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
+	if err := func() error {
+		lifecycle := acquireTranscriptLifecycle(transcript)
+		lifecycle.entry.mu.Lock()
+		defer func() {
+			lifecycle.entry.mu.Unlock()
+			lifecycle.release()
+		}()
+		archives, err := removablePriorCastPaths(ctx, transcript)
 		if err != nil {
-			return fmt.Errorf("ptyhost: find run transcripts: %w", err)
+			return fmt.Errorf("ptyhost: find run transcript history: %w", err)
 		}
-		paths = append(paths, matches...)
-	}
-	for _, path := range paths {
-		if err := ctx.Err(); err != nil {
-			return err
+		paths := append(archives, transcript, transcript+".next", checkpointPath(transcript), castRetentionPath(transcript), castRetentionPath(transcript)+".next", h.ItemLogPath(run), h.ItemLogPath(run)+".compact")
+		patterns := []string{
+			filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
+			filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
+			filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.retention"),
+			filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast.next"),
+			filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.retention.next"),
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("ptyhost: remove run transcript: %w", err)
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				return fmt.Errorf("ptyhost: find run transcripts: %w", err)
+			}
+			paths = append(paths, matches...)
 		}
+		for _, path := range paths {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("ptyhost: remove run transcript: %w", err)
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
 	h.mu.Lock()
 	for key := range h.snapshots {
@@ -550,44 +579,80 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 	return s.lastOutput()
 }
 
-// Replay streams all of a run's recorded terminal output exactly as the agent
-// wrote it, decoded from every asciinema transcript incarnation. It fails with
-// os.ErrNotExist when the run never recorded a transcript - a session that was
-// never started, or an artifact from before recording existed. The error is
-// returned before anything is written, so a caller can fall back to its own
-// refusal when no transcript exists.
-func (h *Host) Replay(run domain.RunID) (io.ReadCloser, int, error) {
-	if err := validateRunID(run); err != nil {
-		return nil, 0, fmt.Errorf("%w: %q", err, run)
-	}
-	return openFullCastReplay(h.transcriptPath(RunSession(run)))
+// Replay opens the retained raw terminal output and its metadata at one
+// immutable boundary. An expired prefix is explicit, not a complete transcript.
+// os.ErrNotExist means the run has never recorded a transcript.
+func (h *Host) Replay(run domain.RunID) (ReplayWindow, error) {
+	return h.replayWindow(run, 0)
 }
 
-// ReplayWindow is a bounded recent terminal suffix and its proven boundary.
-// Position is zero and Complete is false without a valid v2 checkpoint.
+// ReplayWindow carries a retained byte window and its proven end boundary.
+// Complete describes that boundary, not whether all historical output remains.
 type ReplayWindow struct {
-	Reader   io.ReadCloser
-	Bytes    int
-	Cols     uint
-	Rows     uint
-	Position TerminalPosition
-	Complete bool
+	Reader          io.ReadCloser
+	Bytes           int
+	Cols            uint
+	Rows            uint
+	Position        TerminalPosition
+	Complete        bool
+	TruncatedBefore bool
 }
 
 // RecentReplay reads only a fixed-size tail window from newest segments.
 func (h *Host) RecentReplay(run domain.RunID, maxBytes int) (ReplayWindow, error) {
-	if err := validateRunID(run); err != nil {
-		return ReplayWindow{}, fmt.Errorf("%w: %q", err, run)
-	}
 	if maxBytes <= 0 {
 		return ReplayWindow{}, errors.New("ptyhost: recent replay limit must be positive")
 	}
+	return h.replayWindow(run, maxBytes)
+}
+
+func (h *Host) replayWindow(run domain.RunID, maxBytes int) (ReplayWindow, error) {
+	if err := validateRunID(run); err != nil {
+		return ReplayWindow{}, fmt.Errorf("%w: %q", err, run)
+	}
 	path := h.transcriptPath(RunSession(run))
-	data, err := readRecentCast(path, maxBytes)
+	// Never acquire the session lock while holding lifecycle: rotation takes
+	// them in this order. Holding both keeps metadata and opened bytes atomic.
+	s := h.lookup(RunSession(run))
+	if s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	lifecycle := acquireTranscriptLifecycle(path)
+	lifecycle.entry.mu.Lock()
+	defer func() {
+		lifecycle.entry.mu.Unlock()
+		lifecycle.release()
+	}()
+	if s != nil && s.tr != nil {
+		if err := s.tr.flush(); err != nil {
+			return ReplayWindow{}, err
+		}
+	}
+	// Bounded recent reads must not repair or scan unrelated older archives.
+	// Full replay repairs and prunes before pinning its retained descriptors.
+	if maxBytes <= 0 && (s == nil || s.tr == nil) {
+		if err := pruneColdCast(path, time.Now()); err != nil {
+			return ReplayWindow{}, err
+		}
+	}
+	retention, err := readCastRetention(path)
 	if err != nil {
 		return ReplayWindow{}, err
 	}
-	window := ReplayWindow{Reader: io.NopCloser(bytes.NewReader(data)), Bytes: len(data)}
+	window := ReplayWindow{TruncatedBefore: retention.Before != 0}
+	if maxBytes > 0 {
+		data, readErr := readRecentCast(path, maxBytes)
+		if readErr != nil {
+			return ReplayWindow{}, readErr
+		}
+		window.Reader, window.Bytes = io.NopCloser(bytes.NewReader(data)), len(data)
+	} else {
+		window.Reader, window.Bytes, err = openFullCastReplay(path)
+		if err != nil {
+			return ReplayWindow{}, err
+		}
+	}
 	if checkpoint, checkpointErr := decodeCheckpoint(checkpointPath(path)); checkpointErr == nil && checkpoint.Version == screenCheckpointVersion {
 		if _, boundaryErr := validateCheckpointSegments(path, checkpoint, true); boundaryErr == nil {
 			window.Cols, window.Rows = checkpoint.Cols, checkpoint.Rows
@@ -652,6 +717,12 @@ func (h *Host) Snapshot(run domain.RunID) (snapshot ScreenSnapshot, err error) {
 	h.mu.Unlock()
 
 	path := h.transcriptPath(key)
+	lifecycle := acquireTranscriptLifecycle(path)
+	lifecycle.entry.mu.RLock()
+	defer func() {
+		lifecycle.entry.mu.RUnlock()
+		lifecycle.release()
+	}()
 	recovered, _, position, _, loadErr := loadCurrentCheckpoint(path, false)
 	if loadErr == nil {
 		snapshot = makeScreenSnapshot(recovered.screen, recovered.modes, position)

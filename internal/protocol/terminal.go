@@ -64,9 +64,10 @@ type TerminalHistoryLine struct {
 // TerminalHistoryResult is a newest-first page whose lines are ordered
 // chronologically for direct rendering.
 type TerminalHistoryResult struct {
-	Lines      []TerminalHistoryLine `json:"lines"`
-	NextCursor string                `json:"next_cursor,omitempty"`
-	HasMore    bool                  `json:"has_more"`
+	Lines           []TerminalHistoryLine `json:"lines"`
+	NextCursor      string                `json:"next_cursor,omitempty"`
+	HasMore         bool                  `json:"has_more"`
+	TruncatedBefore bool                  `json:"truncated_before,omitempty"`
 }
 
 // TerminalResponse is the result of a terminal control operation.

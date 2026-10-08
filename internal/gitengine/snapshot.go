@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,8 +26,8 @@ import (
 // run's user.
 const snapshotStoreSuffix = ".diffsnap"
 
-// lastTreeFile records the most recent snapshot tree inside the store, so
-// the interval chain survives a watch restart or a server restart.
+// lastTreeFile is the pre-retention published-tip marker. Existing stores
+// migrate it to Git refs on their first capture or historical range read.
 const lastTreeFile = "last"
 
 // MaxEvidenceInputBytes bounds the total regular-file content that one
@@ -34,6 +35,17 @@ const lastTreeFile = "last"
 // preflight runs before staging, and the immutable tree is checked before a
 // retained evidence ref is created.
 const MaxEvidenceInputBytes = 64 << 20
+
+// MaxSnapshotInputBytes bounds visible staged input, not live filesystem use.
+const MaxSnapshotInputBytes = 128 << 20
+
+func (e *Engine) checkStagedBounds(ctx context.Context, checkout, index string) error {
+	tree, _, err := e.gitStaged(ctx, checkout, index, 256, "write-tree")
+	if err != nil {
+		return err
+	}
+	return e.checkSnapshotBounds(ctx, checkout, index, strings.TrimSpace(tree), MaxSnapshotInputBytes, ErrSnapshotStorageLimit)
+}
 
 // snapshotStorePath validates run and returns its snapshot store path
 // without checking existence.
@@ -65,6 +77,10 @@ func (e *Engine) snapshotLock(run domain.RunID) *sync.Mutex {
 // API supplies file metadata without following symlinks or opening special
 // files. The immutable tree is checked again after staging.
 func (e *Engine) checkEvidenceCaptureBounds(ctx context.Context, run domain.RunID, checkout string) error {
+	return e.checkCaptureBounds(ctx, run, checkout, MaxEvidenceInputBytes, ErrEvidenceStorageLimit)
+}
+
+func (e *Engine) checkCaptureBounds(ctx context.Context, run domain.RunID, checkout string, limit uint64, limitErr error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -75,16 +91,16 @@ func (e *Engine) checkEvidenceCaptureBounds(ctx context.Context, run domain.RunI
 	}
 	free, err := disk.Free(checkout)
 	if err != nil {
-		return fmt.Errorf("%w: inspect free disk for run %s: %v", ErrEvidenceStorageLimit, run, err)
+		return fmt.Errorf("%w: cannot inspect free disk", limitErr)
 	}
-	const listingLimit = MaxEvidenceInputBytes + (1 << 20)
+	listingLimit := int(limit) + (1 << 20)
 	listing, over, err := e.gitCheckoutBounded(ctx, run, checkout, listingLimit,
 		"ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return fmt.Errorf("gitengine: list evidence input for run %s: %w", run, err)
 	}
 	if over {
-		return fmt.Errorf("%w: staged file listing exceeds %d bytes", ErrEvidenceStorageLimit, listingLimit)
+		return fmt.Errorf("%w: staged file listing exceeds %d bytes", limitErr, listingLimit)
 	}
 	root, err := e.openCheckoutRoot(checkout)
 	if err != nil {
@@ -141,13 +157,13 @@ func (e *Engine) checkEvidenceCaptureBounds(ctx context.Context, run domain.RunI
 			return fmt.Errorf("gitengine: negative file size for %q", path)
 		}
 		size := uint64(info.Size())
-		if size > MaxEvidenceInputBytes-total {
-			return fmt.Errorf("%w: retained Git input exceeds %d bytes", ErrEvidenceStorageLimit, MaxEvidenceInputBytes)
+		if size > limit-total {
+			return fmt.Errorf("%w: retained Git input exceeds %d bytes", limitErr, limit)
 		}
 		total += size
 	}
 	if total > free {
-		return fmt.Errorf("%w: retained Git input is %d bytes but only %d bytes are free", ErrEvidenceStorageLimit, total, free)
+		return fmt.Errorf("%w: insufficient free disk for staged input", limitErr)
 	}
 	return nil
 }
@@ -157,24 +173,28 @@ func (e *Engine) checkEvidenceCaptureBounds(ctx context.Context, run domain.RunI
 // preflight above, but a tree's blob sizes cannot change once Git has written
 // it, so this is the authoritative capture bound.
 func (e *Engine) checkEvidenceSnapshotBounds(ctx context.Context, run domain.RunID, checkout, tree string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !validObjectID(tree) {
-		return fmt.Errorf("gitengine: evidence snapshot for run %s returned invalid tree %q", run, tree)
-	}
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return err
 	}
-	const listingLimit = MaxEvidenceInputBytes + (1 << 20)
-	listing, over, err := e.gitBareBounded(ctx, store, listingLimit,
+	return e.checkSnapshotBounds(ctx, checkout, filepath.Join(store, "index"), tree, MaxEvidenceInputBytes, ErrEvidenceStorageLimit)
+}
+
+func (e *Engine) checkSnapshotBounds(ctx context.Context, checkout, index, tree string, limit uint64, limitErr error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validObjectID(tree) {
+		return ErrInvalidObjectID
+	}
+	listingLimit := int(limit) + (1 << 20)
+	listing, over, err := e.gitStaged(ctx, checkout, index, listingLimit,
 		"ls-tree", "-r", "-l", "-z", tree, "--")
 	if err != nil {
-		return fmt.Errorf("gitengine: list evidence snapshot for run %s: %w", run, err)
+		return fmt.Errorf("gitengine: list snapshot input: %w", err)
 	}
 	if over {
-		return fmt.Errorf("%w: evidence snapshot listing exceeds %d bytes", ErrEvidenceStorageLimit, listingLimit)
+		return fmt.Errorf("%w: snapshot listing exceeds %d bytes", limitErr, listingLimit)
 	}
 	var total uint64
 	for record := range strings.SplitSeq(listing, "\x00") {
@@ -202,17 +222,17 @@ func (e *Engine) checkEvidenceSnapshotBounds(ctx context.Context, run domain.Run
 		if parseErr != nil {
 			return fmt.Errorf("gitengine: parse evidence snapshot size %q: %w", fields[3], parseErr)
 		}
-		if size > MaxEvidenceInputBytes-total {
-			return fmt.Errorf("%w: retained Git input exceeds %d bytes", ErrEvidenceStorageLimit, MaxEvidenceInputBytes)
+		if size > limit-total {
+			return fmt.Errorf("%w: retained Git input exceeds %d bytes", limitErr, limit)
 		}
 		total += size
 	}
 	free, err := disk.Free(checkout)
 	if err != nil {
-		return fmt.Errorf("%w: inspect free disk for run %s: %v", ErrEvidenceStorageLimit, run, err)
+		return fmt.Errorf("%w: cannot inspect free disk", limitErr)
 	}
 	if total > free {
-		return fmt.Errorf("%w: retained Git input is %d bytes but only %d bytes are free", ErrEvidenceStorageLimit, total, free)
+		return fmt.Errorf("%w: insufficient free disk for staged input", limitErr)
 	}
 	return nil
 }
@@ -228,15 +248,36 @@ func (e *Engine) writeSnapshotTree(ctx context.Context, run domain.RunID, checko
 	return e.writeSnapshotTreeLocked(ctx, run, checkout)
 }
 
-func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, checkout string) (string, error) {
+func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, checkout string) (result string, resultErr error) {
+	if err := e.checkCaptureBounds(ctx, run, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
+		return "", err
+	}
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
+		return "", err
+	}
+	if err = e.initSnapshotStore(ctx, run, checkout, store); err != nil {
 		return "", err
 	}
 	index, err := scratchIndex(store, checkout, run)
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		// A cancelled add or a file grown after preflight must not accumulate
+		// unreferenced blobs forever. The latest accepted trees have refs.
+		cleanup, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+		defer cancel()
+		if removeErr := os.Remove(index); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			resultErr = errors.Join(resultErr, removeErr)
+			return
+		}
+		_, _, pruneErr := e.gitBareBounded(cleanup, store, 0, "prune", "--expire=now")
+		resultErr = errors.Join(resultErr, pruneErr)
+	}()
 	// The store is single-writer: one watch goroutine stages into it, and
 	// RemoveRunCheckout stops that watch before deleting the store. A lock
 	// file here is therefore stale by construction - left by a git killed at
@@ -259,58 +300,151 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 	if !validObjectID(tree) {
 		return "", fmt.Errorf("gitengine: git write-tree for run %s returned %q, not an object id", run, tree)
 	}
+	if err = e.checkSnapshotBounds(ctx, checkout, index, tree, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
+		return "", err
+	}
+	if err = e.retainSnapshot(ctx, store, tree, defaultSnapshotPolicy); err != nil {
+		return "", err
+	}
 	return tree, nil
 }
 
-// lastSnapshotTree reads the store's record of the most recent snapshot
-// tree. An absent, unreadable, or malformed record reads as "unknown"
-// rather than an error: the watch then falls back to the fork-point tree.
+// lastSnapshotTree reads the published boundary, including legacy stores.
 func (e *Engine) lastSnapshotTree(run domain.RunID) string {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(store, lastTreeFile))
-	if err != nil {
-		return ""
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+	defer cancel()
+	if tree, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", snapshotPublishedRef); err == nil {
+		return strings.TrimSpace(tree)
 	}
+	data, _ := os.ReadFile(filepath.Join(store, lastTreeFile))
 	tree := strings.TrimSpace(string(data))
-	if !validObjectID(tree) {
-		return ""
+	if validObjectID(tree) {
+		return tree
 	}
-	return tree
+	return ""
 }
 
-// setLastSnapshotTree records tree as the store's most recent snapshot.
-func (e *Engine) setLastSnapshotTree(run domain.RunID, tree string) error {
+// writeWatchSnapshot keeps the last durable interval and a bounded inflight
+// interval pinned through event publication and ref acknowledgement. A failed
+// acknowledgement retries the same interval before accepting another watch
+// tree; unrelated evidence staging may safely move the generic latest ref.
+func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, checkout string, publish func(string) error) (string, error) {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
-		return err
+		return "", err
 	}
-	// Written through a temporary file so a crash mid-write leaves the
-	// previous record intact rather than a truncated id that reads as
-	// "unknown" and costs the run an interval boundary.
-	tmp, err := os.CreateTemp(store, lastTreeFile+"-*.tmp")
-	if err != nil {
-		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	if err = os.MkdirAll(store, 0o700); err != nil {
+		return "", err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.WriteString(tree + "\n"); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	if err = os.WriteFile(filepath.Join(store, "history-gap"), []byte("1\n"), 0o600); err != nil {
+		return "", err
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	var tree, previous string
+	if _, err = os.Stat(filepath.Join(store, "HEAD")); err == nil {
+		refs, _, refsErr := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(refname) %(objectname)", "refs/aether/inflight/")
+		if refsErr != nil {
+			return "", refsErr
+		}
+		for _, line := range strings.Split(strings.TrimSpace(refs), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			switch fields[0] {
+			case snapshotInflightParentRef:
+				previous = fields[1]
+			case snapshotInflightTreeRef:
+				tree = fields[1]
+			}
+		}
+		if (tree == "") != (previous == "") {
+			return "", fmt.Errorf("gitengine: incomplete inflight snapshot interval")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
-	if err := os.Rename(tmp.Name(), filepath.Join(store, lastTreeFile)); err != nil {
-		return fmt.Errorf("gitengine: record snapshot tree for run %s: %w", run, err)
+	if tree == "" {
+		tree, err = e.writeSnapshotTreeLocked(ctx, run, checkout)
+		if err != nil {
+			return "", err
+		}
+		previous, _, err = e.gitBareBounded(ctx, store, 256, "for-each-ref", "--format=%(objectname)", snapshotPublishedRef)
+		if err != nil {
+			return "", err
+		}
+		previous = strings.TrimSpace(previous)
+		if previous == "" {
+			previous, _, err = e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
+			if err != nil {
+				return "", err
+			}
+			previous = strings.TrimSpace(previous)
+		}
+		// Install both pins before Publish: even a delivered event followed
+		// by a ref-lock failure survives later staging and scoped GC.
+		transaction := "start\nupdate " + snapshotInflightParentRef + " " + previous +
+			"\nupdate " + snapshotInflightTreeRef + " " + tree + "\nprepare\ncommit\n"
+		if _, err := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); err != nil {
+			return "", err
+		}
 	}
-	return nil
+	if publish != nil {
+		if err := publish(tree); err != nil {
+			return "", err
+		}
+	}
+	// A crash or ref-lock failure must leave the complete old interval, not
+	// a new previous paired with an old published tip. If the event succeeds
+	// but this transaction fails, the gap remains for conservative replay.
+	transaction := "start\n"
+	if previous != "" && previous != tree {
+		transaction += "update refs/aether/previous " + previous + "\n"
+		// Pressure may have removed either endpoint's history entry while
+		// the published/inflight pins kept its objects alive. Re-advertising
+		// that interval must hand both endpoints back to the retained catalog
+		// before releasing those pins, or the very next publication can make
+		// this newly delivered interval unreadable. Existing recency is not
+		// refreshed, and unchanged captures never enter this branch.
+		listing, _, listErr := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", snapshotHistoryRoot, "refs/aether/base")
+		if listErr != nil {
+			return "", listErr
+		}
+		retained := strings.Fields(listing)
+		stamp := defaultSnapshotPolicy.now().UnixNano()
+		for _, endpoint := range []string{previous, tree} {
+			if !slices.Contains(retained, endpoint) {
+				ref := fmt.Sprintf("%s%019d-%s", snapshotHistoryRoot, stamp, endpoint)
+				transaction += "update " + ref + " " + endpoint + "\n"
+			}
+		}
+	}
+	transaction += "update " + snapshotPublishedRef + " " + tree +
+		"\ndelete " + snapshotInflightParentRef + "\ndelete " + snapshotInflightTreeRef + "\nprepare\ncommit\n"
+	if _, err := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); err != nil {
+		return "", err
+	}
+	if err := os.Remove(filepath.Join(store, "history-gap")); err != nil {
+		return tree, err
+	}
+	return tree, nil
 }
 
 // removeSnapshotStore deletes a run's snapshot store. Idempotent on a
 // missing path.
 func (e *Engine) removeSnapshotStore(run domain.RunID) error {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return err

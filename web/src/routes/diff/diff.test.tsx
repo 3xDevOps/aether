@@ -306,6 +306,44 @@ test('an interval that fails shows the server message and Refresh retries it', a
   expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
 })
 
+test('keeps cumulative changes usable across snapshot failures and marks the recovered interval gap', async () => {
+  const failed: DiffSnapshot = { time: '2026-08-14T10:03:00Z', files: [], historyGap: true, snapshotError: 'Snapshot input exceeded its retained capture limit' }
+  seed({ ...ready, snapshots: [failed] })
+  renderDiff()
+  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(screen.getByRole('status').textContent).toContain(failed.snapshotError)
+  expect(api.runPatch).not.toHaveBeenCalled()
+
+  const recovered = { ...snapshot('2026-08-14T10:04:00Z', 'tree0', 'tree2'), historyGap: true }
+  act(() => useStore.getState().setDiff(active.id, { snapshots: [recovered, failed] }))
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree0', patch: newFile, truncated: false })
+  openMenu('Current diff')
+  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[0])
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(screen.getByRole('status')).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  chooseInterval(/Current diff/)
+  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+})
+
+test('does not silently show current changes when a selected historical interval expires or leaves the window', async () => {
+  const selected = snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')
+  seed({ ...ready, snapshots: [selected] })
+  vi.mocked(api.runPatch).mockRejectedValue(new Error('Retained snapshot history has expired'))
+  renderDiff()
+  chooseInterval(/What changed/)
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  act(() => useStore.getState().setDiff(active.id, { snapshots: [], intervals: {} }))
+  expect(screen.getByRole('button', { name: /What changed/ })).toBeTruthy()
+  expect(screen.getByRole('alert')).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  chooseInterval(/Current diff/)
+  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+})
+
 test('a snapshot without a tree is a disabled row that says why', () => {
   seed({ ...ready, snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }] })
   renderDiff()

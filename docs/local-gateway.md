@@ -268,6 +268,9 @@ server caps it at 200. Queries are limited to 256 UTF-8 bytes. A cursor must be
 returned unchanged and used with the same run and query; it is authenticated
 server state, not an offset for clients to construct or edit. Malformed,
 tampered, or mismatched cursors are rejected as invalid parameters.
+An authenticated cursor whose segment has since been pruned instead returns
+unavailable (`-32004`, `earlier terminal history has expired`). Clients must
+not substitute an empty page or silently restart at the newest output.
 
 The first request starts at the newest retained output. Every response orders
 its normalized text lines chronologically and returns `has_more`; when another
@@ -275,6 +278,9 @@ window is available it also returns `next_cursor`, which requests the next
 older window. Search applies the literal query while scanning retained casts
 and returns only matching normalized lines. Escape sequences and terminal
 controls are interpreted into text rather than sent to the browser.
+`truncated_before:true` means an earlier prefix has expired. It is derived
+from the same retained-history snapshot as the page, including empty pages;
+`has_more:false` means the retained boundary, not necessarily the run's start.
 
 Line count is not the only bound. Each request also limits raw disk reads,
 decoded bytes and events, elapsed time, cast segments, directory discovery,
@@ -306,7 +312,8 @@ guarantee. These are browser policies, not changes to the request, cursor or
 authorization contract.
 
 The raw `GET /api/runs/<run_id>/terminal-history` route remains only for
-non-dashboard compatibility consumers that need the complete recording. The
+non-dashboard compatibility consumers that need all currently retained raw
+bytes, not a guarantee of the complete recording from run start. The
 dashboard neither calls it nor exposes a full-history download action. The
 route performs the normal gateway and member authorization, then streams the
 available cast incarnations as raw ANSI bytes with
@@ -602,8 +609,8 @@ call is refused with `-32602`, and with a lease another session holds with
 | `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
 | `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
-| `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...]}`, oldest first, cut like stream frames |
-| `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole |
+| `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
+| `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole; expired IDs return unavailable with an explicit retained-history expiry message, missing IDs return not-found |
 | `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |
 
 Use the option IDs and values from the session's `config_options` snapshot,
@@ -872,6 +879,31 @@ full object id, has to resolve against that run's own object database and no
 other, and has to name a tree: a commit id would otherwise peel to its tree
 and render a diff the timeline never offered.
 
+Snapshot sidecars retain a target of 512 MiB per run, the newest 1,024 changed
+trees and seven days of history, protecting the latest/base needed for a valid
+current interval. Consecutive unchanged trees do not add duplicate refs;
+a changed snapshot reverting to an earlier tree refreshes that tree's recency.
+Cleanup touches only the sidecar's snapshot refs and objects, never source
+branches or durable evidence refs. Legacy sidecars migrate their last tip
+even on a range read without a new capture; uncatalogued older objects may
+expire. A range read and evidence import hold the snapshot lock against
+pruning. Published interval refs change atomically, and two bounded in-flight
+pins protect delivered endpoints across ref or event publication failures
+and evidence-triggered GC. Watch snapshots and cumulative-diff staging bound
+visible input at 128 MiB (evidence keeps its stricter 64 MiB input bound).
+
+`run.diff` may include `history_gap:true` and a bounded, path-free
+`snapshot_error` when an interval could not be recorded. The next successful
+interval also advertises a gap if it spans missed work. Clients must not show
+an ordinary complete interval for these events. The current cumulative diff
+remains independently usable within its staging bounds.
+Gap publication retries preserve that distinction and may deliver metadata
+at least once; they never replay an agent action or tool invocation.
+Staging refusal returns unavailable with
+`run.patch: current diff input exceeds 128 MiB or available disk headroom`;
+`files.diff` uses the same explanation with its own method name. It does not
+claim the checkout was removed, and it never returns a partial complete diff.
+
 ```json
 {"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}
 ```
@@ -886,8 +918,8 @@ and render a diff the timeline never offered.
   renders the response inline; it does not serve repositories.
 - `503` with `-32004` when the server has no git engine wired, when the run
   has no checkout left to diff (it finished and was cleaned up), when a
-  requested tree is no longer on disk - a run's snapshot objects are removed
-  with its checkout, so its intervals go when the checkout does - or when
+  requested tree has expired from retained snapshot history (possibly before
+  checkout cleanup), or when
   rendering ran past the engine's 30s ceiling - the same bound a diff
   snapshot's git work gets, because staging re-hashes every untracked file
   and a worktree holding a large un-ignored tree would otherwise be
@@ -995,7 +1027,7 @@ or ask this method to read an arbitrary path.
 - The read methods answer `-32004` (unavailable) when the read cannot be
   served: `run.patch` when diff rendering is not enabled (no git engine
   wired), when the run has no checkout left to diff, or when a requested tree
-  is gone (`run.patch: that snapshot's tree is no longer on disk`),
+  is gone (`run.patch: retained snapshot history has expired or is unavailable`),
   `server.disk` when the server was not told where the data directory is or
   the filesystem holding it could not be read, and `files.tree`,
   `files.read`, or `files.diff` when their checkout or repository is
@@ -1866,6 +1898,14 @@ does not run its agent over ACP`. Every frame is JSON text.
    and page older items with `run.acp.history` (`before_seq` set to
    `oldest_seq`). Otherwise it sends exactly the items after `after_seq`
    and omits `oldest_seq`.
+
+   If a nonzero cursor predates the retained window, the server sends an
+   explicit reset frame after the ack, before replay. The ack's
+   `truncated_before:true` identifies expired history independently of the
+   200-item replay limit. Preserve that flag and authoritative pending
+   requests through a same-epoch reset; a new epoch fences old state.
+   History-page `oldest_seq` is the first retained public item (0 if empty),
+   whereas ack `oldest_seq` is the first replayed item.
 
    ```json
    {"ok":true,"seq":431,"replay":19,"epoch":0,"live":true,

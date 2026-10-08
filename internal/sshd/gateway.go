@@ -55,7 +55,9 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
 		return nil, invalidParams("run.patch: from and to must both be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit), or both empty")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: that snapshot's tree is no longer on disk"}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: retained snapshot history has expired or is unavailable"}
+	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: current diff input exceeds 128 MiB or available disk headroom"}
 	case err != nil:
 		// The wrapped error names checkout paths on the server, so it is
 		// not echoed to the client.

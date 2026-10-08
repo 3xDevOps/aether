@@ -503,13 +503,28 @@ Each run driven over ACP keeps its log at
 `<data-dir>/transcripts/<run_id>.items.jsonl`, one JSON item per line, beside
 the run's terminal transcripts and deleted with them. It holds prompts,
 the agent's messages and thoughts, tool call inputs, output and diffs,
-permission requests and answers, and notices. One item is capped at 256 KiB
-and one run's log at 64 MiB, past which only requests, turn boundaries and
-notices are recorded. Anything an agent or a tool prints, a secret included,
-can be in it; [privacy.md](privacy.md#remote-development-data) covers who can
-read it.
+permission requests and answers, and notices. One item is capped at 256 KiB.
+The run keeps a rolling latest 64 MiB window: new messages and tool output
+continue to be recorded while the oldest items expire. Compaction atomically
+replaces the JSONL file and carries private preceding sequence, epoch and
+turn state, so sequence IDs do not restart and active approvals remain live.
+The temporary replacement file and readers pinning a pre-compaction file need
+additional disk space; 64 MiB is a retained-history ceiling, not an
+instantaneous disk quota. Compaction leaves roughly 8 MiB of writing headroom.
+Anything an agent or a tool prints, a secret included, can be in it;
+[privacy.md](privacy.md#remote-development-data) covers who can read it.
 
 A dashboard that opens the run receives the newest 200 items and pages
 older ones with `run.acp.history`; one that reconnects at most 200 items
 behind receives only the items it missed
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
+
+History pages report `oldest_seq` and `truncated_before` alongside `frames`;
+the stream acknowledgement also reports an expired prefix. The Session view
+marks that boundary rather than implying this is the entire conversation.
+Looking up a full item that has expired returns an explicit unavailable
+error. Reconnecting from an expired cursor resets to a retained replay with
+its boundary advertised; it never invents missing messages or permission
+answers. Existing logs migrate during normal open/compaction. This display
+history policy does not delete the agent's native session, workspace files,
+result branches or separately retained evidence.

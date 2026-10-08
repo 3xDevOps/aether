@@ -116,6 +116,7 @@ func (g *Gateway) handleHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+historyFilename(r.PathValue("run"))+`"`)
 	w.Header().Set("Content-Length", strconv.Itoa(ack.Replay))
+	w.Header().Set("X-Aether-Truncated-Before", strconv.FormatBool(ack.TruncatedBefore))
 	w.WriteHeader(http.StatusOK)
 
 	// A client disappearing while TerminalReader is blocked in Read must close

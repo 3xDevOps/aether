@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/disk"
@@ -113,8 +114,14 @@ func TestRunPatchSnapshotRange(t *testing.T) {
 	if pe.Code != protocol.CodeUnavailable {
 		t.Errorf("missing tree code = %d, want %d", pe.Code, protocol.CodeUnavailable)
 	}
-	if pe.Message != "run.patch: that snapshot's tree is no longer on disk" {
+	if pe.Message != "run.patch: retained snapshot history has expired or is unavailable" {
 		t.Errorf("missing tree message = %q", pe.Message)
+	}
+
+	patcher.err = fmt.Errorf("private /host/checkout: %w", gitengine.ErrSnapshotStorageLimit)
+	pe = wireErrOf(t, c.Call(protocol.MethodRunPatch, protocol.RunPatchParams{RunID: string(e.run.ID)}, nil))
+	if pe.Code != protocol.CodeUnavailable || pe.Message != "run.patch: current diff input exceeds 128 MiB or available disk headroom" {
+		t.Errorf("staging limit refusal = %+v", pe)
 	}
 }
 

@@ -229,6 +229,11 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
           </Button>
         </div>
       )}
+      {session?.truncatedBefore && (
+        <Callout tone="needs-you" role="status" className="mx-4 mt-2 shrink-0">
+          Earlier Enhanced history has expired. Retained items and the current session remain available.
+        </Callout>
+      )}
       <div
         ref={viewport}
         tabIndex={-1}

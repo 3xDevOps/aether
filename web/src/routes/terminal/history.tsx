@@ -679,9 +679,9 @@ export function TerminalHistory({
             dangerouslySetInnerHTML={{ __html: html }} />
         })}
       </div>
-      {(snapshot.loading || snapshot.error || readError) && (
-        <div role="status" className="sticky left-0 -mt-6 h-6 w-fit max-w-full bg-canvas/95 px-2 text-ui-sm text-muted" style={{ bottom: 0 }}>
-          {snapshot.error ?? readError ?? 'Loading older recorded output…'}
+      {(snapshot.loading || snapshot.error || readError || snapshot.truncatedBefore) && (
+        <div role="status" className="sticky left-0 -mt-6 w-fit max-w-full bg-canvas/95 px-2 text-ui-sm text-muted" style={{ bottom: 0 }}>
+          {snapshot.error ?? readError ?? (snapshot.loading ? 'Loading older recorded output…' : 'Earlier recorded output has expired. Retained history and live output remain available.')}
           {(snapshot.error || readError) && <Button size="sm" variant="ghost" onClick={() => {
             if (!episodeReady) startArchive()
             else if (readError) setReadAttempt((attempt) => attempt + 1)

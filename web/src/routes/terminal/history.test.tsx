@@ -183,6 +183,20 @@ test('enters by scrolling without a history button and escapes archive HTML', as
   view.dispose()
 })
 
+test('shows the retained-prefix boundary without blocking a keyboard return to live output', async () => {
+  const client = fakeApi({ terminalHistory: vi.fn(async () => historyResult([historyLine('retained-output')], { truncated_before: true })) })
+  const view = mountHistory(cacheFor(client))
+  const output = await beginReading(view)
+  fireEvent.scroll(output, { target: { scrollTop: 0 } })
+  expect(await screen.findByText('retained-output')).toBeDefined()
+  expect(screen.getByRole('status')).toBeDefined()
+  fireEvent.keyDown(output, { key: 'End' })
+  expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
+  expect(view.terminal.scrollToBottom).toHaveBeenCalled()
+  expect(client.terminalHistory).toHaveBeenCalledTimes(1)
+  view.dispose()
+})
+
 test('accepts the first upward gesture as soon as the restored live surface is announced', async () => {
   const view = mountHistory(cacheFor(fakeApi()), false, true, (reading) => {
     if (!reading) view.host.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true, cancelable: true }))
@@ -378,7 +392,7 @@ test('rebases million-row scroll ranges without changing the visible row or exha
   const cache: HistoryCache = {
     readView: async () => ({ screen: frozenScreen, anchor: { row: -3_000_000, offset: 3, left: 57 } }),
     saveView: vi.fn(async () => {}),
-    snapshot: () => ({ count: 5_000_000, hasMore: false, loading: false, error: null, revision: 1 }),
+    snapshot: () => ({ count: 5_000_000, hasMore: false, truncatedBefore: false, loading: false, error: null, revision: 1 }),
     subscribe: () => () => {},
     loadOlder: vi.fn(async () => {}),
     resetArchive: vi.fn(async () => {}),

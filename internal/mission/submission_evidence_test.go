@@ -41,11 +41,11 @@ func (submissionBytes) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (s submissionTranscript) Replay(domain.RunID) (io.ReadCloser, error) {
+func (s submissionTranscript) Replay(domain.RunID) (io.ReadCloser, bool, error) {
 	if s.err != nil {
-		return nil, s.err
+		return nil, false, s.err
 	}
-	return io.NopCloser(io.LimitReader(submissionBytes{}, s.size)), nil
+	return io.NopCloser(io.LimitReader(submissionBytes{}, s.size)), false, nil
 }
 
 // All writes and normal reads use real private files. Failures are injected only

@@ -128,6 +128,32 @@ func TestACPAlreadyAnsweredIsTyped(t *testing.T) {
 	}
 }
 
+func TestACPExpiredItemRevalidatesPermissionBeforeHistory(t *testing.T) {
+	e, run := newACPEnv(t)
+	_, viewer := addMember(t, e, "Retained history viewer", domain.RoleViewer, false)
+	e.runs.setErr(fmt.Errorf("private /host/log: %w", acphost.ErrHistoryExpired))
+	params := protocol.RunACPItemParams{RunID: string(run.ID), Seq: 7}
+	_, perr := callJSON(t, e, viewer.ID, protocol.MethodRunACPItem, params)
+	if perr == nil || perr.Code != protocol.CodeUnavailable || perr.Message != "earlier agent session history has expired" {
+		t.Fatalf("expired item = %+v", perr)
+	}
+	e.runs.mu.Lock()
+	calls := len(e.runs.calls)
+	e.runs.mu.Unlock()
+	if err := e.store.DeleteMember(context.Background(), viewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, perr = callJSON(t, e, viewer.ID, protocol.MethodRunACPItem, params)
+	if perr == nil || perr.Code != protocol.CodeDenied {
+		t.Fatalf("revoked expiry probe = %+v", perr)
+	}
+	e.runs.mu.Lock()
+	defer e.runs.mu.Unlock()
+	if len(e.runs.calls) != calls {
+		t.Fatal("revoked viewer reached retained ACP history")
+	}
+}
+
 func (f *fakeRuns) ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error) {
 	if err := f.record(fmt.Sprintf("acp.subscribe:%s:%d", run, afterSeq)); err != nil {
 		return scheduler.ACPStream{}, err
@@ -153,13 +179,13 @@ func (f *fakeRuns) ACPSetOption(_ context.Context, run domain.RunID, optionID st
 	return f.record(fmt.Sprintf("acp.set_option:%s:%s:%v", run, optionID, value))
 }
 
-func (f *fakeRuns) ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error) {
+func (f *fakeRuns) ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error) {
 	if err := f.record(fmt.Sprintf("acp.history:%s:%d:%d", run, beforeSeq, limit)); err != nil {
-		return nil, err
+		return acphost.HistoryPage{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.acpStream.Replay, nil
+	return acphost.HistoryPage{Items: f.acpStream.Replay, OldestSeq: f.acpStream.OldestSeq, TruncatedBefore: f.acpStream.TruncatedBefore}, nil
 }
 
 func (f *fakeRuns) ACPItem(run domain.RunID, seq int64) (acphost.Item, error) {

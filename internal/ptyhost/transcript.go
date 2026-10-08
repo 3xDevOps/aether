@@ -78,7 +78,6 @@ type castHeader struct {
 // decodeCastString reproduces the live byte stream exactly.
 type castWriter struct {
 	mu           sync.Mutex
-	lifetimeMu   sync.RWMutex
 	f            *os.File
 	bw           *bufio.Writer
 	start        time.Time
@@ -91,7 +90,9 @@ type castWriter struct {
 	stop         chan struct{}
 	// path is kept so a marker can still be appended after close, for a
 	// delivery that raced the session's end.
-	path string
+	path      string
+	history   []castSegment
+	retention castRetention
 }
 
 func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
@@ -102,6 +103,10 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 		lifecycle.release()
 	}()
 	if err := renameAsideTranscript(path); err != nil {
+		return nil, err
+	}
+	retention, err := readCastRetention(path)
+	if err != nil {
 		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -116,6 +121,7 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 		incarnation: start.UnixNano(),
 		stop:        make(chan struct{}),
 		path:        path,
+		retention:   retention,
 	}
 	hdr, err := json.Marshal(castHeader{
 		Version:     2,
@@ -165,7 +171,8 @@ func renameAsideTranscript(path string) error {
 	if err := os.Rename(path, aside); err != nil {
 		return fmt.Errorf("ptyhost: preserve prior transcript: %w", err)
 	}
-	return nil
+	now := time.Now()
+	return os.Chtimes(aside, now, now)
 }
 
 // readCastTail decodes output events from the bounded tail of an asciinema
@@ -248,7 +255,7 @@ func readRecentCast(path string, maxBytes int) ([]byte, error) {
 	if maxBytes <= 0 {
 		return nil, nil
 	}
-	paths, err := priorCastPaths(path)
+	paths, err := retainedPriorCastPaths(path, maxLegacyCastHeaderInspections)
 	if err != nil {
 		return nil, err
 	}
@@ -312,8 +319,6 @@ func (w *castWriter) flushLoop() {
 
 // flush makes complete output events visible to read-only history requests.
 func (w *castWriter) flush() error {
-	w.lifetimeMu.RLock()
-	defer w.lifetimeMu.RUnlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
@@ -471,7 +476,27 @@ func priorCastSegments(path string) ([]castSegment, error) {
 // readable current cast for a dotted run. Unreadable candidates remain visible
 // so repair reports corruption instead of silently dropping recorded history.
 func priorCastPaths(path string) ([]string, error) {
-	return discoverPriorCastPaths(context.Background(), path, maxLegacyCastHeaderInspections)
+	return retainedPriorCastPaths(path, 0)
+}
+
+// Full reconstruction streams all archives; recent reads keep the original
+// legacy-header discovery budget rather than inheriting that maintenance scan.
+func retainedPriorCastPaths(path string, maxLegacy int) ([]string, error) {
+	paths, err := discoverPriorCastPaths(context.Background(), path, maxLegacy)
+	if err != nil {
+		return nil, err
+	}
+	retention, err := readCastRetention(path)
+	if err != nil {
+		return nil, err
+	}
+	kept := paths[:0]
+	for _, candidate := range paths {
+		if !retention.expired(path, filepath.Base(candidate)) {
+			kept = append(kept, candidate)
+		}
+	}
+	return kept, nil
 }
 
 // removablePriorCastPaths performs the same identity-safe discovery without
@@ -607,20 +632,16 @@ func openFullCastReplay(path string) (io.ReadCloser, int, error) {
 	if replay, total, ok := openCheckpointCastReplay(path); ok {
 		return replay, total, nil
 	}
-	segments, err := priorCastSegments(path)
+	segments, err := collectFullCastSegments(path)
 	if err != nil {
 		return nil, 0, err
 	}
-	current, err := inspectCastSegment(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	segments = append(segments, current)
 	total := 0
 	for _, segment := range segments {
 		total += segment.outputBytes
 	}
-	return openCastReplay(segments, nil), total, nil
+	replay, err := openCastReplay(segments, nil)
+	return replay, total, err
 }
 
 func openCheckpointCastReplay(path string) (io.ReadCloser, int, bool) {
@@ -632,7 +653,12 @@ func openCheckpointCastReplay(path string) (io.ReadCloser, int, bool) {
 	if err != nil || checkpoint.CastOutputBytes > uint64(^uint(0)>>1) {
 		return nil, 0, false
 	}
-	return openCastReplay(segments, nil), int(checkpoint.CastOutputBytes), true
+	total := 0
+	for _, segment := range segments {
+		total += segment.outputBytes
+	}
+	replay, err := openCastReplay(segments, nil)
+	return replay, total, err == nil
 }
 
 func newestCastHeader(path string) (castHeader, error) {
@@ -733,7 +759,7 @@ func readCastHeader(f *os.File) (castHeader, error) {
 // snapshot flushes the complete output events already accepted by the session
 // and opens an immutable replay through that boundary. The caller holds the
 // session lock, so output arriving after the boundary is queued as live data.
-func (w *castWriter) snapshot(prior []castSegment) (io.ReadCloser, int, error) {
+func (w *castWriter) snapshot() (io.ReadCloser, int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
@@ -749,7 +775,7 @@ func (w *castWriter) snapshot(prior []castSegment) (io.ReadCloser, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("ptyhost: inspect transcript replay: %w", err)
 	}
-	segments := append([]castSegment(nil), prior...)
+	segments := append([]castSegment(nil), w.history...)
 	segments = append(segments, castSegment{
 		path:        w.path,
 		fileBytes:   info.Size(),
@@ -759,55 +785,54 @@ func (w *castWriter) snapshot(prior []castSegment) (io.ReadCloser, int, error) {
 	for _, segment := range segments {
 		total += segment.outputBytes
 	}
-	return openCastReplay(segments, w.pending), total, nil
+	replay, err := openCastReplay(segments, w.pending)
+	return replay, total, err
 }
 
-// castReplay holds at most the segment currently being read open. Retained
-// runs may span many server restarts, so opening every cast up front would let
-// one attach consume an unbounded number of file descriptors.
+// castReplay pins its immutable boundary with opened descriptors. Retention and
+// removal can unlink these files without blocking live output or a slow reader.
 type castReplay struct {
-	segments []castSegment
-	index    int
-	current  *replayReader
-	tail     *bytes.Reader
+	readers []*replayReader
+	index   int
+	tail    *bytes.Reader
 }
 
-func openCastReplay(segments []castSegment, tail []byte) *castReplay {
-	return &castReplay{
-		segments: append([]castSegment(nil), segments...),
-		tail:     bytes.NewReader(append([]byte(nil), tail...)),
-	}
-}
-func (r *castReplay) Read(p []byte) (int, error) {
-	for r.index < len(r.segments) {
-		if r.current == nil {
-			segment := r.segments[r.index]
-			f, err := os.Open(segment.path)
-			if err != nil {
-				return 0, fmt.Errorf("ptyhost: open transcript: %w", err)
-			}
-			r.current = newReplayReader(f, segment.fileBytes)
+func openCastReplay(segments []castSegment, tail []byte) (*castReplay, error) {
+	r := &castReplay{tail: bytes.NewReader(append([]byte(nil), tail...))}
+	for _, segment := range segments {
+		f, err := os.Open(segment.path)
+		if err != nil {
+			_ = r.Close()
+			return nil, fmt.Errorf("ptyhost: open transcript: %w", err)
 		}
-		n, err := r.current.Read(p)
+		r.readers = append(r.readers, newReplayReader(f, segment.fileBytes))
+	}
+	return r, nil
+}
+
+func (r *castReplay) Read(p []byte) (int, error) {
+	for r.index < len(r.readers) {
+		current := r.readers[r.index]
+		n, err := current.Read(p)
 		if n > 0 {
 			return n, nil
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return 0, err
 		}
-		_ = r.current.Close()
-		r.current = nil
+		_ = current.Close()
 		r.index++
 	}
 	return r.tail.Read(p)
 }
+
 func (r *castReplay) Close() error {
-	if r.current == nil {
-		return nil
+	var err error
+	for r.index < len(r.readers) {
+		err = errors.Join(err, r.readers[r.index].Close())
+		r.index++
 	}
-	err := r.current.Close()
-	r.current = nil
-	r.index = len(r.segments)
+	r.tail = bytes.NewReader(nil)
 	return err
 }
 
@@ -824,8 +849,12 @@ func castLine(start time.Time, code string, data []byte) []byte {
 	return line
 }
 func (w *castWriter) close() error {
-	w.lifetimeMu.Lock()
-	defer w.lifetimeMu.Unlock()
+	lifecycle := acquireTranscriptLifecycle(w.path)
+	lifecycle.entry.mu.Lock()
+	defer func() {
+		lifecycle.entry.mu.Unlock()
+		lifecycle.release()
+	}()
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()

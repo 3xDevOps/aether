@@ -32,6 +32,24 @@ func startScheduler(t *testing.T, sched *Scheduler) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
+func TestStartupAndMaintenancePruneStoppedTranscripts(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.CheckoutTTL = -time.Second })
+	startScheduler(t, e.sched)
+	waitFor(t, "startup transcript maintenance", func() bool {
+		e.pty.mu.Lock()
+		defer e.pty.mu.Unlock()
+		return e.pty.pruneCalls == 1
+	})
+	// Exercise the same maintenance hook used by the hourly tick without
+	// introducing a second timer or waiting an hour in the regression.
+	e.sched.pruneTranscripts(t.Context())
+	e.pty.mu.Lock()
+	defer e.pty.mu.Unlock()
+	if e.pty.pruneCalls != 2 {
+		t.Fatalf("transcript maintenance calls = %d", e.pty.pruneCalls)
+	}
+}
+
 // failingActiveRunsStore fails the first recovery listing, standing in for a
 // backend failure that is not a cancellation.
 type failingActiveRunsStore struct {

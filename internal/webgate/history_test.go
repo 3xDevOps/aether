@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -173,6 +174,41 @@ func TestHistoryStreamsOnlyAcknowledgedReplay(t *testing.T) {
 	case <-term.closed:
 	default:
 		t.Fatal("history stream did not close at replay boundary")
+	}
+}
+
+func TestHistoryReportsExpiredPrefixWithoutChangingExport(t *testing.T) {
+	for _, truncated := range []bool{false, true} {
+		t.Run(strconv.FormatBool(truncated), func(t *testing.T) {
+			const retained = "\x1b[31mretained\r\n世界\x00"
+			var wire bytes.Buffer
+			if _, err := protocol.WriteTerminalOutput(&wire, []byte(retained)); err != nil {
+				t.Fatal(err)
+			}
+			term := newHistoryTerminal(bytes.NewReader(wire.Bytes()))
+			backend := &historyBackend{
+				attachTerm: term,
+				attachAck: protocol.AttachResponse{
+					OK: true, Framed: true, Replay: len(retained), TruncatedBefore: truncated,
+				},
+			}
+			g, err := New(Config{Authorize: admitAll(backend)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = g.Close() }()
+			rec := httptest.NewRecorder()
+			g.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/runs/run-1/terminal-history", nil))
+			if rec.Code != http.StatusOK || rec.Body.String() != retained {
+				t.Fatalf("export status=%d, bytes=%q", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("X-Aether-Truncated-Before"); got != strconv.FormatBool(truncated) {
+				t.Fatalf("expired-prefix metadata = %q, want %t", got, truncated)
+			}
+			if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(retained)) {
+				t.Fatalf("export length = %q", got)
+			}
+		})
 	}
 }
 

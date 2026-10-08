@@ -18,6 +18,8 @@ export interface DiffSnapshot {
    * interval such a snapshot ended cannot be shown.
    */
   parentTree?: string
+  historyGap?: boolean
+  snapshotError?: string
 }
 
 /**

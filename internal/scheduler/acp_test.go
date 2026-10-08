@@ -232,8 +232,8 @@ func waitItems(t *testing.T, s *Scheduler, run domain.RunID, what string, cond f
 	t.Helper()
 	var items []acphost.Item
 	waitFor(t, what, func() bool {
-		var err error
-		items, err = s.ACPHistory(run, 0, 0)
+		page, err := s.ACPHistory(run, 0, 0)
+		items = page.Items
 		return err == nil && cond(items)
 	})
 	return items
@@ -612,6 +612,61 @@ func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
 	}
 	if len(gap.Replay) != 10 || gap.Replay[0].Seq != last-9 || gap.OldestSeq != 0 {
 		t.Fatalf("viewer inside the window: %d items from %d, oldest %d", len(gap.Replay), gap.Replay[0].Seq, gap.OldestSeq)
+	}
+}
+
+func TestACPHistoryExpiryAndLatestSubscribe(t *testing.T) {
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if err := e.sched.acp.stopAdapter(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	log, err := acphost.OpenLog(e.pty.ItemLogPath(run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = log.Close() }()
+	payload := strings.Repeat("x", 64<<10)
+	for range acphost.MaxRunBytes/len(payload) + 16 {
+		if appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: payload}}); appendErr != nil {
+			t.Fatal(appendErr)
+		}
+	}
+	last := log.LastSeq()
+	page, err := e.sched.ACPHistory(run.ID, 0, 2)
+	if err != nil || !page.TruncatedBefore || page.OldestSeq <= 1 || len(page.Items) != 2 || page.Items[1].Seq != last {
+		t.Fatalf("latest history: %+v, %v", page, err)
+	}
+	expired, err := e.sched.ACPHistory(run.ID, page.OldestSeq, 2)
+	if err != nil || !expired.TruncatedBefore || expired.OldestSeq != page.OldestSeq || len(expired.Items) != 0 {
+		t.Fatalf("expired history: %+v, %v", expired, err)
+	}
+	if _, itemErr := e.sched.ACPItem(run.ID, 1); !errors.Is(itemErr, acphost.ErrHistoryExpired) {
+		t.Fatalf("expired full item: %v", itemErr)
+	}
+	if _, itemErr := e.sched.ACPItem(run.ID, last+1); !errors.Is(itemErr, ErrACPItemNotFound) {
+		t.Fatalf("missing full item: %v", itemErr)
+	}
+	item, err := e.sched.ACPItem(run.ID, last)
+	if err != nil || item.Seq != last || item.Notice.Title != payload {
+		t.Fatalf("latest full item: seq=%d err=%v", item.Seq, err)
+	}
+	stale, err := e.sched.ACPSubscribe(run.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stale.Cancel()
+	if !stale.Reset || !stale.TruncatedBefore || stale.Seq != last || len(stale.Replay) != acphost.ReplayWindow || stale.OldestSeq != stale.Replay[0].Seq {
+		t.Fatalf("stale subscribe: reset=%v truncated=%v seq=%d oldest=%d items=%d", stale.Reset, stale.TruncatedBefore, stale.Seq, stale.OldestSeq, len(stale.Replay))
+	}
+	fresh, err := e.sched.ACPSubscribe(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Cancel()
+	if fresh.Reset || !fresh.TruncatedBefore || fresh.OldestSeq != stale.OldestSeq {
+		t.Fatalf("fresh subscribe: reset=%v truncated=%v oldest=%d", fresh.Reset, fresh.TruncatedBefore, fresh.OldestSeq)
 	}
 }
 

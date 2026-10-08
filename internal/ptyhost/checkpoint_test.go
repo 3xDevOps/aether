@@ -368,15 +368,15 @@ func TestReplayUsesV2CheckpointByteMetadata(t *testing.T) {
 	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 		t.Fatal(err)
 	}
-	replay, size, err := h.Replay(run)
+	window, err := h.Replay(run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = replay.Close() }()
-	if size != len(output) {
-		t.Fatalf("Replay size = %d, want %d", size, len(output))
+	defer func() { _ = window.Reader.Close() }()
+	if window.Bytes != len(output) {
+		t.Fatalf("Replay size = %d, want %d", window.Bytes, len(output))
 	}
-	data, err := io.ReadAll(replay)
+	data, err := io.ReadAll(window.Reader)
 	if err != nil || string(data) != string(output) {
 		t.Fatalf("Replay data = %q, err %v", data, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -96,11 +97,11 @@ type GitEvidencePruner interface {
 	PruneEvidence(context.Context, domain.WorkspaceID) error
 }
 
-// TranscriptExporter opens a finite export of a run's PTY transcript.
-// The production adapter exposes Host.Replay without its attach-only byte
-// count; evidence owns the bounded artifact copy below.
+// TranscriptExporter opens a finite export of a run's retained PTY transcript.
+// The boolean reports an expired prefix, atomically with opening the reader.
+// Evidence independently bounds the artifact copy below.
 type TranscriptExporter interface {
-	Replay(domain.RunID) (io.ReadCloser, error)
+	Replay(domain.RunID) (io.ReadCloser, bool, error)
 }
 
 // ArtifactSource opens an immutable, run-scoped development capture. It is an
@@ -766,18 +767,25 @@ func (s *Service) retainTranscript(ctx context.Context, run domain.RunID, key st
 	if err != nil {
 		return store.EvidenceSourceFact{}, nil, false, err
 	}
-	// A retry after restart reuses only a transcript with an explicit,
-	// atomically-written complete/truncated marker. Size alone cannot tell
-	// whether an exact 16 MiB source ended cleanly at the boundary.
+	// Retry only a durably marked artifact whose length matches its capture.
+	// Legacy markers are migrated before reuse; a damaged artifact must never
+	// be replaced with a different live-history window under the same key.
 	if info, statErr := s.fs.Stat(path); statErr == nil && info.Mode().IsRegular() {
-		truncated, known := s.readTruncationMarker(markerPath)
-		if known {
-			fact := store.EvidenceSourceFact{Name: "transcript", Available: true, Truncated: truncated}
-			if truncated {
-				fact.Reason = "transcript capped at 16 MiB"
-			}
-			return fact, nil, false, nil
+		marker, known := s.readTruncationMarker(markerPath, info.Size())
+		if !known {
+			return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: invalid retained transcript marker or length")
 		}
+		if marker.legacy {
+			if markerErr := s.writeTruncationMarker(markerPath, marker); markerErr != nil {
+				return store.EvidenceSourceFact{}, nil, false, markerErr
+			}
+			if syncErr := s.fs.SyncDir(s.root); syncErr != nil {
+				return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: sync transcript marker migration")
+			}
+		}
+		return marker.fact(), nil, false, nil
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: stat retained transcript")
 	}
 	if s.transcript == nil {
 		return store.EvidenceSourceFact{Name: "transcript", Available: false, Reason: "transcript exporter unavailable"}, []string{"transcript unavailable: exporter unavailable"}, false, nil
@@ -786,7 +794,7 @@ func (s *Service) retainTranscript(ctx context.Context, run domain.RunID, key st
 		reason := safeReason(ctxErr)
 		return store.EvidenceSourceFact{Name: "transcript", Available: false, Reason: reason}, []string{"transcript unavailable: " + reason}, false, nil
 	}
-	reader, err := s.transcript.Replay(run)
+	reader, prefixExpired, err := s.transcript.Replay(run)
 	if err != nil || reader == nil {
 		reason := "transcript unavailable"
 		if err != nil {
@@ -815,31 +823,32 @@ func (s *Service) retainTranscript(ctx context.Context, run domain.RunID, key st
 		_ = tmp.Close()
 		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: write transcript")
 	}
-	if err := tmp.Sync(); err != nil {
+	if syncErr := tmp.Sync(); syncErr != nil {
 		_ = tmp.Close()
 		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: sync transcript")
 	}
-	if err := tmp.Close(); err != nil {
+	if closeErr := tmp.Close(); closeErr != nil {
 		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: close transcript")
 	}
 	if sourceErr != nil {
 		return store.EvidenceSourceFact{Name: "transcript", Available: false, Reason: "transcript read unavailable"}, []string{"transcript unavailable: read error"}, false, nil
 	}
-	if err := s.writeTruncationMarker(markerPath, truncated); err != nil {
-		return store.EvidenceSourceFact{}, nil, false, err
+	info, err := s.fs.Stat(tmpName)
+	if err != nil {
+		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: stat staged transcript")
 	}
-	if err := s.fs.Rename(tmpName, path); err != nil {
+	marker := transcriptMarker{Version: 1, Bytes: info.Size(), PrefixExpired: prefixExpired, CopyCapped: truncated}
+	if markerErr := s.writeTruncationMarker(markerPath, marker); markerErr != nil {
+		return store.EvidenceSourceFact{}, nil, false, markerErr
+	}
+	if renameErr := s.fs.Rename(tmpName, path); renameErr != nil {
 		return store.EvidenceSourceFact{}, nil, false, errors.New("evidence: retain transcript")
 	}
 	removeTemp = false
-	if err := s.fs.SyncDir(s.root); err != nil {
-		return store.EvidenceSourceFact{}, nil, true, fmt.Errorf("evidence: sync transcript directory: %w", err)
+	if syncErr := s.fs.SyncDir(s.root); syncErr != nil {
+		return store.EvidenceSourceFact{}, nil, true, fmt.Errorf("evidence: sync transcript directory: %w", syncErr)
 	}
-	fact := store.EvidenceSourceFact{Name: "transcript", Available: true, Truncated: truncated}
-	if truncated {
-		fact.Reason = "transcript capped at 16 MiB"
-	}
-	return fact, nil, true, nil
+	return marker.fact(), nil, true, nil
 }
 
 func (s *Service) truncationMarkerPath(key string) (string, error) {
@@ -850,27 +859,56 @@ func (s *Service) truncationMarkerPath(key string) (string, error) {
 	return path + ".meta", nil
 }
 
-func (s *Service) readTruncationMarker(path string) (bool, bool) {
-	f, err := s.fs.Open(path)
-	if err != nil {
-		return false, false
-	}
-	defer func() { _ = f.Close() }()
-	b, err := io.ReadAll(io.LimitReader(f, 32))
-	if err != nil {
-		return false, false
-	}
-	switch strings.TrimSpace(string(b)) {
-	case "complete":
-		return false, true
-	case "truncated":
-		return true, true
-	default:
-		return false, false
-	}
+// transcriptMarker is private durable capture metadata, not live history state.
+// Bytes detects later partial artifacts even when only an expired prefix caused
+// truncation. CopyCapped retains the legacy exact-cap integrity requirement.
+type transcriptMarker struct {
+	Version       int   `json:"version"`
+	Bytes         int64 `json:"bytes"`
+	PrefixExpired bool  `json:"prefix_expired,omitempty"`
+	CopyCapped    bool  `json:"copy_capped,omitempty"`
+	legacy        bool
 }
 
-func (s *Service) writeTruncationMarker(path string, truncated bool) error {
+func (m transcriptMarker) fact() store.EvidenceSourceFact {
+	fact := store.EvidenceSourceFact{Name: "transcript", Available: true, Truncated: m.PrefixExpired || m.CopyCapped}
+	if m.PrefixExpired {
+		fact.Reason = "earlier transcript history expired"
+	}
+	if m.CopyCapped {
+		if fact.Reason != "" {
+			fact.Reason += "; "
+		}
+		fact.Reason += "transcript capped at 16 MiB"
+	}
+	return fact
+}
+
+func (s *Service) readTruncationMarker(path string, size int64) (transcriptMarker, bool) {
+	f, err := s.fs.Open(path)
+	if err != nil {
+		return transcriptMarker{}, false
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, 1025))
+	if err != nil || len(b) > 1024 {
+		return transcriptMarker{}, false
+	}
+	var marker transcriptMarker
+	switch strings.TrimSpace(string(b)) {
+	case "complete", "truncated":
+		marker = transcriptMarker{Version: 1, Bytes: size, CopyCapped: strings.TrimSpace(string(b)) == "truncated", legacy: true}
+	default:
+		if err := json.Unmarshal(b, &marker); err != nil {
+			return transcriptMarker{}, false
+		}
+	}
+	valid := marker.Version == 1 && marker.Bytes == size && size >= 0 && size <= MaxTranscriptBytes &&
+		(!marker.CopyCapped || size == MaxTranscriptBytes)
+	return marker, valid
+}
+
+func (s *Service) writeTruncationMarker(path string, marker transcriptMarker) error {
 	tmp, err := s.fs.CreateTemp(s.root, ".transcript-meta-*")
 	if err != nil {
 		return errors.New("evidence: stage transcript marker")
@@ -886,11 +924,12 @@ func (s *Service) writeTruncationMarker(path string, truncated bool) error {
 			_ = s.fs.Remove(tmpName)
 		}
 	}()
-	state := "complete\n"
-	if truncated {
-		state = "truncated\n"
+	state, err := json.Marshal(marker)
+	if err != nil {
+		_ = tmp.Close()
+		return errors.New("evidence: encode transcript marker")
 	}
-	if _, err := io.WriteString(tmp, state); err != nil {
+	if _, err := tmp.Write(state); err != nil {
 		_ = tmp.Close()
 		return errors.New("evidence: write transcript marker")
 	}

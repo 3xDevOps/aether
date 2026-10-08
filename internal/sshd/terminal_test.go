@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -73,9 +74,10 @@ func TestTerminalHistoryIsUniversalReadAndMapsResult(t *testing.T) {
 	history := &historyTestPTY{
 		fakePTY: e.pty,
 		page: ptyhost.HistoryPage{
-			Lines:      []ptyhost.HistoryLine{{Cursor: lineCursor, Time: 1234, Text: "visible"}},
-			NextCursor: nextCursor,
-			HasMore:    true,
+			Lines:           []ptyhost.HistoryLine{{Cursor: lineCursor, Time: 1234, Text: "visible"}},
+			NextCursor:      nextCursor,
+			HasMore:         true,
+			TruncatedBefore: true,
 		},
 	}
 	e.srv.cfg.PTY = history
@@ -92,7 +94,7 @@ func TestTerminalHistoryIsUniversalReadAndMapsResult(t *testing.T) {
 		t.Fatalf("history call = run %q before %q query %q limit %d", history.run, history.before, history.query, history.limit)
 	}
 	if len(got.Lines) != 1 || got.Lines[0].Text != "visible" || got.Lines[0].Cursor != lineCursor ||
-		got.NextCursor != nextCursor || !got.HasMore {
+		got.NextCursor != nextCursor || !got.HasMore || !got.TruncatedBefore {
 		t.Fatalf("terminal.history = %+v", got)
 	}
 }
@@ -129,6 +131,28 @@ func TestTerminalHistoryRevalidatesOpenControlChannelMembershipBeforePTY(t *test
 	}
 	if history.calls != 1 {
 		t.Fatalf("revoked member reached PTY history: calls = %d, want 1", history.calls)
+	}
+}
+
+func TestExpiredTerminalCursorDoesNotBypassPermissionOrRestart(t *testing.T) {
+	e := newTestEnv(t, nil)
+	signer, member := addMember(t, e, "Expired history viewer", domain.RoleViewer, false)
+	history := &historyTestPTY{fakePTY: e.pty, err: ptyhost.ErrHistoryCursorExpired}
+	e.srv.cfg.PTY = history
+	c := controlAs(t, e, signer)
+	params := protocol.TerminalHistoryParams{RunID: string(e.run.ID), Before: historyTestCursor(8)}
+	var got protocol.TerminalHistoryResult
+	err := c.Call(protocol.MethodTerminalHistory, params, &got)
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable || history.calls != 1 || history.before != params.Before {
+		t.Fatalf("expired page = %+v, err=%v, calls=%d, before=%q", got, err, history.calls, history.before)
+	}
+	if deleteErr := e.store.DeleteMember(context.Background(), member.ID); deleteErr != nil {
+		t.Fatal(deleteErr)
+	}
+	err = c.Call(protocol.MethodTerminalHistory, params, &got)
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeDenied || history.calls != 1 {
+		t.Fatalf("revoked expiry probe = %v, backend calls=%d", err, history.calls)
 	}
 }
 
@@ -292,6 +316,7 @@ func TestTerminalHistoryMapsBackendErrorsWithoutDetails(t *testing.T) {
 		message string
 	}{
 		{name: "cursor", err: ptyhost.ErrInvalidHistoryCursor, code: protocol.CodeInvalidParams, message: "invalid terminal history cursor"},
+		{name: "expired cursor", err: fmt.Errorf("private /host/cast: %w", ptyhost.ErrHistoryCursorExpired), code: protocol.CodeUnavailable, message: "earlier terminal history has expired"},
 		{name: "query", err: ptyhost.ErrHistoryQueryTooLong, code: protocol.CodeInvalidParams, message: "terminal history query is too long"},
 		{name: "run", err: ptyhost.ErrInvalidRunID, code: protocol.CodeInvalidParams, message: "invalid run_id"},
 		{name: "missing", err: os.ErrNotExist, code: protocol.CodeNotFound, message: "terminal transcript not found"},

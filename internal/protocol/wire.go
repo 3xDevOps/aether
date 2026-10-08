@@ -542,6 +542,8 @@ type AttachResponse struct {
 	ServerOwnedResponder bool   `json:"server_owned_responder,omitempty"`
 	// Bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
+	// Earlier recorded output expired; replay bytes remain exact retained output.
+	TruncatedBefore bool `json:"truncated_before,omitempty"`
 	// Legacy; Position is authoritative.
 	Cursor   uint64 `json:"cursor,omitempty"`
 	ResumeID string `json:"resume_id,omitempty"`
