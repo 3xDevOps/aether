@@ -34,17 +34,51 @@ type RunPatchResult struct {
 	Truncated bool `json:"truncated"`
 }
 
-// ServerDiskResult is the reply to server.disk: the headroom on the
-// filesystem holding the server's data directory, plus the directories
-// that grow without bound.
+// ServerDiskResult keeps whole-filesystem headroom separate from Aether's
+// de-duplicated file sizes. SnapshotBytes is a subset of WorktreeBytes.
 type ServerDiskResult struct {
-	UsedBytes       uint64 `json:"used_bytes"`
-	TotalBytes      uint64 `json:"total_bytes"`
-	FreeBytes       uint64 `json:"free_bytes"`
-	WorktreeBytes   uint64 `json:"worktree_bytes"`
-	TranscriptBytes uint64 `json:"transcript_bytes"`
-	DatabaseBytes   uint64 `json:"database_bytes"`
-	RepoBytes       uint64 `json:"repo_bytes"`
+	UsedBytes       uint64            `json:"used_bytes"`
+	TotalBytes      uint64            `json:"total_bytes"`
+	FreeBytes       uint64            `json:"free_bytes"`
+	WorktreeBytes   uint64            `json:"worktree_bytes"`
+	TranscriptBytes uint64            `json:"transcript_bytes"`
+	DatabaseBytes   uint64            `json:"database_bytes"`
+	RepoBytes       uint64            `json:"repo_bytes"`
+	HomeBytes       uint64            `json:"home_bytes"`
+	EvidenceBytes   uint64            `json:"evidence_bytes"`
+	OtherBytes      uint64            `json:"other_bytes"`
+	SnapshotBytes   uint64            `json:"snapshot_bytes"`
+	Warnings        []string          `json:"warnings,omitempty"`
+	Docker          *ServerDockerDisk `json:"docker,omitempty"`
+	Entries         []ServerDiskEntry `json:"entries,omitempty"`
+	Truncated       bool              `json:"truncated,omitempty"`
+}
+
+// ServerDockerDisk is daemon-wide. Nil numbers are unknown, not zero.
+// Its filesystem totals must never be added to ServerDiskResult totals.
+type ServerDockerDisk struct {
+	UsedBytes        *uint64 `json:"used_bytes,omitempty"`
+	TotalBytes       *uint64 `json:"total_bytes,omitempty"`
+	FreeBytes        *uint64 `json:"free_bytes,omitempty"`
+	ImagesBytes      *uint64 `json:"images_bytes,omitempty"`
+	ContainersBytes  *uint64 `json:"containers_bytes,omitempty"`
+	VolumesBytes     *uint64 `json:"volumes_bytes,omitempty"`
+	BuildCacheBytes  *uint64 `json:"build_cache_bytes,omitempty"`
+	ReclaimableBytes *uint64 `json:"reclaimable_bytes,omitempty"`
+	SharedFilesystem *bool   `json:"shared_filesystem,omitempty"`
+	Error            string  `json:"error,omitempty"`
+}
+
+// ServerDiskEntry is admin-only attribution, overlapping component totals.
+type ServerDiskEntry struct {
+	Kind             string  `json:"kind"`
+	OwnerKind        string  `json:"owner_kind"`
+	OwnerID          string  `json:"owner_id,omitempty"`
+	Bytes            uint64  `json:"bytes"`
+	ReclaimableBytes *uint64 `json:"reclaimable_bytes,omitempty"`
+	RetainedUntil    string  `json:"retained_until,omitempty"`
+	Reason           string  `json:"reason"`
+	Error            string  `json:"error,omitempty"`
 }
 
 // GatewayCapabilities describes what one gateway deployment can do, so a

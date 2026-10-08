@@ -14,15 +14,14 @@ const DefaultCacheTTL = 30 * time.Second
 // every request.
 //
 // The two halves of a reading cost very different things. The filesystem
-// headroom is one statfs and is taken fresh every time, so the gauge never
-// lags the disk actually filling. The component sizes are a full walk of
-// the checkouts, transcripts and repos trees - a run checkout is a whole
-// clone - and are reused for TTL. A dashboard refreshing every couple of
-// seconds must not turn into a couple of tree walks per second.
+// headroom is one statfs and is taken fresh every time. Component walks and
+// optional read-only enrichment (Docker and durable ownership) are reused for
+// TTL so dashboard refreshes do not repeatedly scan persistent storage.
 type Cache struct {
 	dataDir string
 	ttl     time.Duration
 	now     func() time.Time
+	enrich  func(*Usage)
 
 	mu     sync.Mutex
 	at     time.Time
@@ -32,11 +31,11 @@ type Cache struct {
 
 // NewCache returns a Cache over dataDir. A non-positive ttl applies
 // DefaultCacheTTL.
-func NewCache(dataDir string, ttl time.Duration) *Cache {
+func NewCache(dataDir string, ttl time.Duration, enrich func(*Usage)) *Cache {
 	if ttl <= 0 {
 		ttl = DefaultCacheTTL
 	}
-	return &Cache{dataDir: dataDir, ttl: ttl, now: time.Now}
+	return &Cache{dataDir: dataDir, ttl: ttl, now: time.Now, enrich: enrich}
 }
 
 // Usage returns a reading with fresh filesystem headroom and component
@@ -58,6 +57,9 @@ func (c *Cache) sizesNow() Usage {
 	defer c.mu.Unlock()
 	if now := c.now(); !c.walked || now.Sub(c.at) >= c.ttl {
 		c.sizes = components(c.dataDir)
+		if c.enrich != nil {
+			c.enrich(&c.sizes)
+		}
 		c.at, c.walked = now, true
 	}
 	return c.sizes

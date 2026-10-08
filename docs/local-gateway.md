@@ -854,13 +854,14 @@ and render a diff the timeline never offered.
 
 ### `GET /api/v1/disk`
 
-Usage of the filesystem holding the server's data directory, for the status
-bar's disk gauge:
+Usage of the filesystem holding the server's data directory and storage
+attribution, shown in **Settings > Server**:
 
 ```json
 {"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
  "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800,
- "repo_bytes":8589934592}
+ "repo_bytes":8589934592,"home_bytes":1073741824,"evidence_bytes":20971520,
+ "other_bytes":1048576,"snapshot_bytes":104857600}
 ```
 
 `used_bytes` and `total_bytes` describe the whole filesystem - the gauge
@@ -869,31 +870,52 @@ footprint. `free_bytes` is what an unprivileged writer can still claim, which
 is the number the scheduler's free-space floor is checked against, and is
 smaller than `total - used` wherever the filesystem reserves blocks.
 
-The last four are the directories that grow without bound and are the only
-part an operator can act on: run checkouts (garbage-collected after their
-TTL), transcripts, the SQLite file the persisted event log shares with the
-store, and `repos/`, the bare repo behind each workspace. The event log has
-no file of its own to measure, so the database line covers both. The bare
-repos keep every push, every run branch and the reflogs `internal/gitengine`
-turns on, and nothing reclaims them. `repo_bytes` is absent on servers
-predating the component, and the dashboard drops the line rather than
-showing a zero.
+The categories describe Aether's footprint: worktrees, transcripts, the
+SQLite database (including persisted events), bare workspace repositories,
+member homes, evidence, and other data-directory contents.
+`snapshot_bytes` is a subset of `worktree_bytes`, never an additional total.
+The categories are not a promise that their bytes can be reclaimed.
 
-The components do not overlap. A run checkout is a `git clone --local` of
-its workspace repo, so its object files are hard links to bytes already in
-`repos/`: the walk indexes by device+inode and charges each one to the
-first tree that reaches it, walking `repos/` first. `repo_bytes` therefore
-holds the shared objects, and `worktree_bytes` is what reclaiming that
-checkout would actually free. A component that cannot be read contributes
-zero rather
-than failing the whole reading. Measurement lives in `internal/disk`, shared
-with the scheduler's floor so the gauge and the refusal can never disagree
-about the same disk.
+Directory accounting does not follow symlinks and de-duplicates hardlinks
+across categories. Shared Git objects are charged to repositories before
+checkouts, rather than counting a local clone's objects twice. Unreadable
+data produces `warnings`; affected measurements are partial, not evidence
+of an empty directory. Measurement lives in `internal/disk`, shared with
+the scheduler's filesystem floor.
+
+Optional `docker` accounting describes the whole daemon, including non-Aether
+workloads: `images_bytes`, `containers_bytes`, `volumes_bytes`,
+`build_cache_bytes` and `reclaimable_bytes`. Shared image layers count once;
+build-cache bytes exclude image-shared records, and bind-backed homes are not
+counted again as Docker volumes. Docker's unused classification does not mean
+Aether can safely delete a saved environment image.
+
+Optional `used_bytes`, `total_bytes`, `free_bytes` and `shared_filesystem`
+require a verified local daemon and classic storage layout. Containerd image
+stores can use another filesystem; their capacity remains unknown rather
+than borrowing the Docker data-root's figures. Filesystem used totals must
+not be added together. An omitted measurement is unknown, not zero.
+`docker.error` retains diagnostic causes with private paths and credentials
+redacted, without discarding available data-directory measurements. This
+endpoint never prunes Docker resources.
+
+Admins additionally receive an optional `entries` array, bounded to the
+largest 50 measured owners; `truncated` indicates clipping. Each entry has
+`kind`, `owner_kind` (`run`, `member`, `workspace` or `server`), optional
+`owner_id`, `bytes` and `reason`, with optional `reclaimable_bytes`,
+`retained_until` (ISO 8601) and `error`. Entries attribute the category
+totals; they must not be added to them. Retention reasons use live lifecycle
+ownership when present and durable state otherwise. Transcripts follow
+evidence-protected checkout cleanup; expiration alone never proves safe
+reclamation.
+Unknown reclaimability is omitted. Inventory does not expose private
+filenames or credentials; non-admin members receive aggregate accounting
+without owner details.
 
 `protocol.ServerInfoResult` is shared with the CLI and frozen, and the number
 is of no use to a terminal client, so it is read here instead of being added
-to `server.info`. Any member may read it, because it says how much room the
-deployment has left, not what anyone is running. `503` with `-32004` when the
+to `server.info`. Any member may read the aggregate deployment capacity.
+Owner details are admin-only. `503` with `-32004` when the
 server was not told where the data directory is, or the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
 zero anywhere else).

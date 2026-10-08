@@ -138,7 +138,7 @@ func (s *Service) captureUsage(ctx context.Context, run *domain.Run) (int, int64
 			if packet == nil || packet.RunID != run.ID || packet.WorkspaceID != run.WorkspaceID {
 				return 0, 0, errors.New("evidence: capture quota scope mismatch")
 			}
-			if err := add(packetCaptureKey(packet)); err != nil {
+			if err := add(StorageKey(packet)); err != nil {
 				return 0, 0, err
 			}
 		}
@@ -329,7 +329,7 @@ func (s *Service) OpenArtifact(ctx context.Context, workspace domain.WorkspaceID
 		if artifact.RunID != string(packet.RunID) {
 			return empty, nil, errors.New("evidence: retained capture scope mismatch")
 		}
-		dir, err := s.captureDirectory(packetCaptureKey(packet))
+		dir, err := s.captureDirectory(StorageKey(packet))
 		if err != nil {
 			return empty, nil, err
 		}

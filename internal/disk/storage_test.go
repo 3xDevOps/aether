@@ -1,0 +1,158 @@
+package disk
+
+import (
+	"encoding/json"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestMeasurePersistentBytesAndGlobalHardlinks(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, n int) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, make([]byte, n), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	shared := write("repos/workspace.git/object", 100)
+	for _, name := range []string{"checkouts/run/shared", "checkouts/run.diffsnap/shared", "homes/member/shared", "evidence/shared", "profiles/shared", "transcripts/shared", "aether.db-wal"} {
+		target := write(name, 0)
+		if err := os.Remove(target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(shared, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("homes/member/private", 20)
+	write("evidence/packet.transcript", 30)
+	write("profiles/profile", 40)
+	write("checkouts/run/work", 50)
+	write("checkouts/run.diffsnap/object", 60)
+	write("aether.db", 70)
+	u, err := Measure(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.RepoBytes != 100 || u.HomeBytes != 20 || u.EvidenceBytes != 30 || u.OtherBytes != 40 || u.WorktreeBytes != 110 || u.SnapshotBytes != 60 || u.DatabaseBytes != 70 || u.TranscriptBytes != 0 {
+		t.Fatalf("persistent/hardlink accounting: %+v", u)
+	}
+	var attributed uint64
+	for _, e := range u.Entries {
+		attributed += e.Bytes
+	}
+	if attributed != 370 || len(u.Warnings) != 0 {
+		t.Fatalf("attributed %d; warnings %v", attributed, u.Warnings)
+	}
+}
+
+func TestMeasureDoesNotFollowSymlinkEscapes(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "credential")
+	if err := os.WriteFile(secret, make([]byte, 1234), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "checkouts"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{"homes": outside, "aether.db": secret, "checkouts/escape": outside, "other-secret": secret} {
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u, err := Measure(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.HomeBytes+u.DatabaseBytes+u.WorktreeBytes+u.OtherBytes+u.RepoBytes+u.TranscriptBytes+u.EvidenceBytes != 0 {
+		t.Fatalf("symlink target bytes were inventoried: %+v", u)
+	}
+	if len(u.Entries) != 0 || len(u.Warnings) != 0 {
+		t.Fatalf("skipped symlinks were inventoried: %+v", u)
+	}
+	report, err := json.Marshal(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{outside, secret, "credential"} {
+		if strings.Contains(string(report), private) {
+			t.Fatalf("symlink target identifier leaked: %q", private)
+		}
+	}
+}
+
+func TestMeasureRootAliasDoesNotStealHomeOwnership(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "homes/member"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "homes/member/private"), []byte("home"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("homes", filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	u, err := Measure(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.HomeBytes != 4 || u.OtherBytes != 0 || len(u.Entries) != 1 || u.Entries[0].Kind != "home" || u.Entries[0].Key != "member" {
+		t.Fatalf("alias stole real ownership: %+v", u)
+	}
+}
+
+func TestMeasureAggregatesTranscriptSegments(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "transcripts"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run.cast", "run.items.jsonl", "run.~first.cast", "run.~second.cast"} {
+		if err := os.WriteFile(filepath.Join(dir, "transcripts", name), []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u, err := Measure(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.TranscriptBytes != 16 || len(u.Entries) != 1 || u.Entries[0].Kind != "transcript" || u.Entries[0].Key != "run" || u.Entries[0].Bytes != 16 {
+		t.Fatalf("transcript segments were not aggregated: %+v", u)
+	}
+}
+
+type unreadableStorage struct{ fs.FS }
+
+func (f unreadableStorage) Open(name string) (fs.File, error) {
+	if name == "homes/member" {
+		return nil, &fs.PathError{Op: "open", Path: "private-credential-path", Err: fs.ErrPermission}
+	}
+	return f.FS.Open(name)
+}
+
+func TestPartialMeasurementKeepsReadableBytesAndFailedOwner(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "homes/member"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aether.db"), []byte("database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := componentTree(unreadableStorage{FS: os.DirFS(dir)})
+	if u.DatabaseBytes != 8 || len(u.Warnings) != 1 || strings.Contains(u.Warnings[0], "private-credential-path") {
+		t.Fatalf("partial measurement: %+v", u)
+	}
+	for _, e := range u.Entries {
+		if e.Kind == "home" && e.Key == "member" && e.Error != "" && e.Bytes == 0 {
+			return
+		}
+	}
+	t.Fatal("failed owner omitted from partial inventory")
+}

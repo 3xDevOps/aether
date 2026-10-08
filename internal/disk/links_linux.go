@@ -16,14 +16,10 @@ type seen map[inodeKey]struct{}
 
 func newSeen() seen { return make(seen) }
 
-// claim reports whether info is being counted for the first time in this
-// measurement, recording it when it is. Files with a single link are
-// waved through without touching the map: nothing else can reach them, so
-// they cannot be double-counted, and the map then costs only the shared
-// objects rather than one entry per file in the data directory.
+// claim reports whether this device/inode has already been attributed.
 func (s seen) claim(info fs.FileInfo) bool {
 	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || st.Nlink < 2 {
+	if !ok {
 		return true
 	}
 	key := inodeKey{st.Dev, st.Ino}

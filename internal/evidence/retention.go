@@ -281,7 +281,7 @@ func (s *Service) CleanupExpired(ctx context.Context) (int, error) {
 }
 
 func (s *Service) expirePacket(ctx context.Context, p *store.EvidencePacket, expiry store.EvidenceExpiryStore, now time.Time) error {
-	key := packetCaptureKey(p)
+	key := StorageKey(p)
 	if err := s.removeStagedArtifacts(ctx, p.WorkspaceID, key); err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func (s *Service) purgePacket(ctx context.Context, p *store.EvidencePacket) erro
 	}
 	cleanupCtx, cancel := s.cleanupContext(ctx)
 	defer cancel()
-	key := packetCaptureKey(p)
+	key := StorageKey(p)
 	if err := s.removeCaptures(key); err != nil {
 		return err
 	}
@@ -413,7 +413,7 @@ func (s *Service) cleanupPacket(ctx context.Context, p *store.EvidencePacket) er
 	if p == nil {
 		return nil
 	}
-	key := packetCaptureKey(p)
+	key := StorageKey(p)
 	s.mu.Lock()
 	_, already := s.cleaned[key]
 	s.mu.Unlock()

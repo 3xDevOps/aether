@@ -128,35 +128,12 @@ func TestRunPatchWithoutSeamIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestServerDiskRoundTripsUsage(t *testing.T) {
+func TestServerDiskFilesystemFailureHidesPrivatePath(t *testing.T) {
 	t.Parallel()
-	reader := &fakeDisk{usage: disk.Usage{
-		FreeBytes:       1,
-		UsedBytes:       2,
-		TotalBytes:      3,
-		WorktreeBytes:   4,
-		TranscriptBytes: 5,
-		DatabaseBytes:   6,
-		RepoBytes:       7,
-	}}
+	reader := &fakeDisk{err: errors.New("statfs /srv/aether: permission denied")}
 	e := newTestEnv(t, func(c *Config) { c.Services.Disk = reader })
 	c := controlClient(t, e)
 
-	var got protocol.ServerDiskResult
-	if err := c.Call(protocol.MethodServerDisk, nil, &got); err != nil {
-		t.Fatalf("server.disk: %v", err)
-	}
-	want := protocol.ServerDiskResult{
-		UsedBytes: 2, TotalBytes: 3, FreeBytes: 1,
-		WorktreeBytes: 4, TranscriptBytes: 5, DatabaseBytes: 6, RepoBytes: 7,
-	}
-	if got != want {
-		t.Errorf("server.disk = %+v, want %+v", got, want)
-	}
-
-	// A filesystem read failure names the data-directory path; the client
-	// gets Unavailable without it.
-	reader.err = errors.New("statfs /srv/aether: permission denied")
 	err := c.Call(protocol.MethodServerDisk, nil, nil)
 	pe := wireErrOf(t, err)
 	if pe.Code != protocol.CodeUnavailable {

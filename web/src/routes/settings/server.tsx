@@ -8,14 +8,20 @@ import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
-/** An old server reports no repos figure; it is left out rather than shown as zero. */
 function diskParts(disk: DiskUsage): string[] {
   return [
     `Worktrees ${formatBytes(disk.worktree_bytes)}`,
     `Transcripts ${formatBytes(disk.transcript_bytes)}`,
     `Database ${formatBytes(disk.database_bytes)}`,
     ...(disk.repo_bytes === undefined ? [] : [`Repositories ${formatBytes(disk.repo_bytes)}`]),
+    `Homes ${knownBytes(disk.home_bytes)}`,
+    `Evidence ${knownBytes(disk.evidence_bytes)}`,
+    `Other ${knownBytes(disk.other_bytes)}`,
   ]
+}
+
+function knownBytes(bytes: number | undefined): string {
+  return bytes === undefined ? 'unknown' : formatBytes(bytes)
 }
 
 export function ServerSection() {
@@ -43,13 +49,20 @@ export function ServerSection() {
           </Button>
         )}
       />
-      {disk && disk.total_bytes > 0 && (
+      {!disk && (
+        <SettingRow label="Disk" help="Storage accounting unavailable.">
+          {info.diskError && <p className="whitespace-pre-wrap break-words text-ui-sm text-muted">{info.diskError}</p>}
+        </SettingRow>
+      )}
+      {disk && (
         <SettingRow label="Disk">
           <div role="group" aria-label="Disk usage" className="flex min-w-0 flex-col gap-1.5">
             <p className="text-ui-sm text-muted">
-              {formatBytes(disk.used_bytes)} of {formatBytes(disk.total_bytes)} used on the filesystem holding the data directory, {formatBytes(disk.free_bytes)} free.
+              {disk.total_bytes > 0
+                ? `${formatBytes(disk.used_bytes)} of ${formatBytes(disk.total_bytes)} used on the filesystem holding the data directory, ${formatBytes(disk.free_bytes)} free for an unprivileged writer.`
+                : 'Data filesystem usage unavailable.'}
             </p>
-            <span
+            {disk.total_bytes > 0 && <span
               role="meter"
               aria-label="Disk used"
               aria-valuemin={0}
@@ -58,13 +71,83 @@ export function ServerSection() {
               className="block h-1.5 overflow-hidden rounded-full bg-chrome"
             >
               <span className="block h-full bg-icon-faint" style={{ width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%` }} />
-            </span>
+            </span>}
             <p className="text-ui-sm text-muted">Aether holds {diskParts(disk).join(' · ')}</p>
+            <p className="text-ui-sm text-muted">
+              Snapshots {knownBytes(disk.snapshot_bytes)} (included in worktrees). These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space.
+            </p>
+            {disk.warnings && disk.warnings.length > 0 && (
+              <div className="text-ui-sm text-muted">
+                <p>Partial measurement; affected categories may be incomplete.</p>
+                <ul className="list-inside list-disc">
+                  {disk.warnings.map((warning, index) => <li key={index} className="whitespace-pre-wrap break-words">{warning}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         </SettingRow>
       )}
+      {disk && (
+        <SettingRow label="Docker storage (daemon-wide)">
+          <div className="flex min-w-0 flex-col gap-1.5 text-ui-sm text-muted">
+            {disk.docker ? (
+              <>
+                <p>Images {knownBytes(disk.docker.images_bytes)} · Containers {knownBytes(disk.docker.containers_bytes)} · Volumes {knownBytes(disk.docker.volumes_bytes)} · Build cache {knownBytes(disk.docker.build_cache_bytes)}</p>
+                <p>These figures cover the entire Docker daemon, including workloads outside Aether. Bind-backed homes are counted under Aether homes, not again as Docker volumes.</p>
+                <p>Docker reports {knownBytes(disk.docker.reclaimable_bytes)} as reclaimable using its own unused classification. This is not Aether authorization to delete saved images; an unused image may still be needed by Aether.</p>
+                <p>Docker filesystem: {knownBytes(disk.docker.used_bytes)} used · {knownBytes(disk.docker.total_bytes)} total · {knownBytes(disk.docker.free_bytes)} free.</p>
+                <p>
+                  {disk.docker.shared_filesystem === undefined
+                    ? 'Whether Docker shares the data filesystem is unknown.'
+                    : disk.docker.shared_filesystem
+                      ? 'Docker shares the data filesystem.'
+                      : 'Docker uses a separate filesystem.'}
+                  {' '}Filesystem figures are not added together.
+                </p>
+                {disk.docker.error && <p className="whitespace-pre-wrap break-words">{disk.docker.error}</p>}
+              </>
+            ) : <p>Docker accounting unavailable.</p>}
+          </div>
+        </SettingRow>
+      )}
+      {disk?.entries && <StorageOwners disk={disk} />}
       {admin && <RetainedContainersRow />}
     </SettingsSection>
+  )
+}
+
+function StorageOwners({ disk }: { disk: DiskUsage }) {
+  const runs = useStore((s) => s.runs)
+  const members = useStore((s) => s.members)
+  const workspaces = useStore((s) => s.workspaces)
+  return (
+    <SettingRow label="Largest storage owners" help="Attribution overlaps the categories above; these bytes are not additional totals.">
+      <details className="min-w-0 text-ui-sm text-muted">
+        <summary className="cursor-pointer py-2">
+          {disk.entries?.length ?? 0} owners shown{disk.truncated ? ' · Truncated to the largest 50 entries' : ''}
+        </summary>
+        <ul className="flex min-w-0 flex-col gap-3">
+          {disk.entries?.map((entry, index) => {
+            const id = entry.owner_id
+            const name = id && (entry.owner_kind === 'workspace'
+              ? workspaces[id]?.name
+              : entry.owner_kind === 'member'
+                ? members[id]?.display_name
+                : entry.owner_kind === 'run'
+                  ? runs[id]?.title
+                  : undefined)
+            return (
+              <li key={index} className="min-w-0 break-words">
+                <p className="font-medium text-text">{entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind} · {formatBytes(entry.bytes)}</p>
+                <p>{entry.reason}</p>
+                <p>Reclaimable: {knownBytes(entry.reclaimable_bytes)}{entry.retained_until ? ` · Retained until ${new Date(entry.retained_until).toLocaleString()}` : ''}</p>
+                {entry.error && <p className="whitespace-pre-wrap">{entry.error}</p>}
+              </li>
+            )
+          })}
+        </ul>
+      </details>
+    </SettingRow>
   )
 }
 
@@ -82,7 +165,7 @@ function RetainedContainersRow() {
     <SettingRow
       label="Retained containers"
       help={count > 0
-        ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Freeing them reclaims disk; those runs cannot be reopened.`
+        ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Removing containers prevents reopening those runs; it does not delete all run data, homes, repositories or history.`
         : `No finished run keeps a container${where}.`}
       control={(
         <Button size="sm" variant="secondary" disabled={count === 0} onClick={() => openDialog('release-finished')}>

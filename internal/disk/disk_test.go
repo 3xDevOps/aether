@@ -97,9 +97,7 @@ func TestMeasureCountsAHardlinkedObjectOnce(t *testing.T) {
 	}
 }
 
-// A data directory the server has not populated yet must still produce a
-// gauge: a component that cannot be read contributes zero rather than
-// failing the whole reading.
+// An empty data directory has no component failures.
 func TestMeasureToleratesMissingDirectories(t *testing.T) {
 	got, err := Measure(t.TempDir())
 	if err != nil {
@@ -118,7 +116,7 @@ func TestMeasureToleratesMissingDirectories(t *testing.T) {
 func TestCacheReusesTheWalkUntilTheTTLExpires(t *testing.T) {
 	dir := seedDataDir(t)
 	clock := time.Now()
-	c := NewCache(dir, time.Minute)
+	c := NewCache(dir, time.Minute, nil)
 	c.now = func() time.Time { return clock }
 
 	first, err := c.Usage()

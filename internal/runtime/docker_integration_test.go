@@ -1200,3 +1200,45 @@ func TestDockerInitReapsOrphanedDescendants(t *testing.T) {
 		t.Fatalf("managed Wait().Code = 0, want signal status")
 	}
 }
+
+func TestDockerStorageReportsPersistentLayersWithoutCleanup(t *testing.T) {
+	d := newTestDocker(t)
+	home := t.TempDir()
+	payload := filepath.Join(home, "payload")
+	if err := os.WriteFile(payload, make([]byte, 4<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ids []ID
+	for range 2 {
+		id := createContainer(t, d, Spec{
+			Image:   testImage,
+			Command: []string{"sh", "-c", "dd if=/dev/zero of=/unique bs=1048576 count=2 && test -s /member-payload"},
+			Mounts:  []Mount{{HostPath: home, Subpath: "payload", ContainerPath: "/member-payload"}},
+		})
+		if err := d.Start(t.Context(), id); err != nil {
+			t.Fatal(err)
+		}
+		if status, err := d.Wait(t.Context(), id); err != nil || status.Code != 0 {
+			t.Fatalf("seed container layer: %+v, %v", status, err)
+		}
+		ids = append(ids, id)
+	}
+	for range 2 {
+		usage := d.StorageUsage(t.Context(), home)
+		if usage.ImagesBytes == nil || *usage.ImagesBytes == 0 || usage.ContainersBytes == nil || *usage.ContainersBytes < 4<<20 {
+			t.Fatalf("Docker layers were not measured: %+v", usage)
+		}
+		if strings.Contains(usage.Error, "disk usage unavailable") {
+			t.Fatal(usage.Error)
+		}
+	}
+	for _, id := range ids {
+		info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
+		if err != nil || info.Container.State == nil || info.Container.State.ExitCode != 0 {
+			t.Fatalf("report changed retained container %s: %+v, %v", id, info, err)
+		}
+	}
+	if info, err := os.Stat(payload); err != nil || info.Size() != 4<<20 {
+		t.Fatalf("report changed bind-backed member home: %v, %v", info, err)
+	}
+}

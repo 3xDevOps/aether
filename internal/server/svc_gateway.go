@@ -15,7 +15,7 @@ func init() {
 			d.SSH.Services.Files = d.Git
 		}
 		if d.DataDir != "" {
-			d.SSH.Services.Disk = disk.NewCache(d.DataDir, 0)
+			d.SSH.Services.Disk = disk.NewCache(d.DataDir, 0, storageEnricher(d))
 		}
 		return nil, nil
 	})

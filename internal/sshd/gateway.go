@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -68,7 +69,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	}, nil
 }
 
-func (s *Server) serverDisk(_ context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	reader := s.cfg.Services.Disk
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server.disk: the server was not told where the data directory is"}
@@ -79,7 +80,7 @@ func (s *Server) serverDisk(_ context.Context, _ domain.MemberID, _ json.RawMess
 		// echoed to the client.
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server.disk: the data directory's filesystem could not be read"}
 	}
-	return protocol.ServerDiskResult{
+	result := protocol.ServerDiskResult{
 		UsedBytes:       usage.UsedBytes,
 		TotalBytes:      usage.TotalBytes,
 		FreeBytes:       usage.FreeBytes,
@@ -87,5 +88,26 @@ func (s *Server) serverDisk(_ context.Context, _ domain.MemberID, _ json.RawMess
 		TranscriptBytes: usage.TranscriptBytes,
 		DatabaseBytes:   usage.DatabaseBytes,
 		RepoBytes:       usage.RepoBytes,
-	}, nil
+		HomeBytes:       usage.HomeBytes,
+		EvidenceBytes:   usage.EvidenceBytes,
+		OtherBytes:      usage.OtherBytes,
+		SnapshotBytes:   usage.SnapshotBytes,
+		Warnings:        usage.Warnings,
+		Docker:          (*protocol.ServerDockerDisk)(usage.Docker),
+	}
+	if s.requireAdmin(ctx, member, protocol.MethodServerDisk) == nil {
+		result.Truncated = usage.Truncated || len(usage.Entries) > 50
+		for _, entry := range usage.Entries[:min(len(usage.Entries), 50)] {
+			wire := protocol.ServerDiskEntry{
+				Kind: entry.Kind, OwnerKind: entry.OwnerKind, OwnerID: entry.OwnerID,
+				Bytes: entry.Bytes, ReclaimableBytes: entry.ReclaimableBytes,
+				Reason: entry.Reason, Error: entry.Error,
+			}
+			if entry.RetainedUntil != nil {
+				wire.RetainedUntil = entry.RetainedUntil.UTC().Format(time.RFC3339Nano)
+			}
+			result.Entries = append(result.Entries, wire)
+		}
+	}
+	return result, nil
 }
