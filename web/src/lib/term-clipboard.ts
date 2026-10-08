@@ -43,7 +43,7 @@ function isImageType(type: string): boolean {
   return IMAGE_TYPES[type.toLowerCase()] === true
 }
 
-function imageFiles(data: DataTransfer | null): File[] {
+export function imageFiles(data: DataTransfer | null): File[] {
   if (!data) return []
   const files = Array.from(data.files ?? []).filter((file) => isImageType(file.type))
   if (files.length) return files

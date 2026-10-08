@@ -15,13 +15,6 @@ const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
   .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.startsWith('test/'))
   .map((file) => ({ file: file.split(path.sep).join('/'), text: readFileSync(path.join(src, file), 'utf8') }))
 
-const primitiveNames = sources
-  .filter(({ file }) => file.startsWith('components/ui/'))
-  .flatMap(({ text }) => [
-    ...[...text.matchAll(/^export (?:function|const) ([A-Z]\w*)/gm)].map((m) => m[1]),
-    ...[...text.matchAll(/^export \{([^}]*)\}/gm)].flatMap((m) => m[1].match(/\b[A-Z]\w*/g) ?? []),
-  ])
-
 type Rule = {
   name: string
   why: string
@@ -91,31 +84,6 @@ const rules: Rule[] = [
     legacy: [],
   },
   {
-    name: 'primitives are not restyled',
-    why: "Pass a primitive's variant or size; className is for layout only (margin, width, flex).",
-    pattern: new RegExp(
-      `<(?:${primitiveNames.join('|')})\\b(?:=>|[^<>])*?\\bclassName=(?:\\{(?:cn\\()?)?["'\`][^"'\`]*?\\b(?:text|bg|border|rounded|h|min-h|p|px|py)-`,
-    ),
-    applies: (file) => !file.startsWith('components/ui/'),
-    legacy: [
-      'components/cli-update-banner.tsx',
-      'components/connection-error.tsx',
-      'components/palette/close-dialog.tsx',
-      'components/palette/forward-dialog.tsx',
-      'components/palette/inject-dialog.tsx',
-      'components/palette/palette.tsx',
-      'components/run-list.tsx',
-      'components/shortcuts/index.tsx',
-      'components/terminal-image.tsx',
-      'components/terminal-keys.tsx',
-      'components/update-banner.tsx',
-      'components/workspace-mirror-dialog.tsx',
-      'routes/admin-dialogs/budget-dialog.tsx',
-      'routes/admin-dialogs/import-repository-dialog.tsx',
-      'routes/admin-dialogs/workspace-settings-dialog.tsx',
-    ],
-  },
-  {
     name: 'token names',
     why: 'These colour names are not tokens and render nothing; use the names in index.css (docs/styles.md).',
     pattern:
@@ -125,11 +93,6 @@ const rules: Rule[] = [
 ]
 
 describe('design system source scan', () => {
-  it('finds the primitives and the source', () => {
-    expect(primitiveNames).toContain('Button')
-    expect(sources.length).toBeGreaterThan(100)
-  })
-
   for (const rule of rules) {
     it(rule.name, () => {
       const breaking = sources

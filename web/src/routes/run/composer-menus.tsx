@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import { ChevronDown, FileText, Folder } from '@/components/icons'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { Check, ChevronDown, FileText, Folder } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Menu, MenuContent, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuTrigger } from '@/components/ui/menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import type { ConfigOption, ConfigValue, SessionCommand } from '@/lib/session-types'
 import { cn, focusRingInset, surface } from '@/lib/utils'
@@ -94,8 +96,127 @@ export function SuggestionList({ id, items, active, onPick }: {
 
 const footerCategories = ['mode', 'model', 'thought_level']
 
-function values(option: ConfigOption): ConfigValue[] {
-  return (option.options ?? []).flatMap((entry) => ('group' in entry ? entry.options : [entry]))
+type OptionPillProps = {
+  option: ConfigOption
+  disabled: boolean
+  onSet: (option: ConfigOption, value: string) => Promise<void>
+}
+
+function OptionPill({ option, disabled, onSet }: OptionPillProps) {
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const inFlight = useRef(false)
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
+  const choices = (option.options ?? []).flatMap((entry) => ('group' in entry ? entry.options : [entry]))
+  const current = choices.find((choice) => choice.value === option.currentValue)
+  const unavailable = disabled || busy
+  const changeOpen = (next: boolean) => {
+    if (next && (unavailable || inFlight.current)) return
+    setOpen(next)
+  }
+  const select = (value: string) => {
+    if (unavailable || inFlight.current) return
+    inFlight.current = true
+    setOpen(false)
+    setBusy(true)
+    void onSet(option, value).finally(() => {
+      inFlight.current = false
+      setBusy(false)
+    })
+  }
+  // Keep the trigger focusable so Radix can return focus on close, not after the request.
+  const trigger = (
+    <Button variant="ghost" size="sm" aria-disabled={unavailable || undefined} aria-busy={busy || undefined} aria-label={`${option.name}: ${current?.name ?? 'not set'}`}>
+      <span className="max-w-32 truncate">{current?.name ?? option.name}</span>
+      <ChevronDown />
+    </Button>
+  )
+
+  if (option.category === 'model') {
+    const item = (choice: ConfigValue, group?: { group: string; name: string }) => (
+      <CommandItem
+        key={`value:${choice.value}`}
+        value={JSON.stringify(choice.value)}
+        keywords={[choice.value, choice.name, choice.description ?? '', group?.name ?? '', group?.group ?? '']}
+        disabled={unavailable}
+        onSelect={() => select(choice.value)}
+      >
+        <span className="flex size-4 shrink-0 items-center">
+          {choice.value === option.currentValue && <Check aria-hidden />}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col whitespace-normal py-1 [overflow-wrap:anywhere]">
+          <span>{choice.name}</span>
+          <span className="text-ui-sm text-muted">{choice.value}</span>
+          {choice.description && <span className="text-ui-sm text-muted">{choice.description}</span>}
+          {choice.value === option.currentValue && <span className="sr-only">Current model</span>}
+        </span>
+      </CommandItem>
+    )
+    return (
+      <Popover open={open && !unavailable} onOpenChange={changeOpen}>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverContent
+          side="top"
+          aria-label={option.name}
+          className="flex flex-col overflow-hidden"
+          onOpenAutoFocus={(event) => {
+            const content = event.target as HTMLElement
+            const input = content.querySelector<HTMLInputElement>('[cmdk-input]')
+            if (input) {
+              input.focus({ preventScroll: true })
+              event.preventDefault()
+            }
+            content.querySelector('[cmdk-item][data-selected=true]')?.scrollIntoView({ block: 'nearest' })
+          }}
+        >
+          <Command label={option.name} defaultValue={current ? JSON.stringify(current.value) : undefined} className="[&_[cmdk-input-wrapper]]:shrink-0">
+            <CommandInput placeholder={`Search ${option.name.toLowerCase()}…`} aria-label={`Search ${option.name}`} />
+            <CommandList className="min-h-0">
+              <CommandEmpty>No models found. Try another search.</CommandEmpty>
+              {(option.options ?? []).map((entry) => 'group' in entry ? (
+                <CommandGroup
+                  key={`group:${entry.group}`}
+                  heading={entry.name}
+                  className="[&_[cmdk-group-heading]]:whitespace-normal [&_[cmdk-group-heading]]:[overflow-wrap:anywhere]"
+                >
+                  {entry.options.map((choice) => item(choice, entry))}
+                </CommandGroup>
+              ) : item(entry))}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
+  const item = (choice: ConfigValue) => (
+    <MenuRadioItem
+      key={choice.value}
+      value={choice.value}
+      description={choice.description ?? null}
+      disabled={unavailable}
+    >
+      {choice.name}
+    </MenuRadioItem>
+  )
+  return (
+    <Menu open={open && !unavailable} onOpenChange={changeOpen}>
+      <MenuTrigger asChild>{trigger}</MenuTrigger>
+      <MenuContent align="start" side="top" className="w-[min(360px,calc(100vw-16px))]">
+        <MenuLabel className="whitespace-normal [overflow-wrap:anywhere]">{option.name}</MenuLabel>
+        <MenuRadioGroup value={String(option.currentValue ?? '')} onValueChange={select}>
+          {(option.options ?? []).map((entry) => 'group' in entry ? (
+            <Fragment key={entry.group}>
+              <MenuLabel className="whitespace-normal [overflow-wrap:anywhere]">{entry.name}</MenuLabel>
+              {entry.options.map(item)}
+            </Fragment>
+          ) : item(entry))}
+        </MenuRadioGroup>
+      </MenuContent>
+    </Menu>
+  )
 }
 
 export function OptionPills({ options, disabled, onSet }: {
@@ -103,45 +224,10 @@ export function OptionPills({ options, disabled, onSet }: {
   disabled: boolean
   onSet: (option: ConfigOption, value: string) => Promise<void>
 }) {
-  const [busy, setBusy] = useState<string | null>(null)
-  const shown = footerCategories
-    .map((category) => options.find((option) => option.category === category && option.type === 'select'))
-    .filter((option): option is ConfigOption => Boolean(option))
+  const shown = footerCategories.flatMap((category) => options.filter((option) => option.category === category && option.type === 'select'))
   return (
     <>
-      {shown.map((option) => {
-        const choices = values(option)
-        const current = choices.find((choice) => choice.value === option.currentValue)
-        return (
-          <Menu key={option.id}>
-            <MenuTrigger asChild>
-              <Button variant="ghost" size="sm" disabled={disabled || busy === option.id} aria-label={`${option.name}: ${current?.name ?? 'not set'}`}>
-                <span className="max-w-32 truncate">{current?.name ?? option.name}</span>
-                <ChevronDown />
-              </Button>
-            </MenuTrigger>
-            <MenuContent align="start" side="top">
-              <MenuLabel>{option.name}</MenuLabel>
-              <MenuRadioGroup
-                value={String(option.currentValue ?? '')}
-                onValueChange={(value) => {
-                  setBusy(option.id)
-                  void onSet(option, value).finally(() => setBusy(null))
-                }}
-              >
-                {choices.map((choice) => (
-                  <MenuRadioItem key={choice.value} value={choice.value}>
-                    <span className="flex min-w-0 flex-col">
-                      <span>{choice.name}</span>
-                      {choice.description && <span className="text-ui-sm text-muted">{choice.description}</span>}
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuContent>
-          </Menu>
-        )
-      })}
+      {shown.map((option) => <OptionPill key={option.id} option={option} disabled={disabled} onSet={onSet} />)}
     </>
   )
 }

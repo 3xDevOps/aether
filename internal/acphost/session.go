@@ -135,7 +135,11 @@ type Session struct {
 	stop   context.CancelFunc
 	done   chan struct{}
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// Serialize option RPCs without holding mu, which inbound updates need
+	// before the SDK can finish the corresponding response.
+	optionMu   sync.Mutex
+	options    optionCatalog
 	proj       *projector
 	turn       int64
 	turnActive bool
@@ -171,7 +175,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		subs:   make(map[chan Item]struct{}),
 	}
 	s.ctx, s.stop = context.WithCancel(context.Background())
-	s.proj = newProjector(s.emitLocked, s.armFlush, s.activityLocked)
+	s.proj = newProjector(s.projectLocked, s.armFlush, s.activityLocked)
 	go s.notify.run()
 
 	last, _, openTurn := log.state()
@@ -240,12 +244,19 @@ func (s *Session) open(ctx context.Context) error {
 			Description: fmt.Sprintf("Session %s could not be restored: %v", s.cfg.SessionID, restoreErr),
 		}})
 	}
-	if mode := res.currentMode(); mode != "" {
-		s.emitLocked(Item{Kind: KindModeChange, Mode: mode})
+	s.options.model = legacyOptions(res.Models, "availableModels", "modelId", "currentModelId")
+	s.options.mode = legacyOptions(res.Modes, "availableModes", "id", "currentModeId")
+	// Resume/load may have already delivered config updates. If the response
+	// omits configOptions, retain those rather than resetting their selections
+	// to the legacy current IDs.
+	options := res.ConfigOptions
+	if !present(options) {
+		options = s.options.native
 	}
-	if present(res.ConfigOptions) {
-		s.emitLocked(Item{Kind: KindConfigOptions, ConfigOptions: res.ConfigOptions})
+	if s.options.mode.current == "" {
+		s.options.mode.current = s.state.Mode
 	}
+	s.replaceOptionsLocked(options)
 	return nil
 }
 
@@ -480,16 +491,53 @@ func (s *Session) Answer(requestID, optionID string, content map[string]any) err
 	return s.conn.answer(requestID, optionID, content)
 }
 
-// SetOption sets a config option to a value id (string) or a boolean.
+// SetOption sets an advertised option, using the legacy API only for selectors
+// synthesized from the agent's models or modes.
 func (s *Session) SetOption(ctx context.Context, configID string, value any) error {
-	opts, err := s.conn.setOption(ctx, configID, value)
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	category, err := s.options.selection(configID, value)
+	var revision uint64
+	if category != "" {
+		revision = s.options.legacy(category).revision
+	}
+	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	if present(opts) {
-		s.mu.Lock()
-		s.emitLocked(Item{Kind: KindConfigOptions, ConfigOptions: opts})
-		s.mu.Unlock()
+	if category == "" {
+		opts, optionErr := s.conn.setOption(ctx, configID, value)
+		if optionErr != nil {
+			return optionErr
+		}
+		if present(opts) {
+			s.mu.Lock()
+			s.replaceOptionsLocked(opts)
+			s.mu.Unlock()
+		}
+		return nil
+	}
+	selected := value.(string) // selection checked the legacy value and type.
+	if category == "model" {
+		err = s.conn.setModel(ctx, selected)
+	} else {
+		err = s.conn.setMode(ctx, selected)
+	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Notifications can supply the authoritative selection during the RPC.
+	// Only fill in the requested value when the agent did not send one.
+	if s.options.legacy(category).revision == revision {
+		if category == "mode" {
+			s.emitLocked(Item{Kind: KindModeChange, Mode: selected})
+		} else {
+			s.options.setCurrent(category, selected)
+			s.emitOptionsLocked()
+		}
 	}
 	return nil
 }
@@ -497,12 +545,19 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 // SetMode switches the agent's mode for agents that expose modes but no
 // mode config option.
 func (s *Session) SetMode(ctx context.Context, modeID string) error {
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	revision := s.options.mode.revision
+	s.mu.Unlock()
 	if err := s.conn.setMode(ctx, modeID); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	s.emitLocked(Item{Kind: KindModeChange, Mode: modeID})
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.options.mode.revision == revision {
+		s.emitLocked(Item{Kind: KindModeChange, Mode: modeID})
+	}
 	return nil
 }
 
@@ -578,6 +633,8 @@ func (s *Session) emitLocked(it Item) {
 	switch it.Kind {
 	case KindModeChange:
 		s.state.Mode = it.Mode
+		s.options.setCurrent("mode", it.Mode)
+		s.emitOptionsLocked()
 	case KindConfigOptions:
 		s.state.ConfigOptions = it.ConfigOptions
 	case KindCommands:

@@ -68,9 +68,9 @@ const describedClass = 'h-auto min-h-7 py-1 coarse:h-auto coarse:min-h-11'
 
 function Described({ children, description }: { children: React.ReactNode; description: React.ReactNode }) {
   return (
-    <span className="flex min-w-0 flex-col">
-      <span className="truncate">{children}</span>
-      <span className="text-ui-sm text-muted">{description}</span>
+    <span className="flex min-w-0 flex-col whitespace-normal [overflow-wrap:anywhere]">
+      <span>{children}</span>
+      {description != null && <span className="text-ui-sm text-muted">{description}</span>}
     </span>
   )
 }
