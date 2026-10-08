@@ -727,6 +727,61 @@ func TestACPHistoryKeepsOldItemsAndBoundsSubscribe(t *testing.T) {
 	}
 }
 
+func TestACPStoppedHistoryRefreshesAfterAppendAndDeletion(t *testing.T) {
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if stopErr := e.sched.acp.stopAdapter(t.Context(), run.ID); stopErr != nil {
+		t.Fatal(stopErr)
+	}
+	path := e.pty.ItemLogPath(run.ID)
+	writer, err := acphost.OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	first := acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "first"}}
+	if appendErr := writer.Append(&first); appendErr != nil {
+		t.Fatal(appendErr)
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	page, err := e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Seq != first.Seq {
+		t.Fatalf("initial stopped history: %+v, %v", page, err)
+	}
+	writer, err = acphost.OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "next"}}
+	if appendErr := writer.Append(&next); appendErr != nil {
+		t.Fatal(appendErr)
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	item, err := e.sched.ACPItem(run.ID, next.Seq)
+	if err != nil || item.Notice == nil || item.Notice.Title != "next" {
+		t.Fatalf("appended stopped item: %+v, %v", item, err)
+	}
+	page, err = e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Seq != next.Seq {
+		t.Fatalf("refreshed stopped history: %+v, %v", page, err)
+	}
+	if removeErr := os.Remove(path); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	page, err = e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("deleted history served from cache: %+v, %v", page, err)
+	}
+	if _, itemErr := e.sched.ACPItem(run.ID, next.Seq); !errors.Is(itemErr, ErrACPItemNotFound) {
+		t.Fatalf("deleted full item served from cache: %v", itemErr)
+	}
+}
+
 // A stream opened while no session is live is released by the next session
 // start, or by the end of a closing session it found; the driver keeps no
 // per-run entries once nobody holds or waits on them.

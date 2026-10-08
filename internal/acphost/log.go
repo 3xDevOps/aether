@@ -39,10 +39,16 @@ type SubscriptionReplay struct {
 // Log is append-only JSONL history. A private prefix checkpoint from an older
 // compacted log preserves its missing-history boundary and is never an Item.
 type Log struct {
-	mu        sync.Mutex
-	path      string
-	f         *os.File
-	readers   int
+	mu      sync.Mutex
+	path    string
+	f       *os.File
+	readers int
+	logIndex
+	readOnly bool
+}
+
+// Read-only logs can share this metadata, but never an index with a writer.
+type logIndex struct {
 	seqs      []int64
 	offsets   []int64
 	size      int64
@@ -50,7 +56,6 @@ type Log struct {
 	openTurn  bool
 	mode      string
 	prefixSeq int64
-	readOnly  bool
 }
 
 type itemHeader struct {
@@ -113,7 +118,11 @@ func (l *Log) index() error {
 	if err != nil {
 		return fmt.Errorf("acphost: stat item log: %w", err)
 	}
-	r := bufio.NewReaderSize(io.NewSectionReader(l.f, 0, info.Size()), 64<<10)
+	return l.indexSize(info.Size())
+}
+
+func (l *Log) indexSize(size int64) error {
+	r := bufio.NewReaderSize(io.NewSectionReader(l.f, 0, size), 64<<10)
 	var off int64
 	for {
 		line, err := r.ReadBytes('\n')

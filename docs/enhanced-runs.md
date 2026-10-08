@@ -523,6 +523,12 @@ older ones with `run.acp.history`; one that reconnects at most 200 items
 behind receives only the items it missed
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
 
+The first read of a stopped run indexes its log. A small in-memory cache reuses
+immutable indexes for unchanged files, so subsequent pages do not scan the
+whole conversation. Each request owns a fresh descriptor; file growth or
+replacement rebuilds the index. Eviction discards only cached metadata, not
+history. No extra storage format or retention setting is required.
+
 History pages report `oldest_seq` and `truncated_before` alongside `frames`.
 Logs already trimmed by an older server keep their preceding sequence,
 epoch, turn and mode checkpoint; subsequent appends neither reset those
