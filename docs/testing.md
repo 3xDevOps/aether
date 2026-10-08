@@ -79,8 +79,14 @@ Layers, per the design spec's testing strategy:
 
   These jobs are the merge gate the E2E suite owns.
   The runtime capacity scenario starts its own Docker and containerd daemons
-  with private sockets and storage roots; it never reconfigures the host's
-  daemon. It needs root plus `dockerd` and `containerd` on `PATH`. Docker's
+  with private sockets, storage roots, and network/mount namespaces; it never
+  reconfigures the host's daemon or network. Go's child `Unshareflags` setup
+  makes mount propagation recursively private before exec. The fixture verifies
+  that each daemon's network and mount namespace identities differ from the
+  test process, and that an existing host `docker0` bridge retains its identity,
+  MAC, MTU, and administrative state through startup and teardown.
+  It needs root with permission to unshare these namespaces, plus `dockerd`
+  and `containerd` on `PATH`. Docker's
   info API must expose `Containerd.Address` and namespaces (API 1.46+, including
   Docker 28's API 1.48); missing metadata fails the proof, rather than skipping
   it or guessing an address. The fixture uses the documented

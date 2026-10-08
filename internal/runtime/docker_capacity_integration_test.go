@@ -3,9 +3,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,8 +22,9 @@ import (
 
 // This deliberately does not inspect or reconfigure the shared test daemon.
 // Docker 29 autodetects the system containerd even with a different data-root,
-// so both daemons are isolated explicitly. Root and installed daemon binaries
-// are required for this scenario; missing binaries under root are failures.
+// so both daemons are isolated explicitly, including network and mount namespaces.
+// Root with permission to unshare namespaces and installed daemon binaries are
+// required for this scenario; missing prerequisites under root are failures.
 func TestDockerCapacityContainerdIsolated(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("isolated dockerd/containerd capacity proof requires root; run this scenario with sudo")
@@ -30,6 +33,34 @@ func TestDockerCapacityContainerdIsolated(t *testing.T) {
 		if _, err := exec.LookPath(binary); err != nil {
 			t.Fatalf("isolated capacity integration requires %s: %v", binary, err)
 		}
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkHostBridge func()
+	for _, bridge := range interfaces {
+		if bridge.Name != "docker0" {
+			continue
+		}
+		checkHostBridge = func() {
+			t.Helper()
+			current, err := net.InterfaceByName(bridge.Name)
+			if err != nil {
+				t.Errorf("host Docker bridge disappeared during isolated capacity proof: %v", err)
+				return
+			}
+			if current.Index != bridge.Index || current.MTU != bridge.MTU ||
+				!bytes.Equal(current.HardwareAddr, bridge.HardwareAddr) ||
+				current.Flags&net.FlagUp != bridge.Flags&net.FlagUp {
+				t.Errorf("host Docker bridge changed: before=%+v after=%+v", bridge, *current)
+				return
+			}
+			t.Logf("verified host Docker bridge preserved: name=%s index=%d", current.Name, current.Index)
+		}
+		// Registered before either daemon: also check after both shut down.
+		t.Cleanup(checkHostBridge)
+		break
 	}
 	// Short paths also fit sockaddr_un when Go's test name is long.
 	base, err := os.MkdirTemp("", "aether-capacity-")
@@ -118,6 +149,9 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+	if checkHostBridge != nil {
+		checkHostBridge()
+	}
 	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +211,14 @@ func startCapacityDaemon(t *testing.T, base, binary string, args ...string) <-ch
 	}
 	cmd := exec.Command(binary, args...)
 	cmd.Stdout, cmd.Stderr = log, log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// bridge=none does not isolate libnetwork's cleanup from host interfaces.
+	// Unshareflags also makes / recursively private in Go's pre-exec child,
+	// unlike Cloneflags alone, so daemon mount changes cannot propagate out.
+	// Pathname Unix sockets and files remain accessible to this test.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:      true,
+		Unshareflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS,
+	}
 	// Never notify or consume sockets from the host's systemd service.
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
@@ -217,5 +258,19 @@ func startCapacityDaemon(t *testing.T, base, binary string, args ...string) <-ch
 			}
 		}
 	})
+	for _, namespace := range []string{"net", "mnt"} {
+		parent, err := os.Stat(filepath.Join("/proc/self/ns", namespace))
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err := os.Stat(fmt.Sprintf("/proc/%d/ns/%s", cmd.Process.Pid, namespace))
+		if err != nil {
+			t.Fatalf("inspect isolated %s %s namespace: %v; see owned daemon log", binary, namespace, err)
+		}
+		if os.SameFile(parent, child) {
+			t.Fatalf("isolated %s shares the test process's %s namespace", binary, namespace)
+		}
+		t.Logf("verified isolated %s %s namespace: parent inode=%d child inode=%d", binary, namespace, parent.Sys().(*syscall.Stat_t).Ino, child.Sys().(*syscall.Stat_t).Ino)
+	}
 	return done
 }
