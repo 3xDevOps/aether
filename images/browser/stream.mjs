@@ -64,7 +64,7 @@ export async function streamPage(session, request, response) {
       state.frameListener = (event) => {
         // Slow observers cannot stall Chromium: acknowledge before forwarding.
         void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
-        if (state.frameBlocked || !Number.isFinite(event.metadata.timestamp) || event.metadata.timestamp <= state.viewportChanged) return;
+        if (!Number.isFinite(event.metadata.timestamp) || event.metadata.timestamp <= state.viewportChanged) return;
         const size = state.page.viewportSize();
         if (event.metadata.deviceWidth !== size.width || event.metadata.deviceHeight !== size.height) return;
         if (event.data.length > Math.ceil(limits.frame * 4 / 3)) return;

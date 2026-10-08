@@ -395,15 +395,13 @@ export class BrowserSession {
       case 'viewport': {
         const width = boundedInteger(request.width, 1280, 240, 2560);
         const height = boundedInteger(request.height, 800, 240, 1600);
-        state.frameBlocked = true;
+        const current = page.viewportSize();
+        if (current.width === width && current.height === height) break;
+        // Chromium can deliver the new-size frame before the resize promise resolves.
+        state.viewportID = randomUUID();
+        state.viewportChanged = Date.now() / 1000;
         this.invalidateFrames(state);
-        try { await page.setViewportSize({ width, height }); }
-        finally {
-          state.viewportID = randomUUID();
-          state.viewportChanged = Date.now() / 1000;
-          state.frameBlocked = false;
-          this.invalidateFrames(state);
-        }
+        await page.setViewportSize({ width, height });
         break;
       }
       case 'wait': {

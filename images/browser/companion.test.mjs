@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { BrowserSession, limits } from './session.mjs';
+import { BrowserSession, boundedRead, limits } from './session.mjs';
 import { encodeFrame } from './stream.mjs';
 import { renderTerminal } from './terminal.mjs';
 import { startServer } from './server.mjs';
@@ -185,7 +185,7 @@ async function liveCompanion(t, html) {
     request.setTimeout(15000, () => request.destroy(new Error('Companion request timed out')));
     request.end(JSON.stringify(value));
   });
-  const watch = (page) => {
+  const watch = (page, phase) => {
     const records = [];
     let stream;
     const first = new Promise((resolve, reject) => {
@@ -208,7 +208,7 @@ async function liveCompanion(t, html) {
         });
       });
       stream.on('error', reject);
-      stream.setTimeout(45000, () => stream.destroy(new Error('Current frame timed out')));
+      stream.setTimeout(45000, () => stream.destroy(new Error(`Current frame timed out: ${phase}`)));
       stream.end(JSON.stringify(page));
     });
     t.after(() => stream.destroy());
@@ -222,10 +222,10 @@ test('late static viewers receive original current pixels and invalidated frames
   let { page } = await call('/command', { operation: 'open', url: origin, width: 800, height: 600 });
   const native = session.pages.get(page.page_id).page;
   const boot = await native.evaluate(() => window.boot);
-  const first = watch(page);
+  const first = watch(page, 'initial viewer');
   await first.first;
   await delay(250); // Let the initial compositor updates settle, without changing the app.
-  const second = watch(page);
+  const second = watch(page, 'late static viewer');
   const replay = await second.first;
   let original;
   const deadline = Date.now() + 2000;
@@ -238,15 +238,40 @@ test('late static viewers receive original current pixels and invalidated frames
   assert.equal(replay.metadata.viewport_id, page.viewport_id);
   assert.equal(await native.evaluate(() => window.boot), boot, 'attaching must not reload the app');
   second.close();
-  ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
-  const resized = watch(page);
+  const cdp = await session.cdp(session.pages.get(page.page_id));
+  const resize = native.setViewportSize.bind(native);
+  native.setViewportSize = async (size) => {
+    let observed;
+    const painted = new Promise((resolve) => {
+      observed = (event) => {
+        if (event.metadata.deviceWidth === size.width && event.metadata.deviceHeight === size.height) resolve();
+      };
+      cdp.on('Page.screencastFrame', observed);
+    });
+    try {
+      await resize(size);
+      await boundedRead(painted);
+    } finally { cdp.off('Page.screencastFrame', observed); }
+  };
+  try {
+    ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
+  } finally { native.setViewportSize = resize; }
+  const resized = watch(page, 'resize frame delivered before completion');
   const resizedFrame = await resized.first;
   assert.equal(resizedFrame.metadata.viewport_id, page.viewport_id);
   assert.deepEqual([resizedFrame.metadata.width, resizedFrame.metadata.height], [640, 480]);
   assert.ok(resizedFrame.metadata.sequence > replay.metadata.sequence);
   resized.close();
+  const viewport = page.viewport_id;
+  ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
+  assert.equal(page.viewport_id, viewport, 'unchanged geometry keeps its frame identity');
+  const unchanged = watch(page, 'unchanged viewport');
+  const unchangedFrame = await unchanged.first;
+  assert.equal(unchangedFrame.metadata.viewport_id, viewport);
+  assert.deepEqual([unchangedFrame.metadata.width, unchangedFrame.metadata.height], [640, 480]);
+  unchanged.close();
   ({ page } = await call('/command', { ...page, operation: 'navigate', url: `${origin}/next` }));
-  const navigated = watch(page);
+  const navigated = watch(page, 'navigation');
   const nextFrame = await navigated.first;
   assert.equal(nextFrame.metadata.page_revision, page.page_revision);
   assert.equal(nextFrame.metadata.viewport_id, page.viewport_id);
@@ -254,7 +279,7 @@ test('late static viewers receive original current pixels and invalidated frames
   first.close();
   navigated.close();
   await delay(100);
-  const reattached = await watch(page).first;
+  const reattached = await watch(page, 'stream restart').first;
   assert.ok(reattached.metadata.sequence > nextFrame.metadata.sequence, 'stream restart cannot reuse its old cache');
 });
 
