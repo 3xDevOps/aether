@@ -108,6 +108,12 @@ export interface SessionFrame {
   epoch?: number
 }
 
+export interface SessionHistory {
+  frames: SessionFrame[]
+  oldest_seq?: number
+  truncated_before?: boolean
+}
+
 /** Snapshot of a live session sent in the /ws/acp ack. */
 export interface SessionState {
   turn_in_flight: boolean
@@ -172,6 +178,7 @@ export interface SessionStreamAck {
   seq: number
   replay: number
   oldest_seq?: number
+  truncated_before?: boolean
   epoch: number
   live: boolean
   state?: SessionState

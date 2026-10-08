@@ -1381,6 +1381,12 @@ Leaving the page releases a held lease, so a reload takes it straight back;
 closing the stream resets the run's stream and lease state. Frames go through
 `batchNotifications`, so a burst re-renders once per frame.
 
+An ack or history page's `truncated_before` displays the expired-prefix
+boundary. The page's `oldest_seq` stops older-page requests at the actual
+retained boundary. A same-epoch reset preserves the ack's authoritative
+pending approvals and expiry metadata; it cannot synthesize missing frames.
+An expired full-item request shows the server's error rather than empty detail.
+
 The `sessions` slice keeps each run's `AcpSession`: items grouped into
 turns (`store/session-rows.ts`), the ack's live state (turn in flight,
 pending requests, config options, commands, auth, steering), the lease and
@@ -1536,6 +1542,10 @@ async completions cannot restore another scope's data. Leaving cancels fetching,
 not the saved view. Browser-storage failures are visible; unavailable storage
 allows an in-memory session fallback, not a durable-restore guarantee. Missing
 persisted pages are errors, not silent truncation.
+The saved continuation also preserves `truncated_before`, so a restored page
+still names an expired recording prefix. An expired server cursor leaves the
+read location intact and displays the refusal; it never quietly restarts
+older-page loading from another window.
 
 Arrows, `PageUp`/`PageDown`, `Home`, wheel and touch browse the read surface.
 Scrolling downward to its bottom or pressing `End` returns live. Only a new
@@ -1835,6 +1845,10 @@ both what it renders and the overlap set the conflict chips read.
   from a server that predates them - is a disabled row whose description says
   why. The list is capped at 40 per run and starts empty on every page load,
   because there is no history to replay.
+  `history_gap` marks a missing interval or a successful interval spanning
+  missed snapshots; `snapshot_error` gives its safe cause. Neither is shown
+  as a normal complete interval. Expired snapshot ranges show the server's
+  unavailable error; **Current diff** stays a distinct cumulative choice.
 - **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
   sticky header with a chevron, its path, a status word and `+a −d`. A file
   over 500 lines, a binary file and a deleted file start collapsed; the header

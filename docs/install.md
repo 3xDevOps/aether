@@ -1331,8 +1331,8 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees. A retained Standard or Enhanced run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk usage reports. |
-| `transcripts/` | Per-run PTY transcripts (asciicast v2). |
+| `checkouts/` | Per-run worktrees. A retained Standard or Enhanced run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's `<run-id>.diffsnap/` sidecar has bounded retained snapshot history, described below, and is counted in `worktree_bytes`. |
+| `transcripts/` | Rolling per-session PTY transcripts (asciicast v2): 16 MiB complete-event segments, a 128 MiB retained target and seven-day sealed-segment age limit, preserving the active segment/latest screen. Enhanced runs retain a rolling latest 64 MiB ACP item log; compaction needs temporary copy space. These bounds do not stop live recording or erase native agent state. |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `home-caches/<member>/{runs,terminal}/data/` | Reconstructible npm, pip, uv and Go caches, separate from HOME. Runs use `runs`; the member environment and updater use `terminal`. Small server-owned metadata beside `data/` preserves last use, ownership and cleanup retries; it is not mounted into containers. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
@@ -1347,13 +1347,29 @@ keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
 publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
+Diff sidecars target 512 MiB per run, the newest 1,024 changed trees and seven
+days of history. The base, latest and trees needed for the valid current
+interval remain protected. Consecutive unchanged snapshots do not add
+duplicate refs; changed reverts refresh recency.
+Only sidecar refs and unreferenced sidecar objects are pruned, never workspace
+branches, source files or retained evidence refs. Legacy `last` markers
+migrate their published tip even on a range read without a new capture;
+older uncatalogued snapshot history can expire. Published interval refs are
+atomic, with two bounded in-flight pins protecting delivered endpoints across
+ref/event failures and evidence-triggered GC.
+Watch and current-diff staging allow at most 128 MiB of visible input, while
+evidence staging keeps its stricter 64 MiB bound. These are soft retained
+history budgets, not live disk quotas or limits on valuable workspace data.
+Expired ranges and skipped intervals are explicit in Changes. Evidence
+imports are serialized against pruning and retain independent durable copies.
+
 Each member home is mounted as `$HOME` only in that member's environment
 terminal and the runs they launch. An account share additionally mounts the
 shared agent's login path from it, the whole `~/.omp/agent` for `omp`, into
 the recipient's runs, through a Docker volume named `aether-home-<hash>`
 ([security.md](security.md#account-sharing)).
 
-Four consequences worth knowing:
+Storage rules:
 
 - **Back up `aether.db`, `repos/`, `homes/`, `profiles/`, and `mirrors/` to
   recover core state, installed agents, login state, profile snapshots, and
@@ -1374,6 +1390,13 @@ Four consequences worth knowing:
   credentials and installed tools in `homes/`. Settings > **Server** reports
   cache ownership, deadlines and cleanup failures. Byte accounting de-duplicates
   hardlinks and is not a guarantee that deletion returns those bytes to disk.
+- **Per-run history is bounded, total valuable data is not.** Rolling
+  transcripts and snapshot sidecars reclaim older history automatically, but
+  retained runs, workspace files, `aether.db` and `repos/` can still grow.
+  Provisioning is refused when filesystem reserves and startup allowances
+  cannot fit. Local clones share Git objects through hardlinks; accounting
+  charges them once to repositories, not again to each checkout.
+  See [failure handling](failure-handling.md).
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log

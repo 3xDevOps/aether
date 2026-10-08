@@ -26,12 +26,13 @@ type (
 	schedulerPTYHost interface {
 		StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error
 		StopSession(ctx context.Context, key SessionKey) error
+		PruneTranscripts(ctx context.Context) error
 		LastOutput(key SessionKey) (time.Time, bool)
 		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error
 	}
 	sshdPTYAttacher interface {
 		Attach(ctx context.Context, key SessionKey, client AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error
-		Replay(run domain.RunID) (io.ReadCloser, int, error)
+		Replay(run domain.RunID) (ReplayWindow, error)
 		Snapshot(run domain.RunID) (ScreenSnapshot, error)
 	}
 )
@@ -1772,15 +1773,15 @@ func TestStoppedSessionClosesAttachmentAndPreservesReplay(t *testing.T) {
 		t.Fatal("StopSession did not close the runtime attachment")
 	}
 
-	rc, _, err := h.Replay(run)
+	window, err := h.Replay(run)
 	if err != nil {
 		t.Fatalf("Replay after StopSession: %v", err)
 	}
-	got, err := io.ReadAll(rc)
+	got, err := io.ReadAll(window.Reader)
 	if err != nil {
 		t.Fatalf("read replay: %v", err)
 	}
-	if err := rc.Close(); err != nil {
+	if err := window.Reader.Close(); err != nil {
 		t.Fatalf("close replay: %v", err)
 	}
 	if string(got) != "scrollback" {
@@ -2155,22 +2156,22 @@ func TestReplayTranscript(t *testing.T) {
 		t.Fatalf("StopSession: %v", err)
 	}
 
-	rc, _, err := h.Replay(run)
+	window, err := h.Replay(run)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
-	got, err := io.ReadAll(rc)
+	got, err := io.ReadAll(window.Reader)
 	if err != nil {
 		t.Fatalf("read replay: %v", err)
 	}
-	if cerr := rc.Close(); cerr != nil {
+	if cerr := window.Reader.Close(); cerr != nil {
 		t.Fatalf("close replay: %v", cerr)
 	}
 	if string(got) != "hello \xffworld" {
 		t.Fatalf("replay = %q, want the exact recorded bytes", got)
 	}
 
-	if _, _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Replay unknown run = %v, want os.ErrNotExist", err)
 	}
 }

@@ -63,7 +63,7 @@ function sourceLabel(packet: EvidencePacket): string {
   const sources = packet.sources ?? []
   if (!sources.length) return 'No source availability recorded'
   return sources
-    .map((source) => `${source.name}: ${source.available ? 'available' : `unavailable${source.reason ? ` (${source.reason})` : ''}`}${source.truncated ? ', truncated' : ''}`)
+    .map((source) => `${source.name}: ${source.available ? 'available' : 'unavailable'}${source.truncated ? ', truncated' : ''}${source.reason ? ` (${source.reason})` : ''}`)
     .join(' · ')
 }
 

@@ -29,27 +29,28 @@ type checkpointSegment struct {
 }
 
 type screenCheckpoint struct {
-	Version         int                 `json:"version"`
-	Epoch           TerminalEpoch       `json:"epoch,omitempty"`
-	Sequence        TerminalSequence    `json:"sequence,omitempty"`
-	CastOutputBytes uint64              `json:"cast_output_bytes,omitempty"`
-	Incarnation     int64               `json:"incarnation"`
-	CastOffset      int64               `json:"cast_offset"`
-	Cols            uint                `json:"cols"`
-	Rows            uint                `json:"rows"`
-	Data            []byte              `json:"data"`
-	Segments        []checkpointSegment `json:"segments,omitempty"`
+	Version           int                 `json:"version"`
+	Epoch             TerminalEpoch       `json:"epoch,omitempty"`
+	Sequence          TerminalSequence    `json:"sequence,omitempty"`
+	CastOutputBytes   uint64              `json:"cast_output_bytes,omitempty"`
+	PrunedOutputBytes uint64              `json:"pruned_output_bytes,omitempty"`
+	Incarnation       int64               `json:"incarnation"`
+	CastOffset        int64               `json:"cast_offset"`
+	Cols              uint                `json:"cols"`
+	Rows              uint                `json:"rows"`
+	Data              []byte              `json:"data"`
+	Segments          []checkpointSegment `json:"segments,omitempty"`
 }
 
 func (s *session) captureCheckpointLocked() (*checkpointCapture, error) {
 	if s.tr == nil || s.screen == nil {
 		return nil, nil
 	}
-	if _, isRun := s.run.Run(); !isRun || s.checkpoint == "" {
+	if s.checkpoint == "" {
 		return nil, nil
 	}
 	snapshot := s.screenSnapshotLocked()
-	capture, err := s.tr.captureCheckpoint(s.checkpoint, snapshot, s.history)
+	capture, err := s.tr.captureCheckpoint(s.checkpoint, snapshot)
 	if err != nil {
 		s.checkpointErr = err
 		return nil, err
@@ -101,6 +102,7 @@ func (s *session) snapshot() (ScreenSnapshot, error) {
 
 func (s *session) checkpointNow() error {
 	s.mu.Lock()
+	s.maintainTranscriptLocked()
 	capture, err := s.captureCheckpointLocked()
 	s.mu.Unlock()
 	if err != nil {
@@ -128,7 +130,6 @@ func checkpointPath(transcript string) string {
 
 type castBoundary struct {
 	writer  *castWriter
-	file    *os.File
 	segment castSegment
 }
 
@@ -136,9 +137,7 @@ func (b *castBoundary) release() {
 	if b.writer == nil {
 		return
 	}
-	b.writer.lifetimeMu.RUnlock()
 	b.writer = nil
-	b.file = nil
 }
 
 func (b *castBoundary) flush() error {
@@ -146,6 +145,10 @@ func (b *castBoundary) flush() error {
 		return nil
 	}
 	b.writer.mu.Lock()
+	if b.writer.incarnation != b.segment.incarnation || b.writer.closed {
+		b.writer.mu.Unlock()
+		return errCheckpointSuperseded
+	}
 	err := b.writer.flushStagedLocked()
 	if err == nil {
 		err = b.writer.bw.Flush()
@@ -155,24 +158,35 @@ func (b *castBoundary) flush() error {
 }
 
 func (b *castBoundary) sync() error {
-	if b.writer == nil || b.file == nil {
+	if b.writer == nil {
 		return nil
 	}
-	err := b.file.Sync()
-	b.release()
-	return err
+	b.writer.mu.Lock()
+	defer b.writer.mu.Unlock()
+	if b.writer.incarnation != b.segment.incarnation || b.writer.closed {
+		return errCheckpointSuperseded
+	}
+	return b.writer.f.Sync()
 }
 
 type checkpointCapture struct {
-	path            string
-	snapshot        ScreenSnapshot
-	segments        []checkpointSegment
-	castOutputBytes uint64
-	boundary        castBoundary
-	seq             uint64
+	path              string
+	snapshot          ScreenSnapshot
+	segments          []checkpointSegment
+	castOutputBytes   uint64
+	prunedOutputBytes uint64
+	boundary          castBoundary
+	seq               uint64
 }
 
 func (c *checkpointCapture) persist() error {
+	lifecycle := acquireTranscriptLifecycle(c.boundary.segment.path)
+	lifecycle.entry.mu.Lock()
+	defer func() {
+		c.boundary.release()
+		lifecycle.entry.mu.Unlock()
+		lifecycle.release()
+	}()
 	if err := c.boundary.flush(); err != nil {
 		c.boundary.release()
 		return fmt.Errorf("ptyhost: flush checkpoint transcript: %w", err)
@@ -180,36 +194,40 @@ func (c *checkpointCapture) persist() error {
 	if err := c.boundary.sync(); err != nil {
 		return fmt.Errorf("ptyhost: sync checkpoint transcript: %w", err)
 	}
-	return writeCheckpointFile(c.path, screenCheckpoint{
-		Version:         screenCheckpointVersion,
-		Epoch:           c.snapshot.Position.Epoch,
-		Sequence:        c.snapshot.Position.Sequence,
-		CastOutputBytes: c.castOutputBytes,
-		Incarnation:     c.boundary.segment.incarnation,
-		CastOffset:      c.boundary.segment.fileBytes,
-		Cols:            c.snapshot.Cols,
-		Rows:            c.snapshot.Rows,
-		Data:            c.snapshot.Data,
-		Segments:        c.segments,
+	err := writeCheckpointFile(c.path, screenCheckpoint{
+		Version:           screenCheckpointVersion,
+		Epoch:             c.snapshot.Position.Epoch,
+		Sequence:          c.snapshot.Position.Sequence,
+		CastOutputBytes:   c.castOutputBytes,
+		PrunedOutputBytes: c.prunedOutputBytes,
+		Incarnation:       c.boundary.segment.incarnation,
+		CastOffset:        c.boundary.segment.fileBytes,
+		Cols:              c.snapshot.Cols,
+		Rows:              c.snapshot.Rows,
+		Data:              c.snapshot.Data,
+		Segments:          c.segments,
 	})
+	if err != nil {
+		return err
+	}
+	c.boundary.writer.mu.Lock()
+	defer c.boundary.writer.mu.Unlock()
+	return c.boundary.writer.pruneLocked(time.Now())
 }
 
 // captureCheckpoint records the logical cast boundary represented by snap.
 // Pending UTF-8 is made an event under the short writer lock, while flushing
 // the buffered prefix and syncing the file are deferred until persistence.
-func (w *castWriter) captureCheckpoint(path string, snap ScreenSnapshot, history []castSegment) (checkpointCapture, error) {
-	w.lifetimeMu.RLock()
+func (w *castWriter) captureCheckpoint(path string, snap ScreenSnapshot) (checkpointCapture, error) {
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
-		w.lifetimeMu.RUnlock()
 		return checkpointCapture{}, errors.New("ptyhost: checkpoint transcript is closed")
 	}
 	// A sticky write error must not turn pending tails into an unbounded queue.
 	// An empty write checks it without flushing the buffer.
 	if _, err := w.bw.Write(nil); err != nil {
 		w.mu.Unlock()
-		w.lifetimeMu.RUnlock()
 		return checkpointCapture{}, fmt.Errorf("ptyhost: checkpoint transcript: %w", err)
 	}
 	if len(w.pending) > 0 {
@@ -228,14 +246,12 @@ func (w *castWriter) captureCheckpoint(path string, snap ScreenSnapshot, history
 		path: w.path, fileBytes: w.logicalBytes,
 		outputBytes: w.outputBytes, incarnation: w.incarnation,
 	}
-	writerFile := w.f
-	w.mu.Unlock()
 
-	segments := make([]checkpointSegment, 0, len(history)+1)
-	var castOutputBytes uint64
-	for _, segment := range history {
+	segments := make([]checkpointSegment, 0, len(w.history)+1)
+	castOutputBytes := w.retention.OutputBytes
+	for _, segment := range w.history {
 		if segment.outputBytes < 0 {
-			w.lifetimeMu.RUnlock()
+			w.mu.Unlock()
 			return checkpointCapture{}, errors.New("ptyhost: unknown historical output boundary")
 		}
 		castOutputBytes += uint64(segment.outputBytes)
@@ -249,10 +265,13 @@ func (w *castWriter) captureCheckpoint(path string, snap ScreenSnapshot, history
 		Path: filepath.Base(boundary.path), Incarnation: boundary.incarnation,
 		FileBytes: boundary.fileBytes, OutputBytes: boundary.outputBytes,
 	})
+	prunedOutputBytes := w.retention.OutputBytes
+	w.mu.Unlock()
 	return checkpointCapture{
 		path: path, snapshot: cloneScreenSnapshot(snap), segments: segments,
-		castOutputBytes: castOutputBytes,
-		boundary:        castBoundary{writer: w, file: writerFile, segment: boundary},
+		castOutputBytes:   castOutputBytes,
+		prunedOutputBytes: prunedOutputBytes,
+		boundary:          castBoundary{writer: w, segment: boundary},
 	}, nil
 }
 
@@ -403,6 +422,12 @@ func persistColdCheckpoint(transcript string, snap ScreenSnapshot, segments []ca
 	if err != nil {
 		return err
 	}
+	retention, err := readCastRetention(transcript)
+	if err != nil {
+		return err
+	}
+	checkpoint.PrunedOutputBytes = retention.OutputBytes
+	checkpoint.CastOutputBytes += retention.OutputBytes
 	return writeCheckpointFileIfUnchanged(checkpointPath(transcript), checkpoint, expected)
 }
 
@@ -453,9 +478,16 @@ func validateCheckpointSegments(transcript string, checkpoint screenCheckpoint, 
 	if len(checkpoint.Segments) == 0 {
 		return nil, errors.New("ptyhost: screen checkpoint has no segments")
 	}
-	segments := make([]castSegment, len(checkpoint.Segments))
+	retention, err := readCastRetention(transcript)
+	if err != nil {
+		return nil, err
+	}
+	if checkpoint.PrunedOutputBytes > retention.OutputBytes {
+		return nil, errors.New("ptyhost: checkpoint retention boundary mismatch")
+	}
+	segments := make([]castSegment, 0, len(checkpoint.Segments))
 	index := -1
-	var outputBytes uint64
+	outputBytes := checkpoint.PrunedOutputBytes
 	seenPaths := make(map[string]struct{}, len(checkpoint.Segments))
 	for i, raw := range checkpoint.Segments {
 		if raw.Path == "" || filepath.Base(raw.Path) != raw.Path || raw.Incarnation == 0 || raw.FileBytes <= 0 || raw.OutputBytes < 0 {
@@ -469,8 +501,18 @@ func validateCheckpointSegments(transcript string, checkpoint screenCheckpoint, 
 			return nil, errors.New("ptyhost: checkpoint output boundary overflow")
 		}
 		outputBytes += uint64(raw.OutputBytes)
+		name := raw.Path
+		if name == filepath.Base(transcript) {
+			name = stableCastSegmentName(transcript, raw.Incarnation)
+		}
+		if retention.expired(transcript, name) {
+			continue
+		}
 		path := filepath.Join(filepath.Dir(transcript), raw.Path)
 		segment, segmentErr := inspectCastHeader(path)
+		if raw.Path == filepath.Base(transcript) && (errors.Is(segmentErr, os.ErrNotExist) || segmentErr == nil && segment.incarnation != raw.Incarnation) {
+			segment, segmentErr = inspectCastHeader(filepath.Join(filepath.Dir(transcript), name))
+		}
 		if segmentErr != nil {
 			return nil, segmentErr
 		}
@@ -485,7 +527,7 @@ func validateCheckpointSegments(transcript string, checkpoint screenCheckpoint, 
 		}
 		segment.fileBytes = raw.FileBytes
 		segment.outputBytes = raw.OutputBytes
-		segments[i] = segment
+		segments = append(segments, segment)
 		if raw.Incarnation == checkpoint.Incarnation {
 			if index >= 0 {
 				return nil, errors.New("ptyhost: duplicate checkpoint incarnation")
@@ -509,13 +551,20 @@ func validateCheckpointSegments(transcript string, checkpoint screenCheckpoint, 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if len(paths) != len(segments) {
+	if len(paths) < len(segments) || exact && len(paths) != len(segments) {
 		return nil, errors.New("ptyhost: screen checkpoint segment set is stale")
 	}
-	for i := range paths {
-		if filepath.Clean(paths[i]) != filepath.Clean(segments[i].path) {
+	for i, segment := range segments {
+		if filepath.Clean(paths[i]) != filepath.Clean(segment.path) {
 			return nil, errors.New("ptyhost: screen checkpoint segment order mismatch")
 		}
+	}
+	for _, path := range paths[len(segments):] {
+		segment, err := inspectCastHeader(path)
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, segment)
 	}
 	return segments, nil
 }
@@ -600,6 +649,18 @@ func sameCastBoundaries(left, right []castSegment) bool {
 }
 
 func repairColdSnapshot(transcript string) (ScreenSnapshot, error) {
+	lifecycle := acquireTranscriptLifecycle(transcript)
+	lifecycle.entry.mu.RLock()
+	defer func() {
+		lifecycle.entry.mu.RUnlock()
+		lifecycle.release()
+	}()
+	return repairColdSnapshotLocked(transcript)
+}
+
+// repairColdSnapshotLocked streams one segment at a time. Its caller holds
+// the lifecycle lock, including callers preparing a bounded pinned replay.
+func repairColdSnapshotLocked(transcript string) (ScreenSnapshot, error) {
 	checkpointFile := checkpointPath(transcript)
 	expected, err := readCheckpointIdentity(checkpointFile)
 	if err != nil {
@@ -609,11 +670,13 @@ func repairColdSnapshot(transcript string) (ScreenSnapshot, error) {
 	// An exact v1 checkpoint is already a bounded, authoritative screen. Give
 	// it a fresh epoch because old clients carried no continuity proof, then
 	// atomically migrate it without decoding the cast.
-	if recovered, segments, position, legacy, loadErr := loadCurrentCheckpoint(transcript, true); loadErr == nil && legacy {
+	if recovered, segments, position, legacy, loadErr := loadCurrentCheckpoint(transcript, true); loadErr == nil {
 		snapshot := makeScreenSnapshot(recovered.screen, recovered.modes, position)
 		recovered.screen.dispose()
-		if err = persistColdCheckpoint(transcript, snapshot, segments, expected); err != nil {
-			return ScreenSnapshot{}, err
+		if legacy {
+			if err = persistColdCheckpoint(transcript, snapshot, segments, expected); err != nil {
+				return ScreenSnapshot{}, err
+			}
 		}
 		return snapshot, nil
 	}
@@ -638,9 +701,12 @@ func repairColdSnapshot(transcript string) (ScreenSnapshot, error) {
 	if !sameCastBoundaries(before, segments) || !sameCastBoundaries(segments, after) {
 		return ScreenSnapshot{}, errors.New("ptyhost: transcript changed during snapshot repair")
 	}
-	position, err := freshTerminalPosition()
-	if err != nil {
-		return ScreenSnapshot{}, err
+	position := recovered.position
+	if position.Epoch == "" {
+		position, err = freshTerminalPosition()
+		if err != nil {
+			return ScreenSnapshot{}, err
+		}
 	}
 	snapshot := makeScreenSnapshot(recovered.screen, recovered.modes, position)
 	if err := persistColdCheckpoint(transcript, snapshot, segments, expected); err != nil {
@@ -689,15 +755,18 @@ func recoverCheckpoint(transcript string) (recordedScreen, bool, error) {
 	if err != nil {
 		return recordedScreen{}, false, err
 	}
+	recovered.position = TerminalPosition{Epoch: checkpoint.Epoch, Sequence: checkpoint.Sequence}
 	for i := index; i < len(segments); i++ {
 		start := int64(0)
 		if i == index {
 			start = checkpoint.CastOffset
 		}
-		if _, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes); suffixErr != nil {
+		outputs, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes)
+		if suffixErr != nil {
 			recovered.screen.dispose()
 			return recordedScreen{}, false, suffixErr
 		}
+		recovered.position.Sequence += TerminalSequence(outputs)
 	}
 	return recovered, true, nil
 }
@@ -760,24 +829,4 @@ func applyCastSuffix(path string, offset int64, screen *terminalScreen, modes *m
 		}
 	}
 	return outputs, nil
-}
-
-func relocateCheckpointSegments(segments []castSegment, transcript string) {
-	paths, err := priorCastPaths(transcript)
-	if err != nil {
-		return
-	}
-	for i := range segments {
-		if segments[i].path != transcript {
-			continue
-		}
-		for _, path := range paths {
-			candidate, err := inspectCastHeader(path)
-			if err == nil && candidate.incarnation == segments[i].incarnation {
-				segments[i].path = path
-				segments[i].fileBytes = candidate.fileBytes
-				break
-			}
-		}
-	}
 }

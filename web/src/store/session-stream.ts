@@ -177,10 +177,14 @@ export async function loadOlderItems(store: RootStore, client: Api, runID: strin
   if (!session?.more || session.olderLoading) return
   store.getState().acpOlderState(runID, true)
   try {
-    const frames = await client.runACPHistory(runID, session.oldestSeq, historyPage)
-    store.getState().acpOlder(runID, frames, frames.length === historyPage && (frames[0]?.seq ?? 0) > 1)
+    const page = await client.runACPHistory(runID, session.oldestSeq, historyPage)
+    if (store.getState().acpSessions[runID]?.historyGeneration !== session.historyGeneration) return
+    const oldest = page.frames.find((frame) => frame.item)?.item?.seq ?? 0
+    store.getState().acpOlder(runID, page.frames, page.frames.length === historyPage && oldest > (page.oldest_seq ?? 1), page.truncated_before)
   } catch (err) {
-    store.getState().acpOlderState(runID, false, message(err))
+    if (store.getState().acpSessions[runID]?.historyGeneration === session.historyGeneration) {
+      store.getState().acpOlderState(runID, false, message(err))
+    }
   }
 }
 

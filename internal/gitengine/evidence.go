@@ -110,7 +110,12 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
 		return EvidenceRevision{}, boundsErr
 	}
-	tree, err := e.writeSnapshotTree(ctx, run, checkout)
+	// Keep the source objects pinned until fetch has copied them into the
+	// independently retained evidence repository.
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	tree, err := e.writeSnapshotTreeLocked(ctx, run, checkout)
 	if err != nil {
 		return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for run %s: %w", run, err)
 	}

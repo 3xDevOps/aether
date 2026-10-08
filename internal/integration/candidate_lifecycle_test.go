@@ -77,8 +77,8 @@ type candidateLifecycleTranscript struct {
 	data []byte
 }
 
-func (t candidateLifecycleTranscript) Replay(domain.RunID) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(t.data)), nil
+func (t candidateLifecycleTranscript) Replay(domain.RunID) (io.ReadCloser, bool, error) {
+	return io.NopCloser(bytes.NewReader(t.data)), false, nil
 }
 
 func newCandidateLifecycleFixture(t *testing.T, transcript io.Reader, withAdmission bool) *candidateLifecycleFixture {

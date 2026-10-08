@@ -344,10 +344,10 @@ func TestPlanIsReplacedWhole(t *testing.T) {
 	}
 }
 
-func (m *mockAgent) permissionRequest(toolCallID string) map[string]any {
+func (m *mockAgent) permissionRequest() map[string]any {
 	return map[string]any{
 		"sessionId": m.sessionID(),
-		"toolCall":  map[string]any{"toolCallId": toolCallID, "title": "rm -rf build", "kind": "execute", "status": "pending"},
+		"toolCall":  map[string]any{"toolCallId": "t1", "title": "rm -rf build", "kind": "execute", "status": "pending"},
 		"options": []any{
 			map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
 			map[string]any{"optionId": "reject", "name": "Reject", "kind": "reject_once"},
@@ -359,7 +359,7 @@ func TestPermissionAnswer(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 1)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		res, err := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
+		res, err := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest())
 		if err != nil {
 			got <- err.Error()
 		} else {
@@ -409,7 +409,7 @@ func TestCancelAnswersPendingRequests(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 2)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		res, _ := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
+		res, _ := m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest())
 		got <- string(res)
 		<-m.cancelled
 		return map[string]any{"stopReason": "cancelled"}, nil
@@ -747,7 +747,7 @@ func TestSteerStartingAnAgentTurnIsCancelled(t *testing.T) {
 func TestConnectionLossMidTurn(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
-		_, _ = m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest("t1"))
+		_, _ = m.request(call.ctx, acp.ClientMethodSessionRequestPermission, m.permissionRequest())
 		return nil, nil
 	}
 	s, rec := startMock(t, m, Config{})
@@ -1105,8 +1105,8 @@ func TestSubscribeReplaysAtMostTheWindow(t *testing.T) {
 		}
 		cancel()
 		want := min(last-after, ReplayWindow)
-		if int64(len(replay)) != want || replay[0].Seq != last-want+1 || replay[len(replay)-1].Seq != last {
-			t.Fatalf("Subscribe(%d) replayed %d items from %d, want the %d up to %d", after, len(replay), replay[0].Seq, want, last)
+		if int64(len(replay.Items)) != want || replay.Items[0].Seq != last-want+1 || replay.Items[len(replay.Items)-1].Seq != last {
+			t.Fatalf("Subscribe(%d) replayed %d items from %d, want the %d up to %d", after, len(replay.Items), replay.Items[0].Seq, want, last)
 		}
 	}
 }
@@ -1136,7 +1136,7 @@ func TestSubscribeHasNoGap(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cancel()
-	got := seqs(replay)
+	got := seqs(replay.Items)
 	for it := range ch {
 		got = append(got, it.Seq)
 		if it.Kind == KindTurnEnd {

@@ -45,6 +45,8 @@ type ScreenSnapshot struct {
 	Rows     uint
 	Data     []byte
 	Position TerminalPosition
+	// Earlier recorded output may expire while this screen remains complete.
+	TruncatedBefore bool
 }
 
 type terminalScreen struct {
@@ -554,8 +556,9 @@ func cloneScreenSnapshot(in ScreenSnapshot) ScreenSnapshot {
 }
 
 type recordedScreen struct {
-	screen *terminalScreen
-	modes  modeScanner
+	screen   *terminalScreen
+	modes    modeScanner
+	position TerminalPosition
 }
 
 // readCastScreen restores a durable compact checkpoint when it is valid and

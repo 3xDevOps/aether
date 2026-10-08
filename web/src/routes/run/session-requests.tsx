@@ -161,13 +161,14 @@ export function SessionRequestCard({ run, request, agent, position, id, classNam
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2 max-md:coarse:flex-col max-md:coarse:items-stretch">
+            {/* Keep tooltip wrappers mounted: adding one on focus replaces the pressed button before click. */}
             {options.map((option, index) => (
               <Button
                 key={option.id}
                 size="sm"
                 variant={optionVariant(option, options)}
                 disabled={!canAnswer || busy !== null || incomplete(option)}
-                hint={focused && keyed(index) ? `Press ${index + 1}` : undefined}
+                hint={keyed(index) ? `Press ${index + 1}` : undefined}
                 onClick={pick(index)}
               >
                 {busy === option.id ? 'Sending…' : option.name}

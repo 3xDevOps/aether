@@ -24,6 +24,7 @@ export interface SavedHistoryView {
 interface HistorySnapshot {
   count: number
   hasMore: boolean
+  truncatedBefore: boolean
   loading: boolean
   error: string | null
   revision: number
@@ -45,6 +46,7 @@ interface Header {
   scope: HistoryScope
   count: number
   hasMore: boolean
+  truncatedBefore?: boolean
   nextCursor?: string
   continuationError?: string
 }
@@ -220,7 +222,7 @@ function initializeSubscription() {
 }
 
 class RunHistoryCache implements HistoryCache {
-  private state: HistorySnapshot = { count: 0, hasMore: true, loading: false, error: null, revision: 0 }
+  private state: HistorySnapshot = { count: 0, hasMore: true, truncatedBefore: false, loading: false, error: null, revision: 0 }
   private listeners = new Set<() => void>()
   private ranges: PageRange[] = []
   private boundaryCursors: string[] = []
@@ -351,6 +353,7 @@ class RunHistoryCache implements HistoryCache {
       this.patch({
         count: header?.count ?? 0,
         hasMore: header?.hasMore ?? true,
+        truncatedBefore: header?.truncatedBefore ?? false,
         error: this.storageErrorMessage() ?? this.continuationError ?? null,
         revision: this.state.revision + 1,
       })
@@ -362,7 +365,7 @@ class RunHistoryCache implements HistoryCache {
   }
 
   private header(): Header {
-    return { key: this.key, scope: this.scope, count: this.state.count, hasMore: this.state.hasMore, nextCursor: this.nextCursor, continuationError: this.continuationError }
+    return { key: this.key, scope: this.scope, count: this.state.count, hasMore: this.state.hasMore, truncatedBefore: this.state.truncatedBefore, nextCursor: this.nextCursor, continuationError: this.continuationError }
   }
 
   readView = async (): Promise<SavedHistoryView | null> => {
@@ -473,7 +476,7 @@ class RunHistoryCache implements HistoryCache {
           if (!this.current()) return
           this.clearArchive()
           this.clearStorageError('reset')
-          this.patch({ count: 0, hasMore: true, error: this.storageErrorMessage() ?? null, revision: this.state.revision + 1 })
+          this.patch({ count: 0, hasMore: true, truncatedBefore: false, error: this.storageErrorMessage() ?? null, revision: this.state.revision + 1 })
         } catch (cause) {
           this.storageError(cause, 'reset')
           throw cause
@@ -556,6 +559,7 @@ class RunHistoryCache implements HistoryCache {
       this.patch({
         count: this.state.count + lines.length,
         hasMore: page.has_more,
+        truncatedBefore: this.state.truncatedBefore || page.truncated_before === true,
         error: this.state.error,
         revision: this.state.revision + 1,
       })

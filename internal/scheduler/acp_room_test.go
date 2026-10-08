@@ -132,10 +132,11 @@ func roomDiagnosis(t *testing.T, e *testEnv, rt *acpRuntime, run domain.RunID, i
 	for i, x := range rt.all() {
 		fmt.Fprintf(&b, "exec %d %s: exited %v\n", i, x.identity.ExecID, x.exited())
 	}
-	items, err := e.sched.ACPHistory(run, 0, 0)
+	page, err := e.sched.ACPHistory(run, 0, 0)
 	if err != nil {
 		fmt.Fprintf(&b, "history: %v\n", err)
 	}
+	items := page.Items
 	for _, it := range items[max(0, len(items)-40):] {
 		fmt.Fprintf(&b, "item %d turn %d %s", it.Seq, it.Turn, it.Kind)
 		switch {

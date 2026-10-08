@@ -1032,9 +1032,9 @@ const maxFinishedScreenReplayBytes = 1 << 20
 // repair is pending. Raw and explicit full-history attaches retain Replay.
 func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed, screen bool, controlSnap control.Snapshot, controlHeld bool) bool {
 	var (
-		rc          io.ReadCloser
-		replayBytes int
-		err         error
+		rc              io.ReadCloser
+		replayBytes     int
+		truncatedBefore bool
 	)
 	if framed {
 		snap, snapErr := s.cfg.PTY.Snapshot(run.ID)
@@ -1048,29 +1048,32 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 					}
 					return false
 				}
-				rc, replayBytes = window.Reader, window.Bytes
+				rc, replayBytes, truncatedBefore = window.Reader, window.Bytes, window.TruncatedBefore
 				cols, rows = window.Cols, window.Rows
 			}
 		} else {
 			cols, rows = snap.Cols, snap.Rows
 			if screen {
+				truncatedBefore = snap.TruncatedBefore
 				replayBytes = len(snap.Data)
 				rc = io.NopCloser(bytes.NewReader(snap.Data))
 			}
 		}
 	}
 	if rc == nil {
-		rc, replayBytes, err = s.cfg.PTY.Replay(run.ID)
+		window, err := s.cfg.PTY.Replay(run.ID)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				slog.Warn("sshd: open transcript for attach replay", "run", run.ID, "error", err)
 			}
 			return false
 		}
+		rc, replayBytes, truncatedBefore = window.Reader, window.Bytes, window.TruncatedBefore
 	}
 	defer func() { _ = rc.Close() }()
 	ack := protocol.AttachResponse{
 		OK: true, Cols: cols, Rows: rows, Replay: replayBytes, Framed: framed,
+		TruncatedBefore: truncatedBefore,
 	}
 	if s.cfg.Control != nil {
 		s.attachControlAck(&ack, controlSnap, controlHeld)

@@ -71,6 +71,18 @@ func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
 		t.Fatalf("files.read leaked host path: %q", pe.Message)
 	}
 }
+
+func TestFileDiffStagingLimitDoesNotClaimCheckoutRemoved(t *testing.T) {
+	reader := &fakeFiles{diffErr: errors.Join(gitengine.ErrSnapshotStorageLimit, errors.New("private /host/checkout"))}
+	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
+	err := controlClient(t, e).Call(protocol.MethodFilesDiff, protocol.FilesDiffParams{
+		RunID: string(e.run.ID), Path: "file.txt",
+	}, nil)
+	pe := wireErrOf(t, err)
+	if pe.Code != protocol.CodeUnavailable || pe.Message != "files.diff: current diff input exceeds 128 MiB or available disk headroom" {
+		t.Fatalf("diff staging refusal = %+v", pe)
+	}
+}
 func TestFilesWriteRequiresRunOrWorkspaceWritePermission(t *testing.T) {
 	t.Parallel()
 	reader := &fakeFiles{}

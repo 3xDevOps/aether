@@ -788,8 +788,14 @@ func (e *Engine) FileDiff(ctx context.Context, run domain.RunID, path string) (P
 	} else if !errors.Is(readErr, fs.ErrNotExist) {
 		return Patch{}, fmt.Errorf("%w: read checkout index for run %s: %v", ErrInvalidPath, run, readErr)
 	}
+	if err = e.checkCaptureBounds(ctx, run, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
+		return Patch{}, err
+	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return Patch{}, addErr
+	}
+	if err = e.checkStagedBounds(ctx, checkout, index); err != nil {
+		return Patch{}, err
 	}
 	text, truncated, err := e.gitStaged(ctx, checkout, index, MaxPatchBytes,
 		"diff", "--cached", "--no-color", "--no-renames", meta.Base, "--", path)

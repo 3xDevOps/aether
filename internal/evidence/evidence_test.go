@@ -296,15 +296,16 @@ type evidenceTestEvents struct {
 func (e evidenceTestEvents) LastSeq(context.Context) (uint64, error) { return e.seq, e.err }
 
 type evidenceTestTranscript struct {
-	data []byte
-	err  error
+	data          []byte
+	err           error
+	prefixExpired bool
 }
 
-func (t *evidenceTestTranscript) Replay(domain.RunID) (io.ReadCloser, error) {
+func (t *evidenceTestTranscript) Replay(domain.RunID) (io.ReadCloser, bool, error) {
 	if t.err != nil {
-		return nil, t.err
+		return nil, false, t.err
 	}
-	return io.NopCloser(bytes.NewReader(t.data)), nil
+	return io.NopCloser(bytes.NewReader(t.data)), t.prefixExpired, nil
 }
 
 type recordingEvidenceFS struct {

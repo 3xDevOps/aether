@@ -133,6 +133,8 @@ func (s *Server) terminalHistory(ctx context.Context, _ domain.MemberID, params 
 		switch {
 		case errors.Is(err, ptyhost.ErrInvalidHistoryCursor):
 			return nil, invalidParams("invalid terminal history cursor")
+		case errors.Is(err, ptyhost.ErrHistoryCursorExpired):
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "earlier terminal history has expired"}
 		case errors.Is(err, ptyhost.ErrHistoryQueryTooLong):
 			return nil, invalidParams("terminal history query is too long")
 		case errors.Is(err, ptyhost.ErrInvalidRunID):
@@ -170,7 +172,7 @@ func (s *Server) terminalHistory(ctx context.Context, _ domain.MemberID, params 
 		}
 	}
 	return protocol.TerminalHistoryResult{
-		Lines: lines, NextCursor: page.NextCursor, HasMore: page.HasMore,
+		Lines: lines, NextCursor: page.NextCursor, HasMore: page.HasMore, TruncatedBefore: page.TruncatedBefore,
 	}, nil
 }
 

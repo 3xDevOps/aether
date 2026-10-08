@@ -128,6 +128,26 @@ func TestAttachResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 	}
 }
 
+func TestAttachResponseKeepsExpiredPrefixAndExactReplay(t *testing.T) {
+	const retained = "\x1b[31mretained\r\n世界\x00"
+	stream := &sessionStream{
+		Reader: strings.NewReader(`{"ok":true,"truncated_before":true}` + "\n" + retained),
+		stdin:  &trackingWriteCloser{},
+	}
+	var ack protocol.AttachResponse
+	out, err := readAck(stream, &ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ack.OK || !ack.TruncatedBefore {
+		t.Fatalf("retained replay ack = %+v", ack)
+	}
+	body, err := io.ReadAll(out)
+	if err != nil || string(body) != retained {
+		t.Fatalf("retained replay = %q, err=%v", body, err)
+	}
+}
+
 func TestTerminalResponseKeepsAckErrorAndLeftoverBytes(t *testing.T) {
 	stream := &sessionStream{
 		Reader: strings.NewReader(`{"ok":true,"tab":"main","cols":80,"rows":24}` + "\n" + "terminal output"),

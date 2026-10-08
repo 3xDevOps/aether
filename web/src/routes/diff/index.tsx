@@ -28,8 +28,8 @@ export function ChangesView({ runID }: { runID: string }) {
   const caps = useCapability()
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
-  // Keyed on the snapshot's time, not its index: new snapshots are prepended.
-  const [selected, setSelected] = useState<string | null>(null)
+  // Keep the chosen interval even when newer snapshots move it out of the menu.
+  const [snapshot, setSnapshot] = useState<DiffSnapshot | null>(null)
   const wrapping = useStore((s) => s.diffWrap)
   const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
@@ -41,16 +41,17 @@ export function ChangesView({ runID }: { runID: string }) {
   const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
-  const snapshot = selected === null ? null : (state.snapshots.find((s) => s.time === selected) ?? null)
-  const interval = useInterval(run ? runID : '', snapshot)
+  const outsideWindow = snapshot !== null && !state.snapshots.some((entry) => entry.time === snapshot.time)
+  const interval = useInterval(run ? runID : '', outsideWindow ? null : snapshot)
   const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
   const files = snapshot ? changed : cumulative
   const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
-  const error = snapshot ? interval?.error : state.error
-  const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
-  const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
+  const error = outsideWindow ? 'This interval is no longer in the dashboard history window.' : snapshot ? interval?.error : state.error
+  const failed = snapshot ? outsideWindow || interval?.status === 'error' : state.status === 'error'
+  const loading = snapshot ? !outsideWindow && (!interval || interval.status === 'loading') : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
+  const historyNotice = snapshot ?? state.snapshots.find((entry) => entry.historyGap || entry.snapshotError)
 
   const toggle = useCallback((path: string, next: boolean) => setCollapsed((all) => ({ ...all, [path]: next })), [])
   const open = useCallback((path: string) => {
@@ -91,7 +92,7 @@ export function ChangesView({ runID }: { runID: string }) {
         files={files}
         snapshots={state.snapshots}
         selected={snapshot}
-        onSelect={setSelected}
+        onSelect={(time) => setSnapshot(time === null ? null : state.snapshots.find((entry) => entry.time === time) ?? null)}
         base={state.base}
         wrap={wrap}
         onWrap={setWrapping}
@@ -101,9 +102,18 @@ export function ChangesView({ runID }: { runID: string }) {
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
         publishable={cumulative.length > 0}
       />
+      {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
+        <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2 shrink-0">
+          {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
+          <p>{snapshot
+            ? 'This interval spans a gap in recorded snapshot history; intermediate changes are unavailable.'
+            : 'Some snapshot history is unavailable. The current diff is separate and still shows changes against the fork point.'}</p>
+        </Callout>
+      )}
       {failed && (
         <Callout tone="failed" role="alert" className="m-2 shrink-0">
           {error ?? 'The diff could not be loaded.'}
+          {snapshot && <p>This historical interval is unavailable. Choose Current diff to view the cumulative changes.</p>}
         </Callout>
       )}
       {truncated && (

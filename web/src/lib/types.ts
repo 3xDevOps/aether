@@ -489,6 +489,7 @@ export interface TerminalHistoryResult {
   lines: TerminalHistoryLine[]
   next_cursor?: string
   has_more: boolean
+  truncated_before?: boolean
 }
 
 export interface EnvSaveResult {
@@ -824,6 +825,8 @@ export interface RunDiffPayload {
   /** The previous snapshot's tree, or the fork-point tree for the first one.
    * Both trees are absent from servers that predate per-snapshot trees. */
   parent_tree?: string
+  history_gap?: boolean
+  snapshot_error?: string
 }
 
 /** One other active run touching files a run also touches. */

@@ -153,7 +153,6 @@ type Session struct {
 	subs       map[chan Item]struct{}
 	closed     bool
 	hostClosed bool
-	capped     bool
 	state      State
 	actAt      time.Time
 	actNext    *[2]string
@@ -625,16 +624,15 @@ func ReplayStart(afterSeq, last int64) int64 { return max(afterSeq, last-ReplayW
 // falls more than subscriberBuffer items behind has its channel closed and
 // resubscribes from its last seq. The channel is closed when the session
 // ends or cancel is called.
-func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error) {
-	// The replay is read outside the session lock: holding it would stall
-	// session/update handling, and the SDK closes the agent connection when
-	// its notification queue overflows.
+func (s *Session) Subscribe(afterSeq int64) (SubscriptionReplay, <-chan Item, func(), error) {
+	// Pin the replay before releasing mu, so compaction cannot move its
+	// boundary between capturing history and registering live delivery.
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return nil, nil, nil, ErrClosed
+		return SubscriptionReplay{}, nil, nil, ErrClosed
 	}
-	last := s.log.LastSeq()
+	replay, read := s.log.beginReplay(afterSeq)
 	ch := make(chan Item, subscriberBuffer)
 	s.subs[ch] = struct{}{}
 	s.mu.Unlock()
@@ -646,16 +644,11 @@ func (s *Session) Subscribe(afterSeq int64) ([]Item, <-chan Item, func(), error)
 			close(ch)
 		}
 	}
-	afterSeq = ReplayStart(afterSeq, last)
-	if afterSeq >= last {
-		return nil, ch, cancel, nil
-	}
-	// Sequence numbers are contiguous from 1, so this stops at last, where
-	// the channel takes over.
-	replay, err := s.log.ReadAfter(afterSeq, int(last-max(afterSeq, 0)))
+	var err error
+	replay.Items, err = read.items()
 	if err != nil {
 		cancel()
-		return nil, nil, nil, err
+		return SubscriptionReplay{}, nil, nil, err
 	}
 	return replay, ch, cancel, nil
 }
@@ -677,18 +670,6 @@ func (s *Session) emitLocked(it Item) {
 		s.state.Auth = it.Auth
 	}
 	it.Turn = s.turn
-	if _, size, _ := s.log.state(); size >= MaxRunBytes && !it.essential() {
-		if !s.capped {
-			s.capped = true
-			s.appendLocked(Item{Kind: KindNotice, Turn: s.turn, Notice: &Notice{
-				Severity: "warning",
-				Title:    "Session log is full",
-				Description: fmt.Sprintf("The item log reached %d MiB; only requests and turn boundaries are recorded from here.",
-					MaxRunBytes>>20),
-			}})
-		}
-		return
-	}
 	s.appendLocked(it)
 }
 

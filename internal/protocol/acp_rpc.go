@@ -80,7 +80,9 @@ type RunACPHistoryParams struct {
 
 // RunACPHistoryResult is one page, oldest first, as stream frames.
 type RunACPHistoryResult struct {
-	Frames []ACPFrame `json:"frames"`
+	Frames          []ACPFrame `json:"frames"`
+	OldestSeq       int64      `json:"oldest_seq"`
+	TruncatedBefore bool       `json:"truncated_before,omitempty"`
 }
 
 type RunACPItemParams struct {

@@ -611,6 +611,39 @@ screen. Some content can appear on both sides: the dashboard does not
 heuristically deduplicate text against VT rows or replay the raw recording
 into xterm.
 
+The server keeps a rolling archive, not an unlimited recording: complete
+events rotate at 16 MiB, with a 128 MiB retained target (eight segments)
+per session and a seven-day age limit for sealed segments. The active
+segment and latest compact screen remain available; these are retention
+targets, not a hard quota on an event being written. Output keeps flowing,
+and absolute sequence positions do not restart when older segments expire.
+Container, checkout and retained evidence lifetimes are separate.
+Retention is applied during ordinary live checkpoint maintenance, at startup,
+hourly, and when full cold replay is opened. Startup/hourly maintenance
+also expires sealed segments from stopped run terminals, member terminal tabs,
+and run shells without requiring anyone to read or reopen them. Active or
+starting sessions remain under their live writer's retention policy.
+During maintenance or full cold replay, legacy archives with missing,
+old-format or stale checkpoints are repaired one segment at a time before
+pruning and opening retained replay descriptors. The latest compact screen
+and absolute byte accounting survive that migration. Paged history and bounded
+recent replay remain lazy reads: they do not force full legacy repair or scan
+unrelated older segments. Recent replay without a validated checkpoint does
+not claim a proven terminal position.
+The private retention frontier keeps absolute byte accounting without replaying
+expired data. Already-open replay readers pin their finite window: removed
+segments can still occupy disk space until those readers close. A replay's
+proven end boundary is independent of whether its earlier prefix has expired.
+
+Archived attach acknowledgments report `truncated_before: true` when earlier
+recorded output has expired, including compact screen snapshots and the
+recent-output fallback. A complete current screen does not imply a complete
+recording. Raw history downloads report the same fact in
+`X-Aether-Truncated-Before: true|false`.
+Replay byte counts and downloaded `.ansi` bodies describe the exact retained
+output, with no synthetic expiry marker bytes; they need not represent the
+original complete recording.
+
 As you approach the oldest loaded rows, the dashboard prefetches older pages
 and prepends them without moving the row or partial-row pixel offset you are
 reading. Only the visible rows and a small overscan window are rendered.
@@ -649,6 +682,21 @@ older output remains. Paging automatically continues with the authenticated
 opaque cursor returned by the server; it is tied to this run and query and
 must not be constructed or edited by the client. The dashboard's Find does
 not use the protocol's separate server-search option.
+
+Responses carry `truncated_before:true` when earlier recording has expired.
+An authenticated cursor into a pruned segment returns an explicit history
+expiry error, not an empty complete recording or a silently restarted page.
+Malformed or forged cursors remain invalid parameters. The reader keeps its
+position and shows the error; returning live and starting a new reading
+episode deliberately opens the newest retained window.
+
+Evidence capture copies available transcript bytes into its own immutable
+artifact before cleanup. It marks the source truncated if an earlier prefix
+already expired, if the copy reaches its 16 MiB cap with more source bytes,
+or both, naming the actual causes. An exact-limit complete source is not
+marked truncated. Those facts and the recorded artifact length survive
+retry and server restart; subsequent terminal-history cleanup cannot change
+the retained copy. Expired history cannot be reconstructed by capturing it.
 
 The retained raw archive remains separately available to non-dashboard
 compatibility clients through `GET /api/runs/<run_id>/terminal-history` and

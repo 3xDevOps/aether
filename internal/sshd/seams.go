@@ -20,9 +20,9 @@ type GitTransport interface {
 // PTYAttacher is the SSH server's view of the PTY host (*ptyhost.Host).
 type PTYAttacher interface {
 	Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error
-	// Replay streams a run's recorded transcript as raw terminal bytes and
-	// reports their count; os.ErrNotExist when the run never recorded one.
-	Replay(run domain.RunID) (io.ReadCloser, int, error)
+	// Replay opens a finite retained transcript window with atomic metadata;
+	// os.ErrNotExist when the run never recorded one.
+	Replay(run domain.RunID) (ptyhost.ReplayWindow, error)
 	// RecentReplay returns a bounded suffix of a run's recorded transcript.
 	RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWindow, error)
 	// Snapshot returns the compact current screen for a finished-run attach.
@@ -85,7 +85,7 @@ type RunController interface {
 	ACPSetOption(ctx context.Context, run domain.RunID, optionID string, value any) error
 	// ACPHistory reads up to limit items before beforeSeq, oldest first;
 	// zero reads from the newest.
-	ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error)
+	ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	ACPItem(run domain.RunID, seq int64) (acphost.Item, error)
 	AgentSwitchable(ctx context.Context, member, account domain.MemberID, harness string) (bool, error)
 	SwitchMode(ctx context.Context, run domain.RunID, actor domain.MemberID, mode domain.LaunchMode, admit func(begin func() error) error) error

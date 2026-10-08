@@ -56,6 +56,42 @@ afterEach(() => {
 })
 
 describe('retained terminal history', () => {
+  it('persists an expired prefix without treating it as a missing retained page', async () => {
+    const line = { cursor: 'retained:200', time: 200, text: 'retained output' }
+    const client = { terminalHistory: vi.fn().mockResolvedValue({ lines: [line], has_more: false, truncated_before: true }) }
+    const cache = getHistoryCache(scope, client)
+    await cache.loadOlder()
+    expect(cache.snapshot()).toMatchObject({ count: 1, hasMore: false, truncatedBefore: true, error: null })
+    await cache.saveView(savedView(-1))
+    cache.cancel()
+    // Reload the module boundary: static imports would reuse the resident cache instead of IndexedDB.
+    vi.resetModules()
+    const { useStore: restoredStore } = await import('@/store')
+    restoredStore.setState({ identityKey: scope.identityKey, terminalCacheEpoch: scope.epoch, runs: {}, hydrated: false })
+    const { getHistoryCache: restoreCache } = await import('@/routes/terminal/history-cache')
+    const network = { terminalHistory: vi.fn().mockRejectedValue(new Error('offline')) }
+    const restored = restoreCache(scope, network)
+    expect(await restored.readRows(-1, 0)).toEqual([{ index: -1, line }])
+    expect(restored.snapshot()).toMatchObject({ truncatedBefore: true, hasMore: false, error: null })
+    await restored.loadOlder()
+    expect(network.terminalHistory).not.toHaveBeenCalled()
+  })
+
+  it('keeps an expired authenticated cursor and cached rows on retry instead of silently restarting', async () => {
+    const line = { cursor: 'retained:200', time: 200, text: 'retained output' }
+    const terminalHistory = vi.fn()
+      .mockResolvedValueOnce({ lines: [line], next_cursor: 'signed-old-boundary', has_more: true })
+      .mockRejectedValue(new Error('Requested terminal history has expired'))
+    const cache = getHistoryCache(scope, { terminalHistory })
+    await cache.loadOlder()
+    await cache.loadOlder()
+    expect(cache.snapshot()).toMatchObject({ count: 1, error: 'Requested terminal history has expired' })
+    expect(await cache.readRows(-1, 0)).toEqual([{ index: -1, line }])
+    await cache.loadOlder()
+    expect(terminalHistory.mock.calls.slice(1).map(([params]) => params.before)).toEqual(['signed-old-boundary', 'signed-old-boundary'])
+    expect(cache.snapshot().count).toBe(1)
+  })
+
   it('reaches the archive beginning and revisits older disk pages without moving newer row anchors', async () => {
     const client = archive(2601)
     const cache = getHistoryCache(scope, client)

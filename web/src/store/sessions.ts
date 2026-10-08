@@ -43,6 +43,8 @@ export interface AcpSession {
   seq: number
   oldestSeq: number
   more: boolean
+  truncatedBefore: boolean
+  historyGeneration: number
   turns: Turn[]
   state: SessionState | null
   pending: SessionRequest[]
@@ -69,7 +71,7 @@ export interface SessionsSlice {
   expandedRows: Record<string, Record<string, true>>
   acpAck: (runID: string, ack: SessionStreamAck) => void
   acpFrames: (runID: string, frames: SessionFrame[]) => void
-  acpOlder: (runID: string, frames: SessionFrame[], more: boolean) => void
+  acpOlder: (runID: string, frames: SessionFrame[], more: boolean, truncatedBefore?: boolean) => void
   acpOlderState: (runID: string, loading: boolean, error?: string) => void
   acpReplaceItem: (runID: string, item: SessionItem) => void
   acpStream: (runID: string, stream: StreamState, error?: string) => void
@@ -98,6 +100,8 @@ const emptySession: AcpSession = {
   seq: 0,
   oldestSeq: 0,
   more: false,
+  truncatedBefore: false,
+  historyGeneration: 0,
   turns: [],
   state: null,
   pending: [],
@@ -181,9 +185,9 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const held = s.acpSessions[runID] ?? emptySession
       const restart = ack.epoch !== held.epoch || ack.oldest_seq !== undefined
       const base = restart
-        ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1 }
+        ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
         : {}
-      return patchSession(s, runID, { ...base, epoch: ack.epoch, live: ack.live, state: ack.state ?? null, pending: ack.state?.pending ?? [] })
+      return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, pending: ack.state?.pending ?? [] })
     }),
   acpFrames: (runID, frames) =>
     set((s) => {
@@ -203,7 +207,16 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       for (const frame of frames) {
         if (frame.reset) {
           flush()
-          session = { ...session, turns: [], seq: 0, oldestSeq: 0, more: false, pending: [], epoch: frame.epoch ?? session.epoch + 1 }
+          const sameEpoch = frame.epoch === session.epoch
+          session = {
+            ...session, turns: [], seq: 0, oldestSeq: 0,
+            more: sameEpoch && session.more,
+            truncatedBefore: sameEpoch && session.truncatedBefore,
+            historyGeneration: session.historyGeneration + 1,
+            olderLoading: false, olderError: undefined,
+            pending: sameEpoch ? session.pending : [],
+            epoch: frame.epoch ?? session.epoch + 1,
+          }
           continue
         }
         const [item] = itemsOf([frame])
@@ -212,7 +225,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       flush()
       return { acpSessions: { ...s.acpSessions, [runID]: session } }
     }),
-  acpOlder: (runID, frames, more) =>
+  acpOlder: (runID, frames, more, truncatedBefore = false) =>
     set((s) => {
       const session = s.acpSessions[runID]
       if (!session) return {}
@@ -221,6 +234,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
         turns: prependItems(session.turns, older),
         oldestSeq: older[0]?.seq ?? session.oldestSeq,
         more: more && older.length > 0,
+        truncatedBefore: session.truncatedBefore || truncatedBefore,
         olderLoading: false,
         olderError: undefined,
       })

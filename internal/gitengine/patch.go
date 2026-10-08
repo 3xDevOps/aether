@@ -2,8 +2,11 @@ package gitengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -75,6 +78,9 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	if err != nil {
 		return Patch{}, err
 	}
+	if err = e.checkCaptureBounds(ctx, run, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
+		return Patch{}, err
+	}
 	dir, err := os.MkdirTemp("", "aether-patch-")
 	if err != nil {
 		return Patch{}, fmt.Errorf("gitengine: scratch index for run %s: %w", run, err)
@@ -86,6 +92,9 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	}
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return Patch{}, addErr
+	}
+	if err = e.checkStagedBounds(ctx, checkout, index); err != nil {
+		return Patch{}, err
 	}
 	text, truncated, err := e.gitStaged(ctx, checkout, index, maxBytes,
 		"diff", "--cached", "--no-color", "--no-renames", meta.Base)
@@ -101,6 +110,9 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 // name a tree: a committish would otherwise peel to its tree and render a
 // diff the timeline never offered.
 func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, from, to string, maxBytes int) (Patch, error) {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
 	if from == "" || to == "" {
 		return Patch{}, fmt.Errorf("%w: a snapshot range needs both ends", ErrInvalidObjectID)
 	}
@@ -119,6 +131,16 @@ func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, fro
 	if _, statErr := os.Stat(store); statErr != nil {
 		return Patch{}, fmt.Errorf("%w: run %s has no snapshot store", ErrSnapshotTreeMissing, run)
 	}
+	// Quiet/finished pre-upgrade runs have HEAD and last, but no retained
+	// catalog. Migrate under the reader's GC lock before testing membership;
+	// a new capture (which may exceed today's input bound) is not required.
+	if _, err = os.Stat(filepath.Join(store, lastTreeFile)); err == nil {
+		if err = e.initSnapshotStore(ctx, run, checkout, store); err != nil {
+			return Patch{}, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Patch{}, err
+	}
 	// A tree-to-tree diff reads objects and never stages, so the store's
 	// index is named for GIT_INDEX_FILE but neither seeded nor written -
 	// which also keeps a read clear of the lock the watch's staging takes.
@@ -129,6 +151,17 @@ func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, fro
 	for _, id := range []string{from, to} {
 		if resolveErr := e.requireSnapshotTree(ctx, checkout, index, id); resolveErr != nil {
 			return Patch{}, resolveErr
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(store, "HEAD")); statErr == nil {
+		retained, _, refsErr := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
+		if refsErr != nil {
+			return Patch{}, refsErr
+		}
+		for _, id := range []string{from, to} {
+			if !slices.Contains(strings.Fields(retained), id) {
+				return Patch{}, fmt.Errorf("%w: %s", ErrSnapshotTreeMissing, id)
+			}
 		}
 	}
 	text, truncated, err := e.gitStaged(ctx, checkout, index, maxBytes,

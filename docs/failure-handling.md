@@ -553,7 +553,7 @@ the container and shell are still healthy, not that an OOM spared them.
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted**. |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
-| The agent sends more than 64 MiB to the item log | From then on only requests, turn boundaries and notices are recorded, with a **Session log is full** notice. |
+| The agent sends more than 64 MiB to the item log | The log rolls its latest retained window while recording continues. Earlier items expire; Session shows that boundary, and a full-item lookup for an expired ID returns an explicit unavailable error. Active turn and permission state remain live. |
 
 A background run over ACP ([enhanced-runs.md](enhanced-runs.md#background-runs))
 differs: an ACP server that fails to start or exits, a cancelled turn, or any

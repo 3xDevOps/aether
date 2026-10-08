@@ -31,6 +31,7 @@ type ACPStreamResponse struct {
 	Seq               int64           `json:"seq"`
 	Replay            int             `json:"replay"`
 	OldestSeq         int64           `json:"oldest_seq,omitempty"`
+	TruncatedBefore   bool            `json:"truncated_before,omitempty"`
 	Epoch             int64           `json:"epoch"`
 	Live              bool            `json:"live"`
 	State             json.RawMessage `json:"state,omitempty"`

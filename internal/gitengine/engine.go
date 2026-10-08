@@ -38,7 +38,9 @@ var (
 	ErrInvalidObjectID = errors.New("gitengine: not a git object id")
 	// ErrSnapshotTreeMissing reports a well-formed tree id that the run's
 	// snapshot store no longer holds.
-	ErrSnapshotTreeMissing = errors.New("gitengine: snapshot tree not found")
+	ErrSnapshotTreeMissing = errors.New("gitengine: retained snapshot history expired or unavailable")
+	// ErrSnapshotStorageLimit leaves current files untouched when staging is too large.
+	ErrSnapshotStorageLimit = errors.New("gitengine: snapshot input exceeds storage limit")
 	// ErrEvidenceStorageLimit reports a capture refused before any retained
 	// ref is created because the agent-controlled input is too large or disk
 	// headroom is insufficient.

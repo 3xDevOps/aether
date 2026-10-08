@@ -8,7 +8,7 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('an Enhanced run streams, answers a permission, takes a message and stops on Interrupt', async ({ page, aether }) => {
+test('an Enhanced run streams, answers a permission, takes a message and stops on Interrupt', async ({ page, aether }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -43,6 +43,14 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
     const [row, view] = await Promise.all([log.getByText('permission: allow').boundingBox(), log.boundingBox()])
     return Boolean(row && view && row.y >= view.y && row.y + row.height <= view.y + view.height)
   }, { message: 'the answered reply sits inside the scrolled log' }).toBe(true)
+
+  await box.fill('ask permission')
+  await box.press('ControlOrMeta+Enter')
+  await expect(card.getByText('rm -rf build')).toBeVisible()
+  await expect(card).not.toBeFocused()
+  await card.getByRole('button', { name: 'Allow', exact: true }).click()
+  await expect(log.getByText('permission: allow', { exact: true })).toHaveCount(2)
+  await page.screenshot({ path: testInfo.outputPath('enhanced-first-click-approval.png') })
 
   await box.fill('demo')
   await box.press('ControlOrMeta+Enter')

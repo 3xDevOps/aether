@@ -468,7 +468,7 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 80 || ack.Rows != 24 || ack.Replay != len("recorded output") {
+	if !ack.OK || ack.TruncatedBefore || ack.Cols != 80 || ack.Rows != 24 || ack.Replay != len("recorded output") {
 		t.Fatalf("ack = %+v, want ok with default geometry and full replay length", ack)
 	}
 	buf := make([]byte, len("recorded output"))
@@ -480,6 +480,60 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	}
 	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
 		t.Fatalf("after replay read = %v, want EOF", err)
+	}
+}
+
+func TestAttachFinishedRunReportsExpiredPrefixWithoutChangingBytes(t *testing.T) {
+	for _, request := range []protocol.AttachRequest{{}, {Framed: true}, {Framed: true, Screen: true}} {
+		t.Run(fmt.Sprintf("framed=%t/screen=%t", request.Framed, request.Screen), func(t *testing.T) {
+			e := newTestEnv(t, nil)
+			e.pty.setErr(errNoSession)
+			retained := "\x1b[31mretained\r\n世界\x00"
+			e.pty.setTranscript(e.run.ID, []byte(retained))
+			e.pty.truncatedBefore = true
+			if request.Screen {
+				retained = "\x1b[2Jcurrent screen\r\n"
+				e.pty.snapshots = map[domain.RunID]ptyhost.ScreenSnapshot{
+					e.run.ID: {Cols: 80, Rows: 24, Data: []byte(retained), TruncatedBefore: true},
+				}
+			}
+			if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+			request.RunID, request.ReadOnly = string(e.run.ID), true
+			if err := json.NewEncoder(pipe).Encode(request); err != nil {
+				t.Fatal(err)
+			}
+			r := bufio.NewReader(pipe)
+			var ack protocol.AttachResponse
+			readJSONLine(t, r, &ack)
+			if !ack.OK || !ack.TruncatedBefore || ack.Replay != len(retained) || ack.Framed != request.Framed {
+				t.Fatalf("retained replay ack = %+v", ack)
+			}
+			if request.Framed {
+				reader := &protocol.TerminalReader{Reader: r}
+				buf := make([]byte, len(retained))
+				n, size, err := reader.Read(buf)
+				if err != nil || n != len(retained) || string(buf[:n]) != retained || size != [2]uint{} {
+					t.Fatalf("retained output = %q, size=%v, err=%v", buf[:n], size, err)
+				}
+				if _, _, err := reader.Read(buf); !errors.Is(err, io.EOF) {
+					t.Fatalf("after replay = %v, want EOF", err)
+				}
+			} else {
+				got, err := io.ReadAll(r)
+				if err != nil || string(got) != retained {
+					t.Fatalf("retained output = %q, err=%v", got, err)
+				}
+			}
+			e.pty.mu.Lock()
+			inputBytes := e.pty.input.Len()
+			e.pty.mu.Unlock()
+			if inputBytes != 0 {
+				t.Fatalf("archived replay accepted %d input bytes", inputBytes)
+			}
+		})
 	}
 }
 
@@ -502,7 +556,7 @@ func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 120 || ack.Rows != 30 || ack.Replay != len("complete recorded output") {
+	if !ack.OK || ack.TruncatedBefore || ack.Cols != 120 || ack.Rows != 30 || ack.Replay != len("complete recorded output") {
 		t.Fatalf("ack = %+v, want snapshot geometry and complete transcript length", ack)
 	}
 	reader := &protocol.TerminalReader{Reader: r}
@@ -552,8 +606,9 @@ func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) 
 	e.pty.recent = map[domain.RunID]fakeRecentReplay{
 		e.run.ID: {
 			data: []byte("recent output"), cols: 132, rows: 43,
-			position: ptyhost.TerminalPosition{Epoch: "unproven", Sequence: 99},
-			complete: true,
+			position:        ptyhost.TerminalPosition{Epoch: "unproven", Sequence: 99},
+			complete:        true,
+			truncatedBefore: true,
 		},
 	}
 	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
@@ -567,7 +622,7 @@ func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) 
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 132 || ack.Rows != 43 || ack.Replay != len("recent output") {
+	if !ack.OK || !ack.TruncatedBefore || ack.Cols != 132 || ack.Rows != 43 || ack.Replay != len("recent output") {
 		t.Fatalf("ack = %+v, want bounded recent replay geometry and length", ack)
 	}
 	if position := ack.HighWater(); position.Valid() {

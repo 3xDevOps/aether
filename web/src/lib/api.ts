@@ -185,7 +185,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
-import type { SessionFrame, SessionItem, SessionLease } from '@/lib/session-types'
+import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -575,11 +575,11 @@ export const api = {
   runACPSetOption: (runID: string, optionID: string, value: string | boolean, lease: SessionLease) =>
     call<unknown>('run.acp.set_option', { run_id: runID, option_id: optionID, value, ...lease }),
   runACPHistory: (runID: string, beforeSeq?: number, limit?: number) =>
-    call<{ frames: SessionFrame[] }>('run.acp.history', {
+    call<SessionHistory>('run.acp.history', {
       run_id: runID,
       before_seq: beforeSeq,
       limit,
-    }).then((r) => r.frames),
+    }),
   runACPItem: (runID: string, seq: number) =>
     call<{ item: SessionItem }>('run.acp.item', { run_id: runID, seq }).then((r) => r.item),
   runModeSwitch: (runID: string, mode: 'tui' | 'acp', lease?: SessionLease) =>

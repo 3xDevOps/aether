@@ -286,7 +286,7 @@ function EvidenceSummary({ packet, onAnswer }: { packet: EvidencePacket; onAnswe
       </div>
       <div>
         <h4 className="font-medium">Source availability</h4>
-        <ul className="mt-1 space-y-1 text-muted">{(packet.sources ?? []).map((source) => <li key={source.name}>{source.name}: {source.available ? 'available' : `unavailable${source.reason ? ` (${source.reason})` : ''}`}{source.truncated ? ', truncated' : ''}</li>)}</ul>
+        <ul className="mt-1 space-y-1 text-muted">{(packet.sources ?? []).map((source) => <li key={source.name}>{source.name}: {source.available ? 'available' : 'unavailable'}{source.truncated ? ', truncated' : ''}{source.reason ? ` (${source.reason})` : ''}</li>)}</ul>
       </div>
       {packet.unresolved_facts?.length ? <div><h4 className="font-medium">Unresolved questions</h4><ul className="mt-1 space-y-1">{packet.unresolved_facts.map((fact) => <li key={fact} className="flex items-start justify-between gap-2"><span>{fact}</span>{onAnswer && <Button type="button" size="sm" variant="secondary" onClick={() => onAnswer(fact)}>Answer</Button>}</li>)}</ul></div> : <p className="text-muted">No unresolved questions recorded.</p>}
       {packet.next_action && <p><span className="font-medium">Next action: </span>{packet.next_action}</p>}

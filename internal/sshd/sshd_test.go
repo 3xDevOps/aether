@@ -79,33 +79,35 @@ func (g *fakeGit) ReceivePack(_ context.Context, ws domain.WorkspaceID, stdin io
 }
 
 type fakeRecentReplay struct {
-	data     []byte
-	cols     uint
-	rows     uint
-	position ptyhost.TerminalPosition
-	complete bool
+	data            []byte
+	cols            uint
+	rows            uint
+	position        ptyhost.TerminalPosition
+	complete        bool
+	truncatedBefore bool
 }
 
 // fakePTY echoes keystrokes prefixed with "echo:". A run with a
 // transcripts entry replays it; anything else reports os.ErrNotExist.
 type fakePTY struct {
-	mu          sync.Mutex
-	err         error
-	errDelay    time.Duration
-	gate        ptyhost.WriteGate
-	replay      []byte
-	resumeID    string
-	transcripts map[domain.RunID][]byte
-	snapshots   map[domain.RunID]ptyhost.ScreenSnapshot
-	cols        uint
-	snapshotErr error
-	recent      map[domain.RunID]fakeRecentReplay
-	recentLimit int
-	rows        uint
-	readOnly    bool
-	follow      bool
-	input       bytes.Buffer
-	resizes     [][2]uint
+	mu              sync.Mutex
+	err             error
+	errDelay        time.Duration
+	gate            ptyhost.WriteGate
+	replay          []byte
+	resumeID        string
+	transcripts     map[domain.RunID][]byte
+	truncatedBefore bool
+	snapshots       map[domain.RunID]ptyhost.ScreenSnapshot
+	cols            uint
+	snapshotErr     error
+	recent          map[domain.RunID]fakeRecentReplay
+	recentLimit     int
+	rows            uint
+	readOnly        bool
+	follow          bool
+	input           bytes.Buffer
+	resizes         [][2]uint
 	// session, when set, is the size reported to the attach, as the real host
 	// reports the PTY's actual size rather than the one the header asked for.
 	session [2]uint
@@ -113,14 +115,15 @@ type fakePTY struct {
 	tell chan [2]uint
 }
 
-func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, int, error) {
+func (p *fakePTY) Replay(run domain.RunID) (ptyhost.ReplayWindow, error) {
 	p.mu.Lock()
 	data, ok := p.transcripts[run]
+	truncatedBefore := p.truncatedBefore
 	p.mu.Unlock()
 	if !ok {
-		return nil, 0, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
+		return ptyhost.ReplayWindow{}, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
 	}
-	return io.NopCloser(bytes.NewReader(data)), len(data), nil
+	return ptyhost.ReplayWindow{Reader: io.NopCloser(bytes.NewReader(data)), Bytes: len(data), TruncatedBefore: truncatedBefore}, nil
 }
 
 func (p *fakePTY) RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWindow, error) {
@@ -136,12 +139,13 @@ func (p *fakePTY) RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWi
 		data = data[len(data)-maxBytes:]
 	}
 	return ptyhost.ReplayWindow{
-		Reader:   io.NopCloser(bytes.NewReader(data)),
-		Bytes:    len(data),
-		Cols:     recent.cols,
-		Rows:     recent.rows,
-		Position: recent.position,
-		Complete: recent.complete,
+		Reader:          io.NopCloser(bytes.NewReader(data)),
+		Bytes:           len(data),
+		Cols:            recent.cols,
+		Rows:            recent.rows,
+		Position:        recent.position,
+		Complete:        recent.complete,
+		TruncatedBefore: recent.truncatedBefore,
 	}, nil
 }
 

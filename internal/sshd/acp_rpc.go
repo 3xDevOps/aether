@@ -95,19 +95,19 @@ func (s *Server) runACPHistory(ctx context.Context, _ domain.MemberID, raw json.
 	if perr != nil {
 		return nil, perr
 	}
-	items, err := s.cfg.Runs.ACPHistory(run, p.BeforeSeq, p.Limit)
+	page, err := s.cfg.Runs.ACPHistory(run, p.BeforeSeq, p.Limit)
 	if err != nil {
 		return nil, acpError(err)
 	}
-	frames := make([]protocol.ACPFrame, len(items))
-	for i, it := range items {
+	frames := make([]protocol.ACPFrame, len(page.Items))
+	for i, it := range page.Items {
 		b, truncated, err := it.Wire(protocol.ACPWireItemBytes)
 		if err != nil {
 			return nil, rpcError(err)
 		}
 		frames[i] = protocol.ACPFrame{Seq: it.Seq, Item: b, Truncated: truncated}
 	}
-	return protocol.RunACPHistoryResult{Frames: frames}, nil
+	return protocol.RunACPHistoryResult{Frames: frames, OldestSeq: page.OldestSeq, TruncatedBefore: page.TruncatedBefore}, nil
 }
 
 func (s *Server) runACPItem(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -166,6 +166,8 @@ func acpError(err error) *protocol.Error {
 	case errors.Is(err, acphost.ErrAlreadyAnswered):
 		data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonAlreadyAnswered})
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error(), Data: data}
+	case errors.Is(err, acphost.ErrHistoryExpired):
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "earlier agent session history has expired"}
 	case errors.Is(err, acphost.ErrUnknownRequest), errors.Is(err, scheduler.ErrACPItemNotFound):
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, acphost.ErrUnknownOption):

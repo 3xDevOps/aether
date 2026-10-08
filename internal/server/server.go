@@ -212,14 +212,13 @@ func forwardRunTitle(setter runTitleSetter, key ptyhost.SessionKey, title string
 	setter.SetRunTitle(run, title)
 }
 
-// ptyTranscript adapts the PTY host's complete replay seam to the evidence
-// service's context-free transcript exporter. The byte count belongs to
-// attach framing, not the bounded evidence artifact copy.
+// ptyTranscript exports the retained window and its atomic prefix-expiry
+// metadata. Evidence independently bounds and preserves its artifact copy.
 type ptyTranscript struct{ host *ptyhost.Host }
 
-func (p ptyTranscript) Replay(run domain.RunID) (io.ReadCloser, error) {
-	reader, _, err := p.host.Replay(run)
-	return reader, err
+func (p ptyTranscript) Replay(run domain.RunID) (io.ReadCloser, bool, error) {
+	window, err := p.host.Replay(run)
+	return window.Reader, window.TruncatedBefore, err
 }
 
 // New constructs every component from cfg, fanning the data directory out

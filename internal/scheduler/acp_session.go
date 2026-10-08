@@ -19,11 +19,12 @@ var errNoItemLog = errors.New("scheduler: the run has no session item log")
 
 type ACPStream struct {
 	Replay []acphost.Item
-	// Reset means the log was replaced past the cursor: Replay starts from
-	// the first item and the viewer drops what it held.
-	Reset bool
-	Epoch int64
-	Seq   int64
+	// Reset means the cursor is outside retained history: Replay contains
+	// only real retained items and the viewer drops its previous projection.
+	Reset           bool
+	TruncatedBefore bool
+	Epoch           int64
+	Seq             int64
 	// OldestSeq is the first replayed seq when the replay does not continue
 	// from the viewer's cursor; the viewer pages older items from it.
 	OldestSeq int64
@@ -42,17 +43,10 @@ type ACPStream struct {
 func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, error) {
 	sess, started, release := s.acp.started(run)
 	if sess != nil {
-		last := sess.Log().LastSeq()
-		reset := afterSeq > last
-		if reset {
-			afterSeq = 0
-		}
 		replay, items, cancel, err := sess.Subscribe(afterSeq)
 		if err == nil {
 			state := sess.State()
-			out := ACPStream{Replay: replay, Reset: reset, Items: items, State: &state, Cancel: cancel, Seq: max(afterSeq, 0)}
-			out.Epoch, out.Seq = streamMark(sess.Log(), replay, out.Seq)
-			out.OldestSeq = oldestSeq(afterSeq, replay)
+			out := ACPStream{Replay: replay.Items, Reset: replay.Reset, TruncatedBefore: replay.TruncatedBefore, Items: items, State: &state, Cancel: cancel, Seq: replay.Seq, Epoch: replay.Epoch, OldestSeq: replay.OldestSeq}
 			return out, nil
 		}
 		if !errors.Is(err, acphost.ErrClosed) {
@@ -71,62 +65,43 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 		return out, nil
 	}
 	defer func() { _ = log.Close() }()
-	if afterSeq > log.LastSeq() {
-		out.Reset, afterSeq = true, 0
-	}
-	if out.Replay, err = log.ReadAfter(acphost.ReplayStart(afterSeq, log.LastSeq()), 0); err != nil {
+	replay, err := log.Replay(afterSeq)
+	if err != nil {
 		release()
 		return ACPStream{}, err
 	}
-	out.Epoch, out.Seq = streamMark(log, out.Replay, max(afterSeq, 0))
-	out.OldestSeq = oldestSeq(afterSeq, out.Replay)
+	out.Replay, out.Reset, out.TruncatedBefore = replay.Items, replay.Reset, replay.TruncatedBefore
+	out.Epoch, out.Seq, out.OldestSeq = replay.Epoch, replay.Seq, replay.OldestSeq
 	return out, nil
 }
 
-func oldestSeq(afterSeq int64, replay []acphost.Item) int64 {
-	if len(replay) > 0 && (afterSeq <= 0 || replay[0].Seq > afterSeq+1) {
-		return replay[0].Seq
-	}
-	return 0
-}
-
-func streamMark(log *acphost.Log, replay []acphost.Item, seq int64) (int64, int64) {
-	if n := len(replay); n > 0 {
-		return replay[n-1].Epoch, replay[n-1].Seq
-	}
-	last, err := log.ReadBefore(math.MaxInt64, 1)
-	if err != nil || len(last) == 0 {
-		return 0, seq
-	}
-	return last[0].Epoch, seq
-}
-
-func (s *Scheduler) ACPHistory(run domain.RunID, beforeSeq int64, limit int) ([]acphost.Item, error) {
+func (s *Scheduler) ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error) {
 	if beforeSeq <= 0 {
 		beforeSeq = math.MaxInt64
 	}
-	var items []acphost.Item
+	var page acphost.HistoryPage
 	err := s.withItemLog(run, func(log *acphost.Log) (err error) {
-		items, err = log.ReadBefore(beforeSeq, limit)
+		page, err = log.History(beforeSeq, limit)
 		return err
 	})
 	if errors.Is(err, errNoItemLog) {
-		return nil, nil
+		return acphost.HistoryPage{}, nil
 	}
-	return items, err
+	return page, err
 }
 
 func (s *Scheduler) ACPItem(run domain.RunID, seq int64) (acphost.Item, error) {
 	var item acphost.Item
 	err := s.withItemLog(run, func(log *acphost.Log) error {
-		items, err := log.ReadAfter(seq-1, 1)
+		var found bool
+		var err error
+		item, found, err = log.Item(seq)
 		if err != nil {
 			return err
 		}
-		if len(items) == 0 || items[0].Seq != seq {
+		if !found {
 			return fmt.Errorf("%w: %d", ErrACPItemNotFound, seq)
 		}
-		item = items[0]
 		return nil
 	})
 	if errors.Is(err, errNoItemLog) {
@@ -158,7 +133,7 @@ func (s *Scheduler) recordedMode(run domain.RunID) string {
 		return ""
 	}
 	defer func() { _ = log.Close() }()
-	return lastItem(log, acphost.KindModeChange).Mode
+	return log.Mode()
 }
 
 func lastItem(log *acphost.Log, kind acphost.Kind) acphost.Item {

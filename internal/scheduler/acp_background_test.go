@@ -93,10 +93,11 @@ func TestBackgroundRunOverACPFinishesOnEndTurn(t *testing.T) {
 	if got.Reason != exitedCompletedReason || !got.ACP {
 		t.Fatalf("finished run %+v, want completed with %q", got, exitedCompletedReason)
 	}
-	items, err := e.sched.ACPHistory(run.ID, 0, 0)
+	page, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := page.Items
 	if !assistantSaid("pong")(items) || !turnEnded("end_turn", 1)(items) {
 		t.Fatalf("the item log does not hold the one turn: %+v", items)
 	}
@@ -110,10 +111,11 @@ func TestBackgroundRunOverACPAllowsPermissions(t *testing.T) {
 	e, _ := newBackgroundEnv(t, enhancedAgent, true)
 	run := e.launchBackground(t, enhancedAgent, acpmock.PromptAskPermission)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	items, err := e.sched.ACPHistory(run.ID, 0, 0)
+	page, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := page.Items
 	if !assistantSaid("permission: allow")(items) {
 		t.Fatalf("the permission request was not allowed: %+v", items)
 	}
@@ -161,10 +163,11 @@ func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	t.Cleanup(func() { _ = s2.Close() })
 	startScheduler(t, s2)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	items, err := s2.ACPHistory(run.ID, 0, 0)
+	page, err := s2.ACPHistory(run.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := page.Items
 	if !slices.ContainsFunc(items, func(it acphost.Item) bool {
 		return it.Kind == acphost.KindMessage && it.Message.Role == "user" && it.Message.Text == oneShotResume
 	}) {
@@ -194,13 +197,13 @@ func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 	t.Cleanup(func() { _ = s2.Close() })
 	startScheduler(t, s2)
 	waitFor(t, "the task sent to the new session", func() bool {
-		items, err := s2.ACPHistory(run.ID, 0, 0)
+		page, err := s2.ACPHistory(run.ID, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var prompts []string
 		reset := false
-		for _, it := range items {
+		for _, it := range page.Items {
 			switch {
 			case it.Kind == acphost.KindReset:
 				reset = true

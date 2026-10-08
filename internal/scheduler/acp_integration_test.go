@@ -85,10 +85,11 @@ func TestIntegrationBackgroundRunDocker(t *testing.T) {
 	if got.Reason != exitedCompletedReason {
 		t.Fatalf("reason %q, want %q", got.Reason, exitedCompletedReason)
 	}
-	items, err := e.sched.ACPHistory(run.ID, 0, 0)
+	page, err := e.sched.ACPHistory(run.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := page.Items
 	if !assistantSaid("pong")(items) {
 		t.Fatalf("the item log does not hold the turn: %+v", items)
 	}

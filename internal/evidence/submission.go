@@ -90,8 +90,8 @@ func (s *Service) checkSubmissionTranscript(ctx context.Context, packet *store.E
 	if err != nil {
 		return err
 	}
-	// Count the bounded stream without retaining its payload. Capture records no
-	// general byte length, but a capped source must retain exactly the full cap.
+	// Count the bounded stream and match the immutable capture marker. Prefix
+	// expiry can yield any retained length; copy-cap truncation cannot.
 	limited := &io.LimitedReader{R: captureContextReader{ctx: ctx, Reader: reader}, N: MaxTranscriptBytes + 1}
 	oversized, readErr, writeErr := copyBounded(limited, io.Discard, MaxTranscriptBytes)
 	closeErr := reader.Close()
@@ -107,8 +107,22 @@ func (s *Service) checkSubmissionTranscript(ctx context.Context, packet *store.E
 	if oversized {
 		return fmt.Errorf("evidence: retained transcript exceeds capture bound")
 	}
-	if truncated && MaxTranscriptBytes+1-limited.N < MaxTranscriptBytes {
-		return fmt.Errorf("evidence: capped retained transcript is shorter than capture bound")
+	size := MaxTranscriptBytes + 1 - limited.N
+	markerPath, err := s.truncationMarkerPath(StorageKey(packet))
+	if err != nil {
+		return err
+	}
+	marker, known := s.readTruncationMarker(markerPath, size)
+	if !known || marker.fact().Truncated != truncated {
+		return fmt.Errorf("evidence: retained transcript does not match capture metadata")
+	}
+	if marker.legacy {
+		if err := s.writeTruncationMarker(markerPath, marker); err != nil {
+			return err
+		}
+		if err := s.fs.SyncDir(s.root); err != nil {
+			return fmt.Errorf("evidence: sync transcript marker migration: %w", err)
+		}
 	}
 	return nil
 }

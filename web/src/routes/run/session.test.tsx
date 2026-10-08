@@ -123,6 +123,45 @@ describe('the Enhanced session view', () => {
     expect(within(log).getByText('Exit code 0')).toBeDefined()
   })
 
+  it('keeps live Enhanced output and approvals usable after a retained-prefix replay reset', async () => {
+    open()
+    const session = acpSocket().open({
+      seq: 20, replay: 1, oldest_seq: 20, truncated_before: true, has_control: true, control_generation: 4,
+      state: state({ turn_in_flight: true, pending: [permission] }),
+    })
+    session.send({ reset: true, epoch: 0 })
+    session.items({ ...say(1, 'assistant', 'Current retained response'), seq: 20 })
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('Current retained response')).toBeDefined()
+    expect(screen.getByText(/Earlier Enhanced history has expired/)).toBeDefined()
+    // The tool-call frame expired; the authoritative pending request still permits an answer,
+    // but cannot establish a command-specific title without inventing missing history.
+    const card = await screen.findByRole('generic', { name: /Allow this action\? rm -rf build/ })
+    const allow = within(card).getByRole('button', { name: 'Allow' })
+    expect(allow).toHaveProperty('disabled', false)
+    await userEvent.click(allow)
+    expect(api.runInputAnswer).toHaveBeenCalledWith('run_1', 'req_1', 'allow', expect.objectContaining({ control_generation: 4 }), undefined)
+    session.items({ ...say(1, 'assistant', 'Live output after the gap'), seq: 21 })
+    expect(await within(log).findByText('Live output after the gap')).toBeDefined()
+    expect(within(log).getAllByText('Current retained response')).toHaveLength(1)
+  })
+
+  it('retains the output excerpt when its full Enhanced item expires', async () => {
+    const expired = 'acphost: requested session history has expired'
+    vi.mocked(api.runACPItem).mockRejectedValue(new Error(expired))
+    open()
+    const start = item('turn_start', 1)
+    const entry = tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'retained excerpt', exit_code: 0 })
+    acpSocket().open({}, [start, { ...entry, truncated: true }])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    await userEvent.click(await within(log).findByRole('button', { name: /Ran 1 command/ }))
+    await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
+    expect(await within(log).findByText('retained excerpt')).toBeDefined()
+    expect((await within(log).findByRole('alert')).textContent).toContain(expired)
+    expect(within(log).queryByText('Loading the full output…')).toBeNull()
+    expect(api.runACPItem).toHaveBeenCalledWith('run_1', entry.seq)
+  })
+
   it('reads Queued on a message the agent holds behind its turn, then why it was not sent', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true }) }, [item('turn_start', 1)])

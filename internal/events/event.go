@@ -234,6 +234,10 @@ type RunDiffPayload struct {
 	// tree for the first snapshot. Diffing ParentTree to Tree is what this
 	// interval changed.
 	ParentTree string `json:"parent_tree,omitempty"`
+	// HistoryGap marks an unavailable boundary, including the next interval.
+	HistoryGap bool `json:"history_gap,omitempty"`
+	// SnapshotError is a bounded, path-free explanation of missing history.
+	SnapshotError string `json:"snapshot_error,omitempty"`
 }
 
 func (RunDiffPayload) EventType() Type { return TypeRunDiff }

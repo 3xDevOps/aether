@@ -59,7 +59,6 @@ type session struct {
 	generation    uint64
 	att           runtime.Attachment
 	tr            *castWriter
-	history       []castSegment
 	checkpoint    string
 	checkpointMu  sync.Mutex
 	checkpointSeq uint64
@@ -249,6 +248,7 @@ func (s *session) commitOutputLocked(p []byte) {
 	if s.tr != nil {
 		s.tr.output(p)
 	}
+	s.maintainTranscriptLocked()
 	s.changedLocked()
 	for c := range s.clients {
 		c.enqueue(p)
@@ -262,6 +262,7 @@ func (s *session) commitPendingOutputLocked(p []byte) {
 	if len(p) == 0 {
 		return
 	}
+	defer s.maintainTranscriptLocked()
 	if s.screen != nil {
 		s.screen.write(p)
 	}
@@ -528,7 +529,7 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 			if c.screen || s.development {
 				c.setReplay(s.screenSnapshotLocked().Data)
 			} else if _, isRun := s.run.Run(); isRun {
-				replay, replayBytes, err := s.tr.snapshot(s.history)
+				replay, replayBytes, err := s.tr.snapshot()
 				if err != nil {
 					s.mu.Unlock()
 					return fmt.Errorf("ptyhost: snapshot run transcript: %w", err)

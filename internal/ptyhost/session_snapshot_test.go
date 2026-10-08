@@ -493,17 +493,17 @@ func TestFinalizingSessionDefersArchiveFallback(t *testing.T) {
 	if err := h.StopSession(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	replay, size, err := h.Replay(run)
+	window, err := h.Replay(run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = replay.Close() }()
-	data, err := io.ReadAll(replay)
+	defer func() { _ = window.Reader.Close() }()
+	data, err := io.ReadAll(window.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != want || size != len(want) {
-		t.Fatalf("finished archive = %q (%d bytes), want %q", data, size, want)
+	if string(data) != want || window.Bytes != len(want) {
+		t.Fatalf("finished archive = %q (%d bytes), want %q", data, window.Bytes, want)
 	}
 }
 

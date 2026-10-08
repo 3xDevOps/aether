@@ -106,10 +106,11 @@ func TestIntegrationEnhancedMissionWake(t *testing.T) {
 func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID, n int) []acphost.Item {
 	t.Helper()
 	for {
-		items, err := srv.sched.ACPHistory(run, 0, 0)
+		page, err := srv.sched.ACPHistory(run, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		items := page.Items
 		ended := 0
 		for _, it := range items {
 			if it.Kind == acphost.KindTurnEnd && it.StopReason == "end_turn" {
@@ -130,10 +131,11 @@ func waitTurns(ctx context.Context, t *testing.T, srv *Server, run domain.RunID,
 func waitPrompted(ctx context.Context, t *testing.T, srv *Server, run domain.RunID, instruction string) {
 	t.Helper()
 	for {
-		items, err := srv.sched.ACPHistory(run, 0, 0)
+		page, err := srv.sched.ACPHistory(run, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		items := page.Items
 		for _, it := range items {
 			if it.Kind == acphost.KindMessage && it.Message.Role == "user" && strings.Contains(it.Message.Text, strings.TrimSpace(instruction)) {
 				return
