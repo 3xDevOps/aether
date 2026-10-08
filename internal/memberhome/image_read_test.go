@@ -44,7 +44,7 @@ func TestReadImageRoundTrip(t *testing.T) {
 		{".png", "image/png"}, {".jpg", "image/jpeg"}, {".gif", "image/gif"},
 	} {
 		t.Run(tc.ext, func(t *testing.T) {
-			manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+			manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestReadImageRoundTrip(t *testing.T) {
 func TestReadImageRejectsUnsafeFiles(t *testing.T) {
 	for _, kind := range []string{"missing", "empty", "invalid", "oversized", "directory", "symlink", "hardlink", "image directory symlink", "aether directory symlink", "home symlink"} {
 		t.Run(kind, func(t *testing.T) {
-			manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+			manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +158,7 @@ func TestReadImageRejectsUnsafeFiles(t *testing.T) {
 
 func TestReadImageDoesNotCreateMissingHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestReadImageDoesNotCreateMissingHome(t *testing.T) {
 }
 
 func TestReadImageRejectsArbitraryNames(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestReadImageRejectsArbitraryNames(t *testing.T) {
 }
 
 func TestReadImageFileRejectsGrowthAfterStat(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
