@@ -575,31 +575,10 @@ test('switching live runs restores the same recorded rows and pixel offsets with
   const runB = await launchHistoryRun(alice, workspaceID, 'RESTORE-B', 0)
   const activeSockets = new Map<object, string>()
   const historyRequests: string[] = []
-  const socketEvents: object[] = []
-  await page.addInitScript(() => {
-    const NativeWebSocket = window.WebSocket
-    window.WebSocket = class extends NativeWebSocket {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols)
-        this.addEventListener('close', (event) => {
-          const pathname = new URL(this.url).pathname
-          if (pathname.startsWith('/ws/attach/')) {
-            console.info('terminal socket close', pathname, event.code, event.reason)
-          }
-        })
-      }
-    }
-  })
   page.on('websocket', (socket) => {
     const url = new URL(socket.url())
     if (!url.pathname.startsWith('/ws/attach/') || url.searchParams.has('shell')) return
     activeSockets.set(socket, url.pathname.split('/').pop()!)
-    socketEvents.push({ event: 'open', run: activeSockets.get(socket), at: Date.now() })
-    socket.on('framereceived', ({ payload }) => {
-      if (typeof payload === 'string') socketEvents.push({ event: 'frame', run: activeSockets.get(socket), payload, at: Date.now() })
-    })
-    socket.on('socketerror', (error) => socketEvents.push({ event: 'error', error, at: Date.now() }))
-    socket.on('close', () => socketEvents.push({ event: 'close', run: activeSockets.get(socket), at: Date.now() }))
     socket.on('close', () => activeSockets.delete(socket))
   })
   page.on('request', (request) => {
@@ -689,10 +668,6 @@ test('switching live runs restores the same recorded rows and pixel offsets with
     await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Board', exact: true }).click()
     await expect.poll(() => activeSockets.size).toBe(0)
   } finally {
-    await testInfo.attach('terminal socket diagnostics', {
-      body: JSON.stringify(socketEvents),
-      contentType: 'application/json',
-    })
     await releaseWriter(runA.writer, 1)
     await closeWriter(runA.writer.socket)
     await releaseWriter(runB.writer, 1)
