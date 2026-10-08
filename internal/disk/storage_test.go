@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestMeasurePersistentBytesAndGlobalHardlinks(t *testing.T) {
+func TestPersistentBytesAndGlobalHardlinks(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, n int) string {
 		t.Helper()
@@ -23,7 +23,8 @@ func TestMeasurePersistentBytesAndGlobalHardlinks(t *testing.T) {
 		return p
 	}
 	shared := write("repos/workspace.git/object", 100)
-	for _, name := range []string{"checkouts/run/shared", "checkouts/run.diffsnap/shared", "homes/member/shared", "evidence/shared", "profiles/shared", "transcripts/shared", "aether.db-wal"} {
+	write("repos/workspace.git/independent-object", 100)
+	for _, name := range []string{"repos/workspace.git/linked-object", "checkouts/run/shared", "checkouts/run.diffsnap/shared", "homes/member/shared", "evidence/shared", "profiles/shared", "transcripts/shared", "aether.db-wal"} {
 		target := write(name, 0)
 		if err := os.Remove(target); err != nil {
 			t.Fatal(err)
@@ -38,18 +39,15 @@ func TestMeasurePersistentBytesAndGlobalHardlinks(t *testing.T) {
 	write("checkouts/run/work", 50)
 	write("checkouts/run.diffsnap/object", 60)
 	write("aether.db", 70)
-	u, err := Measure(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.RepoBytes != 100 || u.HomeBytes != 20 || u.EvidenceBytes != 30 || u.OtherBytes != 40 || u.WorktreeBytes != 110 || u.SnapshotBytes != 60 || u.DatabaseBytes != 70 || u.TranscriptBytes != 0 {
+	u := components(dir)
+	if u.RepoBytes != 200 || u.HomeBytes != 20 || u.EvidenceBytes != 30 || u.OtherBytes != 40 || u.WorktreeBytes != 110 || u.SnapshotBytes != 60 || u.DatabaseBytes != 70 || u.TranscriptBytes != 0 {
 		t.Fatalf("persistent/hardlink accounting: %+v", u)
 	}
 	var attributed uint64
 	for _, e := range u.Entries {
 		attributed += e.Bytes
 	}
-	if attributed != 370 || len(u.Warnings) != 0 {
+	if attributed != 470 || len(u.Warnings) != 0 {
 		t.Fatalf("attributed %d; warnings %v", attributed, u.Warnings)
 	}
 }
@@ -145,7 +143,12 @@ func TestPartialMeasurementKeepsReadableBytesAndFailedOwner(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "aether.db"), []byte("database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	u := componentTree(unreadableStorage{FS: os.DirFS(dir)})
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	u := componentTree(unreadableStorage{FS: root.FS()}, newSeen(root))
 	if u.DatabaseBytes != 8 || len(u.Warnings) != 1 || strings.Contains(u.Warnings[0], "private-credential-path") {
 		t.Fatalf("partial measurement: %+v", u)
 	}

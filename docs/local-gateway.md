@@ -876,9 +876,10 @@ member homes, evidence, and other data-directory contents.
 `snapshot_bytes` is a subset of `worktree_bytes`, never an additional total.
 The categories are not a promise that their bytes can be reclaimed.
 
-Directory accounting does not follow symlinks and de-duplicates hardlinks
-across categories. Shared Git objects are charged to repositories before
-checkouts, rather than counting a local clone's objects twice. Unreadable
+Directory accounting does not follow symlinks. It indexes file identities on
+Linux, macOS and Windows to count hardlinks once across categories without
+comparing every file with the rest of the scan. Shared Git objects are charged
+to repositories before checkouts. Unreadable
 data produces `warnings`; affected measurements are partial, not evidence
 of an empty directory. Measurement lives in `internal/disk`, shared with
 the scheduler's filesystem floor.

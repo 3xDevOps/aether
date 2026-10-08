@@ -82,10 +82,10 @@ func components(dataDir string) Usage {
 		return u
 	}
 	defer func() { _ = root.Close() }()
-	return componentTree(root.FS())
+	return componentTree(root.FS(), newSeen(root))
 }
 
-func componentTree(tree fs.FS) Usage {
+func componentTree(tree fs.FS, counted seen) Usage {
 	var u Usage
 	top, err := fs.ReadDir(tree, ".")
 	if err != nil {
@@ -95,7 +95,6 @@ func componentTree(tree fs.FS) Usage {
 	// Repositories own hard-linked clone objects even when another tree is
 	// encountered first lexically. Every other category shares the same set.
 	sort.SliceStable(top, func(i, j int) bool { return top[i].Name() == reposDir && top[j].Name() != reposDir })
-	counted := newSeen()
 	entries := make(map[[2]string]*Entry)
 	warnings := make(map[string]bool)
 	for _, dir := range top {
@@ -115,7 +114,11 @@ func componentTree(tree fs.FS) Usage {
 			if err == nil && d.Type().IsRegular() {
 				var info fs.FileInfo
 				info, err = d.Info()
-				if err == nil && info.Mode().IsRegular() && info.Size() > 0 && counted.claim(info) {
+				var claimed bool
+				if err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+					claimed, err = counted.claim(name, info)
+				}
+				if err == nil && claimed {
 					n := uint64(info.Size())
 					e.Bytes += n
 					switch kind {
