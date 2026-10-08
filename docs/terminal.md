@@ -607,6 +607,13 @@ authorized protocol replies resume even while reading; user input resumes
 only after returning live. Paint and viewport restoration settle before the
 live surface can be revealed.
 
+The derived `.screen` checkpoint stores one current recording boundary and
+aggregate lineage/output counts, not an ever-growing list of archived files.
+Version 3 checkpoints remain small as recordings accumulate; existing version
+1 and 2 checkpoints remain readable. A valid current-screen/end boundary does
+not assert that every historical file is available. Full replay checks that
+lineage separately and reports missing data rather than inventing output.
+
 Live xterm and its bootstrap remain bounded; older retained output is
 reached by continuing upward in the same terminal pane. Reading freezes the
 current VT presentation while new output continues behind it. Older archive
@@ -673,8 +680,10 @@ archive grows. Continuing upward reaches the
 [earliest retained output](media/terminal-history-earliest.webp).
 
 The server returns at most 200 lines per request and also bounds disk reads,
-decoded events, segment discovery, concurrent readers, and elapsed scan
-time. A page can therefore be short or empty while `has_more` still says
+decoded events, segments per page, concurrent readers and decoding time.
+Directory discovery uses bounded memory and caller cancellation, without a
+fixed limit on the total number of retained files. A page can therefore be
+short or empty while `has_more` still says
 older output remains. Paging automatically continues with the authenticated
 opaque cursor returned by the server; it is tied to this run and query and
 must not be constructed or edited by the client. The dashboard's Find does

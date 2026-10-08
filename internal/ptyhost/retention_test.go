@@ -301,6 +301,22 @@ func TestCastExistingFrontierPreservesPositionAndRemainingHistory(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
+			// An old v2 checkpoint still lists both files at publication.
+			segments, err := collectFullCastSegments(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkpoint.Version = 2
+			checkpoint.Segments = nil
+			for _, segment := range segments {
+				checkpoint.Segments = append(checkpoint.Segments, checkpointSegment{
+					Path: filepath.Base(segment.path), Incarnation: segment.incarnation,
+					FileBytes: segment.fileBytes, OutputBytes: segment.outputBytes,
+				})
+			}
+			if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+				t.Fatal(err)
+			}
 			old := checkpoint.Segments[0]
 			// Cover both completed old pruning and interruption after publication.
 			frontier, err := json.Marshal(castRetention{Before: checkpoint.Incarnation, OutputBytes: uint64(old.OutputBytes)})

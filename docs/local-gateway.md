@@ -283,10 +283,11 @@ from the same retained-history snapshot as the page, including empty pages;
 `has_more:false` means the retained boundary, not necessarily the run's start.
 
 Line count is not the only bound. Each request also limits raw disk reads,
-decoded bytes and events, elapsed time, cast segments, directory discovery,
-and concurrent readers; searches have their own lower concurrency cap. A page
-or search may therefore return fewer than the requested number of lines,
-including none, with `has_more:true`. Continuing uses an older-page request
+decoded bytes and events, decoding time, cast segments per page and concurrent
+readers; searches have their own lower concurrency cap. Directory discovery
+streams with bounded memory and caller cancellation, not a total-history
+entry cutoff. A page or search may therefore return fewer than the requested
+number of lines, including none, with `has_more:true`. Continuing uses an older-page request
 with `next_cursor`; the live attach does not do this work. The dashboard's
 integrated upward scroller starts at the newest page and prefetches older
 windows near the loaded edge, automatically continuing empty scan windows.

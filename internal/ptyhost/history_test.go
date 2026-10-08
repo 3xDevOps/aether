@@ -30,6 +30,20 @@ func (c *historyAdmissionContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
+type historyDiscoveryCancelContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *historyDiscoveryCancelContext) Err() error {
+	c.checks++
+	if c.checks == 3 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
 func historyTestHost(t *testing.T, run domain.RunID, chunks ...string) (*Host, string) {
 	t.Helper()
 	h, err := New(Config{TranscriptDir: t.TempDir()})
@@ -584,20 +598,31 @@ func TestHistorySegmentDiscoveryIsBoundedAndResumable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 1; i <= maxHistorySegmentsPerPage+2; i++ {
-		incarnation := int64(100000 + i)
+	for i := range 3*maxHistorySegmentsPerPage + 2 {
+		incarnation := int64(100001 + i)
 		name := filepath.Join(filepath.Dir(path), stableCastSegmentName(path, incarnation))
 		if err = os.WriteFile(name, historyHeaderWithIncarnation(t, header, incarnation), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	page, err := h.History(context.Background(), run, "", "absent", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Lines) != 0 || !page.HasMore || page.NextCursor == "" {
-		t.Fatalf("bounded segment page = %+v", page)
+	cursor := ""
+	for pageIndex := range 4 {
+		page, err := h.History(historyBudgetTestContext(), run, cursor, "absent", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Lines) != 0 {
+			t.Fatalf("unexpected search lines = %+v", page)
+		}
+		if pageIndex < 3 {
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
+				t.Fatalf("bounded discovery did not advance: %+v", page)
+			}
+		} else if page.HasMore {
+			t.Fatalf("resumed discovery never reached the oldest file: %+v", page)
+		}
+		cursor = page.NextCursor
 	}
 }
 
@@ -824,21 +849,49 @@ func TestHistoryCursorUsesFullQueryDigestAndRejectsOldVersion(t *testing.T) {
 	}
 }
 
-func TestHistorySegmentDiscoveryHasExplicitDirectoryBudget(t *testing.T) {
-	run := domain.RunID("history-discovery-budget")
-	h, path := historyTestHost(t, run)
-	if err := os.Remove(path); err != nil {
+func TestHistoryDiscoveryStreamsPastFormerDirectoryLimit(t *testing.T) {
+	run := domain.RunID("history-discovery-large")
+	h, path := historyTestHost(t, run, "older-one\nolder-two\n")
+	cursor, err := h.History(t.Context(), run, "", "", 1)
+	if err != nil || cursor.NextCursor == "" {
+		t.Fatalf("initial cursor = %+v, %v", cursor, err)
+	}
+	writer, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.output([]byte("latest\n"))
+	if err = writer.close(); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Dir(path)
-	for i := 0; i <= maxHistoryDirectoryEntries; i++ {
+	for i := range 4097 {
 		name := filepath.Join(dir, "unrelated-"+strconv.Itoa(i))
-		if err := os.WriteFile(name, nil, 0o644); err != nil {
+		if err = os.WriteFile(name, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := h.History(context.Background(), run, "", "", 1); !errors.Is(err, ErrHistoryDiscoveryLimit) {
-		t.Fatalf("over-budget discovery error = %v", err)
+	older, err := h.History(t.Context(), run, cursor.NextCursor, "", 1)
+	if err != nil || strings.Join(historyTexts(older.Lines), ",") != "older-one" {
+		t.Fatalf("known cursor hidden by unrelated directory entries: %+v, %v", older, err)
+	}
+	page, err := h.History(t.Context(), run, "", "", 3)
+	if err != nil || strings.Join(historyTexts(page.Lines), ",") != "older-one,older-two,latest" || page.HasMore {
+		t.Fatalf("cross-segment discovery lost history: %+v, %v", page, err)
+	}
+	if err = os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	page, err = h.History(t.Context(), run, "", "", 2)
+	if err != nil || strings.Join(historyTexts(page.Lines), ",") != "older-one,older-two" || page.HasMore {
+		t.Fatalf("archive-only discovery lost history: %+v, %v", page, err)
+	}
+	base, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ctx := &historyDiscoveryCancelContext{Context: base, cancel: cancel}
+	discovery := historySegmentDiscovery{}
+	if err = discovery.initialize(ctx, nil, path, path); !errors.Is(err, context.Canceled) || discovery.initialized {
+		t.Fatalf("directory traversal ignored cancellation: initialized=%t, %v", discovery.initialized, err)
 	}
 }
 

@@ -90,9 +90,11 @@ type castWriter struct {
 	stop         chan struct{}
 	// path is kept so a marker can still be appended after close, for a
 	// delivery that raced the session's end.
-	path      string
-	history   []castSegment
-	retention castRetention
+	path              string
+	prefixOutputBytes uint64
+	prefixSegments    int
+	prefixKnown       bool
+	retention         castRetention
 }
 
 func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
@@ -102,6 +104,7 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 		lifecycle.entry.mu.Unlock()
 		lifecycle.release()
 	}()
+	prefixOutputBytes, prefixSegments, prefixKnown := castCheckpointAccounting(path)
 	if err := renameAsideTranscript(path); err != nil {
 		return nil, err
 	}
@@ -115,13 +118,16 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 	}
 	start := time.Now()
 	w := &castWriter{
-		f:           f,
-		bw:          bufio.NewWriterSize(f, 32*1024),
-		start:       start,
-		incarnation: start.UnixNano(),
-		stop:        make(chan struct{}),
-		path:        path,
-		retention:   retention,
+		f:                 f,
+		bw:                bufio.NewWriterSize(f, 32*1024),
+		start:             start,
+		incarnation:       start.UnixNano(),
+		stop:              make(chan struct{}),
+		path:              path,
+		retention:         retention,
+		prefixOutputBytes: prefixOutputBytes,
+		prefixSegments:    prefixSegments,
+		prefixKnown:       prefixKnown,
 	}
 	hdr, err := json.Marshal(castHeader{
 		Version:     2,
@@ -148,6 +154,41 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 	}
 	go w.flushLoop()
 	return w, nil
+}
+
+// A current checkpoint already accounts for the full absolute prefix.
+func castCheckpointAccounting(path string) (uint64, int, bool) {
+	if checkpoint, err := decodeCheckpoint(checkpointPath(path)); err == nil && checkpoint.Version >= 2 {
+		if segments, err := validateCheckpointSegments(path, checkpoint, true); err == nil {
+			count := len(segments)
+			if checkpoint.Version == screenCheckpointVersion {
+				count = checkpoint.SegmentCount
+			}
+			return checkpoint.CastOutputBytes, count, true
+		}
+	}
+	return 0, 0, false
+}
+
+// Legacy or stale recordings need one initial streaming scan, not a growing
+// in-memory segment list or another scan on each checkpoint and rotation.
+func (w *castWriter) loadPrefixLocked() error {
+	if w.prefixKnown {
+		return nil
+	}
+	segments, err := priorCastSegments(w.path)
+	if err != nil {
+		return err
+	}
+	total := w.retention.OutputBytes
+	for _, segment := range segments {
+		if ^uint64(0)-total < uint64(segment.outputBytes) {
+			return errors.New("ptyhost: transcript output boundary overflow")
+		}
+		total += uint64(segment.outputBytes)
+	}
+	w.prefixOutputBytes, w.prefixSegments, w.prefixKnown = total, len(segments), true
+	return nil
 }
 
 // renameAsideTranscript preserves an existing non-empty transcript (a prior
@@ -628,8 +669,29 @@ func legacyCastSegmentIncarnation(path, name string) (int64, bool) {
 }
 
 func openFullCastReplay(path string) (io.ReadCloser, int, error) {
-	if replay, total, ok := openCheckpointCastReplay(path); ok {
-		return replay, total, nil
+	if checkpoint, err := decodeCheckpoint(checkpointPath(path)); err == nil && checkpoint.Version >= 2 {
+		if segments, err := validateCheckpointSegments(path, checkpoint, true); err == nil {
+			var total uint64
+			if checkpoint.Version == screenCheckpointVersion {
+				segments, err = collectCastHeaders(path)
+				if err != nil {
+					return nil, 0, err
+				}
+				if len(segments) != checkpoint.SegmentCount {
+					return nil, 0, errors.New("ptyhost: compact checkpoint lineage changed")
+				}
+				total = checkpoint.CastOutputBytes - checkpoint.PrunedOutputBytes
+			} else {
+				for _, segment := range segments {
+					total += uint64(segment.outputBytes)
+				}
+			}
+			if total > uint64(^uint(0)>>1) {
+				return nil, 0, errors.New("ptyhost: transcript output exceeds platform limits")
+			}
+			replay, err := openCastReplay(segments, nil)
+			return replay, int(total), err
+		}
 	}
 	segments, err := collectFullCastSegments(path)
 	if err != nil {
@@ -641,23 +703,6 @@ func openFullCastReplay(path string) (io.ReadCloser, int, error) {
 	}
 	replay, err := openCastReplay(segments, nil)
 	return replay, total, err
-}
-
-func openCheckpointCastReplay(path string) (io.ReadCloser, int, bool) {
-	checkpoint, err := decodeCheckpoint(checkpointPath(path))
-	if err != nil || checkpoint.Version != screenCheckpointVersion {
-		return nil, 0, false
-	}
-	segments, err := validateCheckpointSegments(path, checkpoint, true)
-	if err != nil || checkpoint.CastOutputBytes > uint64(^uint(0)>>1) {
-		return nil, 0, false
-	}
-	total := 0
-	for _, segment := range segments {
-		total += segment.outputBytes
-	}
-	replay, err := openCastReplay(segments, nil)
-	return replay, total, err == nil
 }
 
 func newestCastHeader(path string) (castHeader, error) {
@@ -764,28 +809,28 @@ func (w *castWriter) snapshot() (io.ReadCloser, int, error) {
 	if w.closed {
 		return nil, 0, errors.New("ptyhost: transcript is closed")
 	}
+	if err := w.loadPrefixLocked(); err != nil {
+		return nil, 0, err
+	}
 	if err := w.flushStagedLocked(); err != nil {
 		return nil, 0, fmt.Errorf("ptyhost: flush transcript replay: %w", err)
 	}
 	if err := w.bw.Flush(); err != nil {
 		return nil, 0, fmt.Errorf("ptyhost: flush transcript replay: %w", err)
 	}
-	info, err := w.f.Stat()
+	segments, err := collectCastHeaders(w.path)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ptyhost: inspect transcript replay: %w", err)
+		return nil, 0, err
 	}
-	segments := append([]castSegment(nil), w.history...)
-	segments = append(segments, castSegment{
-		path:        w.path,
-		fileBytes:   info.Size(),
-		outputBytes: w.outputBytes,
-	})
-	total := len(w.pending)
-	for _, segment := range segments {
-		total += segment.outputBytes
+	if len(segments) != w.prefixSegments+1 {
+		return nil, 0, errors.New("ptyhost: transcript lineage changed")
+	}
+	total := w.prefixOutputBytes - w.retention.OutputBytes + uint64(w.outputBytes) + uint64(len(w.pending))
+	if total > uint64(^uint(0)>>1) {
+		return nil, 0, errors.New("ptyhost: transcript output exceeds platform limits")
 	}
 	replay, err := openCastReplay(segments, w.pending)
-	return replay, total, err
+	return replay, int(total), err
 }
 
 // castReplay opens immutable sealed segments lazily and pins only the active

@@ -1272,6 +1272,12 @@ append/rotation. Explicit deletion may interrupt an unopened sealed segment,
 but must not silently skip it. Archived SSH acknowledgments and download
 headers continue reporting pre-existing gaps without injecting marker bytes.
 
+`TestCheckpointLongLineageRemainsWritable` keeps 40,000 real recording files
+whose old checkpoint metadata would exceed 8 MiB, then verifies compact
+checkpoint publication, rotation, restart, old cursors and continued output.
+History-discovery regressions cross the former directory-entry limit and
+advance through bounded pages of empty segments without a stuck cursor.
+
 The Docker runtime regressions must run against a reachable, real Docker
 daemon; the in-process E2E runtime is not a substitute for these checks:
 

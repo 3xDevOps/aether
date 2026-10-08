@@ -81,6 +81,9 @@ func (w *castWriter) rotate(snap ScreenSnapshot) error {
 	if w.closed || w.logicalBytes < castSegmentBytes {
 		return nil
 	}
+	if err := w.loadPrefixLocked(); err != nil {
+		return err
+	}
 	// A compact seed includes pending decoder bytes. Record those bytes before
 	// sealing so the seed and the next output agree on the exact raw boundary.
 	if len(w.pending) > 0 {
@@ -97,22 +100,13 @@ func (w *castWriter) rotate(snap ScreenSnapshot) error {
 	if err := w.f.Sync(); err != nil {
 		return err
 	}
-	if w.history == nil {
-		var err error
-		w.history, err = priorCastSegments(w.path)
-		if err != nil {
-			return err
-		}
-	}
 	old := castSegment{path: w.path, fileBytes: w.logicalBytes, outputBytes: w.outputBytes, incarnation: w.incarnation}
 	// Publish a usable screen before changing any filenames. Recovery can
 	// relocate this final boundary if the process stops during the rotation.
-	checkpoint, err := checkpointFromSnapshot(snap, append(w.history, old))
+	checkpoint, err := w.checkpointLocked(snap, old)
 	if err != nil {
 		return err
 	}
-	checkpoint.PrunedOutputBytes = w.retention.OutputBytes
-	checkpoint.CastOutputBytes += checkpoint.PrunedOutputBytes
 	if err = writeCheckpointFile(checkpointPath(w.path), checkpoint); err != nil {
 		return err
 	}
@@ -158,19 +152,31 @@ func (w *castWriter) rotate(snap ScreenSnapshot) error {
 	w.f, w.bw = tmp, bufio.NewWriterSize(tmp, 32*1024)
 	w.start, w.incarnation = now, incarnation
 	w.logicalBytes, w.outputBytes = int64(len(line)+len(seed)), 0
-	w.history = append(w.history, old)
+	w.prefixOutputBytes += uint64(old.outputBytes)
+	w.prefixSegments++
 	return w.persistRotatedCheckpointLocked(snap)
 }
 
 func (w *castWriter) persistRotatedCheckpointLocked(snap ScreenSnapshot) error {
-	segments := append(w.history, castSegment{path: w.path, fileBytes: w.logicalBytes, outputBytes: w.outputBytes, incarnation: w.incarnation})
-	checkpoint, err := checkpointFromSnapshot(snap, segments)
+	checkpoint, err := w.checkpointLocked(snap, castSegment{path: w.path, fileBytes: w.logicalBytes, outputBytes: w.outputBytes, incarnation: w.incarnation})
 	if err != nil {
 		return err
 	}
-	checkpoint.PrunedOutputBytes = w.retention.OutputBytes
-	checkpoint.CastOutputBytes += checkpoint.PrunedOutputBytes
 	return writeCheckpointFile(checkpointPath(w.path), checkpoint)
+}
+
+func (w *castWriter) checkpointLocked(snap ScreenSnapshot, boundary castSegment) (screenCheckpoint, error) {
+	checkpoint, err := checkpointFromSnapshot(snap, []castSegment{boundary})
+	if err != nil {
+		return screenCheckpoint{}, err
+	}
+	if ^uint64(0)-checkpoint.CastOutputBytes < w.prefixOutputBytes {
+		return screenCheckpoint{}, errors.New("ptyhost: checkpoint output boundary overflow")
+	}
+	checkpoint.CastOutputBytes += w.prefixOutputBytes
+	checkpoint.PrunedOutputBytes = w.retention.OutputBytes
+	checkpoint.SegmentCount = w.prefixSegments + 1
+	return checkpoint, nil
 }
 
 // A crash between the two rotation renames leaves an owned .next file. Its

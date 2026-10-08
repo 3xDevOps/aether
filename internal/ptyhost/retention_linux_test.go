@@ -66,6 +66,17 @@ func TestLegacyReplayUnderDescriptorBudget(t *testing.T) {
 					}
 					checkpoint.Version, checkpoint.Epoch, checkpoint.Sequence = 1, "", 0
 					checkpoint.CastOutputBytes = 0
+					segments, err := collectFullCastSegments(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					checkpoint.Segments = nil
+					for _, segment := range segments {
+						checkpoint.Segments = append(checkpoint.Segments, checkpointSegment{
+							Path: filepath.Base(segment.path), Incarnation: segment.incarnation,
+							FileBytes: segment.fileBytes, OutputBytes: segment.outputBytes,
+						})
+					}
 					if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 						t.Fatal(err)
 					}

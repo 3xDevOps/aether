@@ -1,8 +1,11 @@
 package ptyhost
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,7 +47,7 @@ func snapshotForBytes(t *testing.T, data []byte, position TerminalPosition) Scre
 	return makeScreenSnapshot(screen, modes, position)
 }
 
-func TestCheckpointV2RoundTripsTerminalPosition(t *testing.T) {
+func TestCompactCheckpointRoundTripsTerminalPosition(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "roundtrip.cast")
 	output := []byte("first\r\nsecond")
@@ -64,7 +67,7 @@ func TestCheckpointV2RoundTripsTerminalPosition(t *testing.T) {
 	}
 	defer recovered.screen.dispose()
 	if legacy {
-		t.Fatal("v2 checkpoint reported as legacy")
+		t.Fatal("current checkpoint reported as legacy")
 	}
 	if gotPosition != position {
 		t.Fatalf("position = %#v, want %#v", gotPosition, position)
@@ -354,7 +357,7 @@ func TestRecentReplayReportsOnlyProvenPosition(t *testing.T) {
 	}
 }
 
-func TestReplayUsesV2CheckpointByteMetadata(t *testing.T) {
+func TestReplayUsesCheckpointByteMetadata(t *testing.T) {
 	h, dir := newTestHost(t)
 	run := domain.RunID("metadata-replay")
 	path := filepath.Join(dir, string(run)+".cast")
@@ -379,5 +382,210 @@ func TestReplayUsesV2CheckpointByteMetadata(t *testing.T) {
 	data, err := io.ReadAll(window.Reader)
 	if err != nil || string(data) != string(output) {
 		t.Fatalf("Replay data = %q, err %v", data, err)
+	}
+}
+
+func TestCheckpointLongLineageRemainsWritable(t *testing.T) {
+	h, dir := newTestHost(t)
+	run := domain.RunID(strings.Repeat("l", 128))
+	path := filepath.Join(dir, string(run)+".cast")
+	// Real distinct files whose former per-file checkpoint metadata exceeds
+	// 8 MiB. Small output events keep the regression affordable in the suite.
+	const count = 40000
+	output := []byte("old\r\nolder\r\n")
+	start := time.Now().Add(-time.Hour)
+	firstIncarnation := start.UnixNano()
+	event := castLine(start, "o", output)
+	segments := make([]castSegment, 0, count)
+	legacy := screenCheckpoint{Version: 2}
+	for i := range count {
+		incarnation := firstIncarnation + int64(i)
+		name := path
+		if i != count-1 {
+			name = filepath.Join(dir, stableCastSegmentName(path, incarnation))
+		}
+		header := fmt.Sprintf("{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":%d,\"incarnation\":%d}\n", start.Unix(), incarnation)
+		data := append([]byte(header), event...)
+		if err := os.WriteFile(name, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		segments = append(segments, castSegment{path: name, incarnation: incarnation, fileBytes: int64(len(data)), outputBytes: len(output)})
+		legacy.Segments = append(legacy.Segments, checkpointSegment{
+			Path: filepath.Base(name), Incarnation: incarnation, FileBytes: int64(len(data)), OutputBytes: len(output),
+		})
+	}
+	oldEncoding, err := json.Marshal(legacy)
+	if err != nil || len(oldEncoding) <= maxScreenCheckpointBytes {
+		t.Fatalf("fixture did not exceed the old checkpoint ceiling: %d, %v", len(oldEncoding), err)
+	}
+	position := TerminalPosition{Epoch: "long-lineage-epoch", Sequence: TerminalSequence(count * len(output))}
+	checkpoint, err := checkpointFromSnapshot(snapshotForBytes(t, bytes.Repeat(output, 12), position), segments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+		t.Fatalf("long recording could not publish a checkpoint: %v", err)
+	}
+	page, err := h.History(t.Context(), run, "", "", 1)
+	if err != nil || page.NextCursor == "" || strings.Join(historyTexts(page.Lines), ",") != "older" {
+		t.Fatalf("initial history = %+v, %v", page, err)
+	}
+	key := RunSession(run)
+	if err = h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
+		t.Fatal(err)
+	}
+	s := h.lookup(key)
+	s.deliver([]byte("resumed"))
+	if err = s.checkpointNow(); err != nil {
+		t.Fatal(err)
+	}
+	// Cross the real complete-event rotation boundary after the lineage has
+	// already outgrown the old metadata limit.
+	s.mu.Lock()
+	s.tr.marker(strings.Repeat("x", castSegmentBytes))
+	s.commitOutputLocked([]byte("-rotated"))
+	s.mu.Unlock()
+	if err = h.StopSession(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := decodeCheckpoint(checkpointPath(path))
+	if err != nil || latest.Version != screenCheckpointVersion || len(latest.Segments) != 1 || latest.SegmentCount != count+2 {
+		t.Fatalf("long-lineage rotation did not publish a compact checkpoint: %+v, %v", latest, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() >= castSegmentBytes {
+		t.Fatalf("rotation stopped sealing the active segment: %v, %v", info, err)
+	}
+	info, err = os.Stat(checkpointPath(path))
+	if err != nil || info.Size() >= 64<<10 {
+		t.Fatalf("checkpoint grew with old segments: %v, %v", info, err)
+	}
+	wantPosition := TerminalPosition{Epoch: position.Epoch, Sequence: position.Sequence + TerminalSequence(len("resumed-rotated"))}
+	if err = h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(Config{TranscriptDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	snapshot, err := reopened.Snapshot(run)
+	if err != nil || snapshot.Position != wantPosition || !bytes.Contains(snapshot.Data, []byte("resumed-rotated")) {
+		t.Fatalf("long-lineage restart reset the screen: %+v, %v", snapshot, err)
+	}
+	window, err := reopened.Replay(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(window.Reader)
+	_ = window.Reader.Close()
+	want := append(bytes.Repeat(output, count), "resumed-rotated"...)
+	if readErr != nil || !bytes.Equal(data, want) || window.Bytes != len(want) || window.Position != wantPosition || window.TruncatedBefore {
+		t.Fatalf("long-lineage replay lost history: got %d bytes, want %d, %+v, %v", len(data), len(want), window, readErr)
+	}
+	older, err := reopened.History(t.Context(), run, page.NextCursor, "", 1)
+	if err != nil || strings.Join(historyTexts(older.Lines), ",") != "old" || older.TruncatedBefore {
+		t.Fatalf("authenticated cursor lost its original segment: %+v, %v", older, err)
+	}
+	if err = reopened.StartSession(t.Context(), key, newFakeAtt()); err != nil {
+		t.Fatal(err)
+	}
+	reopened.lookup(key).deliver([]byte("-again"))
+	if err = reopened.StopSession(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	latest, err = decodeCheckpoint(checkpointPath(path))
+	if err != nil || latest.Sequence != wantPosition.Sequence+TerminalSequence(len("-again")) || latest.Epoch != wantPosition.Epoch || latest.SegmentCount != count+3 {
+		t.Fatalf("long-lineage writer lost absolute accounting: %+v, %v", latest, err)
+	}
+	t.Logf("preserved %d original cast files; former metadata %d bytes; compact checkpoint %d bytes; reopened replay %d bytes; resumed sequence %d",
+		count, len(oldEncoding), info.Size(), len(data), latest.Sequence)
+}
+
+func TestCompactCheckpointKeepsRecentReadsLazyAndFullReplayHonest(t *testing.T) {
+	h, dir := newTestHost(t)
+	run := domain.RunID("compact-lazy")
+	path := filepath.Join(dir, string(run)+".cast")
+	first := writeClosedCast(t, path, []byte("old\r\nolder\r\n"))
+	cursor, err := h.History(t.Context(), run, "", "", 1)
+	if err != nil || cursor.NextCursor == "" {
+		t.Fatalf("initial cursor = %+v, %v", cursor, err)
+	}
+	current := writeClosedCast(t, path, []byte("latest\r\n"))
+	first.path = filepath.Join(dir, stableCastSegmentName(path, first.incarnation))
+	position := TerminalPosition{Epoch: "compact-lazy-epoch", Sequence: TerminalSequence(first.outputBytes + current.outputBytes)}
+	checkpoint, err := checkpointFromSnapshot(snapshotForBytes(t, []byte("old\r\nolder\r\nlatest\r\n"), position), []castSegment{first, current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(first.path); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := h.Snapshot(run)
+	if err != nil || snapshot.Position != position {
+		t.Fatalf("current screen required reading old segments: %+v, %v", snapshot, err)
+	}
+	recent, err := h.RecentReplay(run, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = recent.Reader.Close()
+	if !recent.Complete || recent.Position != position {
+		t.Fatalf("current end boundary lost its proof: %+v", recent)
+	}
+	if window, replayErr := h.Replay(run); replayErr == nil {
+		_ = window.Reader.Close()
+		t.Fatal("full replay silently accepted a missing interior segment")
+	}
+	if _, err = h.History(t.Context(), run, cursor.NextCursor, "", 1); !errors.Is(err, ErrHistoryCursorExpired) {
+		t.Fatalf("cursor into missing history = %v", err)
+	}
+	currentFile, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := currentFile.Write(castLine(time.Now(), "o", []byte("suffix")))
+	closeErr := currentFile.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("append suffix: %v, %v", writeErr, closeErr)
+	}
+	if _, err = repairColdSnapshot(path); err == nil {
+		t.Fatal("stale repair silently shortened an incomplete lineage")
+	}
+	unchanged, err := decodeCheckpoint(checkpointPath(path))
+	if err != nil || unchanged.Epoch != checkpoint.Epoch || unchanged.Sequence != checkpoint.Sequence || unchanged.SegmentCount != checkpoint.SegmentCount {
+		t.Fatalf("failed repair replaced the absolute boundary: %+v, %v", unchanged, err)
+	}
+}
+
+func TestCheckpointV2MigratesWithoutResettingPosition(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v2-migration.cast")
+	first := writeClosedCast(t, path, []byte("old\r\n"))
+	current := writeClosedCast(t, path, []byte("latest"))
+	first.path = filepath.Join(dir, stableCastSegmentName(path, first.incarnation))
+	position := TerminalPosition{Epoch: "v2-epoch", Sequence: TerminalSequence(first.outputBytes + current.outputBytes)}
+	checkpoint, err := checkpointFromSnapshot(snapshotForBytes(t, []byte("old\r\nlatest"), position), []castSegment{first, current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint.Version, checkpoint.SegmentCount = 2, 0
+	checkpoint.Segments = []checkpointSegment{
+		{Path: filepath.Base(first.path), Incarnation: first.incarnation, FileBytes: first.fileBytes, OutputBytes: first.outputBytes},
+		{Path: filepath.Base(current.path), Incarnation: current.incarnation, FileBytes: current.fileBytes, OutputBytes: current.outputBytes},
+	}
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := repairColdSnapshot(path)
+	if err != nil || snapshot.Position != position || !bytes.Contains(snapshot.Data, []byte("latest")) {
+		t.Fatalf("v2 migration changed terminal state: %+v, %v", snapshot, err)
+	}
+	migrated, err := decodeCheckpoint(checkpointPath(path))
+	if err != nil || migrated.Version != screenCheckpointVersion || migrated.SegmentCount != 2 || len(migrated.Segments) != 1 || migrated.CastOutputBytes != checkpoint.CastOutputBytes {
+		t.Fatalf("v2 migration did not compact its lineage: %+v, %v", migrated, err)
 	}
 }
