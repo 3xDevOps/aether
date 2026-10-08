@@ -84,9 +84,12 @@ provisioning and each outstanding provisioning add 1 GiB disk and 512 MiB
 memory to those requirements, preventing simultaneous launches from spending
 the same measured headroom. Reservations end on success, error or cancellation.
 
-Admission covers launch/relaunch and new member-environment, browser and agent
+Admission covers new runs and new member-environment, browser and agent
 updater containers, with a five-second probe deadline. It does not re-admit
-existing-environment execs or idempotent lookups of already-created runs.
+existing-environment execs, idempotent lookups of already-created runs, or
+reopening live or paused retained containers. Reopening resumes existing
+compute, not stopped processes; an unpause failure is returned without a
+restart or replacement container. Starting new compute still requires admission.
 It does not evict or pause existing runs under pressure. Checks precede
 mutation where possible; a failed provisioning after admission still uses
 the ordinary launch-failure lifecycle.

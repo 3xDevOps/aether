@@ -154,9 +154,12 @@ memory ceiling. Container stdout/stderr uses Docker's rotating `local` log
 driver (`max-size=10m`, `max-file=3`); this does not cap Aether's transcripts,
 agent caches or files in the checkout/home.
 
-Before provisioning a new run, relaunch, member environment, browser or agent
-updater container, Aether checks capacity with a five-second probe deadline.
-Existing-environment execs do not reserve another container's startup allowance.
+Before provisioning a new run, member environment, browser or agent updater
+container, Aether checks capacity with a five-second probe deadline.
+Existing-environment execs and reopening live or paused retained containers
+do not reserve another container's startup allowance. Reopening only resumes
+existing compute: it does not restart stopped processes or create a replacement
+container if unpausing fails. Starting new compute still requires admission.
 Admission checks the Aether data filesystem, the Docker storage filesystems
 and available host memory:
 
@@ -178,8 +181,10 @@ guarantee or a substitute for host capacity planning.
 
 Docker capacity is measured only after verifying a local Unix-socket daemon
 against its data-root engine ID. A Unix socket alone is not proof of locality.
-Classic `overlay2`/`vfs` storage uses Docker's data root. For a containerd
-image store, supported `overlayfs`/`native` snapshotters use the actual
+Classic storage checks Docker's data root and the actual layer directory:
+`overlay2`, or `vfs/dir` (the verified `vfs` parent before the first layer).
+These directories may occupy different filesystems. For a containerd image
+store, supported `overlayfs`/`native` snapshotters use the actual
 content and snapshotter roots exported by containerd's `PluginInfo` API at
 Docker's reported `Containerd.Address`; each filesystem is checked separately.
 There is no guessed `/var/lib/containerd` fallback. Linux `MemAvailable` and

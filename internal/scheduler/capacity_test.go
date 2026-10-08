@@ -341,27 +341,87 @@ func TestCapacityRefusalPrecedesRunMutationAndDoesNotEvict(t *testing.T) {
 	}
 }
 
-func TestCapacityRelaunchRefusalPreservesRetainedRun(t *testing.T) {
+func TestCapacityRelaunchReusesRetainedCompute(t *testing.T) {
+	for _, paused := range []bool{true, false} {
+		t.Run(fmt.Sprintf("paused=%t", paused), func(t *testing.T) {
+			e, rt := newAdmissionEnv(t, nil)
+			run, container := e.launchFake(t, "retained")
+			if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+				t.Fatal(err)
+			}
+			e.waitStoreStatus(t, run.ID, domain.RunMerged)
+			if !paused {
+				if err := rt.Resume(t.Context(), container.id); err != nil {
+					t.Fatal(err)
+				}
+				e.sched.mu.Lock()
+				e.sched.runs[run.ID].paused = false
+				e.sched.mu.Unlock()
+			}
+			host := healthyAdmissionHost()
+			host.MemoryAvailableBytes = 1
+			host.Filesystems[0].FreeBytes = 1
+			rt.setHost(host)
+			e.sched.cfg.MinFreeBytes = math.MaxInt64
+			var probes atomic.Int32
+			rt.probe = func(context.Context) error {
+				probes.Add(1)
+				return errors.New("capacity unavailable")
+			}
+			reopened, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID)
+			if err != nil || reopened.ID != run.ID || reopened.Status != domain.RunRunning {
+				t.Fatalf("reopen existing compute under pressure: %+v, %v", reopened, err)
+			}
+			if container.currentState() != "running" || probes.Load() != 0 {
+				t.Fatalf("resume state=%s, capacity probes=%d", container.currentState(), probes.Load())
+			}
+			e.sched.capacityGate <- struct{}{}
+			reservations := e.sched.capacityReservations
+			<-e.sched.capacityGate
+			if reservations != 0 {
+				t.Fatalf("resume reserved startup capacity: %d", reservations)
+			}
+		})
+	}
+}
+
+func TestCapacityRelaunchDoesNotRestartStoppedCompute(t *testing.T) {
 	e, rt := newAdmissionEnv(t, nil)
 	run, container := e.launchFake(t, "retained")
 	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
 	closed := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	// Model an external stop that the retained owner has not observed yet.
+	// Leave Wait pending so this exercises Relaunch, not exit finalization.
+	container.mu.Lock()
+	container.state = "stopped"
+	container.mu.Unlock()
 	host := healthyAdmissionHost()
 	host.MemoryAvailableBytes = 1
 	rt.setHost(host)
-	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); !errors.Is(err, ErrMemoryPressure) {
-		t.Fatalf("relaunch under pressure: %v", err)
+	var creates atomic.Int32
+	rt.create = func(context.Context) error {
+		creates.Add(1)
+		return errors.New("unexpected replacement")
+	}
+	_, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID)
+	if !errors.Is(err, ErrInvalidTransition) || !strings.Contains(err.Error(), `resume from state "stopped"`) {
+		t.Fatalf("stale retained runtime state must report unpause failure: %v", err)
 	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
-	if err != nil || row.Status != closed.Status || row.Reason != closed.Reason || container.currentState() != "paused" {
-		t.Fatalf("refusal changed retained state: %+v, %v, %s", row, err, container.currentState())
+	if err != nil || row.Status != closed.Status || row.Reason != closed.Reason || container.currentState() != "stopped" {
+		t.Fatalf("failed resume changed retained state: %+v, %v, %s", row, err, container.currentState())
+	}
+	if creates.Load() != 0 {
+		t.Fatal("failed resume created a replacement container")
 	}
 	rt.setHost(healthyAdmissionHost())
-	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
-		t.Fatalf("refusal leaked relaunch reservation: %v", err)
+	release, err := e.sched.reserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("failed resume leaked startup capacity: %v", err)
 	}
+	release()
 }
 
 func TestCapacityMemberEnvironmentReusesExistingContainer(t *testing.T) {
