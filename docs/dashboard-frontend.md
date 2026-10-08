@@ -1023,6 +1023,10 @@ to Working. Archive eligibility and input gates use the wire status, not
 the presentation state: a reported interactive outcome is not a closed run.
 Use **Close** to end that session and start its container retention grace.
 
+Overdue worker mail on an open integrator takes precedence over a reviewed
+outcome. Its warning and unread count stay in Working until the mail is
+acknowledged; then the reported Done or Failed state is shown again.
+
 ### Execution, input and paused on the wire
 
 **The parked reason survives a fetch.** `protocol.Run` carries `reason` -

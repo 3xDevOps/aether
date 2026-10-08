@@ -100,16 +100,16 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
     }
   }
   if (isPaused(run, ctx)) return { state: 'paused', reason: 'Paused' }
+  const unread = unreadMail(run, ctx.now)
+  if (unread > 0 && waitingOn(run, ctx) === undefined) {
+    return { state: 'working', reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
+  }
   const outcome = reportedOutcome(run)
   if (outcome) {
     return {
       state: outcome === 'success' ? 'done' : 'failed',
       reason: `Agent reported ${outcome}. Run remains open for follow-up.`,
     }
-  }
-  const unread = unreadMail(run, ctx.now)
-  if (unread > 0 && waitingOn(run, ctx) === undefined) {
-    return { state: 'working', reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
   }
   return { state: 'working', reason: workingReason(run, ctx) }
 }

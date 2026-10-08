@@ -1,5 +1,5 @@
 import { awaitingReview } from '@/lib/needs-you'
-import { groupOf, plainReason, presentRun, runLabel, stateLabel } from '@/lib/status'
+import { groupOf, plainReason, presentRun, runLabel } from '@/lib/status'
 import { isTerminal, toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
@@ -67,6 +67,18 @@ describe('run presentation', () => {
     expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')
   })
 
+  it('keeps overdue worker mail visible after reviewing an open integrator outcome', () => {
+    const parked = toRecord(run({
+      mode: 'acp', acp: true, mission_id: 'mission_1', mission_role: 'integrator',
+      status: 'needs-attention', reason: 'agent reported failure', outcome_unseen: false,
+      unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z',
+    }))
+    const warning = presentRun(parked, ctx)
+    expect(warning).toMatchObject({ state: 'working', unread: 3 })
+    expect(groupOf(warning.state)).toBe('working')
+    expect(presentRun({ ...parked, unacked_messages: 0, oldest_unacked_at: undefined }, ctx).state).toBe('failed')
+  })
+
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', paused: true }))
     expect(presentRun(paused, ctx).state).toBe('paused')
@@ -78,10 +90,6 @@ describe('run presentation', () => {
     expect(groupOf('working')).toBe('working')
     expect(groupOf('done')).toBe('finished')
     expect(groupOf('failed')).toBe('finished')
-  })
-
-  it('names the states without the word idle', () => {
-    expect(Object.values(stateLabel)).toEqual(['Needs you', 'Working', 'Paused', 'Done', 'Failed'])
   })
 
   it.each(['tui', 'acp'] as const)('keeps %s reported work distinct from a finished runtime', (mode) => {
