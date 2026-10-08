@@ -183,7 +183,13 @@ func (c *Client) Logout(ctx context.Context) error {
 	if err != nil && (!errors.As(err, &refused) || refused.Status != http.StatusUnauthorized) {
 		return fmt.Errorf("%w; the token is still valid and kept in %s so you can retry", err, tokensPath(c.dir))
 	}
-	return updateTokens(c.dir, func(f tokensFile) { delete(f.Edges, c.origin) })
+	return updateTokens(c.dir, func(f tokensFile) {
+		// A sign-in may have replaced the token while revocation was in
+		// flight. Forget only the credential this logout revoked.
+		if current := f.Edges[c.origin]; current.Token == s.Token && current.SigninOrigin == s.SigninOrigin {
+			delete(f.Edges, c.origin)
+		}
+	})
 }
 
 // Account reads the signed-in account and the servers deleting it would

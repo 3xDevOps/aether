@@ -892,6 +892,20 @@ launchable. If an older updater left the installed package missing and a
 surviving `~/.local/lib/.<agent>-update.*/previous` copy, the next attempt
 restores that copy before contacting npm.
 
+### Edge status during sign-in or logout
+
+Device-key and token reads share the credential store's cross-process
+`edge.lock` with writers. A status request waits for a concurrent credential
+write instead of opening a partially written key or racing token-file
+replacement on Windows. A process exit releases the lock automatically;
+genuine file-permission and malformed-credential errors are still reported.
+Status responses never include the device token or private device code.
+
+Logout does not hold this lock while contacting the edge. After revocation,
+it removes only the token it revoked, preserving a newer sign-in completed
+by another client while the request was in flight. If revocation cannot
+reach the edge, the token is kept so logout can be retried.
+
 ### SSH drop mid-attach
 
 The PTY session belongs to the server, not to the connection, so a dropped

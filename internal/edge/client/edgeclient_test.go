@@ -431,6 +431,102 @@ func TestConcurrentSignInsKeepEveryToken(t *testing.T) {
 	}
 }
 
+func TestCredentialReadersWaitForWriter(t *testing.T) {
+	fixture := newTestClient(t, newFakeEdge(t))
+	token := signIn(t, fixture)
+	want, err := fixture.Session()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := os.ReadFile(deviceKeyPath(fixture.dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		read func(*Client) error
+	}{
+		{"Session", func(c *Client) error {
+			session, err := c.Session()
+			if err != nil {
+				return err
+			}
+			if session.SigninOrigin != want.SigninOrigin || session.Device != want.Device || session.Account != want.Account {
+				return errors.New("Session did not read the committed sign-in")
+			}
+			raw, err := json.Marshal(session)
+			if err == nil && strings.Contains(string(raw), token) {
+				return errors.New("Session exposes the device token")
+			}
+			return err
+		}},
+		{"SignedIn", func(c *Client) error {
+			origins, err := SignedIn(c.dir)
+			if err != nil {
+				return err
+			}
+			if len(origins) != 1 || origins[0] != c.origin {
+				return errors.New("SignedIn did not read the committed sign-in")
+			}
+			return nil
+		}},
+		{"DeviceSigner", func(c *Client) error {
+			signer, err := DeviceSigner(c.dir)
+			if err != nil {
+				return err
+			}
+			if edgeproto.DeviceKeyLine(signer.PublicKey()) != want.Device.Key {
+				return errors.New("DeviceSigner did not read the committed key")
+			}
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := New(t.TempDir(), fixture.origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := lock(c.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			release := sync.OnceFunc(unlock)
+			defer release()
+			started := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				close(started)
+				done <- tc.read(c)
+			}()
+			<-started
+			// Hold the actual cross-process lock, not a test-only mutex:
+			// no consumer may inspect credentials before the writer commits.
+			select {
+			case err := <-done:
+				t.Fatalf("read completed while the writer held the lock: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			if err := os.WriteFile(deviceKeyPath(c.dir), key, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeTokens(c.dir, tokensFile{Edges: map[string]stored{
+				c.origin: {Token: token, Session: want},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			release()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("read did not finish after the writer released the lock")
+			}
+		})
+	}
+}
+
 func TestDialRefusalCarriesEdgeMessageAndHost(t *testing.T) {
 	for _, refusal := range []edgeproto.Refusal{
 		edgeproto.RefusalTokenRevoked, edgeproto.RefusalNotMember,
@@ -602,6 +698,73 @@ func TestLogoutRevokesThenForgets(t *testing.T) {
 	}
 	if strings.Contains(string(raw), token) {
 		t.Fatal("the token file still holds the revoked token")
+	}
+}
+
+func TestLogoutKeepsConcurrentSignIn(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusUnauthorized} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			edge := newFakeEdge(t)
+			revoked := make(chan string, 1)
+			resume := make(chan struct{})
+			release := sync.OnceFunc(func() { close(resume) })
+			defer release()
+			edge.mux.HandleFunc("POST "+edgeproto.PathLogout, func(w http.ResponseWriter, r *http.Request) {
+				revoked <- r.Header.Get("Authorization")
+				<-resume
+				w.WriteHeader(status)
+			})
+			c := newTestClient(t, edge)
+			oldToken := signIn(t, c)
+			before, err := c.Session()
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- c.Logout(context.Background()) }()
+			select {
+			case auth := <-revoked:
+				if auth != "Bearer "+oldToken {
+					t.Fatal("logout did not revoke its original token")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("logout did not reach the edge")
+			}
+			// Another client signs in while the old token's revocation is
+			// in flight. Network I/O must not hold the credential lock.
+			other, err := New(c.dir, c.origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			newToken := edgeproto.NewToken()
+			signedIn := make(chan error, 1)
+			go func() {
+				_, storeErr := other.store(&Login{key: before.Device.Key, SigninOrigin: before.SigninOrigin},
+					edgeproto.DeviceTokenResponse{Token: newToken, Device: before.Device, Account: before.Account})
+				signedIn <- storeErr
+			}()
+			select {
+			case signInErr := <-signedIn:
+				if signInErr != nil {
+					t.Fatal(signInErr)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("sign-in waited for logout's network request")
+			}
+			release()
+			select {
+			case logoutErr := <-done:
+				if logoutErr != nil {
+					t.Fatal(logoutErr)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("logout did not finish")
+			}
+			session, err := other.session()
+			if err != nil || session.Token != newToken {
+				t.Fatalf("logout discarded the newer sign-in: %v", err)
+			}
+		})
 	}
 }
 
