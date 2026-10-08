@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -368,9 +369,30 @@ func TestLegacyCacheConfigurationFailurePreservesHomeOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			managed := writeCacheFixture(t, e, e.member.ID, "runs", 4096)
+			const unrelated = "unrelated cleanup failure"
+			if markerErr := e.sched.cfg.Homes.SetCacheCleanupError(e.member.ID, "terminal", unrelated); markerErr != nil {
+				t.Fatal(markerErr)
+			}
 			e.sched.sweepCaches(t.Context(), true)
 			requireCacheExists(t, managed, false)
 			requireCacheExists(t, legacy, true)
+			failed, readErr := e.sched.cfg.Homes.ReadCache(e.member.ID, "terminal")
+			if readErr != nil || !strings.Contains(failed.CleanupError, unrelated) {
+				t.Fatalf("configuration failure erased another cleanup error: %+v, %v", failed, readErr)
+			}
+			e.sched.cfg.Store = e.db
+			e.sched.cfg.Runtime = rt
+			rt.err = nil
+			e.sched.sweepCaches(t.Context(), true)
+			requireCacheExists(t, legacy, false)
+			restarted, restartErr := memberhome.New(e.sched.cfg.Homes.Root(), e.sched.cfg.Homes.CacheRoot(), nil)
+			if restartErr != nil {
+				t.Fatal(restartErr)
+			}
+			recovered, recoveryErr := restarted.ReadCache(e.member.ID, "terminal")
+			if recoveryErr != nil || recovered.CleanupError != unrelated {
+				t.Fatalf("successful retry retained its error or cleared another operation: %+v, %v", recovered, recoveryErr)
+			}
 		})
 	}
 }

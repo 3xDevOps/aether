@@ -69,9 +69,10 @@ win over these targets. They are not hard quotas, and no waiting shell or
 silent agent is killed for cache space. Failed cleanup and deleted-member
 resources retain small server-owned retry metadata outside the writable
 mount; normal maintenance retries them even if a partial removal brought the
-remaining data below its age or size target. Successful image cleanup does not
-clear a pending cache-data failure. An open environment protects its cache
-data, not an exited updater container whose cleanup needs retrying.
+remaining data below its age or size target. Successful retries clear only
+their own diagnostic; image or legacy-cache cleanup cannot clear a pending
+cache-data failure. An open environment protects its cache data, not an exited
+updater container whose cleanup needs retrying.
 
 Before legacy cleanup, Aether re-reads the current image, workspace and harness
 cache settings, including configurations that have never launched or were edited

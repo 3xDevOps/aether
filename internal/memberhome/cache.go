@@ -56,6 +56,7 @@ type cacheMetadata struct {
 	DataCleanupPending  bool      `json:"data_cleanup_pending,omitempty"`
 	ImageCleanupError   string    `json:"image_cleanup_error,omitempty"`
 	RuntimeCleanupError string    `json:"runtime_cleanup_error,omitempty"`
+	LegacyCleanupError  string    `json:"legacy_cleanup_error,omitempty"`
 	Owners              []string  `json:"owners,omitempty"`
 	LegacyProtected     uint8     `json:"legacy_protected,omitempty"`
 }
@@ -163,6 +164,9 @@ func (m *Manager) ReadCache(member domain.MemberID, pool string) (CacheInfo, err
 		if meta.RuntimeCleanupError != "" {
 			info.CleanupError = boundedCacheError(strings.TrimPrefix(info.CleanupError+"; "+meta.RuntimeCleanupError, "; "))
 		}
+		if meta.LegacyCleanupError != "" {
+			info.CleanupError = boundedCacheError(strings.TrimPrefix(info.CleanupError+"; "+meta.LegacyCleanupError, "; "))
+		}
 	}
 	entry, err := root.Lstat("data")
 	if err == nil {
@@ -243,6 +247,14 @@ func (m *Manager) SetCacheImageCleanupError(member domain.MemberID, message stri
 func (m *Manager) SetCacheRuntimeCleanupError(member domain.MemberID, pool, message string) error {
 	return m.updateCacheMetadata(member, pool, true, func(meta *cacheMetadata) error {
 		meta.RuntimeCleanupError = boundedCacheError(message)
+		return nil
+	})
+}
+
+// SetCacheLegacyCleanupError changes only legacy-home cleanup status.
+func (m *Manager) SetCacheLegacyCleanupError(member domain.MemberID, message string) error {
+	return m.updateCacheMetadata(member, CachePoolTerminal, true, func(meta *cacheMetadata) error {
+		meta.LegacyCleanupError = boundedCacheError(message)
 		return nil
 	})
 }

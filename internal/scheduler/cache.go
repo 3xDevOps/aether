@@ -340,12 +340,15 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 			if !owners.legacy[info.Member] && len(latest.Owners) == 0 {
 				if current[info.Member] {
 					if err := s.protectConfiguredLegacyCaches(ctx, info.Member); err != nil {
-						_ = s.cfg.Homes.SetCacheCleanupError(info.Member, info.Pool, "Legacy cache configuration unavailable; cleanup deferred")
+						_ = s.cfg.Homes.SetCacheLegacyCleanupError(info.Member, "Legacy cache configuration unavailable; cleanup deferred")
 						return
 					}
 				}
 				if err := s.cfg.Homes.RemoveLegacyCaches(ctx, info.Member); err != nil {
-					_ = s.cfg.Homes.SetCacheCleanupError(info.Member, info.Pool, "Legacy cache cleanup failed; automatic retry pending")
+					_ = s.cfg.Homes.SetCacheLegacyCleanupError(info.Member, "Legacy cache cleanup failed; automatic retry pending")
+					return
+				}
+				if err := s.cfg.Homes.SetCacheLegacyCleanupError(info.Member, ""); err != nil {
 					return
 				}
 				if !current[info.Member] {
