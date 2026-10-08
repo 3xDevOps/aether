@@ -175,7 +175,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
         </AssistantRow>
       )
     case 'thinking':
-      return <EventRow detail={row.text}>Thought</EventRow>
+      return <EventRow detail={<Markdown text={row.text} />}>Thought</EventRow>
     case 'work':
       return <WorkRow row={row} runID={ctx.runID} />
     case 'live':

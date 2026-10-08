@@ -94,8 +94,10 @@ the agent in, inspect the checkout, or run commands next to the agent
 
 An Enhanced run opens on its **Session** view: the session item log as one
 timeline, newest at the bottom. Your messages are filled blocks; the agent's
-replies are plain text with formatted code. Consecutive tool calls fold into
-one line ("Read 2 files, ran 1 command and edited 1 file"); click it for one
+replies and **Thought** reasoning traces render Markdown, including emphasis,
+lists, links and code blocks, both while streaming and when replayed.
+Consecutive tool calls fold into one line ("Read 2 files, ran 1 command and
+edited 1 file"); click it for one
 line per call with its duration, and click a call for the command, the end of
 its output or its diff. The agent's plan, the files a turn changed (each opens
 **Changes**), notices and a **Finished** line per turn sit in between, and
@@ -109,6 +111,11 @@ sidebar and the header say **Waiting for your reply** and the header's
 Standard runs and for real stalls. **Show earlier** reads older items 200 at
 a time. `Esc` in an empty composer moves focus to the timeline; `Esc` again
 leaves the run.
+
+Thought previews are capped at four line heights and scale with **Settings >
+Appearance > Text size**; event notices remain plain text.
+The [rendering capture](media/acp-reasoning-markdown.png) shows production
+timeline components with fixture ACP items, not a live agent.
 
 The composer under the timeline sends with `Mod+Enter`; on a touch screen the
 button is the only way, and Enter adds a line. Its button changes with the

@@ -212,7 +212,7 @@ export function EventRow({
         <span className={cn('min-w-0 flex-1 break-words', tone !== 'neutral' && 'text-text')}>{children}</span>
         {trailing !== undefined && <span className="shrink-0 tabular-nums">{trailing}</span>}
       </div>
-      {detail && <p className="line-clamp-4 pl-4 break-words whitespace-pre-wrap">{detail}</p>}
+      {detail && <div className={cn('line-clamp-4 max-h-[4lh] pl-4 break-words', typeof detail === 'string' && 'whitespace-pre-wrap')}>{detail}</div>}
     </div>
   )
 }
