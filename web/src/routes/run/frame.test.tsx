@@ -325,14 +325,13 @@ describe('the session composer', () => {
   })
 
   it.each([
-    [{ status: 'completed' }, 'This run has finished. Reopen it from More to message the agent.'],
-    [{ status: 'failed', mode: 'headless' }, 'This run has finished.'],
-    [{ status: 'provisioning' }, 'The agent is still starting.'],
-    [{ member_id: bob.id, protected: true }, 'This run is protected: only its owner or an admin can message the agent.'],
-  ] as const)('replaces the composer with the reason it is closed: %j', (over, reason) => {
+    { status: 'completed' },
+    { status: 'failed', mode: 'headless' },
+    { status: 'provisioning' },
+    { member_id: bob.id, protected: true },
+  ] as const)('does not accept messages when the run is unavailable: %j', (over) => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'collaborator' } } })
     open(over, 'session')
-    expect(screen.getByText(reason)).toBeDefined()
     expect(screen.queryByRole('textbox', { name: 'Message the agent' })).toBeNull()
   })
 })

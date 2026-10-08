@@ -855,15 +855,19 @@ repository, and is a review destination for publishing the run branch (for
 example, to open a pull request); it is not the destination for a mirrored
 base update.
 
-Then close the run so it leaves **Needs you**:
+An agent's completion report leaves a Standard or Enhanced run open. Send a
+follow-up in the message box or type into the Standard agent's terminal;
+neither requires reopening. Reporting does not start an expiry timer.
+
+When finished with the session, close it:
 
 ```sh
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
 
-Closing retains the exact TUI container, checkout, run row, member account and
-coordination surfaces for `--run-container-ttl` (default `7 days`). Before that
-retention expires, reopen the same run with **Reopen run** in its **More**
+Closing retains the exact Standard or Enhanced container, checkout, run row,
+member account and coordination surfaces for `--run-container-ttl` (default
+`7 days`). Before retention expires, reopen the same run with **Reopen run** in its **More**
 menu, or:
 
 ```sh
@@ -878,8 +882,8 @@ which the run cannot be reopened.
 Swarm workers also retain their exact containers for the same default
 7 days after a success/failure report or container exit, without continuing
 work. Inspect their Session, Changes, Captures and worker details normally.
-Unlike explicitly closed ordinary Standard runs, completed workers cannot be
-reopened.
+Unlike explicitly closed ordinary Standard or Enhanced runs, completed
+workers cannot be reopened.
 
 The local daemon is optional. It fetches server-owned run branches as agents
 commit and can push your local base branch in **local-only** workspaces. It

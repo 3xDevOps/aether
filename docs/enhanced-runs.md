@@ -119,6 +119,13 @@ Standard runs and for real stalls. **Show earlier** reads older items 200 at
 a time. `Esc` in an empty composer moves focus to the timeline; `Esc` again
 leaves the run.
 
+A success or failure outcome report does not close an interactive Enhanced
+session. It shows the reported result for review, then **Done** or **Failed**
+with the session still open for follow-up. Send another message normally;
+no adapter restart or session restoration is needed. **Close** ends the
+session and starts the default seven-day container grace. Background runs and
+swarm workers still finish automatically.
+
 Thought previews are capped at four line heights and scale with **Settings >
 Appearance > Text size**; event notices remain plain text.
 The [rendering capture](media/acp-reasoning-markdown.png) shows production

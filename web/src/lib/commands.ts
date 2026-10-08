@@ -125,6 +125,14 @@ export function isRetainedRun(run: RunRecord): boolean {
   }
 }
 
+/** Reopen is explicit and only available while an interactive runtime is retained. */
+export function canReopenRun(run: RunRecord): boolean {
+  return (run.mode === 'tui' || run.mode === 'acp') &&
+    (run.reason === 'closed; retained container'
+      ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
+      : isTerminal(run.status) && agentReportRetained.has(run.reason ?? ''))
+}
+
 export function releaseFinishedPlan(
   candidates: RunActionCandidate[],
   cap: Capability,
@@ -405,10 +413,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
   if (
-    run.mode === 'tui' &&
-    (run.reason === 'closed; retained container'
-      ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
-      : finished && agentReportRetained.has(run.reason ?? '')) &&
+    canReopenRun(run) &&
     cap.hasMethod('run.relaunch') &&
     maySteer
   ) {
@@ -441,7 +446,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   return list
 }
 
-/** An agent report finished a TUI run and kept its container to relaunch. */
+/** Older agent-report finishes can still have a retained interactive runtime. */
 const agentReportRetained = new Set([
   'agent reported success; retained container',
   'agent reported failure; retained container',

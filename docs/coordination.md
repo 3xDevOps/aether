@@ -1134,53 +1134,47 @@ before returning the receipt; ordinary lock contention is not a report conflict.
 The receipt is not task acceptance: a success report without required user
 evidence leaves the task in **Review**.
 
-**Success and failure are terminal**: a run holds one terminal report. After
-it, a report under any new idempotency key, `blocked` included, fails with
-`CodeConflict` (`-32003`); the same key and inputs replay the original
-report. Reopening the run (**Reopen run** under the run's **More** menu,
-or `aether reopen <run>`) supersedes the terminal report, including one
-whose evidence capture failed and was never accepted, so the reopened agent
-can report again under a new idempotency key; the superseded report's key
-then fails with `CodeConflict`, as does a report whose evidence capture was
-still running when the reopen landed. **Blocked is nonterminal**: a run may file any
-number of blocked reports, before or after one another.
+**Interactive Standard and Enhanced runs stay open.** A success or failure
+report completes the current task, not the session. Use a new idempotency key
+for each later task's report. A new report supersedes the previous success or
+failure report, including a pending reservation whose evidence capture failed.
+Retrying the same key and inputs replays its receipt until it is superseded;
+a superseded key or capture fails with `CodeConflict` (`-32003`). Earlier
+reports and their evidence remain in history.
+
+**Background runs and swarm workers have one terminal outcome per launch.**
+After success or failure, any new report key, including `blocked`, conflicts.
+Blocked is nonterminal and may repeat before the terminal outcome. Reopening
+an eligible retained run supersedes its terminal report.
 
 What a report does depends on the run:
 
-- **Ordinary run** (no swarm assignment). Success or failure finishes the
-  run once the agent's turn ends: Aether commits the work (`aether:` for
-  success, `wip:` for failure), publishes the run branch, and records
-  `completed` or `failed`, which moves the run out of **Working**. The turn
-  ends when the agent reports itself waiting with no input request
-  open; a permission or question prompt is not the end of the turn,
-  and the run finishes once it is answered. A report that reaches the server
-  after the turn already ended finishes the run at once. An agent without a
-  status reporter never says its turn ended, so there the first
-  `--poll-interval` check two minutes after the report finishes the run; an
-  agent with one is finished by the turn end alone, however long it
-  keeps working, unless the run stalled into Needs you (`needs-attention`) by
-  that check,
-  which then finishes it. A run with an input request open is never
-  finished by the check; it waits for the owner's answer. A finish that fails
-  is retried by the same check two minutes later. If the agent process exits
-  first, the run takes the reported status, whatever its exit code, even when
-  the report reaches the server after the exit or was made while the run was
-  still starting; a report a reopen superseded never changes the run. The
-  commit the exit already published keeps the exit's `aether:` or `wip:`
-  prefix, and the run's status and report are the record. A Standard run keeps
-  its paused container so it can be reopened, exactly like a closed run, with the reason
-  `agent reported success; retained container` or
-  `agent reported failure; retained container`; a Background run, or a
-  Standard run with a negative `--run-container-ttl`, records `agent reported success` or
-  `agent reported failure`. The finished run carries `outcome_unseen: true`
-  until its owner opens it (`run.seen`) or a status change such as Close or
-  a reopen clears it. A Close or Kill that lands first wins, and Close still
-  re-labels a finished run as merged or abandoned. Blocked moves the run to
-  Needs you (`needs-attention`) with the reason `blocked: <summary>` the next
-  time its turn ends (or it stalls, on an agent without a status reporter), until the agent
-  resumes; an input request does not show it. The newest blocked
-  report decides the reason: an older one the server retries delivering after
-  it changes nothing.
+- **Interactive run** (`tui` or `acp`, except a swarm worker). At turn end,
+  with no permission or question request open, success or failure records
+  `needs-attention` with the reason `agent reported success` or
+  `agent reported failure`. The owner sees an unreviewed outcome; after
+  opening it, the dashboard shows **Done** or **Failed** and says the run
+  remains open for follow-up. The composer, native terminal, container and
+  Enhanced agent session remain live. The next working turn clears the idle
+  outcome. A report received after turn end is shown immediately. Without a
+  status reporter, the first poll two minutes after the report shows it;
+  the stall detector can also reveal it. Neither path interrupts an open
+  input request. A report does not start a retention timer or publish a
+  result commit. Use the normal Git workflow to deliver changes, then
+  **Close** when finished with the session. Close commits and publishes
+  remaining work and starts the default seven-day container grace.
+- **Background run** (`headless`). Success or failure still finishes the run
+  after its turn ends, or on process exit. For an agent without a status
+  reporter, the first `--poll-interval` check two minutes after the report
+  finishes it; outstanding input requests prevent that finish. Aether commits
+  the work (`aether:` for success, `wip:` for failure), publishes the run
+  branch, records `completed` or `failed`, and cleans up its container.
+  A Close or Kill that lands first wins.
+- **Blocked report.** The summary becomes `blocked: <summary>` at turn end,
+  or when an agent without a status reporter stalls. It does not interrupt
+  an open input request. Resuming work clears the reason; an older retried
+  report cannot bring it back.
+
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason
   `worker finished; retained container`. Failure does the same without
@@ -1193,10 +1187,13 @@ What a report does depends on the run:
   them.
 - **Swarm integrator.** Success completes an `active` swarm and stops
   any leftover workers; it is refused in `planning`. Failure leaves the
-  swarm in its phase, so a human can recover it with Replace integrator.
-  Either way the integrator run then finishes like an ordinary run once its
-  turn ends. Report success only after the verified candidate is delivered,
+  swarm in its phase for another attempt or **Replace integrator**.
+  An interactive integrator remains open for follow-up; a Background
+  integrator finishes. Report success only after the verified candidate is delivered,
   or, with nothing to deliver, once the findings are gathered.
+
+Reported outcomes carry `outcome_unseen: true` until the owner opens the run
+(`run.seen`) or work resumes, Close or another status change clears it.
 
 Waiting on a peer uses ask/inbox, never report; waiting on a question's
 answer uses `mission plan show --wait`, not an outcome. Read the inbox once more before a
@@ -1269,14 +1266,14 @@ It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
 
-The two meet on an ordinary run. After a success or failure `coord.report`,
-the next `waiting` (idle) hook with no input request open is the end of the
-turn that reported, so it finishes the run instead of parking it. A hook that
-only opens or closes an input request is not a turn end, but closing the last
-open request on a reported run that is already idle finishes it. After a
-blocked `coord.report`, the next idle hook parks the run with the
-`blocked: <summary>` reason instead of `agent idle`; the first `working` hook
-after that park clears it.
+After an interactive success or failure `coord.report`, the next `waiting`
+(idle) hook with no input request open makes the outcome reviewable without
+closing the run. A hook that only opens or closes an input request is not a
+turn end, but closing the last request on an already-idle run can reveal the
+outcome. A Background run still finishes at that boundary. A blocked report
+shows `blocked: <summary>` instead of `agent idle`. The first `working` hook
+after an outcome was shown clears that idle reason; older report retries
+cannot bring it back.
 The scheduler applies a report as part of its durable publication, so a
 server restart or a temporarily unreachable run is retried, not lost.
 

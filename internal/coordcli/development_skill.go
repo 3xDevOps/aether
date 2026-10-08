@@ -72,9 +72,10 @@ ONLY if your harness actually supports it. If it cannot read images, report
 exactly that limitation and the text/DOM checks you did; do not claim visual
 verification from text alone. Preserve capture identity/revision, note any
 truncation and unsupported content, and do not automatically upload screenshots
-publicly. Verification and evidence collection must precede terminal stop,
-artifact deletion, or a success/failure report, which may clean up all
-development resources. Do not report while a check still needs them. Read the inbox before the report and take no new work afterwards.
+publicly. Verify and collect required evidence before reporting an outcome,
+terminal stop, or artifact deletion. Background and worker success/failure
+reports may clean up development resources; interactive non-worker sessions
+stay open for follow-up. Read the inbox before reporting, then end your turn.
 `
 
 const retainCaptureSkill = `Retain only deliberately selected, reviewed captures:

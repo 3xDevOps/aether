@@ -262,7 +262,7 @@ type CoordInboxResult struct {
 	Acked bool `json:"acked,omitempty"`
 }
 
-// CoordReportParams submits a durable worker outcome for the calling run.
+// CoordReportParams submits a durable task outcome for the calling run.
 type CoordReportParams struct {
 	Outcome        string   `json:"outcome"`
 	Summary        string   `json:"summary"`

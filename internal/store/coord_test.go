@@ -264,6 +264,9 @@ func TestCoordReportTerminalSlot(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	m := mustCreateMember(t, db)
 	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	if err := db.SetRunMode(ctx, run.ID, domain.LaunchHeadless, false); err != nil {
+		t.Fatalf("SetRunMode: %v", err)
+	}
 	report := func(outcome CoordOutcome, key string) *CoordReport {
 		return &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: outcome, Summary: string(outcome), IdempotencyKey: key}
 	}
@@ -317,6 +320,9 @@ func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	m := mustCreateMember(t, db)
 	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	if err := db.SetRunMode(ctx, run.ID, domain.LaunchHeadless, false); err != nil {
+		t.Fatalf("SetRunMode: %v", err)
+	}
 	pending := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1"}
 	if _, err := db.ReserveCoordReport(ctx, pending); err != nil {
 		t.Fatalf("ReserveCoordReport: %v", err)
@@ -387,7 +393,7 @@ func TestCoordReportSlotMigrationKeepsReportsAndPublications(t *testing.T) {
 		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
 			VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
 		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
-			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
+			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'headless', 'running', 'b', 'w', 1);
 		INSERT INTO coord_reports (id, workspace_id, run_id, outcome, summary, idempotency_key, state, created_at, finalized_at)
 			VALUES ('rep1', 'w1', 'r1', 'success', 'done', 'k1', 'finalized', 1, 2);
 		INSERT INTO coord_report_publications (report_id, event_id, publication_state, created_at)

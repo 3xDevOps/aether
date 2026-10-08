@@ -185,9 +185,8 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 	}
 }
 
-// TestCLISkillOutcomesFollowTheRole: an ordinary run learns that a terminal
-// report finishes it, a worker that it submits the attempt, and an integrator
-// that success completes the mission.
+// Outcome guidance is selected by the live assignment, not merely by whether
+// the coordination socket belongs to a mission.
 func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": workerOutcomes, "integrator": integratorOutcomes} {
 		status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: []string{protocol.MethodCoordInbox}}

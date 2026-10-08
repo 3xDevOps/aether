@@ -86,6 +86,31 @@ describe('ending commands by stage', () => {
     }
   })
 
+  it.each(['tui', 'acp'] as const)('keeps %s reports open and reopens only after explicit Close', (mode) => {
+    const commandsFor = (over: Parameters<typeof run>[0]) => runCommands({
+      run: toRecord(run({ mode, ...over })),
+      paused: false,
+      cap: { hasMethod: () => true, hasLocal: () => false, hasWS: () => true },
+      members: {},
+      self: { id: 'mem_alice', role: 'collaborator' },
+    }).map((command) => command.id)
+    const parked = commandsFor({
+      status: 'needs-attention', reason: 'agent reported success', outcome_unseen: true,
+    })
+    expect(parked).toContain('inject')
+    expect(parked).toContain('close')
+    expect(parked).not.toContain('relaunch')
+    expect(parked).not.toContain('archive')
+    const closed = commandsFor({ status: 'abandoned', reason: 'closed; retained container' })
+    expect(closed).toContain('relaunch')
+    expect(closed).not.toContain('inject')
+    expect(commandsFor({ status: 'abandoned', reason: 'retained container expired' })).not.toContain('relaunch')
+    expect(commandsFor({ mode: 'headless', status: 'completed', reason: 'agent reported success; retained container' }))
+      .not.toContain('relaunch')
+    expect(commandsFor({ mission_role: 'worker', status: 'completed', reason: 'worker finished; retained container' }))
+      .not.toContain('relaunch')
+  })
+
   it('hides completed-run actions when the Kill policy denies them', () => {
     const commands = runCommands({
       run: toRecord(run({ status: 'completed', protected: true })),

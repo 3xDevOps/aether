@@ -320,6 +320,57 @@ func TestEnhancedRunSendsTaskAndReportsTurns(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 }
 
+func TestEnhancedReportedOutcomeKeepsSessionForFollowup(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "first turn", turnEnded("end_turn", 1))
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	session := e.sched.acp.session(run.ID)
+	container := e.rt.byName(string(run.ID))
+	firstExec := rt.all()[0]
+	if err := e.sched.FinishReported(t.Context(), run.ID, "report-first", domain.RunCompleted, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || row.FinishedAt != nil {
+		t.Fatalf("first outcome = %+v", row)
+	}
+	if _, err := e.sched.Seen(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptAskPermission}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "follow-up permission", func() bool { return len(e.sched.PendingInputs(run.ID)) == 1 })
+	row = e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if row.OutcomeUnseen || row.Reason == reportedSuccessReason {
+		t.Fatalf("follow-up retained outcome: %+v", row)
+	}
+	if err := e.sched.FinishReported(t.Context(), run.ID, "report-second", domain.RunFailed, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	pending := e.sched.PendingInputs(run.ID)
+	e.expireReportDeadline(t, run.ID)
+	if row = e.waitStoreStatus(t, run.ID, domain.RunRunning); row.OutcomeUnseen {
+		t.Fatal("outcome shown while permission still pending")
+	}
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "allow", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "second outcome", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && row.Status == domain.RunNeedsAttention && row.Reason == reportedFailureReason && row.OutcomeUnseen
+	})
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || sc.Retained || sc.Paused || sc.RetainedUntil != nil {
+		t.Fatalf("reported outcome retained container: %+v, %v", sc, err)
+	}
+	if e.sched.acp.session(run.ID) != session || e.rt.byName(string(run.ID)) != container || len(rt.all()) != 1 || firstExec.exited() {
+		t.Fatal("report restarted or stopped the live ACP execution")
+	}
+}
+
 func TestEnhancedRunPermissionAnsweredOnce(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
@@ -369,7 +420,7 @@ func TestEnhancedRunFormAnswerCarriesValues(t *testing.T) {
 
 // A failed turn is not a turn end: an armed outcome report waits for one
 // that succeeds.
-func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
+func TestEnhancedRunFailedTurnDoesNotSettleReportedOutcome(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
 	run := e.launchACP(t, "")
@@ -390,7 +441,10 @@ func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	waitFor(t, "reported outcome after successful turn", func() bool {
+		row, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && row.Status == domain.RunNeedsAttention && row.Reason == reportedSuccessReason
+	})
 }
 
 func TestEnhancedRunCancel(t *testing.T) {

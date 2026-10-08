@@ -136,8 +136,9 @@ func registerTools(srv *mcp.Server, socket string, g *gate) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolReport,
 		Description: "Submit one durable success, failure, or blocked outcome with bounded evidence references. " +
-			"A run has one success or failure report; on an ordinary run it finishes the run when the turn ends, " +
-			"and blocked shows the summary as the Idle reason. " +
+			"Interactive non-worker Standard/TUI and Enhanced/ACP sessions stay open: report, end your turn, and await follow-up; use a new key for a later task. " +
+			"Background runs finish on success/failure with one terminal report per launch; swarm workers keep one per attempt. " +
+			"Integrator success still completes the active mission; blocked shows the summary as the Needs you reason at turn end. " +
 			"An explicit stable idempotency_key is required; the server captures evidence before accepting it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReportParams) (*mcp.CallToolResult, protocol.CoordReportResult, error) {
 		var out protocol.CoordReportResult

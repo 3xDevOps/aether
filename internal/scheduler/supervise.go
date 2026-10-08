@@ -610,7 +610,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				e.reporter == harness.ReporterFull
 			released := e.status == domain.RunNeedsAttention && observed &&
 				idle <= s.cfg.StallThreshold && !heldForTheMember
-			if released && e.agentReport.State == agentstatus.Idle {
+			if released && (e.agentReport.State == agentstatus.Idle || e.idleShown) {
 				released = e.unparks(activity, s.cfg.turnTail)
 			}
 			var err error
@@ -619,32 +619,35 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the
-				// blocked reason waits for its turn-end report.
-				showsBlocked := e.blockedReason != "" && e.reporter == harness.ReporterNone
-				if showsBlocked {
-					reason = e.blockedReason
-				}
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
-				if err == nil && showsBlocked && !e.blockedShown {
-					e.blockedShown = true
-					if serr := s.writeSidecar(e.sidecar()); serr != nil {
-						slog.Warn("scheduler: persist shown blocked reason", "run", e.runID, "error", serr)
-					}
+				// idle outcome waits for its turn-end report.
+				showsIdle := e.idleReason != "" && e.reporter == harness.ReporterNone && !e.atPrompt()
+				if showsIdle {
+					err = s.parkIdleReportLocked(ctx, e)
+				} else {
+					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
 			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
+				old := e.sidecar()
+				oldParked, oldActivity := e.parkedAt, e.postParkActivity
 				e.agentReport = agentstatus.Report{}
 				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
-				if e.blockedShown {
-					e.blockedReason, e.blockedShown = "", false
+				if e.idleShown {
+					e.idleReason, e.idleShown = "", false
 				}
-				if serr := s.writeSidecar(e.sidecar()); serr != nil {
-					slog.Warn("scheduler: persist cleared agent report", "run", e.runID, "error", serr)
+				err = s.writeSidecar(e.sidecar())
+				if err == nil {
+					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
+						"activity resumed", "")
 				}
-				err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
-					"activity resumed", "")
+				if err != nil {
+					e.agentReport = old.agentReport()
+					e.parkedAt, e.postParkActivity = oldParked, oldActivity
+					e.idleReason, e.idleShown = old.IdleReason, old.IdleShown
+					err = errors.Join(err, s.writeSidecar(old))
+				}
 			}
 			if err != nil {
 				slog.Warn("scheduler: stall transition", "run", e.runID, "error", err)

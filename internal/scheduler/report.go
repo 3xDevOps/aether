@@ -19,13 +19,9 @@ import (
 // Sidecar persistence precedes any observable change; no input delta is saved as
 // the last execution report or replayed on recovery.
 //
-// A run armed by FinishReported finishes once its execution is idle at the
-// end of a turn and no input request is open: the agent's last message is
-// then in the transcript. That idle report is recorded without the park,
-// which the finish would only flash on the board; a failed finish is
-// retried on it, and recovery finishes on it. Only the turn-end idle report
-// shows a pending blocked reason, and the first working report after that
-// park clears it.
+// Interactive outcomes share blocked reports' nonterminal park: only a real
+// turn end with no pending input shows the reason, and only Working after
+// that park clears it. Background outcomes instead start their terminal finish.
 func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error {
 	newSession, err := s.applyAgentReport(ctx, run, report)
 	if newSession != nil {
@@ -79,16 +75,16 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	reportChanged := execution.State != entry.agentReport.State || execution.Reason != entry.agentReport.Reason
 	finishes := entry.reported != "" && turnEnd(execution) && len(pending) == 0
 	reason := report.Reason
-	showsBlocked, clearsBlocked := false, false
+	showsIdle, clearsIdle := false, false
 	switch {
-	case report.State == agentstatus.Idle && turnEnd(execution) && !finishes && entry.blockedReason != "":
-		reason = entry.blockedReason
-		showsBlocked = !entry.blockedShown
-	case report.State == agentstatus.Working && entry.blockedShown:
-		clearsBlocked = true
+	case turnEnd(execution) && len(pending) == 0 && !finishes && entry.idleReason != "":
+		reason = entry.idleReason
+		showsIdle = !entry.idleShown
+	case report.State == agentstatus.Working && entry.idleShown:
+		clearsIdle = true
 	}
 	var oldSidecar sidecar
-	persist := inputsChanged || reportChanged || showsBlocked || clearsBlocked
+	persist := inputsChanged || reportChanged || showsIdle || clearsIdle
 	if persist {
 		oldSidecar = entry.sidecar()
 		next := oldSidecar
@@ -100,11 +96,11 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			started := entry.startedAt
 			next.InputStartedAt = &started
 		}
-		if showsBlocked {
-			next.BlockedShown = true
+		if showsIdle {
+			next.IdleShown = true
 		}
-		if clearsBlocked {
-			next.BlockedReason, next.BlockedShown = "", false
+		if clearsIdle {
+			next.IdleReason, next.IdleShown = "", false
 		}
 		if err := s.writeSidecar(next); err != nil {
 			return nil, fmt.Errorf("scheduler: persist agent report: %w", err)
@@ -112,19 +108,29 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	}
 
 	var transitionErr error
-	switch report.State {
-	case agentstatus.Idle:
-		if !finishes && (entry.status != domain.RunNeedsAttention || reportChanged || showsBlocked) {
-			transitionErr = s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunNeedsAttention, reason, "")
+	switch {
+	case report.State == agentstatus.Idle || showsIdle:
+		if !finishes && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
+			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
+				domain.RunNeedsAttention, reason, "", showsIdle && reportedIdleReason(reason))
 		}
-	case agentstatus.Working:
+	case report.State == agentstatus.Working:
 		if entry.status == domain.RunNeedsAttention {
 			transitionErr = s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
 				domain.RunRunning, agentstatus.ReasonResumed, "")
 		}
 	}
 	if transitionErr != nil {
+		if showsIdle {
+			// The native boundary is still true when parking its outcome
+			// fails. Keep it durable so the poll/recovery path can retry
+			// without requiring an idle agent to send another turn end.
+			entry.agentReport = execution
+			entry.pendingInputs = pending
+			entry.inputPublishPending = entry.inputPublishPending || inputsChanged
+			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+			return nil, errors.Join(transitionErr, s.writeSidecar(entry.sidecar()), s.publishPendingInputLocked(ctx, entry))
+		}
 		if persist {
 			transitionErr = errors.Join(transitionErr, s.writeSidecar(oldSidecar))
 		}
@@ -146,11 +152,12 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		entry.pendingInputs = pending
 		entry.inputPublishPending = true
 	}
-	if showsBlocked {
-		entry.blockedShown = true
+	if showsIdle {
+		entry.idleShown = true
+		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
 	}
-	if clearsBlocked {
-		entry.blockedReason, entry.blockedShown = "", false
+	if clearsIdle {
+		entry.idleReason, entry.idleShown = "", false
 	}
 	if finishes {
 		s.startReportedFinishLocked(entry)

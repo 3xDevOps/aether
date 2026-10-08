@@ -517,17 +517,17 @@ trimmed and must be 1 to 64 characters with no control characters; a bad
 name is `-32602` with the reason. Each rename publishes `member.changed`
 (`{"member_id":"...","display_name":"..."}`) in every workspace.
 
-`run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. A run that
-an agent's `coord.report` finished (see
-[coordination.md](coordination.md)) has `run.outcome_unseen` set until its
-owner opens it; `run.seen` clears the flag. Only the run's current owner may
+`run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. An agent's
+success or failure outcome (see [coordination.md](coordination.md)) sets
+`run.outcome_unseen`, including when an interactive run stays open at
+`needs-attention`. `run.seen` clears the flag. Only the run's current owner may
 call it; anyone else, admins included, gets `-32001`. Clearing publishes a
 `run.outcome_seen` event with an empty payload and a timeline note; calling
 it on a run whose flag is already clear returns the run and publishes
 nothing. Every `run.status` payload carries `outcome_unseen` as the run's
 flag after that event, including a same-status re-label such as retention
-expiry: `true` from the finish a report causes until the owner opens the run,
-`false` after a later status change such as a close or reopen.
+expiry: `true` when a reported outcome becomes reviewable until the owner
+opens it, `false` after work resumes, Close or another status change.
 
 `run.relaunch` is another proxied control-channel method:
 
@@ -536,12 +536,12 @@ aether reopen <run-id>
 ```
 
 The equivalent gateway call is `POST /api/v1/run.relaunch` with
-`{"run_id":"run_..."}` and a `RunResult` response. It is eligible only for a
-TUI run that retained its container and whose `--run-container-ttl` deadline
-has not passed: `merged` or `abandoned` after `run.close` (`reason` is
-`closed; retained container`), `completed` after the agent reported success
-(`agent reported success; retained container`), or `failed` after it reported
-failure (`agent reported failure; retained container`). `run.relaunch` resumes the
+`{"run_id":"run_..."}` and a `RunResult` response. It is eligible for a
+Standard or Enhanced run that retained its container and whose
+`--run-container-ttl` deadline has not passed: `merged` or `abandoned`
+after `run.close` (`reason` is `closed; retained container`). Older
+agent-finished retained runs remain eligible. Interactive outcome reports
+now leave the run open and do not require reopening. `run.relaunch` resumes the
 same run row in the same container and checkout; it does not create a new run
 or container and does not perform a new launch or disk-floor admission.
 
@@ -551,7 +551,7 @@ boot. Once expiry destroys the retained container, the call returns `-32002`
 reopened. An expired or otherwise unavailable retained run cannot be
 reopened; a row removed by `run.delete` instead returns not found. The
 default `--run-container-ttl` is `168h` (7 days); negative values disable
-retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
+retention, so a closed interactive run is unavailable to `run.relaunch` immediately.
 
 ### `GET /api/v1/capabilities`
 

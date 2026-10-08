@@ -27,14 +27,11 @@ type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
 }
 
-// OutcomeSink receives an ordinary run's published coord.report. A success
-// or failure asks the scheduler to finish the run; a blocked summary becomes
-// its needs-attention reason. reportedAt is when the report was finalized,
-// which lets the scheduler ignore a report older than the run's current
-// launch. reportID lets it ignore a replayed blocked report, and re-read a
-// terminal report it applies after the run exited, when no launch is left
-// to compare against. A run that
-// is already terminal or gone is not an error; any error leaves the
+// OutcomeSink receives an ordinary run's published coord.report. Success and
+// failure park an interactive run or finish a background run; a blocked summary
+// becomes its needs-attention reason. reportedAt and reportID let the scheduler
+// reject stale or replayed reports independently of native execution updates.
+// A run that is already terminal or gone is not an error; any error leaves the
 // publication pending for retry.
 type OutcomeSink interface {
 	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
@@ -42,28 +39,36 @@ type OutcomeSink interface {
 }
 
 // applyRunOutcome hands a run's report to the scheduler before the
-// publication is marked done, so the outbox retries a failed hand-off. A
-// mission integrator's run finishes like an ordinary run; a mission worker
-// keeps its mission lifecycle, and a report a relaunch superseded no longer
-// speaks for the run.
+// publication is marked done, so the outbox retries a failed hand-off.
+// Mission integrators use the ordinary outcome path; workers keep their mission
+// lifecycle. A superseded report remains evidence but no longer speaks for the run.
 func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport) error {
 	if s.cfg.Outcomes == nil || report.SupersededAt != nil {
 		return nil
 	}
+	current, err := s.cfg.Mail.GetCoordReport(ctx, report.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("report outcome lookup: %w", err)
+	}
+	if current.SupersededAt != nil {
+		return nil
+	}
 	if s.cfg.Mission != nil {
-		assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrMissionStale) {
+		assignment, assignmentErr := s.cfg.Mission.Assignment(ctx, report.RunID)
+		if errors.Is(assignmentErr, store.ErrNotFound) || errors.Is(assignmentErr, store.ErrMissionStale) {
 			return nil
 		}
-		if err != nil {
-			return fmt.Errorf("report outcome assignment: %w", err)
+		if assignmentErr != nil {
+			return fmt.Errorf("report outcome assignment: %w", assignmentErr)
 		}
 		if assignment.Role == "worker" {
 			return nil
 		}
 	}
 	reportedAt := *report.FinalizedAt
-	var err error
 	switch report.Outcome {
 	case store.CoordOutcomeSuccess:
 		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, report.ID, domain.RunCompleted, reportedAt)

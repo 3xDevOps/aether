@@ -30,11 +30,9 @@ var ErrCoordPeerLimit = errors.New("store: coordination peer limit reached")
 // report (success or failure) under a different idempotency key.
 var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
 
-// ErrCoordReportSuperseded means a retry reused the idempotency key of a
-// terminal report a relaunch superseded, or a capture tried to finalize a
-// reservation a relaunch superseded. The reopened run reports again under
-// a new key.
-var ErrCoordReportSuperseded = errors.New("store: coordination report was superseded by a relaunch")
+// ErrCoordReportSuperseded means a retry or evidence capture refers to a
+// terminal reservation superseded by a later interactive report or relaunch.
+var ErrCoordReportSuperseded = errors.New("store: coordination report was superseded")
 
 // ErrCoordReportIdempotencyConflict means a retry reused a report key with
 // different semantic inputs.
@@ -116,8 +114,7 @@ type RunMessage struct {
 // a durable reservation made before evidence capture; only finalized rows are
 // externally accepted outcomes. EvidenceRefs are opaque, bounded references
 // and never server filesystem paths. A run holds any number of blocked
-// reports and at most one terminal report whose SupersededAt is nil; a
-// relaunch supersedes it.
+// reports and at most one terminal report whose SupersededAt is nil.
 type CoordReport struct {
 	ID                string
 	WorkspaceID       domain.WorkspaceID
@@ -215,7 +212,7 @@ type MessageStore interface {
 }
 
 // CoordTerminalReportStore frees a run's terminal report slot and reads a
-// report back to see whether a relaunch superseded it.
+// report back to see whether another report or a relaunch superseded it.
 type CoordTerminalReportStore interface {
 	SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error
 	GetCoordReport(ctx context.Context, id string) (*CoordReport, error)
@@ -615,10 +612,8 @@ func scanRunMessage(row interface{ Scan(...any) error }) (*RunMessage, error) {
 	return &m, nil
 }
 
-// AppendCoordReport is retained for callers that already have a completed
-// evidence set. It uses the same durable reservation/finalization path as
-// coord.report, so even legacy callers cannot create a second active terminal
-// report for a run.
+// AppendCoordReport uses the same durable reservation/finalization path as
+// coord.report for callers that already have a completed evidence set.
 func (d *DB) AppendCoordReport(ctx context.Context, report *CoordReport) error {
 	if err := validateCoordReport(report); err != nil {
 		return err
@@ -679,9 +674,9 @@ func validateCoordReportRefs(refs []string) error {
 
 // ReserveCoordReport durably records a report before any evidence capture.
 // A retry with the same key returns the persisted pending or finalized row,
-// or ErrCoordReportSuperseded once a relaunch superseded it. A new key
-// receives ErrCoordReportConflict while the run holds an active terminal
-// report, whatever the new outcome.
+// or ErrCoordReportSuperseded once it was superseded. A fresh key on a live,
+// non-worker interactive run supersedes its terminal reservation atomically.
+// Other runs keep their terminal slot until a relaunch supersedes it.
 func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
 		return false, err
@@ -713,6 +708,18 @@ func (d *DB) ReserveCoordReport(ctx context.Context, report *CoordReport) (bool,
 		return false, fmt.Errorf("store: reserve coord report: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE coord_reports SET superseded_at = ?
+		 WHERE run_id = ? AND outcome IN ('success', 'failure') AND superseded_at IS NULL
+		   AND NOT EXISTS (
+		       SELECT 1 FROM coord_reports WHERE run_id = ? AND idempotency_key = ?)
+		   AND EXISTS (
+		       SELECT 1 FROM runs WHERE id = ? AND mode IN ('tui', 'acp')
+		         AND status IN ('queued', 'provisioning', 'running', 'needs-attention'))
+		   AND NOT EXISTS (SELECT 1 FROM mission_attempts WHERE run_id = ?)`,
+		createdAt, report.RunID, report.RunID, report.IdempotencyKey, report.RunID, report.RunID); err != nil {
+		return false, fmt.Errorf("store: reserve coord report: supersede previous: %w", err)
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO coord_reports (`+coordReportCols+`)
 		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL
 		WHERE NOT EXISTS (
@@ -801,7 +808,7 @@ func CoordReportEventID(reportID string) string {
 // FinalizeCoordReport atomically turns a pending reservation into an
 // externally accepted report. It returns true only for the transition that
 // won the finalization race, and ErrCoordReportSuperseded for a
-// reservation a relaunch superseded while its evidence was captured.
+// reservation superseded while its evidence was captured.
 func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
 		return false, err

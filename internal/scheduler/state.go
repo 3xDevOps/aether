@@ -247,11 +247,8 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 	return s.transitionOutcomeLocked(ctx, run, workspace, from, to, reason, actor, false)
 }
 
-// transitionOutcomeLocked is transitionLocked that, when reported, records
-// the transition an agent's terminal report causes and marks the outcome
-// unseen by the run's owner. The event's OutcomeUnseen equals reported:
-// only completed and failed rows carry the flag, and neither has a legal
-// same-status transition that would keep it.
+// transitionOutcomeLocked also marks a newly reported outcome unseen, including
+// a nonterminal interactive park. Ordinary transitions clear the visible flag.
 func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, reported bool) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
@@ -354,10 +351,10 @@ type sidecar struct {
 	InputStartedAt      *time.Time               `json:"input_started_at,omitempty"`
 	InputPublishPending bool                     `json:"input_publish_pending,omitempty"`
 	ReportedOutcome     domain.RunStatus         `json:"reported_outcome,omitempty"`
-	BlockedReason       string                   `json:"blocked_reason,omitempty"`
-	BlockedShown        bool                     `json:"blocked_shown,omitempty"`
-	BlockedReportID     string                   `json:"blocked_report_id,omitempty"`
-	BlockedReportAt     *time.Time               `json:"blocked_report_at,omitempty"`
+	IdleReason          string                   `json:"blocked_reason,omitempty"`
+	IdleShown           bool                     `json:"blocked_shown,omitempty"`
+	IdleReportID        string                   `json:"blocked_report_id,omitempty"`
+	IdleReportAt        *time.Time               `json:"blocked_report_at,omitempty"`
 	RelaunchedAt        *time.Time               `json:"relaunched_at,omitempty"`
 	ExitObserved        bool                     `json:"exit_observed"`
 	ExitCode            int                      `json:"exit_code"`
@@ -387,12 +384,12 @@ func (e *supervised) sidecar() sidecar {
 		pendingInputs = nil
 		inputPublishPending = false
 	}
-	var relaunchedAt, blockedReportAt *time.Time
+	var relaunchedAt, idleReportAt *time.Time
 	if t := e.relaunchedAt; !t.IsZero() {
 		relaunchedAt = &t
 	}
-	if t := e.blockedReportAt; !t.IsZero() {
-		blockedReportAt = &t
+	if t := e.idleReportAt; !t.IsZero() {
+		idleReportAt = &t
 	}
 	return sidecar{
 		RunID:               string(e.runID),
@@ -417,10 +414,10 @@ func (e *supervised) sidecar() sidecar {
 		InputStartedAt:      inputStartedAt,
 		InputPublishPending: inputPublishPending,
 		ReportedOutcome:     e.reported,
-		BlockedReason:       e.blockedReason,
-		BlockedShown:        e.blockedShown,
-		BlockedReportID:     e.blockedReportID,
-		BlockedReportAt:     blockedReportAt,
+		IdleReason:          e.idleReason,
+		IdleShown:           e.idleShown,
+		IdleReportID:        e.idleReportID,
+		IdleReportAt:        idleReportAt,
 		RelaunchedAt:        relaunchedAt,
 		ExitObserved:        e.exitObserved,
 		ExitCode:            e.exitCode,

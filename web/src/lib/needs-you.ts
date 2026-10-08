@@ -102,9 +102,23 @@ export const terminalAction: PrimaryAction = { kind: 'open', label: 'Open termin
 const answerIn = (run: RunRecord, enhancedLabel: string): PrimaryAction =>
   isEnhanced(run) ? { kind: 'open', label: enhancedLabel } : terminalAction
 
+/** An interactive report parks the live session, rather than finishing its runtime. */
+export function reportedOutcome(
+  run: Pick<Run, 'status'> & Partial<Pick<Run, 'mode' | 'mission_role' | 'reason'>>,
+): 'success' | 'failure' | undefined {
+  if (run.status !== 'needs-attention' || run.mission_role === 'worker' ||
+    (run.mode !== 'tui' && run.mode !== 'acp')) return undefined
+  if (run.reason === 'agent reported success') return 'success'
+  if (run.reason === 'agent reported failure') return 'failure'
+  return undefined
+}
+
 // `outcome_unseen` is owner-scoped on the server.
-export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen'>): boolean {
-  return run.outcome_unseen === true && (run.status === 'completed' || run.status === 'failed')
+export function awaitingReview(
+  run: Pick<Run, 'status' | 'outcome_unseen'> & Partial<Pick<Run, 'mode' | 'mission_role' | 'reason'>>,
+): boolean {
+  return run.outcome_unseen === true &&
+    (run.status === 'completed' || run.status === 'failed' || reportedOutcome(run) !== undefined)
 }
 
 export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
@@ -349,6 +363,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     holds: (run, ctx) =>
       isEnhanced(run) &&
       run.status === 'needs-attention' &&
+      reportedOutcome(run) === undefined &&
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(stalledPrefix) &&
       !run.reason?.startsWith(blockedPrefix) &&
@@ -362,6 +377,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'run',
     holds: (run, ctx) =>
       run.status === 'needs-attention' &&
+      reportedOutcome(run) === undefined &&
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(blockedPrefix) &&
       enhancedFailure(run) === undefined,
@@ -379,8 +395,11 @@ export const needsYouConditions: NeedsYouCondition[] = [
     holds: (run) => awaitingReview(run),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
-    reason: (run) =>
-      run.status === 'failed' ? 'Failed, review the result' : 'Finished, review the result',
+    reason: (run) => {
+      const outcome = reportedOutcome(run)
+      if (outcome) return `Agent reported ${outcome}; review the result. Run remains open for follow-up.`
+      return run.status === 'failed' ? 'Failed, review the result' : 'Finished, review the result'
+    },
   }),
 ]
 

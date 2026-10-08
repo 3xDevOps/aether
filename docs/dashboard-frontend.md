@@ -948,8 +948,8 @@ never hidden.
 | Needs you | any, while a condition below applies to the viewer | Needs you |
 | Working | `queued`, `provisioning`, `running`, `needs-attention` | Working |
 | Paused | a live run paused by a member | Working |
-| Done | `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
-| Failed | `failed`, `interrupted` | Finished, sorted first |
+| Done | `completed`, `merged`, `abandoned` ("Closed without merging"), or a seen interactive success at `needs-attention` | Finished |
+| Failed | `failed`, `interrupted`, or a seen interactive failure at `needs-attention` | Finished, sorted first |
 
 Needs you means the viewer can resolve it. `src/lib/needs-you.ts` holds the
 conditions as one table, checked in order; `needsYou(run, ctx)` returns the
@@ -966,9 +966,9 @@ first that applies:
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
 | Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
-| Enhanced turn ended (`acp`, parked at `needs-attention` without a stall) | owner | Waiting for your reply |
-| Parked at `needs-attention` (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
-| Unreviewed finish (`outcome_unseen`) | owner | Finished, review the result |
+| Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | Waiting for your reply |
+| Parked at `needs-attention` without a reported outcome (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
+| Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
 
 A condition that applies to someone else leaves the run Working with "Waiting
 for Alice". A worker in a running swarm with a live integrator counts only for
@@ -1006,17 +1006,22 @@ without the field - a legacy gateway), and live `pause`/`resume` entries on
 the `workspace.timeline` stream keep it current (`pausedFromTimeline` in
 `src/store/board.ts`).
 
-**Unreviewed finish** marks a run an agent finished with
-`aether-internal report --outcome success|failure` (status `completed` or
-`failed`) that its owner has not opened. The server owns the flag
-(`outcome_unseen`, below), so it survives a reload and needs only the owner.
-`watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when the
-owner reveals the run through `navigate()`, or is already on it in a visible
-tab when the flag arrives. It makes one call per reveal: a refusal shows the
-server's error and is not retried until the owner opens the run again. The
-run moves to Finished only when the `run.outcome_seen` event or the method
-result clears the flag. Archive eligibility and finished-run checks read the
-wire status, so they treat the run as finished throughout.
+**Unreviewed outcome** marks a success or failure reported with
+`aether-internal report` that the owner has not opened. Interactive Standard
+and Enhanced runs stay live at `needs-attention`, with the reason
+`agent reported success` or `agent reported failure`; Background runs finish.
+The server owns `outcome_unseen`, so it survives reloads and needs only the
+owner. `watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when
+the owner reveals the run through `navigate()`, or is already on it in a
+visible tab when the flag arrives. It makes one call per reveal: a refusal
+shows the server's error and is not retried until the owner opens it again.
+
+Once the flag clears, the run presents **Done** or **Failed** in Finished.
+An interactive run still accepts messages and terminal input; the reason
+line says it remains open for follow-up. Its next working turn returns it
+to Working. Archive eligibility and input gates use the wire status, not
+the presentation state: a reported interactive outcome is not a closed run.
+Use **Close** to end that session and start its container retention grace.
 
 ### Execution, input and paused on the wire
 
@@ -1112,8 +1117,9 @@ protect and free do not overwrite the server's events with an RPC response.
   `run.release`, the kill permission and a retained-container reason
   (`isRetainedRun`). A freed or expired run no longer offers it, and the
   server checks the lifecycle again if the run changed after the menu opened.
-- **Reopen run** restarts a Standard run whose container was retained after
-  a close or an agent-reported finish (`aether reopen` on the command line).
+- **Reopen run** resumes a retained Standard or Enhanced run after explicit
+  Close (`aether reopen` on the command line). Reported interactive completion
+  needs no reopening. Older agent-finished retained runs remain eligible.
 - **Hand off** and **Protect** need the run's owner or an admin. Before
   hydration the caller's own record has not arrived, and the mirror answers
   yes rather than making the shell's buttons appear a beat late. **Pull

@@ -4,6 +4,7 @@ import { ArrowUp, CornerUpRight, ListPlus, Play, Square } from '@/components/ico
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
+import { canReopenRun } from '@/lib/commands'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { formatKeys, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
@@ -142,7 +143,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const [body, setBody] = useState('')
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
-  const block = composerBlock(run, maySteer, cap.hasMethod('run.relaunch') && run.mode === 'tui')
+  const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.image'), () => room.busy)
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
@@ -258,7 +259,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const gate = enhancedBlock({
     run,
     maySteer,
-    canReopen: cap.hasMethod('run.relaunch'),
+    canReopen: maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run),
     stream: session?.stream,
     streamError: session?.streamError,
     sessionLive: session?.live ?? false,

@@ -1,4 +1,4 @@
-import { enhancedBlock, pillFor } from '@/routes/run/composer-state'
+import { composerBlock, enhancedBlock, pillFor } from '@/routes/run/composer-state'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
@@ -39,6 +39,20 @@ describe('the Enhanced composer gate', () => {
     [{ hasLease: false, controller: 'other' as const }, 'Someone else controls this run.'],
   ])('%j', (over, reason) => {
     expect(enhancedBlock({ ...open, ...over })?.reason ?? null).toBe(reason)
+  })
+
+  it.each(['success', 'failure'] as const)('accepts follow-ups after reported %s without Reopen', (outcome) => {
+    for (const mode of ['tui', 'acp'] as const) {
+      const parked = toRecord(run({
+        mode, acp: mode === 'acp', status: 'needs-attention',
+        reason: `agent reported ${outcome}`, outcome_unseen: true,
+      }))
+      expect(composerBlock(parked, true, false)).toBeNull()
+      expect(enhancedBlock({ ...open, run: parked, canReopen: false })).toBeNull()
+      expect(composerBlock({ ...parked, outcome_unseen: false }, true, false)).toBeNull()
+      expect(composerBlock({ ...parked, status: 'abandoned' }, true, true))
+        .toBe('This run has finished. Reopen it from More to message the agent.')
+    }
   })
 
   it('keeps Interrupt for the lease holder while a request waits', () => {

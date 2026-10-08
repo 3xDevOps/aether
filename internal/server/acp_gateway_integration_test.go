@@ -163,6 +163,39 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 		}
 	}
 	next("the task's answer", func() bool { return strings.Contains(said.String(), "pong") })
+	waitTurns(ctx, t, env.srv, domain.RunID(runID), 1)
+	original, err := env.srv.Store().GetRun(ctx, domain.RunID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := waitMissionSocket(t, filepath.Join(env.data, "coord", runID))
+	reportOutcome := func(outcome, key, reason string) {
+		t.Helper()
+		if err := pacedCall(ctx, socket, protocol.MethodCoordReport, protocol.CoordReportParams{
+			Outcome: outcome, Summary: "Verified the current turn.", IdempotencyKey: key,
+		}, nil); err != nil {
+			t.Fatalf("coord.report %s: %v", outcome, err)
+		}
+		params, _ := json.Marshal(protocol.RunIDParams{RunID: runID})
+		for {
+			var got protocol.RunResult
+			if status := postJSON(t, web+"/api/v1/run.get", string(params), &got); status != http.StatusOK {
+				t.Fatalf("run.get after report: %d", status)
+			}
+			if got.Run.Status == string(domain.RunNeedsAttention) && got.Run.Reason == reason {
+				if !got.Run.OutcomeUnseen || got.Run.Paused || got.Run.FinishedAt != nil || got.Run.ContainerRetainedUntil != nil {
+					t.Fatalf("report stopped the Enhanced session: %+v", got.Run)
+				}
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("reported outcome never became ready: %+v", got.Run)
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}
+	reportOutcome(protocol.CoordOutcomeSuccess, "first-turn", "agent reported success")
 
 	inject, _ := json.Marshal(protocol.RunInjectParams{
 		RunID: runID, Message: acpmock.PromptAskPermission, IdempotencyKey: "ask-1",
@@ -186,6 +219,25 @@ func TestIntegrationEnhancedRunGateway(t *testing.T) {
 		t.Fatalf("second answer: %d %+v", status, out.Error)
 	}
 	next("the answered turn", func() bool { return strings.Contains(said.String(), "permission: allow") })
+	waitTurns(ctx, t, env.srv, domain.RunID(runID), 2)
+	reportOutcome(protocol.CoordOutcomeFailure, "second-turn", "agent reported failure")
+	followup, _ := json.Marshal(protocol.RunInjectParams{
+		RunID: runID, Message: "say pong", IdempotencyKey: "follow-up-after-failure",
+		ControlSessionID: lease.ControlSessionID, ControlGeneration: lease.ControlGeneration,
+	})
+	if status := postJSON(t, web+"/api/v1/run.inject", string(followup), &posted); status != http.StatusOK || posted.Receipt != "sent" {
+		t.Fatalf("follow-up after reported failure: %d %+v", status, posted)
+	}
+	next("the follow-up answer on the same stream", func() bool { return strings.Count(said.String(), "pong") == 2 })
+	waitTurns(ctx, t, env.srv, domain.RunID(runID), 3)
+	continued, err := env.srv.Store().GetRun(ctx, domain.RunID(runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.HarnessSessionID == "" || continued.HarnessSessionID != original.HarnessSessionID ||
+		continued.OutcomeUnseen || continued.FinishedAt != nil {
+		t.Fatalf("follow-up did not preserve the original agent session: before=%+v after=%+v", original, continued)
+	}
 
 	closeParams, _ := json.Marshal(protocol.RunCloseParams{RunID: runID, Outcome: string(domain.RunAbandoned)})
 	var closed protocol.RunResult
