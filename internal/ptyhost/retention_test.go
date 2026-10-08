@@ -165,7 +165,7 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = restarted.Close() })
 	snapshot, err := restarted.Snapshot(run)
-	if err != nil || snapshot.Position != window.Position || !bytes.Contains(snapshot.Data, []byte("CURRENT")) {
+	if err != nil || !snapshot.TruncatedBefore || snapshot.Position != window.Position || !bytes.Contains(snapshot.Data, []byte("CURRENT")) {
 		t.Fatalf("latest compact screen did not survive expiry/restart: %+v, %v", snapshot, err)
 	}
 	if err = restarted.StartSession(t.Context(), key, newFakeAtt()); err != nil {
@@ -173,7 +173,7 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	}
 	restarted.lookup(key).deliver([]byte("-resumed"))
 	resumed, err := restarted.Snapshot(run)
-	if err != nil || resumed.Position.Epoch != before.Epoch || resumed.Position.Sequence != sequence+TerminalSequence(len("-resumed")) {
+	if err != nil || !resumed.TruncatedBefore || resumed.Position.Epoch != before.Epoch || resumed.Position.Sequence != sequence+TerminalSequence(len("-resumed")) {
 		t.Fatalf("restart did not continue absolute position: %+v, %v", resumed, err)
 	}
 }
@@ -368,6 +368,12 @@ func TestMaintenancePrunesStoppedRecordingKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if run, isRun := key.Run(); isRun {
+				snapshot, snapshotErr := h.Snapshot(run)
+				if snapshotErr != nil || snapshot.TruncatedBefore {
+					t.Fatalf("complete cold screen = %+v, %v", snapshot, snapshotErr)
+				}
+			}
 			old := time.Now().Add(-castRetainedAge - time.Hour)
 			for _, file := range []string{archives[0], path} {
 				if err = os.Chtimes(file, old, old); err != nil {
@@ -376,6 +382,12 @@ func TestMaintenancePrunesStoppedRecordingKinds(t *testing.T) {
 			}
 			if err = h.PruneTranscripts(t.Context()); err != nil {
 				t.Fatal(err)
+			}
+			if run, isRun := key.Run(); isRun {
+				snapshot, snapshotErr := h.Snapshot(run)
+				if snapshotErr != nil || !snapshot.TruncatedBefore || !bytes.Contains(snapshot.Data, []byte("LATEST")) {
+					t.Fatalf("cached screen hid newly expired history: %+v, %v", snapshot, snapshotErr)
+				}
 			}
 			if _, err = os.Stat(archives[0]); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("stopped archive survived maintenance: %v", err)

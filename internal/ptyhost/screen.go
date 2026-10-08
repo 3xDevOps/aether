@@ -45,6 +45,8 @@ type ScreenSnapshot struct {
 	Rows     uint
 	Data     []byte
 	Position TerminalPosition
+	// Earlier recorded output may expire while this screen remains complete.
+	TruncatedBefore bool
 }
 
 type terminalScreen struct {

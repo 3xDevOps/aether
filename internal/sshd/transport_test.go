@@ -484,29 +484,34 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 }
 
 func TestAttachFinishedRunReportsExpiredPrefixWithoutChangingBytes(t *testing.T) {
-	for _, framed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("framed=%t", framed), func(t *testing.T) {
+	for _, request := range []protocol.AttachRequest{{}, {Framed: true}, {Framed: true, Screen: true}} {
+		t.Run(fmt.Sprintf("framed=%t/screen=%t", request.Framed, request.Screen), func(t *testing.T) {
 			e := newTestEnv(t, nil)
 			e.pty.setErr(errNoSession)
-			const retained = "\x1b[31mretained\r\n世界\x00"
+			retained := "\x1b[31mretained\r\n世界\x00"
 			e.pty.setTranscript(e.run.ID, []byte(retained))
 			e.pty.truncatedBefore = true
+			if request.Screen {
+				retained = "\x1b[2Jcurrent screen\r\n"
+				e.pty.snapshots = map[domain.RunID]ptyhost.ScreenSnapshot{
+					e.run.ID: {Cols: 80, Rows: 24, Data: []byte(retained), TruncatedBefore: true},
+				}
+			}
 			if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
-			if err := json.NewEncoder(pipe).Encode(protocol.AttachRequest{
-				RunID: string(e.run.ID), ReadOnly: true, Framed: framed,
-			}); err != nil {
+			request.RunID, request.ReadOnly = string(e.run.ID), true
+			if err := json.NewEncoder(pipe).Encode(request); err != nil {
 				t.Fatal(err)
 			}
 			r := bufio.NewReader(pipe)
 			var ack protocol.AttachResponse
 			readJSONLine(t, r, &ack)
-			if !ack.OK || !ack.TruncatedBefore || ack.Replay != len(retained) || ack.Framed != framed {
+			if !ack.OK || !ack.TruncatedBefore || ack.Replay != len(retained) || ack.Framed != request.Framed {
 				t.Fatalf("retained replay ack = %+v", ack)
 			}
-			if framed {
+			if request.Framed {
 				reader := &protocol.TerminalReader{Reader: r}
 				buf := make([]byte, len(retained))
 				n, size, err := reader.Read(buf)

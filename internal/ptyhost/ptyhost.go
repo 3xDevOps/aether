@@ -696,10 +696,29 @@ func (h *Host) startSnapshotRepair(key SessionKey, path string) *snapshotResult 
 // background repair and returns ErrSnapshotPending without scanning the cast
 // on the caller goroutine.
 func (h *Host) Snapshot(run domain.RunID) (snapshot ScreenSnapshot, err error) {
-	if err := validateRunID(run); err != nil {
-		return ScreenSnapshot{}, fmt.Errorf("%w: %q", err, run)
+	if validationErr := validateRunID(run); validationErr != nil {
+		return ScreenSnapshot{}, fmt.Errorf("%w: %q", validationErr, run)
 	}
 	key := RunSession(run)
+	path := h.transcriptPath(key)
+	defer func() {
+		if err != nil {
+			return
+		}
+		lifecycle := acquireTranscriptLifecycle(path)
+		lifecycle.entry.mu.RLock()
+		defer func() {
+			lifecycle.entry.mu.RUnlock()
+			lifecycle.release()
+		}()
+		retention, retentionErr := readCastRetention(path)
+		if retentionErr != nil {
+			snapshot = ScreenSnapshot{}
+			err = fmt.Errorf("ptyhost: read snapshot retention: %w", retentionErr)
+			return
+		}
+		snapshot.TruncatedBefore = retention.Before != 0
+	}()
 	h.mu.Lock()
 	if s := h.sessions[key]; s != nil {
 		h.mu.Unlock()
@@ -716,7 +735,6 @@ func (h *Host) Snapshot(run domain.RunID) (snapshot ScreenSnapshot, err error) {
 	}
 	h.mu.Unlock()
 
-	path := h.transcriptPath(key)
 	lifecycle := acquireTranscriptLifecycle(path)
 	lifecycle.entry.mu.RLock()
 	defer func() {

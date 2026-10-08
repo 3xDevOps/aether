@@ -1054,6 +1054,7 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 		} else {
 			cols, rows = snap.Cols, snap.Rows
 			if screen {
+				truncatedBefore = snap.TruncatedBefore
 				replayBytes = len(snap.Data)
 				rc = io.NopCloser(bytes.NewReader(snap.Data))
 			}

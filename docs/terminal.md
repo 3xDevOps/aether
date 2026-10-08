@@ -636,8 +636,10 @@ segments can still occupy disk space until those readers close. A replay's
 proven end boundary is independent of whether its earlier prefix has expired.
 
 Archived attach acknowledgments report `truncated_before: true` when earlier
-recorded output has expired, including the recent-output fallback. Raw history
-downloads report the same fact in `X-Aether-Truncated-Before: true|false`.
+recorded output has expired, including compact screen snapshots and the
+recent-output fallback. A complete current screen does not imply a complete
+recording. Raw history downloads report the same fact in
+`X-Aether-Truncated-Before: true|false`.
 Replay byte counts and downloaded `.ansi` bodies describe the exact retained
 output, with no synthetic expiry marker bytes; they need not represent the
 original complete recording.
