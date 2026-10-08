@@ -290,24 +290,6 @@ func TestRunWireShape(t *testing.T) {
 	}
 }
 
-func TestRunInjectParamsWireIncludesCallerKey(t *testing.T) {
-	params := RunInjectParams{RunID: "run-1", Message: "continue", IdempotencyKey: "inject-1"}
-	raw, err := json.Marshal(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got RunInjectParams
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got != params {
-		t.Fatalf("run.inject params = %+v, want %+v", got, params)
-	}
-	if !strings.Contains(string(raw), `"idempotency_key":"inject-1"`) {
-		t.Fatalf("run.inject params omitted caller key: %s", raw)
-	}
-}
-
 func TestWorkspaceWireShapeOmitsServerConfig(t *testing.T) {
 	w := &domain.Workspace{
 		ID: "ws_1", Name: "proj",

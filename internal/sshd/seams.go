@@ -73,7 +73,8 @@ type RunController interface {
 	// PendingInputs returns an independent snapshot of unresolved requests;
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
-	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error)
+	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error)
+	ReadImage(ctx context.Context, runID domain.RunID, reference string) ([]byte, string, error)
 	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
 	// first answer wins. values is the form answer for an accepted question.

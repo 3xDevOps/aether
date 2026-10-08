@@ -550,15 +550,18 @@ export const api = {
     runID: string,
     message: string,
     idempotencyKey: string,
-    opts?: { steer?: boolean; lease?: SessionLease },
+    opts?: { steer?: boolean; lease?: SessionLease; attachments?: string[] },
   ) =>
     call<RoomPostResult>('run.inject', {
       run_id: runID,
       message,
       idempotency_key: idempotencyKey,
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.steer ? { steer: true } : {}),
       ...opts?.lease,
     }),
+  roomImage: async (runID: string, messageID: string, index: number, signal?: AbortSignal): Promise<Blob> =>
+    (await getResponse(`/run/${encodeURIComponent(runID)}/messages/${encodeURIComponent(messageID)}/attachments/${index}`, signal)).blob(),
   runInputAnswer: (runID: string, requestID: string, optionID: string, lease: SessionLease, values?: Record<string, unknown>) =>
     call<unknown>('run.input.answer', {
       run_id: runID,

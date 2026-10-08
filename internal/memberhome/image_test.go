@@ -1,6 +1,7 @@
 package memberhome
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,11 +43,12 @@ func TestSaveImageCreatesPrivateGeneratedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, err := manager.SaveImage("member-1", ".png", []byte("image"))
+	data := encodedTestImage(t, ".png")
+	path, err := manager.SaveImage("member-1", ".png", data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.IsAbs(path) || filepath.Dir(path) != terminalImageDir || filepath.Ext(path) != ".png" {
+	if filepath.IsAbs(path) || filepath.Dir(path) != terminalImageDir || filepath.Ext(path) != ".png" || !ValidImageName(filepath.Base(path)) {
 		t.Fatalf("generated path = %q", path)
 	}
 	home, err := manager.Path("member-1")
@@ -57,8 +59,8 @@ func TestSaveImageCreatesPrivateGeneratedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(image) != "image" {
-		t.Fatalf("stored image bytes = %q, want %q", image, "image")
+	if !bytes.Equal(image, data) {
+		t.Fatalf("stored image bytes differ from the uploaded image")
 	}
 	info, err := os.Stat(filepath.Join(home, filepath.FromSlash(path)))
 	if err != nil {

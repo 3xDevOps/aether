@@ -273,7 +273,7 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	image := []byte("run home image")
+	image := onePixelPNG
 	path, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", image)
 	if err != nil {
 		t.Fatalf("SaveTerminalImage: %v", err)
@@ -1286,7 +1286,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
-	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi", false, nil); !errors.Is(err, ptyhost.ErrNoSession) {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "hi"}, false, nil); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
 	}
 }

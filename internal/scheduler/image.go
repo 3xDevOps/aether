@@ -4,16 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 )
-
-var generatedTerminalImage = regexp.MustCompile(`^image-[0-9a-f]{32}\.(?:png|jpg|gif|webp)$`)
 
 // SaveTerminalImage persists image bytes in the member home the target
 // container mounts and returns the absolute path visible from that container.
@@ -117,17 +113,37 @@ func (s *Scheduler) ValidateTerminalImage(ctx context.Context, runID domain.RunI
 		return errors.New("scheduler: terminal image is outside the run home image directory")
 	}
 	name := strings.TrimPrefix(reference, prefix)
-	if strings.Contains(name, "/") || !generatedTerminalImage.MatchString(name) {
+	if !memberhome.ValidImageName(name) {
 		return errors.New("scheduler: terminal image reference was not server generated")
 	}
-	hostHome, err := s.cfg.Homes.Path(account)
-	if err != nil {
-		return errors.New("scheduler: resolve terminal image home")
-	}
-	hostPath := filepath.Join(hostHome, ".aether", "terminal-images", name)
-	info, err := os.Lstat(hostPath)
-	if err != nil || !info.Mode().IsRegular() {
-		return errors.New("scheduler: terminal image does not exist")
+	if _, _, err := s.cfg.Homes.ReadImage(account, name); err != nil {
+		return fmt.Errorf("scheduler: read terminal image: %w", err)
 	}
 	return nil
+}
+
+// ReadImage resolves a saved image reference using the run's durable home
+// ownership, not a live container or a caller-selected host path. The
+// container-visible HOME prefix is metadata only; new references are admitted
+// separately by ValidateTerminalImage while that HOME is still captured.
+func (s *Scheduler) ReadImage(ctx context.Context, runID domain.RunID, reference string) ([]byte, string, error) {
+	if s.cfg.Homes == nil {
+		return nil, "", errors.New("scheduler: member homes are not configured")
+	}
+	if runID == "" || !path.IsAbs(reference) || path.Clean(reference) != reference || strings.ContainsAny(reference, "\x00\r\n\\") {
+		return nil, "", errors.New("scheduler: invalid terminal image reference")
+	}
+	name := path.Base(reference)
+	if !memberhome.ValidImageName(name) || !strings.HasSuffix(path.Dir(reference), "/.aether/terminal-images") {
+		return nil, "", errors.New("scheduler: terminal image reference was not server generated")
+	}
+	run, err := s.cfg.Store.GetRun(ctx, runID)
+	if err != nil {
+		return nil, "", fmt.Errorf("scheduler: resolve terminal image run: %w", err)
+	}
+	data, mimeType, err := s.cfg.Homes.ReadImage(run.HomeMember(), name)
+	if err != nil {
+		return nil, "", fmt.Errorf("scheduler: read terminal image: %w", err)
+	}
+	return data, mimeType, nil
 }

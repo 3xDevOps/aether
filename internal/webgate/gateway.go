@@ -106,6 +106,7 @@ func New(cfg Config) (*Gateway, error) {
 	g.HandleFunc("GET /ws/terminal", g.handleTerminal)
 	g.HandleFunc("GET /ws/dev/browser/{run}", g.handleDevelopmentBrowser)
 	g.HandleFunc("GET /api/v1/dev/{run}/artifacts/{artifact}", g.handleDevelopmentArtifact)
+	g.HandleFunc("GET /api/v1/run/{run}/messages/{message}/attachments/{index}", g.handleDevelopmentArtifact)
 	static := StaticHandler(cfg.Static)
 	g.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Serving the SPA here would turn a wrong-verb client bug into a

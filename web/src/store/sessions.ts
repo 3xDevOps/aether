@@ -307,6 +307,10 @@ export function deliveryOf(m: RoomMessage): Pick<Extract<SessionRow, { kind: 'us
   }
 }
 
+export function roomImages(m: Pick<RoomMessage, 'id' | 'attachments'>): Extract<SessionRow, { kind: 'user' }>['images'] {
+  return m.attachments?.length ? m.attachments.map((_, index) => ({ messageID: m.id, index })) : undefined
+}
+
 export interface SessionSources {
   run: RunRecord
   events: Event[]
@@ -432,7 +436,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
     const order = events.length + index
     if (m.kind === 'steer_request') {
       items.push({ at: m.created_at, order, row: {
-        ...base, kind: 'user', authorID: m.actor_id, body: m.body, ...deliveryOf(m),
+        ...base, kind: 'user', authorID: m.actor_id, body: m.body, images: roomImages(m), ...deliveryOf(m),
       } })
     } else if (m.kind === 'comment') {
       items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body } })

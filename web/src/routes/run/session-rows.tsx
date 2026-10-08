@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { Copy } from '@/components/icons'
 import { MessageRow as AgentMessage } from '@/components/messages/message-row'
+import { MessageImages } from '@/components/messages/message-images'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -136,7 +137,8 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body
       return (
         <MessageRow
-          author={name(row.authorID ?? ctx.ownerID)}
+          author={row.authorID ? name(row.authorID) : row.images?.length ? 'User' : name(ctx.ownerID)}
+          attachments={row.images?.length ? <MessageImages runID={ctx.runID} images={row.images} /> : undefined}
           meta={
             <>
               {row.delivery && (

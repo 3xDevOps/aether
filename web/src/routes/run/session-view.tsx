@@ -19,7 +19,7 @@ import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
 import { liveActivity, rowsOfTurn, type SessionRow } from '@/store/session-rows'
-import { deliveryOf, readSessionLog, rowsForRun, type AcpSession } from '@/store/sessions'
+import { deliveryOf, readSessionLog, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
 
 const emptyRoom: RoomMessage[] = []
@@ -45,14 +45,22 @@ function withSteers(rows: SessionRow[], room: RoomMessage[]): SessionRow[] {
   const used = new Set<string>()
   const matched = rows.map((row) => {
     if (row.kind !== 'user') return row
-    const steer = steers.find((m) => !used.has(m.id) && m.body.trim() === row.body.trim() &&
-      Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow)
-    if (!steer) return row
-    used.add(steer.id)
-    return { ...row, authorID: steer.actor_id, ...(steer.state === 'not_sent' ? deliveryOf(steer) : {}) }
-  })
+    const imageMessageID = row.images?.[0]?.messageID
+    const sameImageMessage = imageMessageID !== undefined && row.images!.every((image) => image.messageID === imageMessageID)
+    const steer = imageMessageID
+      ? sameImageMessage && steers.find((m) => m.id === imageMessageID)
+      : steers.find((m) => !used.has(m.id) && !m.attachments?.length && m.body.trim() === row.body.trim() &&
+        Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow)
+    const messageID = steer ? steer.id : sameImageMessage ? imageMessageID : undefined
+    if (messageID) {
+      if (used.has(messageID)) return null
+      used.add(messageID)
+    }
+    if (!steer) return messageID ? { ...row, id: messageID } : row
+    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, authorID: steer.actor_id, ...deliveryOf(steer) }
+  }).filter((row): row is SessionRow => row !== null)
   const waiting = steers.filter((m) => !used.has(m.id) && m.state !== 'cancelled')
-    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, authorID: m.actor_id, ...deliveryOf(m) }))
+    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), authorID: m.actor_id, ...deliveryOf(m) }))
   return byTime(matched, waiting)
 }
 
@@ -65,7 +73,7 @@ function enhancedRows(session: AcpSession | undefined): SessionRow[] {
   return rows
 }
 
-function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { rows: SessionRow[]; session?: AcpSession } {
+function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { rows: SessionRow[]; session?: AcpSession; missingRoomImages: boolean } {
   const session = useStore((s) => (enhanced ? s.acpSessions[run.id] : undefined))
   const events = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]?.events))
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyRoom)
@@ -81,7 +89,9 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
     const reported = messages.some((m) => m.kind === 'report')
     return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, messages.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
   }, [enhanced, session, room, run, events, members, messages, showMessages, paused])
-  return { rows, session }
+  const roomIDs = new Set(room.map((m) => m.id))
+  const missingRoomImages = enhanced && rows.some((row) => row.kind === 'user' && row.images?.some((image) => !roomIDs.has(image.messageID)))
+  return { rows, session, missingRoomImages }
 }
 
 function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession | undefined): string {
@@ -113,7 +123,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
 }) {
   const enhanced = run.acp === true
   const [showMessages, setShowMessages] = useState(true)
-  const { rows, session } = useRows(run, enhanced, showMessages)
+  const { rows, session, missingRoomImages } = useRows(run, enhanced, showMessages)
   const expanded = useStore((s) => s.expandedRows[run.id])
   const log = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]))
   const roomError = useStore((s) => s.roomError[run.id])
@@ -123,7 +133,10 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
     const page = s.roomPagination[run.id]
     return Boolean(page?.initialized && !page.exhausted && s.roomNextBefore[run.id] !== undefined)
   })
-  const older = enhanced ? Boolean(session?.more) : olderRoom
+  const older = olderRoom || (enhanced && Boolean(session?.more))
+  useEffect(() => {
+    if (missingRoomImages && olderRoom && !roomLoading && !roomError) void room.loadOlder()
+  }, [missingRoomImages, olderRoom, roomLoading, roomError, room.loadOlder])
   const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
   const pinned = useRef(true)
@@ -192,10 +205,10 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
   const loadOlder = () => {
     pinned.current = false
     setShift(true)
-    if (enhanced) void loadOlderItems(useStore, api, run.id)
-    else void room.loadOlder()
+    if (enhanced && session?.more) void loadOlderItems(useStore, api, run.id)
+    if (olderRoom) void room.loadOlder()
   }
-  const loadingOlder = enhanced ? Boolean(session?.olderLoading) : roomLoading
+  const loadingOlder = roomLoading || (enhanced && Boolean(session?.olderLoading))
   const olderError = enhanced ? session?.olderError : undefined
 
   const dock = enhanced && session && session.pending.length > 0 && (

@@ -25,6 +25,7 @@ export const state = (over: Partial<SessionState> = {}): SessionState => ({
   queued: 0,
   pending: [],
   last_activity: new Date(start).toISOString(),
+  prompt_images: false,
   ...over,
 })
 
