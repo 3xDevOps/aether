@@ -186,6 +186,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
 | `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
 | `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
+| `GET` | `/api/v1/run/<run_id>/messages/<message_id>/attachments/<index>` | persisted chat image bytes; zero-based attachment index, requires View on the run |
 | `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -198,6 +199,20 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
+
+### Chat image previews
+
+The chat image route identifies a persisted room message and its attachment
+index, never a client-selected filesystem path. The message must belong to the
+requested run and workspace. Both gateways stream the validated PNG, JPEG,
+GIF or WebP bytes through the existing binary artifact transport, with
+`no-store`, `nosniff` and sandbox headers. It works after the container stops;
+deleting the run/message or revoking View access prevents further downloads.
+
+The artifact stream request carries `room_message_id` and `attachment_index`
+with canonical `artifact_id: "room:<message_id>:<index>"`. These selectors
+cannot be combined with `evidence_packet_id`; room images use View authority,
+not the Steer authority of live development captures.
 
 ### Development streams and retained captures
 
@@ -611,6 +626,13 @@ carries `agent_delivery: "queued"` until the agent takes it
 (`"delivered"`), or turns `not_sent` with `failure.code` `agent_refused` or
 `agent_disconnected`; each change publishes `workspace.room_message`
 ([enhanced-runs.md](enhanced-runs.md#permissions-and-input)).
+
+`run.inject` also accepts `attachments`, an ordered array of at most eight
+references returned by `terminal.image`. Text may be empty only when an image
+is attached. References remain separate in the persisted room message.
+Enhanced delivery resolves validated bytes into ACP image blocks; their short
+`aether://room/<message_id>/<index>` URIs identify authorized previews, not
+public download URLs. Image bytes are not copied into the session item log.
 
 ### Candidate integration methods
 
@@ -1819,7 +1841,8 @@ does not run its agent over ACP`. Every frame is JSON text.
    holds once the `replay` frames that follow are applied; `live` says
    whether a session is running; `state` is its snapshot (turn in flight,
    queued prompts, pending requests with their options, mode, config
-   options, commands, the agent's `auth` status and `auth_methods`, and
+   options, commands, the agent's `auth` status and `auth_methods`,
+   `prompt_images`: whether the agent accepts ACP image content, and
    `steering`: whether `run.inject` with `steer: true` can join a running
    turn). A refusal carries `code` and `error` and closes 1008.
 
@@ -1832,7 +1855,7 @@ does not run its agent over ACP`. Every frame is JSON text.
 
    ```json
    {"ok":true,"seq":431,"replay":19,"epoch":0,"live":true,
-    "state":{"turn_in_flight":true,"queued":0,"pending":[],"mode":"auto"},
+    "state":{"turn_in_flight":true,"queued":0,"pending":[],"mode":"auto","prompt_images":true},
     "has_control":true,"control_session_id":"tab-1","control_generation":7}
    ```
 

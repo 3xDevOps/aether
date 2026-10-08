@@ -22,6 +22,10 @@ import (
 // ErrClosed is returned once the agent connection has ended.
 var ErrClosed = errors.New("acphost: agent connection closed")
 
+// ErrUnsupportedImage means the agent does not accept image prompts; no input
+// was sent or queued.
+var ErrUnsupportedImage = errors.New("acphost: agent does not support image prompts")
+
 const subscriberBuffer = 1024
 
 // Config describes the session to host.
@@ -79,6 +83,7 @@ type State struct {
 	Commands      json.RawMessage `json:"commands,omitempty"`
 	Auth          json.RawMessage `json:"auth,omitempty"`
 	Steering      bool            `json:"steering,omitempty"`
+	PromptImages  bool            `json:"prompt_images"`
 	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
 }
 
@@ -290,6 +295,9 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	if len(blocks) == 0 {
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
+	if err := s.validatePromptImages(blocks); err != nil {
+		return Receipt{}, err
+	}
 	s.mu.Lock()
 	if s.closingLocked() {
 		s.mu.Unlock()
@@ -375,6 +383,9 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 // PromptIdle starts a turn only when no turn is running and no prompt is
 // queued, and reports whether it did once the agent accepted the prompt.
 func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bool, error) {
+	if err := s.validatePromptImages(blocks); err != nil {
+		return false, err
+	}
 	s.mu.Lock()
 	if s.closingLocked() {
 		s.mu.Unlock()
@@ -390,6 +401,17 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bo
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Session) validatePromptImages(blocks []acp.ContentBlock) error {
+	if !s.conn.Info().PromptImages {
+		for _, block := range blocks {
+			if block.Image != nil {
+				return ErrUnsupportedImage
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(error)) *turnAck {
@@ -586,6 +608,7 @@ func (s *Session) State() State {
 	st.LastActivity = s.conn.LastActivity()
 	info := s.conn.Info()
 	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
+	st.PromptImages = info.PromptImages
 	return st
 }
 

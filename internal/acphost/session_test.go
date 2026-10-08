@@ -63,6 +63,158 @@ func TestReplayRecordedAgents(t *testing.T) {
 	}
 }
 
+func imagePromptFixture(t *testing.T, capability string) fixture {
+	t.Helper()
+	fix := loadFixture(t, "claude")
+	var init map[string]json.RawMessage
+	if err := json.Unmarshal(fix.Initialize, &init); err != nil {
+		t.Fatal(err)
+	}
+	var caps map[string]json.RawMessage
+	if err := json.Unmarshal(init["agentCapabilities"], &caps); err != nil {
+		t.Fatal(err)
+	}
+	delete(caps, "promptCapabilities")
+	if capability != "" {
+		caps["promptCapabilities"] = json.RawMessage(`{"image":` + capability + `}`)
+	}
+	var err error
+	init["agentCapabilities"], err = json.Marshal(caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix.Initialize, err = json.Marshal(init)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fix
+}
+
+func embeddedImagePrompt(t *testing.T) []acp.ContentBlock {
+	t.Helper()
+	var blocks []acp.ContentBlock
+	if err := json.Unmarshal([]byte(`[{"type":"text","text":"Look at this"},{"type":"image","mimeType":"image/png","data":"cHJpdmF0ZS1pbWFnZS1ieXRlcw==","uri":"aether://room/message-1/0"}]`), &blocks); err != nil {
+		t.Fatal(err)
+	}
+	return blocks
+}
+
+func TestImagePromptCapabilityAndMetadata(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		t.Run(fmt.Sprintf("idle=%v", idle), func(t *testing.T) {
+			m := newMockAgent(t, imagePromptFixture(t, "true"))
+			got := make(chan json.RawMessage, 1)
+			m.onPrompt = func(_ *mockAgent, call promptCall) (any, *acp.RequestError) {
+				got <- call.params.Prompt
+				return map[string]any{"stopReason": "end_turn"}, nil
+			}
+			s, rec := startMock(t, m, Config{})
+			if !s.Info().PromptImages || !s.State().PromptImages {
+				t.Fatalf("image capability missing: info=%+v state=%+v", s.Info(), s.State())
+			}
+			snapshot, err := json.Marshal(s.State())
+			if err != nil || !strings.Contains(string(snapshot), `"prompt_images":true`) {
+				t.Fatalf("snapshot = %s, %v", snapshot, err)
+			}
+			blocks := embeddedImagePrompt(t)
+			if idle {
+				if started, promptErr := s.PromptIdle(context.Background(), blocks); promptErr != nil || !started {
+					t.Fatalf("PromptIdle = %v, %v", started, promptErr)
+				}
+			} else if receipt, promptErr := s.Prompt(context.Background(), blocks, false, nil); promptErr != nil || receipt.Outcome != OutcomeSent {
+				t.Fatalf("Prompt = %+v, %v", receipt, promptErr)
+			}
+			rec.waitIdle(t)
+			var sent []acp.ContentBlock
+			if decodeErr := json.Unmarshal(<-got, &sent); decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			if len(sent) != 2 || sent[1].Image == nil || sent[1].Image.Data != blocks[1].Image.Data ||
+				sent[1].Image.MimeType != "image/png" || deref(sent[1].Image.Uri) != "aether://room/message-1/0" {
+				t.Fatalf("sent image = %+v", sent)
+			}
+			its := items(t, s)
+			messages := ofKind(its, KindMessage)
+			if len(messages) != 1 || messages[0].Message.Text != "Look at this" {
+				t.Fatalf("messages = %+v", messages)
+			}
+			attachments := messages[0].Message.Attachments
+			if len(attachments) != 1 || attachments[0].Type != "image" ||
+				attachments[0].MimeType != "image/png" || attachments[0].URI != "aether://room/message-1/0" {
+				t.Fatalf("attachments = %+v", attachments)
+			}
+			logged, err := json.Marshal(its)
+			if err != nil || strings.Contains(string(logged), blocks[1].Image.Data) || strings.Contains(string(logged), `"data"`) {
+				t.Fatalf("image bytes in item log: %s, %v", logged, err)
+			}
+		})
+	}
+}
+
+func TestUnsupportedImagesNeverStartQueueOrSteer(t *testing.T) {
+	for _, capability := range []string{"", "false"} {
+		t.Run("image="+capability, func(t *testing.T) {
+			m := newMockAgent(t, imagePromptFixture(t, capability))
+			release := make(chan struct{})
+			m.onPrompt = func(_ *mockAgent, _ promptCall) (any, *acp.RequestError) {
+				<-release
+				return map[string]any{"stopReason": "end_turn"}, nil
+			}
+			s, _ := startMock(t, m, Config{})
+			defer close(release)
+			if s.Info().PromptImages || s.State().PromptImages {
+				t.Fatal("unadvertised image capability enabled")
+			}
+			snapshot, err := json.Marshal(s.State())
+			if err != nil || !strings.Contains(string(snapshot), `"prompt_images":false`) {
+				t.Fatalf("snapshot = %s, %v", snapshot, err)
+			}
+			blocks := embeddedImagePrompt(t)
+			callback := make(chan error, 1)
+			refuse := func() {
+				t.Helper()
+				before := len(items(t, s))
+				for _, steer := range []bool{false, true} {
+					receipt, err := s.Prompt(context.Background(), blocks, steer, func(err error) { callback <- err })
+					if !errors.Is(err, ErrUnsupportedImage) || receipt.Outcome != "" {
+						t.Fatalf("Prompt steer=%v = %+v, %v", steer, receipt, err)
+					}
+				}
+				if started, err := s.PromptIdle(context.Background(), blocks); started || !errors.Is(err, ErrUnsupportedImage) {
+					t.Fatalf("PromptIdle = %v, %v", started, err)
+				}
+				if s.State().Queued != 0 || len(items(t, s)) != before || m.called(methodSteering) {
+					t.Fatal("unsupported image changed log, queue, or steering")
+				}
+				select {
+				case err := <-callback:
+					t.Fatalf("unsupported image registered delivery callback: %v", err)
+				default:
+				}
+			}
+			refuse()
+			if s.State().TurnInFlight || m.called(acp.AgentMethodSessionPrompt) || len(ofKind(items(t, s), KindTurnStart)) != 0 {
+				t.Fatal("unsupported image started a turn")
+			}
+			if receipt, err := s.Prompt(context.Background(), textPrompt("text still works"), false, nil); err != nil || receipt.Outcome != OutcomeSent {
+				t.Fatalf("text Prompt = %+v, %v", receipt, err)
+			}
+			refuse()
+			m.mu.Lock()
+			prompts := 0
+			for _, method := range m.methods {
+				if method == acp.AgentMethodSessionPrompt {
+					prompts++
+				}
+			}
+			m.mu.Unlock()
+			if prompts != 1 || len(ofKind(items(t, s), KindTurnStart)) != 1 {
+				t.Fatalf("unsupported image sent an extra prompt: %d", prompts)
+			}
+		})
+	}
+}
+
 func TestChunksCoalesce(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	const tokens = 400

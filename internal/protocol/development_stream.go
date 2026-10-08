@@ -19,6 +19,8 @@ type DevBrowserStreamRequest struct{ DevBrowserPageTarget }
 type DevArtifactDownloadRequest struct {
 	DevArtifactGetParams
 	EvidencePacketID string `json:"evidence_packet_id,omitempty"`
+	RoomMessageID    string `json:"room_message_id,omitempty"`
+	AttachmentIndex  *int   `json:"attachment_index,omitempty"`
 }
 type DevStreamResponse struct {
 	OK       bool         `json:"ok"`

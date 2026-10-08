@@ -513,6 +513,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
     runInject: vi.fn(async () => ({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })),
+    roomImage: vi.fn(async () => needsOverride('roomImage')),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),
     runACPSetOption: vi.fn(async () => needsOverride('runACPSetOption')),

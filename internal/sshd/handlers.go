@@ -298,11 +298,14 @@ func (s *Server) runInject(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
-	if p.RunID == "" || p.Message == "" || p.IdempotencyKey == "" {
-		return nil, invalidParams("run_id, message, and idempotency_key are required")
+	if p.RunID == "" || (p.Message == "" && len(p.Attachments) == 0) || p.IdempotencyKey == "" {
+		return nil, invalidParams("run_id, message or attachments, and idempotency_key are required")
 	}
 	if len(p.IdempotencyKey) > protocol.CollaborationMaxIdempotencyKeyBytes {
 		return nil, invalidParams("idempotency_key is too long")
+	}
+	if perr = validateCollaborationAttachments(p.Attachments); perr != nil {
+		return nil, perr
 	}
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
@@ -314,6 +317,7 @@ func (s *Server) runInject(ctx context.Context, member domain.MemberID, params j
 		ActorID:        member,
 		Kind:           store.RoomMessageSteerRequest,
 		Body:           p.Message,
+		Attachments:    p.Attachments,
 		IdempotencyKey: p.IdempotencyKey,
 		Steer:          p.Steer,
 

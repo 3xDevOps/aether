@@ -133,14 +133,26 @@ turn:
 images, so it never interrupts; `Mod+Shift+Enter` always queues.
 
 **Attach an image** selects PNG, JPEG, GIF or WebP files; pasting actual image
-data into the composer attaches it too. A paste containing text and an image
-also inserts the text at the current selection. Attach at most eight images,
-each at most 8 MiB. Uploads use `terminal.image` and store files in the run's persistent
-member home, not its checkout. **Send**, **Steer** or **Queue** includes their
-container-visible paths in the prompt; uploading alone sends nothing. Images
-can be sent without text. Remove an attachment with its **×** button; this
-removes the prompt reference, not the stored file. Failed uploads show the
-server error, and failed sends keep the text and attachments for retry.
+data embeds it in the composer too. Thumbnails appear above the text, with a
+remove button for each image. A paste containing text and an image also inserts
+the text at the current selection. Attach at most eight images, each at most
+8 MiB. **Retry image upload** retries an incomplete upload without discarding
+the other images; sending stays disabled until all selected images are ready.
+
+Uploads use `terminal.image` and store files in the run's persistent member
+home, not its checkout. **Send**, **Steer** or **Queue** sends the image bytes
+as ACP image content alongside the text, not as filenames in the prompt.
+Uploading alone sends nothing to the agent. Images can be sent without text.
+The image control is disabled when the agent does not advertise image support.
+Standard runs keep their existing file-reference delivery to the terminal.
+
+Sent images remain visible in the conversation after reconnecting or opening
+history. Viewing them requires **View** on the run; a completed run's images
+remain readable while its message and member-home file are retained. Removing
+a draft thumbnail does not delete the stored file. Failed uploads show the
+server error, and failed sends keep the text and image previews for retry.
+An image-read failure before delivery is **Not sent**, not **Delivery uncertain**.
+After restoring or reattaching the image, retrying can submit a new request.
 
 The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`). The model picker searches names, IDs, descriptions and

@@ -119,6 +119,7 @@ export interface SessionState {
   commands?: SessionCommand[]
   auth?: AuthStatusUpdate
   steering?: boolean
+  prompt_images: boolean
   auth_methods?: AuthMethod[]
 }
 

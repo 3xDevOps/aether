@@ -2,6 +2,8 @@ package acphost
 
 import (
 	"encoding/json"
+	"net/url"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -43,6 +45,10 @@ const (
 	maxContentBytes = 32 << 10
 	maxRawBytes     = 16 << 10
 	maxShrunkString = 4 << 10
+	// Room image uploads allow eight attachments; their generated message IDs
+	// and single-digit indices fit comfortably in this bounded reference.
+	maxRoomImages   = 8
+	maxRoomImageURI = 128
 )
 
 // Item is one entry of a run's session item log. Seq is per run and strictly
@@ -218,7 +224,7 @@ func (it *Item) shrink() {
 	}
 	if m := it.Message; m != nil {
 		m.Text, _ = cutTail(m.Text, maxShrunkString)
-		m.Attachments = nil
+		m.Attachments = roomImageRefs(m.Attachments)
 	}
 	if r := it.Request; r != nil {
 		r.Title, _ = cutTail(r.Title, maxShrunkString)
@@ -243,6 +249,52 @@ func (it *Item) shrink() {
 			tc.Diffs = tc.Diffs[:16]
 		}
 	}
+}
+
+// roomImageRefs keeps only short authenticated-preview identities when bulk
+// content must be discarded. Never retain arbitrary URLs or other payload fields.
+func roomImageRefs(contents []Content) []Content {
+	var refs []Content
+	for _, content := range contents {
+		if content.Type != "image" || len(content.URI) > maxRoomImageURI {
+			continue
+		}
+		switch content.MimeType {
+		case "image/png", "image/jpeg", "image/gif", "image/webp":
+		default:
+			continue
+		}
+		path, ok := strings.CutPrefix(content.URI, "aether://room/")
+		if !ok {
+			continue
+		}
+		message, index, ok := strings.Cut(path, "/")
+		if !ok || len(index) != 1 || index[0] < '0' || index[0] >= '0'+maxRoomImages {
+			continue
+		}
+		id, err := url.PathUnescape(message)
+		if err != nil || id == "" || strings.ContainsAny(id, "/\\?#") || !utf8.ValidString(id) {
+			continue
+		}
+		safe := true
+		for _, r := range id {
+			if r <= ' ' || r == 0x7f {
+				safe = false
+				break
+			}
+		}
+		if !safe {
+			continue
+		}
+		if refs == nil {
+			refs = make([]Content, 0, min(len(contents), maxRoomImages))
+		}
+		refs = append(refs, Content{Type: "image", MimeType: content.MimeType, URI: content.URI})
+		if len(refs) == maxRoomImages {
+			break
+		}
+	}
+	return refs
 }
 
 // cutTail keeps the first n bytes of s on a rune boundary.
@@ -303,7 +355,7 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 	brief := Item{Seq: it.Seq, Epoch: it.Epoch, Time: it.Time, Turn: it.Turn, Kind: it.Kind, Truncated: true,
 		Mode: cut.Mode, StopReason: cut.StopReason}
 	if m := cut.Message; m != nil {
-		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, Complete: m.Complete}
+		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, Complete: m.Complete, Attachments: m.Attachments}
 	}
 	if tc := cut.ToolCall; tc != nil {
 		brief.ToolCall = &ToolCall{ID: tc.ID, ToolKind: tc.ToolKind, Status: tc.Status, ExitCode: tc.ExitCode}
@@ -312,5 +364,11 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 		brief.Request = &Request{ID: r.ID, Kind: r.Kind, ToolCallID: r.ToolCallID, Status: r.Status, Answer: r.Answer}
 	}
 	b, err = json.Marshal(brief)
+	// If a caller's frame is too small even for bounded references, shed only
+	// the references that cannot fit rather than returning an oversized frame.
+	for err == nil && len(b) > limit && brief.Message != nil && len(brief.Message.Attachments) > 0 {
+		brief.Message.Attachments = brief.Message.Attachments[:len(brief.Message.Attachments)-1]
+		b, err = json.Marshal(brief)
+	}
 	return b, true, err
 }

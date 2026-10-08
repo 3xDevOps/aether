@@ -188,6 +188,14 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 			text.WriteString(b.Text)
 		}
 		return a.prompt(ctx, text.String())
+	case "_session/steering":
+		a.mu.Lock()
+		running := a.turn != nil && a.turn.Err() == nil
+		a.mu.Unlock()
+		if !running {
+			return map[string]any{"outcome": "promptRequired"}, nil
+		}
+		return map[string]any{"outcome": "injected"}, nil
 	case acp.AgentMethodSessionCancel:
 		return nil, nil
 	case acp.AgentMethodSessionSetMode:
@@ -206,7 +214,9 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError) {
 	a.mu.Lock()
 	cancelled := a.turn.Done()
+	cancelTurn := a.cancelTurn
 	a.mu.Unlock()
+	defer cancelTurn()
 	switch text {
 	case PromptAskPermission:
 		a.mu.Lock()
@@ -252,7 +262,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptDemo:
-		return a.demo(ctx, cancelled)
+		return a.demo(ctx, cancelled), nil
 	case PromptWait:
 		select {
 		case <-cancelled:
@@ -300,7 +310,7 @@ func demoTool(id, kind, title, status string, extra map[string]any) json.RawMess
 	return b
 }
 
-func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) (any, *acp.RequestError) {
+func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 	thought, _ := json.Marshal(map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
 		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
@@ -330,9 +340,9 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) (any, *acp.
 	for _, step := range steps {
 		select {
 		case <-cancelled:
-			return map[string]any{"stopReason": "cancelled"}, nil
+			return map[string]any{"stopReason": "cancelled"}
 		case <-ctx.Done():
-			return map[string]any{"stopReason": "cancelled"}, nil
+			return map[string]any{"stopReason": "cancelled"}
 		case <-time.After(400 * time.Millisecond):
 		}
 		for _, u := range step {
@@ -343,5 +353,5 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) (any, *acp.
 		a.text(ctx, word)
 		time.Sleep(15 * time.Millisecond)
 	}
-	return map[string]any{"stopReason": "end_turn"}, nil
+	return map[string]any{"stopReason": "end_turn"}
 }

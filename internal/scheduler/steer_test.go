@@ -231,7 +231,7 @@ func TestInject(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "focus on the tests", false, nil); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "focus on the tests"}, false, nil); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	inj := e.pty.injected()
@@ -260,7 +260,7 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 	ctx := t.Context()
 
 	run, c := e.launchFake(t, "task")
-	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "one enter", false, nil); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "one enter"}, false, nil); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 	waitFor(t, "stdin delivery", func() bool {
@@ -271,7 +271,7 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch opencode: %v", err)
 	}
-	if _, err := e.sched.Inject(ctx, opencode.ID, e.member.ID, "two enters", false, nil); err != nil {
+	if _, err := e.sched.Inject(ctx, opencode.ID, e.member.ID, domain.AgentPrompt{Text: "two enters"}, false, nil); err != nil {
 		t.Fatalf("Inject opencode: %v", err)
 	}
 	inj := e.pty.injected()
@@ -951,7 +951,7 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	run, c := e.launchFake(t, "task")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 
-	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, "keep going", false, nil); err != nil {
+	if _, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "keep going"}, false, nil); err != nil {
 		t.Fatalf("Inject stalled: %v", err)
 	}
 	inj := e.pty.injected()
@@ -1014,7 +1014,7 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 		return !ok
 	})
 
-	_, err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late", false, nil)
+	_, err := e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "too late"}, false, nil)
 	if !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("Inject completed = %v, want ErrNoSession", err)
 	}

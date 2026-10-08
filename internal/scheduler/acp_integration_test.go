@@ -158,7 +158,7 @@ func TestIntegrationEnhancedRunDocker(t *testing.T) {
 		t.Fatalf("harness_session_id %q, want %q", got.HarnessSessionID, fix.SessionID())
 	}
 
-	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, acpmock.PromptAskPermission, false, nil); err != nil {
+	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptAskPermission}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var pending []domain.RunInputRequest
@@ -177,7 +177,7 @@ func TestIntegrationEnhancedRunDocker(t *testing.T) {
 	if _, err = e.sched.Relaunch(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("Relaunch: %v", err)
 	}
-	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, "after reopen", false, nil); err != nil {
+	if _, err = e.sched.Inject(ctx, run.ID, e.member.ID, domain.AgentPrompt{Text: "after reopen"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "a turn in the resumed session", turnEnded("end_turn", 3))

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -334,7 +335,7 @@ type collabPTY struct {
 	err   error
 }
 
-func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, _ bool, _ func(error)) (string, error) {
+func (p *collabPTY) Inject(_ context.Context, _ domain.RunID, _ domain.MemberID, _ domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
@@ -765,7 +766,7 @@ func TestOverdueWorkerWaitsForSchedulerRecovery(t *testing.T) {
 	worker, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Now: clock.Now,
 		Ready: ready, WorkerInterval: time.Hour,
-		Inject: func(context.Context, domain.RunID, domain.MemberID, string, bool, func(error)) (string, error) {
+		Inject: func(context.Context, domain.RunID, domain.MemberID, domain.AgentPrompt, bool, func(error)) (string, error) {
 			delivered <- struct{}{}
 			return "", nil
 		},
@@ -1005,6 +1006,9 @@ func TestRoomIdempotencyAndReceiptClassification(t *testing.T) {
 	if got := ClassifyReceipt(ptyhost.ErrNoSession); got != ReceiptNotSent {
 		t.Fatalf("no session receipt=%q", got)
 	}
+	if got := ClassifyReceipt(fmt.Errorf("image prompt: %w", acphost.ErrUnsupportedImage)); got != ReceiptNotSent {
+		t.Fatalf("unsupported image receipt=%q", got)
+	}
 	if got := ClassifyReceipt(errors.New("write failed")); got != ReceiptUncertain {
 		t.Fatalf("write error receipt=%q", got)
 	}
@@ -1088,14 +1092,14 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	var injectedActor domain.MemberID
-	var injectedMessage string
+	var injectedPrompt domain.AgentPrompt
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
+		Inject: func(_ context.Context, gotRun domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
 			if gotRun != run.ID {
 				t.Fatalf("injected run=%q, want %q", gotRun, run.ID)
 			}
-			injectedActor, injectedMessage = actor, message
+			injectedActor, injectedPrompt = actor, prompt
 			return "", nil
 		},
 		Attachments: func(context.Context, domain.WorkspaceID, domain.RunID, string) error { return nil },
@@ -1118,14 +1122,117 @@ func TestApprovedDeliveryUsesRequestActorAndAttachments(t *testing.T) {
 	if injectedActor != other.ID {
 		t.Fatalf("injected actor=%q, want request actor %q", injectedActor, other.ID)
 	}
-	for _, ref := range []string{"home/.aether/image-1.png", "home/.aether/image-2.png"} {
-		if !strings.Contains(injectedMessage, ref) {
-			t.Fatalf("injected message %q missing attachment %q", injectedMessage, ref)
+	if injectedPrompt.Text != "inspect this" || injectedPrompt.MessageID != result.Message.ID {
+		t.Fatalf("injected prompt=%+v, persisted message=%+v", injectedPrompt, result.Message)
+	}
+	if len(injectedPrompt.Attachments) != len(result.Message.Attachments) {
+		t.Fatalf("injected attachments=%v, want %v", injectedPrompt.Attachments, result.Message.Attachments)
+	}
+	for i, ref := range result.Message.Attachments {
+		if injectedPrompt.Attachments[i] != ref {
+			t.Fatalf("injected attachment %d=%q, want %q", i, injectedPrompt.Attachments[i], ref)
 		}
 	}
-	if !strings.Contains(injectedMessage, "--- AETHER ATTACHMENTS ---") ||
-		!strings.Contains(injectedMessage, "--- END AETHER ATTACHMENTS ---") {
-		t.Fatalf("injected message lacks attachment framing: %q", injectedMessage)
+	wantTerminal := "inspect this\n\n--- AETHER ATTACHMENTS ---\n- home/.aether/image-1.png\n- home/.aether/image-2.png\n--- END AETHER ATTACHMENTS ---"
+	if got := injectedPrompt.TextWithAttachments(); got != wantTerminal {
+		t.Fatalf("terminal prompt=%q, want %q", got, wantTerminal)
+	}
+	if got := (domain.AgentPrompt{Text: "plain text"}).TextWithAttachments(); got != "plain text" {
+		t.Fatalf("plain terminal prompt=%q", got)
+	}
+}
+
+func TestImageOnlySteeringValidationAndIdentity(t *testing.T) {
+	st, clock, ws, owner, _, run := setupCollab(t)
+	controlService := control.New(control.Config{Now: clock.Now})
+	lease, _, err := controlService.Acquire(string(run.ID), string(owner.ID), "images", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompts []domain.AgentPrompt
+	validated := 0
+	service, err := New(Config{
+		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
+		Attachments: func(_ context.Context, gotWorkspace domain.WorkspaceID, gotRun domain.RunID, ref string) error {
+			if gotWorkspace != ws.ID || gotRun != run.ID {
+				t.Fatalf("attachment validation scope=%q/%q", gotWorkspace, gotRun)
+			}
+			if ref != "image-one" && ref != "image-two" {
+				return errors.New("unknown image")
+			}
+			validated++
+			return nil
+		},
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, prompt domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
+			if validated == 0 {
+				t.Fatal("delivered before attachment validation")
+			}
+			prompts = append(prompts, prompt)
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := MessageInput{
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID,
+		Kind: store.RoomMessageSteerRequest, Attachments: []string{"image-one"},
+		IdempotencyKey: "image-one", ControllerSessionID: lease.SessionID,
+		ControllerGeneration: lease.Generation,
+	}
+	first, err := service.Post(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := service.Post(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Receipt != ReceiptSent || retry.Message.ID != first.Message.ID || len(prompts) != 1 {
+		t.Fatalf("image retry first=%+v retry=%+v prompts=%+v", first, retry, prompts)
+	}
+	input.Attachments = []string{"image-two"}
+	input.IdempotencyKey = "image-two"
+	second, err := service.Post(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Receipt != ReceiptSent || second.Message.ID == first.Message.ID || len(prompts) != 2 {
+		t.Fatalf("distinct image submission=%+v prompts=%+v", second, prompts)
+	}
+	for i, msg := range []*store.RoomMessage{first.Message, second.Message} {
+		if prompts[i].Text != "" || prompts[i].MessageID != msg.ID || len(prompts[i].Attachments) != 1 || prompts[i].Attachments[0] != msg.Attachments[0] {
+			t.Fatalf("prompt=%+v persisted=%+v", prompts[i], msg)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+		refs []string
+		note bool
+		want error
+	}{
+		{name: "empty", want: ErrInvalidRequest},
+		{name: "whitespace", body: " \n", want: ErrInvalidRequest},
+		{name: "unknown image", refs: []string{"unknown"}, want: ErrInvalidAttachment},
+		{name: "empty reference", refs: []string{""}, want: ErrInvalidAttachment},
+		{name: "reference newline", refs: []string{"image-one\n"}, want: ErrInvalidAttachment},
+		{name: "image-only note", refs: []string{"image-one"}, note: true, want: ErrInvalidRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := input
+			in.IdempotencyKey = tc.name
+			in.Body, in.Attachments = tc.body, tc.refs
+			if tc.note {
+				in.Kind = store.RoomMessageComment
+			}
+			if _, err := service.Post(context.Background(), in); !errors.Is(err, tc.want) {
+				t.Fatalf("Post error=%v, want %v", err, tc.want)
+			}
+			if len(prompts) != 2 {
+				t.Fatal("invalid input reached delivery")
+			}
+		})
 	}
 }
 
@@ -1139,7 +1246,7 @@ func TestControllerSteerReachesInjectorAndReturnsOutcome(t *testing.T) {
 	var steered bool
 	service, err := New(Config{
 		Store: st, Runs: st, Workspaces: st, Control: controlService, Now: clock.Now,
-		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ string, steer bool, _ func(error)) (string, error) {
+		Inject: func(_ context.Context, _ domain.RunID, _ domain.MemberID, _ domain.AgentPrompt, steer bool, _ func(error)) (string, error) {
 			steered = steer
 			return "injected", nil
 		},

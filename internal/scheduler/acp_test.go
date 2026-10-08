@@ -1,9 +1,14 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"slices"
@@ -67,7 +72,7 @@ func (r *acpRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec runtim
 		done:     make(chan struct{}),
 	}
 	go func() {
-		e.agent.Serve(agentIn, agentOut)
+		e.agent.Serve(io.TeeReader(agentIn, &e.wire), agentOut)
 		_ = agentOut.Close()
 		close(e.done)
 	}()
@@ -104,6 +109,7 @@ type acpExec struct {
 	agentOut *io.PipeWriter
 	done     chan struct{}
 	stopErr  error
+	wire     acpWire
 }
 
 func (e *acpExec) Identity() runtime.ExecIdentity { return e.identity }
@@ -156,6 +162,44 @@ func (e *acpExec) exited() bool {
 	default:
 		return false
 	}
+}
+
+// acpWire captures the actual host-to-adapter stream, including image bytes,
+// without changing the adapter's behavior or relying on projected history.
+type acpWire struct {
+	mu   sync.Mutex
+	data bytes.Buffer
+}
+
+func (w *acpWire) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.data.Write(p)
+}
+
+func (w *acpWire) prompts(t *testing.T) [][]acp.ContentBlock {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var prompts [][]acp.ContentBlock
+	for _, line := range bytes.Split(w.data.Bytes(), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				Prompt []acp.ContentBlock `json:"prompt"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(line, &request); err != nil {
+			t.Fatalf("decode ACP request: %v", err)
+		}
+		if request.Method == acp.AgentMethodSessionPrompt || request.Method == "_session/steering" {
+			prompts = append(prompts, request.Params.Prompt)
+		}
+	}
+	return prompts
 }
 
 func newACPEnv(t *testing.T, opts ...func(*Config)) (*testEnv, *acpRuntime) {
@@ -268,7 +312,7 @@ func TestEnhancedRunSendsTaskAndReportsTurns(t *testing.T) {
 	if sc.AgentSessionID != fresh.HarnessSessionID || sc.AgentExec == nil || sc.AgentExec.ExecID != execs[0].identity.ExecID {
 		t.Fatalf("sidecar session %q exec %+v", sc.AgentSessionID, sc.AgentExec)
 	}
-	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "again", false, nil)
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "again"}, false, nil)
 	if err != nil || outcome != acphost.OutcomeSent {
 		t.Fatalf("Inject = %q, %v", outcome, err)
 	}
@@ -282,7 +326,7 @@ func TestEnhancedRunPermissionAnsweredOnce(t *testing.T) {
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskPermission, false, nil); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptAskPermission}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var pending []domain.RunInputRequest
@@ -309,7 +353,7 @@ func TestEnhancedRunFormAnswerCarriesValues(t *testing.T) {
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptAskForm, false, nil); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptAskForm}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	var pending []domain.RunInputRequest
@@ -335,7 +379,7 @@ func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptRefuse, false, nil); err == nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptRefuse}, false, nil); err == nil {
 		t.Fatal("Inject of a refused prompt succeeded")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
@@ -343,7 +387,7 @@ func TestEnhancedRunFailedTurnDoesNotFinishReportedRun(t *testing.T) {
 		t.Fatalf("reason %q", got.Reason)
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "say pong", false, nil); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
@@ -366,7 +410,7 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 	e, rt := newACPEnv(t)
 	run := e.launchACP(t, acpmock.PromptWait)
 	e.waitAgentWorking(t, run.ID)
-	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "queued behind the turn", false, nil)
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "queued behind the turn"}, false, nil)
 	if err != nil || outcome != acphost.OutcomeQueued {
 		t.Fatalf("Inject = %q, %v", outcome, err)
 	}
@@ -379,7 +423,7 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 				it.Notice.Description == "queued behind the turn"
 		})
 	})
-	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, "after exit", false, nil)
+	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after exit"}, false, nil)
 	if got := collab.ClassifyReceipt(err); got != collab.ReceiptNotSent {
 		t.Fatalf("receipt %q for %v", got, err)
 	}
@@ -420,7 +464,7 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 		entry := s2.runs[run.ID]
 		return entry != nil && entry.agentReport.State == agentstatus.Idle && len(entry.pendingInputs) == 0
 	})
-	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, "after restart", false, nil); err != nil {
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after restart"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 1))
@@ -474,7 +518,7 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	}
 	first := rt.all()[0]
 	waitFor(t, "adapter stopped", first.exited)
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "closed", false, nil); err == nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "closed"}, false, nil); err == nil {
 		t.Fatal("a closed run took input")
 	}
 	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
@@ -488,7 +532,7 @@ func TestEnhancedRunCloseStopsAdapterAndReopenResumes(t *testing.T) {
 	if mode := e.sched.acp.session(run.ID).State().Mode; mode != "plan" || !slices.Contains(execs[1].agent.Methods(), acp.AgentMethodSessionSetMode) {
 		t.Fatalf("reopened in mode %q, want the recorded plan mode re-applied", mode)
 	}
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "after reopen", false, nil); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after reopen"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "a turn after reopen", turnEnded("end_turn", 2))
@@ -521,7 +565,7 @@ func TestEnhancedRunAdapterFailureParksRun(t *testing.T) {
 	if !strings.Contains(got.Reason, "enhanced session failed") || !strings.Contains(got.Reason, "managed exec") {
 		t.Fatalf("reason %q", got.Reason)
 	}
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, "hi", false, nil); !errors.Is(err, ErrACPNotRunning) {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "hi"}, false, nil); !errors.Is(err, ErrACPNotRunning) {
 		t.Fatalf("Inject without a session: %v", err)
 	}
 	items := waitItems(t, e.sched, run.ID, "failure notice", func(items []acphost.Item) bool { return len(items) > 0 })
@@ -674,7 +718,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 		t.Fatal("resume did not offer the idle session mail that arrived while paused")
 	}
 
-	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, acpmock.PromptWait, false, nil); err != nil {
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptWait}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.waitAgentWorking(t, run.ID)
@@ -719,5 +763,202 @@ func TestEnhancedActivityNamesTheToolKindAndItsWord(t *testing.T) {
 		case <-time.After(waitTimeout):
 			t.Fatal("no activity event")
 		}
+	}
+}
+
+func schedulerPNG(t *testing.T) []byte {
+	t.Helper()
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 2, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
+}
+
+func TestEnhancedRunEmbeddedImageWire(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		text  string
+		busy  bool
+		steer bool
+	}{
+		{name: "caption", text: "look at this"},
+		{name: "image only"},
+		{name: "queued caption", text: "look at this", busy: true},
+		{name: "queued image only", busy: true},
+		{name: "steered caption", text: "look at this", busy: true, steer: true},
+		{name: "steered image only", busy: true, steer: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, rt := newACPEnv(t)
+			task := ""
+			if tc.busy {
+				task = acpmock.PromptWait
+			}
+			run := e.launchACP(t, task)
+			if tc.busy {
+				e.waitAgentWorking(t, run.ID)
+			}
+			data := schedulerPNG(t)
+			reference, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := domain.AgentPrompt{Text: tc.text, Attachments: []string{reference}, MessageID: "message /image"}
+			delivered := make(chan error, 1)
+			outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, prompt, tc.steer, func(err error) { delivered <- err })
+			wantOutcome := acphost.OutcomeSent
+			if tc.busy {
+				wantOutcome = acphost.OutcomeQueued
+				if tc.steer {
+					wantOutcome = acphost.OutcomeInjected
+				}
+			}
+			if err != nil || outcome != wantOutcome {
+				t.Fatalf("Inject = %q, %v; want %q", outcome, err, wantOutcome)
+			}
+			if tc.busy && !tc.steer {
+				if got := len(rt.all()[0].wire.prompts(t)); got != 1 {
+					t.Fatalf("queued image reached the wire before turn end: %d prompts", got)
+				}
+				if cancelErr := e.sched.ACPCancel(t.Context(), run.ID); cancelErr != nil {
+					t.Fatal(cancelErr)
+				}
+				select {
+				case deliveryErr := <-delivered:
+					if deliveryErr != nil {
+						t.Fatal(deliveryErr)
+					}
+				case <-time.After(waitTimeout):
+					t.Fatal("queued image delivery callback did not run")
+				}
+			}
+			prompts := rt.all()[0].wire.prompts(t)
+			wantPrompts := 1
+			if tc.busy {
+				wantPrompts++
+			}
+			if len(prompts) != wantPrompts {
+				t.Fatalf("wire has %d prompts, want %d", len(prompts), wantPrompts)
+			}
+			blocks := prompts[len(prompts)-1]
+			wantBlocks := 1
+			if tc.text != "" {
+				wantBlocks++
+				if len(blocks) == 0 || blocks[0].Text == nil || blocks[0].Text.Text != tc.text {
+					t.Fatalf("caption was not preserved: %+v", blocks)
+				}
+			}
+			if len(blocks) != wantBlocks {
+				t.Fatalf("wire has %d blocks, want %d", len(blocks), wantBlocks)
+			}
+			img := blocks[len(blocks)-1].Image
+			wantURI := "aether://room/message%20%2Fimage/0"
+			if img == nil || img.MimeType != "image/png" || img.Uri == nil || *img.Uri != wantURI {
+				t.Fatalf("image metadata = %+v", img)
+			}
+			got, err := base64.StdEncoding.DecodeString(img.Data)
+			if err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("ACP image bytes changed: %v", err)
+			}
+			waitItems(t, e.sched, run.ID, "image metadata in history", func(items []acphost.Item) bool {
+				return slices.ContainsFunc(items, func(item acphost.Item) bool {
+					return item.Message != nil && item.Message.Role == "user" &&
+						len(item.Message.Attachments) == 1 && item.Message.Attachments[0].URI == wantURI &&
+						item.Message.Attachments[0].MimeType == "image/png" && item.Message.Text == tc.text
+				})
+			})
+			log, err := os.ReadFile(e.pty.ItemLogPath(run.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(log, []byte(img.Data)) || bytes.Contains(log, data) || bytes.Contains(log, []byte(reference)) {
+				t.Fatal("ACP log contains image bytes or a container file reference")
+			}
+			if tc.steer {
+				if err := e.sched.ACPCancel(t.Context(), run.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestEnhancedRunRejectsUnsupportedImagesBeforeDelivery(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	rt.fixture.Initialize = bytes.Replace(rt.fixture.Initialize, []byte(`"image": true`), []byte(`"image": false`), 1)
+	run := e.launchACP(t, acpmock.PromptWait)
+	e.waitAgentWorking(t, run.ID)
+	prompt := domain.AgentPrompt{Text: "caption", Attachments: []string{"/not-even-an-image"}, MessageID: "unsupported"}
+	for _, steer := range []bool{false, true} {
+		_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, prompt, steer, nil)
+		if !errors.Is(err, acphost.ErrUnsupportedImage) || collab.ClassifyReceipt(err) != collab.ReceiptNotSent {
+			t.Fatalf("unsupported image receipt = %v", err)
+		}
+	}
+	if len(rt.all()[0].wire.prompts(t)) != 1 || e.sched.acp.session(run.ID).State().Queued != 0 {
+		t.Fatal("unsupported image was queued or delivered")
+	}
+	if err := e.sched.ACPCancel(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadImageUsesStoredHomeWithoutLiveRun(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	data := schedulerPNG(t)
+	reference, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	retained, err := New(e.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = retained.Close() })
+	got, mimeType, err := retained.ReadImage(t.Context(), run.ID, reference)
+	if err != nil || mimeType != "image/png" || !bytes.Equal(got, data) {
+		t.Fatalf("read retained image = %q, %v", mimeType, err)
+	}
+	if validationErr := retained.ValidateTerminalImage(t.Context(), run.ID, reference); validationErr == nil {
+		t.Fatal("new image admission succeeded without captured live HOME")
+	}
+	foreign, err := e.cfg.Homes.SaveImage(domain.MemberID("another-member"), ".png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		"/root/" + foreign,
+		reference + "\n",
+		"/root/../" + strings.TrimPrefix(reference, "/"),
+		strings.Replace(reference, "/.aether/terminal-images/", "/elsewhere/", 1),
+		"/root/.aether/terminal-images/arbitrary.png",
+	} {
+		if _, _, err := retained.ReadImage(t.Context(), run.ID, bad); err == nil {
+			t.Errorf("ReadImage accepted foreign or malformed reference %q", bad)
+		}
+	}
+}
+
+func TestStandardDriverKeepsImageReferencesAndSubmitSequence(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "task")
+	prompt := domain.AgentPrompt{Text: "caption", Attachments: []string{"/root/.aether/terminal-images/image-0123456789abcdef0123456789abcdef.png"}}
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, prompt, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	injected := e.pty.injected()
+	want := "caption\n\n--- AETHER ATTACHMENTS ---\n- " + prompt.Attachments[0] + "\n--- END AETHER ATTACHMENTS ---"
+	if len(injected) != 1 || injected[0].message != want || injected[0].submit != "\r" {
+		t.Fatalf("terminal delivery = %+v", injected)
 	}
 }

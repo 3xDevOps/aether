@@ -346,9 +346,10 @@ type RunResult struct {
 // RunInjectParams.IdempotencyKey makes a retry return the original room
 // mutation.
 type RunInjectParams struct {
-	RunID          string `json:"run_id"`
-	Message        string `json:"message"`
-	IdempotencyKey string `json:"idempotency_key"`
+	RunID          string   `json:"run_id"`
+	Message        string   `json:"message"`
+	Attachments    []string `json:"attachments,omitempty"`
+	IdempotencyKey string   `json:"idempotency_key"`
 	// Steer adds the message to an enhanced run's running turn instead of
 	// queueing it.
 	Steer bool `json:"steer,omitempty"`

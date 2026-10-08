@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
-import { ArrowUp, CornerUpRight, ListPlus, Paperclip, Play, Square, X } from '@/components/icons'
+import { ArrowUp, CornerUpRight, ListPlus, Play, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
@@ -10,7 +10,7 @@ import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
-import { ComposerImages, imageMessage, imageTypes, maxAttachments, useComposerImages } from '@/routes/run/composer-images'
+import { ComposerImagePicker, ComposerImages, useComposerImages } from '@/routes/run/composer-images'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { composerBlock, enhancedBlock, pillFor, pillHint, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
@@ -55,7 +55,7 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, imageAction }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
@@ -71,6 +71,8 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
   combobox?: { expanded: boolean; controls: string; active?: string }
   onPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void
   readOnly?: boolean
+  images?: React.ReactNode
+  imageAction?: React.ReactNode
 }) {
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
@@ -92,6 +94,8 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
   return (
     <div className="relative">
       {menu}
+      <div className="overflow-hidden rounded-control border border-control bg-canvas">
+      {images}
       <Textarea
         ref={textarea}
         aria-label="Message the agent"
@@ -106,7 +110,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
         readOnly={readOnly}
         onPaste={onPaste}
         placeholder={placeholder}
-        className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
+        className="resize-none border-0 [field-sizing:content] max-md:[--composer-lines:6.5rem]"
         style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
         onFocus={() => {
           setFocused(true)
@@ -124,6 +128,8 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
           onEscape()
         }}
       />
+      {imageAction && <div className="flex items-center gap-2 px-1 pb-1">{imageAction}</div>}
+      </div>
     </div>
   )
 }
@@ -134,12 +140,11 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const coarse = useMediaQuery(coarsePointer)
   const [body, setBody] = useState('')
-  const picker = useRef<HTMLInputElement>(null)
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, cap.hasMethod('run.relaunch') && run.mode === 'tui')
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.image'), () => room.busy)
-  const { attachments, uploading, uploadError } = images
+  const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
   const hint = control.canAct
     ? 'Sends to the agent’s terminal.'
@@ -148,9 +153,9 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
 
   const send = () => {
     const text = body.trim()
-    if (!text || room.busy || images.isUploading()) return
+    if (!text || room.busy || !images.isReady()) return
     const post = async () => {
-      if (await room.post({ kind: 'steer_request', body: text, attachments })) {
+      if (await room.post({ kind: 'steer_request', body: text, attachments: images.getPaths() })) {
         setBody('')
         images.clear()
       }
@@ -183,42 +188,18 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           onEscape={onEscape}
           placeholder="Message the agent"
           describedBy={hintID}
+          onPaste={images.onPaste}
+          images={<ComposerImages images={images} disabled={room.busy} />}
+          imageAction={<ComposerImagePicker images={images} disabled={room.busy || !cap.hasMethod('terminal.image')} />}
         />
         <div className="flex min-w-0 items-center gap-2">
-          <input
-            ref={picker}
-            type="file"
-            accept={imageTypes}
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void images.upload([file])
-              event.currentTarget.value = ''
-            }}
-          />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            label={attachments.length >= maxAttachments ? `At most ${maxAttachments} images` : 'Attach an image'}
-            disabled={!cap.hasMethod('terminal.image') || uploading || attachments.length >= maxAttachments}
-            onClick={() => picker.current?.click()}
-          >
-            <Paperclip />
-          </Button>
-          {attachments.length > 0 && (
-            <Button variant="ghost" size="sm" hint="Remove the attached images" onClick={images.clear}>
-              {attachments.length} {attachments.length === 1 ? 'image' : 'images'}
-              <X />
-            </Button>
-          )}
           <p id={hintID} className="line-clamp-2 min-w-0 flex-1 text-ui-sm text-muted">
             {uploading ? 'Uploading…' : hint}
           </p>
           <Button
             size="sm"
             hint={coarse ? undefined : `Send (${formatKeys('$mod+Enter')})`}
-            disabled={!body.trim() || room.busy || uploading}
+            disabled={!body.trim() || room.busy || !images.ready}
             onClick={send}
           >
             <ArrowUp />
@@ -267,7 +248,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const [error, setError] = useState<string>()
   const [focused, setFocused] = useState(false)
   const [active, setActive] = useState(0)
-  const idempotency = useRef<{ text: string; key: string } | null>(null)
+  const idempotency = useRef<{ identity: string; key: string } | null>(null)
   const hintID = useId()
   const listID = useId()
   const queueHeld = useQueueHeld(focused)
@@ -286,8 +267,9 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     controller: !controllerID ? null : controllerID === self.id ? 'self' : 'other',
   })
   const turnRunning = state?.turn_in_flight ?? false
-  const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.image'), () => busyRef.current)
-  const hasContent = Boolean(body.trim()) || images.attachments.length > 0
+  const supportsImages = state?.prompt_images === true
+  const images = useComposerImages(run.id, !gate && supportsImages && cap.hasMethod('terminal.image'), () => busyRef.current)
+  const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
 
   const [dismissed, setDismissed] = useState(false)
@@ -325,14 +307,27 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   }
 
   const deliver = async (steer: boolean) => {
-    const text = imageMessage(body, images.getPaths())
+    const text = body.trim()
+    const attachments = images.getPaths()
     const lease = sessionLease(useStore, run.id)
-    if (!text || busyRef.current || images.isUploading() || !lease) return
-    const key = idempotency.current?.text === text ? idempotency.current.key : crypto.randomUUID()
-    idempotency.current = { text, key }
+    if ((!text && !attachments.length) || busyRef.current || !images.isReady() || !lease) return
+    if (attachments.length && !supportsImages) {
+      setError('This agent does not support image prompts.')
+      return
+    }
+    const identity = JSON.stringify([text, attachments])
+    const key = idempotency.current?.identity === identity ? idempotency.current.key : crypto.randomUUID()
+    idempotency.current = { identity, key }
     const sent = await attempt(async () => {
-      const result = await api.runInject(run.id, text, key, { steer, lease })
+      const result = await api.runInject(run.id, text, key, { steer, lease, attachments })
       useStore.getState().upsertRoomMessage(result.message)
+      const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
+      if (delivery !== 'sent' && delivery !== 'queued') {
+        if (delivery !== 'uncertain') idempotency.current = null
+        throw new Error(result.message.failure?.message ?? (delivery === 'uncertain'
+          ? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.'
+          : 'The message was not sent. Your draft was kept.'))
+      }
     })
     if (sent) {
       idempotency.current = null
@@ -394,7 +389,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   }
 
   const look = pillLook[pill]
-  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'resume' && !hasContent)
+  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'resume' && (!images.ready || !hasContent || (images.previews.length > 0 && !supportsImages)))
   const keyHint = coarse ? undefined : pill === 'steer' ? `Steer (${shortcutLabel('composer-send')}); ${shortcutLabel('composer-queue')} queues` : `${look.label} (${shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')})`
 
   return (
@@ -419,6 +414,14 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           value={body}
           readOnly={busy}
           onPaste={images.onPaste}
+          images={<ComposerImages images={images} disabled={busy} />}
+          imageAction={(
+            <ComposerImagePicker
+              images={images}
+              disabled={busy || !supportsImages || !cap.hasMethod('terminal.image')}
+              unsupported={!supportsImages ? 'This agent does not support image prompts.' : undefined}
+            />
+          )}
           onChange={(value, at) => {
             setBody(value)
             setCaret(at)
@@ -456,7 +459,6 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           }}
         />
         <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <ComposerImages images={images} disabled={busy || !cap.hasMethod('terminal.image')} />
           <OptionPills options={state?.config_options ?? []} disabled={busy} onSet={setOption} />
           <p id={hintID} role={images.uploading ? 'status' : undefined} className="line-clamp-2 min-w-0 flex-1 basis-24 px-1 text-ui-sm text-muted">
             {images.uploading ? 'Uploading…' : turnRunning || pill === 'resume' ? pillHint[pill] : ''}

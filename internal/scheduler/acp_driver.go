@@ -3,10 +3,13 @@ package scheduler
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,14 +142,31 @@ func (d *acpDriver) LastActivity(run domain.RunID) time.Time {
 	return time.Time{}
 }
 
-func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, message string, steer bool, delivered func(error)) (string, error) {
+func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Member, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
 	sess, err := d.live(run.ID)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ptyhost.ErrNoSession, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, acpSteerTimeout)
 	defer cancel()
-	receipt, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(message)}, steer, delivered)
+	blocks := make([]acp.ContentBlock, 0, len(prompt.Attachments)+1)
+	if prompt.Text != "" || len(prompt.Attachments) == 0 {
+		blocks = append(blocks, acp.TextBlock(prompt.Text))
+	}
+	if len(prompt.Attachments) > 0 && !sess.Info().PromptImages {
+		return "", acphost.ErrUnsupportedImage
+	}
+	for index, reference := range prompt.Attachments {
+		data, mimeType, readErr := d.s.ReadImage(ctx, run.ID, reference)
+		if readErr != nil {
+			return "", fmt.Errorf("%w: scheduler: read prompt image: %w", domain.ErrPromptNotSent, readErr)
+		}
+		uri := "aether://room/" + url.PathEscape(prompt.MessageID) + "/" + strconv.Itoa(index)
+		block := acp.ImageBlock(base64.StdEncoding.EncodeToString(data), mimeType)
+		block.Image.Uri = &uri
+		blocks = append(blocks, block)
+	}
+	receipt, err := sess.Prompt(ctx, blocks, steer, delivered)
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}

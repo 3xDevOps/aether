@@ -133,6 +133,14 @@ permission and the run's control lease. It is capped at 64 MiB per run and delet
 terminal transcripts, when the run's checkout is reclaimed or the run is
 deleted. Standard runs keep only their terminal transcript.
 
+Images selected or pasted into chat are uploaded to the run's persistent member
+home before sending. Sending an Enhanced prompt passes their bytes to the agent
+and its configured model provider. Room records and the session item log retain
+small attachment references, not copies of the image bytes. Members with
+**View** can fetch images attached to that run's retained messages. Removing a
+draft thumbnail or deleting a run does not remove the member-home file; see
+[image retention](security.md#terminal-image-uploads).
+
 The shared app browser runs on your server, not in the phone's WebView.
 Browser input, app-terminal input, observations, frames, and explicit capture
 requests travel through your Aether server. A page opened there makes its

@@ -25,11 +25,13 @@ export function MessageRow({
   author,
   meta,
   children,
+  attachments,
   variant = 'message',
 }: {
   author: React.ReactNode
   meta?: React.ReactNode
   children: React.ReactNode
+  attachments?: React.ReactNode
   variant?: 'message' | 'note'
 }) {
   const body = useRef<HTMLDivElement>(null)
@@ -67,6 +69,7 @@ export function MessageRow({
           {open ? 'Show less' : 'Show more'}
         </button>
       )}
+      {attachments}
     </div>
   )
 }

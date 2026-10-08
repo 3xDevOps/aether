@@ -23,7 +23,7 @@ type AgentDriver interface {
 	// LastActivity is when the agent last produced output, zero if never.
 	LastActivity(run domain.RunID) time.Time
 	// Deliver hands a member's message to the agent as their next prompt.
-	Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string, steer bool, delivered func(error)) (string, error)
+	Deliver(ctx context.Context, run *domain.Run, member *domain.Member, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error)
 }
 
 // tuiDriver runs the agent as the child of the container's primary PTY.
@@ -48,8 +48,8 @@ func (d tuiDriver) LastActivity(run domain.RunID) time.Time {
 	return t
 }
 
-func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.Member, message string, _ bool, _ func(error)) (string, error) {
-	return "", d.pty.Inject(ctx, ptyhost.RunSession(run.ID), member.DisplayName, member.Color, message, harness.SubmitSequence(run.Harness))
+func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.Member, prompt domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
+	return "", d.pty.Inject(ctx, ptyhost.RunSession(run.ID), member.DisplayName, member.Color, prompt.TextWithAttachments(), harness.SubmitSequence(run.Harness))
 }
 
 // Headless runs without Run.ACP host their one-shot agent on the primary PTY.

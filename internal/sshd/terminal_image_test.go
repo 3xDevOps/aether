@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -23,14 +25,14 @@ var onePixelPNG = []byte{
 
 func TestDecodeTerminalImageAcceptsExactDecodedLimit(t *testing.T) {
 	t.Parallel()
-	data := make([]byte, maxTerminalImageBytes)
+	data := make([]byte, domain.MaxImageBytes)
 	copy(data, onePixelPNG)
 	encoded := base64.StdEncoding.EncodeToString(data)
 	got, ext, err := decodeTerminalImage(encoded)
 	if err != nil {
 		t.Fatalf("decode exact-limit PNG: %v", err)
 	}
-	if ext != ".png" || len(got) != maxTerminalImageBytes || !bytes.Equal(got[:len(onePixelPNG)], onePixelPNG) {
+	if ext != ".png" || len(got) != domain.MaxImageBytes || !bytes.Equal(got[:len(onePixelPNG)], onePixelPNG) {
 		t.Fatalf("decoded image = extension %q, %d bytes", ext, len(got))
 	}
 }
@@ -40,9 +42,34 @@ func TestDecodeTerminalImageRejectsInvalidAndOversizedContent(t *testing.T) {
 	if _, _, err := decodeTerminalImage(base64.StdEncoding.EncodeToString([]byte("not an image"))); err == nil {
 		t.Fatal("invalid image accepted")
 	}
-	oversize := make([]byte, maxTerminalImageBytes+1)
+	oversize := make([]byte, domain.MaxImageBytes+1)
 	if _, _, err := decodeTerminalImage(base64.StdEncoding.EncodeToString(oversize)); err == nil {
 		t.Fatal("oversized image accepted")
+	}
+}
+
+func TestDecodeTerminalImagePreservesValidationErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, encoded, want string
+	}{
+		{"required", "", "image content is required"},
+		{"base64", "???", "image content is not valid base64:"},
+		{"noncanonical base64", "/x==", "image content is not valid base64:"},
+		{"empty decoded", "\n", "image content is empty"},
+		{"invalid PNG", base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n")), "invalid PNG image:"},
+		{"invalid JPEG", base64.StdEncoding.EncodeToString([]byte{0xff, 0xd8, 0xff}), "invalid JPEG image:"},
+		{"invalid GIF", base64.StdEncoding.EncodeToString([]byte("GIF89a")), "invalid GIF image:"},
+		{"invalid WebP", base64.StdEncoding.EncodeToString([]byte("RIFF0000WEBP")), "invalid WebP image:"},
+		{"unsupported", base64.StdEncoding.EncodeToString([]byte("<svg/>")), "unsupported or invalid image format"},
+		{"oversized", strings.Repeat("A", maxTerminalImageEncodedBytes+1), "image exceeds the 8 MiB limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, ext, err := decodeTerminalImage(tc.encoded)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || data != nil || ext != "" {
+				t.Fatalf("decodeTerminalImage = (%d bytes, %q, %v), want %q", len(data), ext, err, tc.want)
+			}
+		})
 	}
 }
 

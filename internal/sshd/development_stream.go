@@ -2,9 +2,12 @@ package sshd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -205,6 +208,18 @@ func (s *Server) openDevelopmentArtifact(ctx context.Context, member domain.Memb
 	if req.RunID == "" || req.ArtifactID == "" {
 		return protocol.DevArtifact{}, nil, nil, invalidParams("run_id and artifact_id are required")
 	}
+	if req.RoomMessageID != "" || req.AttachmentIndex != nil {
+		if req.EvidencePacketID != "" || req.RoomMessageID == "" || req.AttachmentIndex == nil || *req.AttachmentIndex < 0 {
+			return protocol.DevArtifact{}, nil, nil, invalidParams("room_message_id and a nonnegative attachment_index are required and cannot select evidence")
+		}
+		if req.ArtifactID != "room:"+req.RoomMessageID+":"+strconv.Itoa(*req.AttachmentIndex) {
+			return protocol.DevArtifact{}, nil, nil, invalidParams("invalid room image artifact_id")
+		}
+		return s.openRoomImage(ctx, member, req)
+	}
+	if strings.HasPrefix(req.ArtifactID, "room:") {
+		return protocol.DevArtifact{}, nil, nil, invalidParams("room image selectors are required")
+	}
 	if req.EvidencePacketID == "" {
 		run, principal, authorize, err := s.developmentAuthority(ctx, member, req.RunID)
 		if err != nil {
@@ -267,4 +282,59 @@ func (s *Server) openDevelopmentArtifact(ctx context.Context, member domain.Memb
 		return protocol.DevArtifact{}, nil, nil, collaborationRPCError(err)
 	}
 	return artifact, source, authorize, err
+}
+
+// Room images use persisted message references and View, not the live
+// development session's Steer/account-use authority.
+func (s *Server) openRoomImage(ctx context.Context, member domain.MemberID, req protocol.DevArtifactDownloadRequest) (protocol.DevArtifact, io.ReadCloser, func(context.Context) error, error) {
+	index := *req.AttachmentIndex
+	message, lookupErr := s.cfg.Store.GetRoomMessage(ctx, req.RoomMessageID)
+	if lookupErr != nil {
+		return protocol.DevArtifact{}, nil, nil, lookupErr
+	}
+	if message.RunID != domain.RunID(req.RunID) || index >= len(message.Attachments) {
+		return protocol.DevArtifact{}, nil, nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+	}
+	workspace, reference := message.WorkspaceID, message.Attachments[index]
+	authorize := func(ctx context.Context) error {
+		if err := s.checkMember(ctx, member); err != nil {
+			return err
+		}
+		current, err := s.cfg.Store.GetRoomMessage(ctx, req.RoomMessageID)
+		if err != nil {
+			return err
+		}
+		if current.RunID != domain.RunID(req.RunID) || current.WorkspaceID != workspace || index >= len(current.Attachments) || current.Attachments[index] != reference {
+			return &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+		}
+		target, err := resolveRunTarget(ctx, s.cfg.Store, current.RunID)
+		if err != nil {
+			return err
+		}
+		if target.Workspace != workspace {
+			return &protocol.Error{Code: protocol.CodeNotFound, Message: "room image not found"}
+		}
+		actor, err := resolveActor(ctx, s.cfg.Store, member)
+		if err != nil {
+			return err
+		}
+		return permissions.Check(permissions.View, actor, target)
+	}
+	if err := authorize(ctx); err != nil {
+		return protocol.DevArtifact{}, nil, nil, err
+	}
+	data, mimeType, err := s.cfg.Runs.ReadImage(ctx, message.RunID, reference)
+	if err != nil {
+		return protocol.DevArtifact{}, nil, nil, err
+	}
+	if len(data) == 0 || len(data) > domain.MaxImageBytes {
+		return protocol.DevArtifact{}, nil, nil, invalidParams("invalid room image size")
+	}
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+	default:
+		return protocol.DevArtifact{}, nil, nil, invalidParams("invalid room image content type")
+	}
+	artifact := protocol.DevArtifact{ID: req.ArtifactID, RunID: req.RunID, ContentType: mimeType, Bytes: int64(len(data))}
+	return artifact, io.NopCloser(bytes.NewReader(data)), authorize, nil
 }

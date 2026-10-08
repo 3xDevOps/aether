@@ -49,13 +49,17 @@ type AgentInfo struct {
 	Resume          bool
 	List            bool
 	Steering        bool
+	PromptImages    bool
 	AuthMethods     json.RawMessage
 }
 
 type initializeResult struct {
 	ProtocolVersion   int `json:"protocolVersion"`
 	AgentCapabilities struct {
-		LoadSession         bool `json:"loadSession"`
+		LoadSession        bool `json:"loadSession"`
+		PromptCapabilities struct {
+			Image bool `json:"image"`
+		} `json:"promptCapabilities"`
 		SessionCapabilities struct {
 			Resume json.RawMessage `json:"resume"`
 			List   json.RawMessage `json:"list"`
@@ -273,6 +277,7 @@ func (c *Conn) initialize(ctx context.Context) error {
 		Resume:          present(caps.SessionCapabilities.Resume),
 		List:            present(caps.SessionCapabilities.List),
 		Steering:        res.Meta.Steering.Supported,
+		PromptImages:    caps.PromptCapabilities.Image,
 		AuthMethods:     res.AuthMethods,
 	}
 	if res.AgentInfo != nil {

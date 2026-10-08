@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -61,7 +62,7 @@ const (
 // PTY acceptance and records the timeline/co-author effects exactly once after
 // acceptance. The outcome is empty for a terminal run. delivered follows a
 // "queued" outcome as acphost.Session.Prompt says.
-type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error)
+type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error)
 
 // AttachmentValidator accepts only an opaque reference to an image already
 // known to the image service. A validator is required whenever attachments
@@ -90,14 +91,14 @@ type ProtectedStore interface {
 	SetRunProtected(context.Context, domain.RunID, bool) error
 }
 
-// ClassifyReceipt maps PTY outcomes to the wire contract. Only the two
-// explicit no-session errors prove no write occurred; every other write error
-// is uncertain.
+// ClassifyReceipt maps delivery outcomes to the wire contract. Missing terminal
+// sessions, unsupported images, and explicit pre-delivery failures prove no
+// write occurred; other errors are uncertain.
 func ClassifyReceipt(err error) Receipt {
 	if err == nil {
 		return ReceiptSent
 	}
-	if errors.Is(err, ptyhost.ErrNoSession) || errors.Is(err, ptyhost.ErrSessionEnded) {
+	if errors.Is(err, ptyhost.ErrNoSession) || errors.Is(err, ptyhost.ErrSessionEnded) || errors.Is(err, acphost.ErrUnsupportedImage) || errors.Is(err, domain.ErrPromptNotSent) {
 		return ReceiptNotSent
 	}
 	return ReceiptUncertain
@@ -430,8 +431,8 @@ func (s *Service) validateInput(ctx context.Context, in *MessageInput) error {
 	if in.WorkspaceID == "" || in.RunID == "" || in.ActorID == "" || !in.Kind.Valid() || strings.TrimSpace(in.IdempotencyKey) == "" {
 		return fmt.Errorf("%w: workspace, run, actor, kind, and idempotency key are required", ErrInvalidRequest)
 	}
-	if len(in.Body) == 0 || len(in.Body) > s.cfg.BodyLimit {
-		return fmt.Errorf("%w: body must be between 1 and %d bytes", ErrInvalidRequest, s.cfg.BodyLimit)
+	if len(in.Body) > s.cfg.BodyLimit || strings.TrimSpace(in.Body) == "" && (in.Kind != store.RoomMessageSteerRequest || len(in.Attachments) == 0) {
+		return fmt.Errorf("%w: body is required unless steering with attachments, and must not exceed %d bytes", ErrInvalidRequest, s.cfg.BodyLimit)
 	}
 	if len(in.IdempotencyKey) > s.cfg.IdempotencyBytes {
 		return fmt.Errorf("%w: idempotency key is too long", ErrInvalidRequest)
@@ -439,6 +440,7 @@ func (s *Service) validateInput(ctx context.Context, in *MessageInput) error {
 	if len(in.Attachments) > s.cfg.AttachmentLimit {
 		return fmt.Errorf("%w: too many attachments", ErrInvalidAttachment)
 	}
+	aggregateBytes := len(in.Body)
 	for _, ref := range in.Attachments {
 		if ref == "" || len(ref) > s.cfg.AttachmentBytes || strings.ContainsAny(ref, "\x00\r\n") || s.cfg.Attachments == nil {
 			return ErrInvalidAttachment
@@ -446,8 +448,11 @@ func (s *Service) validateInput(ctx context.Context, in *MessageInput) error {
 		if err := s.cfg.Attachments(ctx, in.WorkspaceID, in.RunID, ref); err != nil {
 			return ErrInvalidAttachment
 		}
+		aggregateBytes += len(ref) + 3
 	}
-	if len(serializeAgentMessage(in.Body, in.Attachments)) > s.agentMessageLimit() {
+	// Framing adds a fixed overhead on both sides of the terminal limit, so
+	// compare payload sizes without allocating a serialized prompt.
+	if aggregateBytes > s.cfg.BodyLimit+s.cfg.AttachmentLimit*(s.cfg.AttachmentBytes+3) {
 		return fmt.Errorf("%w: serialized message is too large", ErrInvalidRequest)
 	}
 	if in.Anchor != nil {

@@ -27,12 +27,18 @@ export interface ChangedFile {
   deletions: number
 }
 
+export interface MessageImageRef {
+  messageID: string
+  index: number
+}
+
 export type SessionRow =
   | {
       kind: 'user'
       id: string
       at: string
       body: string
+      images?: MessageImageRef[]
       authorID?: string
       delivery?: Delivery
       deliverAfter?: string
@@ -169,8 +175,32 @@ function seconds(ms: number): string {
 
 type Slot =
   | { kind: 'row'; row: SessionRow }
-  | { kind: 'message'; id: string; role: string; first: SessionItem; text: string; complete: boolean }
+  | { kind: 'message'; id: string; role: string; first: SessionItem; text: string; images: MessageImageRef[]; complete: boolean }
   | { kind: 'tool'; id: string }
+
+function imageRefs(item: SessionItem): MessageImageRef[] {
+  const images: MessageImageRef[] = []
+  for (const content of item.message?.attachments ?? []) {
+    if (content.type !== 'image' || !content.uri) continue
+    const match = /^aether:\/\/room\/([^/?#\s]+)\/([0-9]+)$/.exec(content.uri)
+    if (!match || match[0] !== content.uri) continue
+    const index = Number(match[2])
+    if (!Number.isSafeInteger(index)) continue
+    try {
+      const messageID = decodeURIComponent(match[1]!)
+      if (!images.some((image) => image.messageID === messageID && image.index === index)) images.push({ messageID, index })
+    } catch {
+      // A malformed escaped ID is not an authenticated room reference.
+    }
+  }
+  return images
+}
+
+function appendImages(images: MessageImageRef[], incoming: MessageImageRef[]): void {
+  for (const image of incoming) {
+    if (!images.some((held) => held.messageID === image.messageID && held.index === image.index)) images.push(image)
+  }
+}
 
 export function turnRows(turn: Turn): SessionRow[] {
   const slots: Slot[] = []
@@ -197,10 +227,11 @@ export function turnRows(turn: Turn): SessionRow[] {
         const open = messages.get(key)
         if (open) {
           open.text += m.text
+          appendImages(open.images, imageRefs(item))
           open.complete ||= Boolean(m.complete)
           break
         }
-        const slot = { kind: 'message' as const, id: key, role: item.kind === 'thought' ? 'thought' : m.role, first: item, text: m.text, complete: Boolean(m.complete) }
+        const slot = { kind: 'message' as const, id: key, role: item.kind === 'thought' ? 'thought' : m.role, first: item, text: m.text, images: imageRefs(item), complete: Boolean(m.complete) }
         messages.set(key, slot)
         slots.push(slot)
         break
@@ -281,9 +312,9 @@ export function turnRows(turn: Turn): SessionRow[] {
     }
     const at = slot.first.time
     if (slot.role === 'user') {
-      if (inboxWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
-      else if (missionWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
-      else rows.push({ kind: 'user', id: slot.id, at, body: slot.text })
+      if (!slot.images.length && inboxWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
+      else if (!slot.images.length && missionWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
+      else rows.push({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}) })
     } else if (slot.role === 'thought') {
       rows.push({ kind: 'thinking', id: slot.id, at, text: slot.text })
     } else if (slot.text.trim()) {
@@ -403,7 +434,15 @@ export function trimTurns(turns: Turn[], keep: number): Turn[] {
     count += turns[i]!.items.length
     if (count >= keep) {
       const turn = turns[i]!
-      const cut = count - keep
+      let cut = count - keep
+      // Keep a user's image metadata with any of its retained message segments.
+      const messages = new Set(turn.items.slice(cut).flatMap((item) => item.message?.role === 'user' ? [item.message.message_id] : []))
+      for (let j = 0; j < cut; j++) {
+        if (turn.items[j]!.message && messages.has(turn.items[j]!.message!.message_id)) {
+          cut = j
+          break
+        }
+      }
       return cut > 0 ? [{ ...turn, items: turn.items.slice(cut) }, ...turns.slice(i + 1)] : turns.slice(i)
     }
   }

@@ -583,7 +583,7 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 // Inject delivers a steering message to the live run's agent through its
 // driver; the tui driver ends it with the harness's submit sequence so the
 // text reaches the agent's conversation rather than sitting in its input box.
-func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error) {
+func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry != nil && entry.switching != "" {
@@ -593,7 +593,7 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	if entry != nil && (entry.status == domain.RunRunning || entry.status == domain.RunNeedsAttention) {
 		workspace := entry.workspaceID
 		s.mu.Unlock()
-		return s.injectLive(ctx, run, workspace, actor, message, steer, delivered)
+		return s.injectLive(ctx, run, workspace, actor, prompt, steer, delivered)
 	}
 	s.mu.Unlock()
 
@@ -604,7 +604,7 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	return "", fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
 }
 
-func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, message string, steer bool, delivered func(error)) (string, error) {
+func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
 		return "", err
@@ -613,11 +613,11 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return "", err
 	}
-	outcome, err := s.driver(r.ACP).Deliver(ctx, r, m, message, steer, delivered)
+	outcome, err := s.driver(r.ACP).Deliver(ctx, r, m, prompt, steer, delivered)
 	if err != nil {
 		return "", err
 	}
-	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
+	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, prompt.Text)
 	s.RecordSteer(ctx, run, actor)
 	return outcome, nil
 }

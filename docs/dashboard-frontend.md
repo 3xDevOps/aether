@@ -1410,9 +1410,20 @@ an empty composer during a turn) or **Resume** (a paused run). `Mod+Enter` does
 what the pill says and nothing without text or images, `Mod+Shift+Enter`
 queues; on touch only the pill sends. The shared upload state in
 `composer-images.tsx` accepts file selection and native image paste, enforces
-the eight-image limit, and uses `terminal.image`. Enhanced sends include the
-returned paths in the prompt, allow image-only messages, block while uploading,
-and retain text and images on failure. Footer controls wrap on narrow screens.
+the eight-image limit, and uses `terminal.image`. File-backed object URLs show
+thumbnails inside the input; removal, successful send and unmount revoke them.
+Enhanced sends pass text and ordered attachment references separately through
+`run.inject`; the server resolves them into ACP image blocks. Image-only
+messages are allowed, incomplete uploads block sending, and failures preserve
+the draft and previews. `prompt_images` from the ACP snapshot gates image input.
+Footer controls wrap on narrow screens.
+
+User rows keep room-message IDs and attachment indices, not image bytes.
+Image-bearing ACP rows match room messages by those IDs rather than caption
+text, so separate image-only messages remain separate. `message-images.tsx`
+fetches authorized image blobs through `api.roomImage` and revokes its object
+URLs when identity, run or row changes. Images sit outside the text-collapse
+area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use

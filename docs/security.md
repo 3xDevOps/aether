@@ -737,8 +737,8 @@ directory explicitly chosen through the browser picker, not arbitrary paths.
 only the bytes in a user-selected browser `File` (including an actual image
 `File` from native paste); a text clipboard value that happens to be a local
 path remains text. There is no RPC that asks the server to read an arbitrary
-client path, and the upload action only inserts the returned shell-quoted path
-into the focused terminal - it does not press Enter or run the command.
+client path. In a terminal, the upload action inserts the returned shell-quoted
+path without pressing Enter or running a command.
 
 The web gateway permits a 12 MiB request for `terminal.image` to leave room
 for base64 and JSON framing. The server validates the decoded bytes as a
@@ -758,6 +758,26 @@ home or the member is deleted. A member-home bind mount is not part of
 environment image. Like every file in that home, the images are readable in
 each container that mounts it: the member's environment and the runs
 they launch.
+
+### Chat image delivery and previews
+
+Enhanced chat keeps validated attachment references separate from prompt text.
+The server reads the saved images into ACP image blocks only when delivering
+the prompt; agents without image support are refused rather than given a
+filename fallback. The conversation log keeps short room-message references,
+not image bytes.
+
+Preview requests name a run, persisted message and attachment index. The server
+checks their association and current View permission, and repeats authorization
+checks while streaming. It resolves the stored reference only within the run's
+persisted home member, including after handoff or container shutdown. Reads
+reject arbitrary names, symlinks, hardlinks, non-regular files, invalid images
+and files over 8 MiB. MIME types come from validated bytes.
+
+The dashboard fetches previews through the authenticated gateway and displays
+local object URLs; it never loads an arbitrary URI supplied by the transcript.
+Deleting the message or run, removing the home file, or losing View access
+prevents another download. Existing member-home image retention still applies.
 
 ## Browser configuration and Files
 

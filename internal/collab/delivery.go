@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
@@ -132,11 +131,11 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 }
 
 func (s *Service) inject(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, steer bool) (string, error) {
-	message := serializeAgentMessage(msg.Body, msg.Attachments)
+	prompt := domain.AgentPrompt{Text: msg.Body, Attachments: msg.Attachments, MessageID: msg.ID}
 	if s.cfg.Inject == nil {
 		return "", ErrNoInjector
 	}
-	return s.cfg.Inject(ctx, run.ID, actor.ID, message, steer, func(err error) {
+	return s.cfg.Inject(ctx, run.ID, actor.ID, prompt, steer, func(err error) {
 		s.agentDelivered(context.WithoutCancel(ctx), msg.ID, err)
 	})
 }
@@ -178,31 +177,6 @@ func (s *Service) dropAgentQueued(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// serializeAgentMessage keeps the body and validated container-visible
-// attachment references in one bounded, unambiguous agent-facing message.
-func serializeAgentMessage(body string, attachments []string) string {
-	if len(attachments) == 0 {
-		return body
-	}
-	var b strings.Builder
-	b.Grow(len(body) + len(attachments)*DefaultAttachmentBytes + 64)
-	b.WriteString(body)
-	b.WriteString("\n\n--- AETHER ATTACHMENTS ---\n")
-	for _, ref := range attachments {
-		b.WriteString("- ")
-		b.WriteString(ref)
-		b.WriteByte('\n')
-	}
-	b.WriteString("--- END AETHER ATTACHMENTS ---")
-	return b.String()
-}
-
-func (s *Service) agentMessageLimit() int {
-	const prefix = "\n\n--- AETHER ATTACHMENTS ---\n"
-	const suffix = "--- END AETHER ATTACHMENTS ---"
-	return s.cfg.BodyLimit + len(prefix) + len(suffix) + s.cfg.AttachmentLimit*(s.cfg.AttachmentBytes+3)
 }
 
 // DeliverDue delivers every bounded page of overdue steer requests. It is

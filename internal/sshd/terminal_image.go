@@ -1,23 +1,18 @@
 package sshd
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image/gif"
-	"image/jpeg"
-	"image/png"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"golang.org/x/image/webp"
 )
 
 const (
-	maxTerminalImageBytes        = 8 << 20
-	maxTerminalImageEncodedBytes = 4 * ((maxTerminalImageBytes + 2) / 3)
+	maxTerminalImageEncodedBytes = 4 * ((domain.MaxImageBytes + 2) / 3)
 )
 
 func init() {
@@ -61,35 +56,9 @@ func decodeTerminalImage(encoded string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("image content is not valid base64: %w", err)
 	}
-	if len(data) == 0 {
-		return nil, "", fmt.Errorf("image content is empty")
+	extension, _, err := memberhome.ValidateImage(data)
+	if err != nil {
+		return nil, "", err
 	}
-	if len(data) > maxTerminalImageBytes {
-		return nil, "", fmt.Errorf("image exceeds the 8 MiB limit")
-	}
-
-	switch {
-	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
-		if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
-			return nil, "", fmt.Errorf("invalid PNG image: %w", err)
-		}
-		return data, ".png", nil
-	case len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff:
-		if _, err := jpeg.DecodeConfig(bytes.NewReader(data)); err != nil {
-			return nil, "", fmt.Errorf("invalid JPEG image: %w", err)
-		}
-		return data, ".jpg", nil
-	case len(data) >= 6 && (bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a"))):
-		if _, err := gif.DecodeConfig(bytes.NewReader(data)); err != nil {
-			return nil, "", fmt.Errorf("invalid GIF image: %w", err)
-		}
-		return data, ".gif", nil
-	case len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")):
-		if _, err := webp.DecodeConfig(bytes.NewReader(data)); err != nil {
-			return nil, "", fmt.Errorf("invalid WebP image: %w", err)
-		}
-		return data, ".webp", nil
-	default:
-		return nil, "", fmt.Errorf("unsupported or invalid image format")
-	}
+	return data, extension, nil
 }

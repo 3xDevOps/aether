@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -185,6 +186,16 @@ func (g *Gateway) handleDevelopmentArtifact(w http.ResponseWriter, r *http.Reque
 		DevArtifactGetParams: protocol.DevArtifactGetParams{DevRunParams: protocol.DevRunParams{RunID: r.PathValue("run")}, ArtifactID: r.PathValue("artifact")},
 		EvidencePacketID:     r.URL.Query().Get("evidence_packet_id"),
 	}
+	if messageID := r.PathValue("message"); messageID != "" {
+		index, err := strconv.Atoi(r.PathValue("index"))
+		if err != nil || index < 0 || req.EvidencePacketID != "" {
+			WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid room image selector"})
+			return
+		}
+		req.RoomMessageID = messageID
+		req.AttachmentIndex = &index
+		req.ArtifactID = "room:" + messageID + ":" + strconv.Itoa(index)
+	}
 	source, artifact, err := stream.Artifact(ctx, req)
 	if err != nil {
 		perr := developmentError(err)
@@ -197,6 +208,18 @@ func (g *Gateway) handleDevelopmentArtifact(w http.ResponseWriter, r *http.Reque
 	if artifact.RunID != req.RunID || artifact.ID != req.ArtifactID || artifact.Bytes < 0 {
 		WriteError(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "capture identity mismatch"})
 		return
+	}
+	if req.RoomMessageID != "" {
+		if artifact.Bytes == 0 || artifact.Bytes > domain.MaxImageBytes {
+			WriteError(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "invalid room image size"})
+			return
+		}
+		switch artifact.ContentType {
+		case "image/png", "image/jpeg", "image/gif", "image/webp":
+		default:
+			WriteError(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "invalid room image content type"})
+			return
+		}
 	}
 	w.Header().Set("Content-Type", artifact.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(artifact.Bytes, 10))

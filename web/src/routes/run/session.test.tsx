@@ -195,7 +195,7 @@ describe('the Enhanced session view', () => {
     await userEvent.type(box, 'also docs')
     expect(screen.getByText('Added to the current turn.')).toBeDefined()
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
-    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'also docs', expect.any(String), { steer: true, lease: expect.objectContaining({ control_generation: 4 }) }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'also docs', expect.any(String), expect.objectContaining({ steer: true, lease: expect.objectContaining({ control_generation: 4 }) })))
   })
 
   it('does nothing on Mod+Enter with an empty box, and keeps Interrupt while a request waits', async () => {
@@ -265,7 +265,7 @@ describe('the Enhanced session view', () => {
     expect(request).toMatchObject({ type: 'control', write: true })
     expect(api.runInject).not.toHaveBeenCalled()
     session.send({ type: 'control', request_id: request.request_id, ok: true, has_control: true, control_generation: 5 })
-    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), { steer: false, lease: expect.objectContaining({ control_generation: 5 }) }))
+    await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'go', expect.any(String), expect.objectContaining({ steer: false, lease: expect.objectContaining({ control_generation: 5 }) })))
   })
 
   it('shows the adapter failure with its stderr and the two ways on', async () => {

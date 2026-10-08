@@ -363,6 +363,7 @@ type fakeRuns struct {
 	sharedRefusals map[string]string
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
+	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -600,8 +601,18 @@ func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 	f.paused[run] = paused
 }
 
-func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, message string, _ bool, _ func(error)) (string, error) {
-	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, message))
+func (f *fakeRuns) Inject(_ context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, _ bool, _ func(error)) (string, error) {
+	return "", f.record(fmt.Sprintf("inject:%s:%s:%s", run, actor, prompt.TextWithAttachments()))
+}
+
+func (f *fakeRuns) ReadImage(ctx context.Context, run domain.RunID, reference string) ([]byte, string, error) {
+	f.mu.Lock()
+	readImage := f.readImage
+	f.mu.Unlock()
+	if readImage == nil {
+		return nil, "", errors.New("sshd test: image data is not configured")
+	}
+	return readImage(ctx, run, reference)
 }
 
 func (f *fakeRuns) RecordHandoff(_ context.Context, run domain.RunID, from domain.MemberID) {
