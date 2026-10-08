@@ -112,7 +112,8 @@ Standard runs and for real stalls. **Show earlier** reads older items 200 at
 a time. `Esc` in an empty composer moves focus to the timeline; `Esc` again
 leaves the run.
 
-Thoughts keep a four-line preview; event notices remain plain text.
+Thought previews are capped at four line heights and scale with **Settings >
+Appearance > Text size**; event notices remain plain text.
 The [rendering capture](media/acp-reasoning-markdown.png) shows production
 timeline components with fixture ACP items, not a live agent.
 
