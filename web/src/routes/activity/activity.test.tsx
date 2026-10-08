@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import type { Api } from '@/lib/api'
+import { eventLabel } from '@/lib/events'
 import type { Event, RunMessage, TimelinePage, TimelineQuery } from '@/lib/types'
 import { ActivityRoute } from '@/routes/activity'
 import { olderFeed, openFeed } from '@/routes/team/sync'
@@ -149,6 +150,26 @@ describe('activity feed', () => {
     expect(pause.querySelector('[data-slot="status-dot"]')).toBeNull()
   })
 
+  it('renders retention metadata without a business-state dot and clears stale metadata', async () => {
+    const deadline = '2026-08-21T10:04:00Z'
+    const cause = 'Evidence preservation failed; cleanup will retry'
+    const retention: Event = {
+      ...history[1], id: 'evt_retention', type: 'run.retention', actor_id: '',
+      payload: { container_retained_until: deadline, cleanup_pending: true, cleanup_error: cause },
+    }
+    seed()
+    render(<ActivityRoute params={{}} client={feedApi([retention])} />)
+    const row = (await screen.findByText(cause, { exact: false })).closest('li')
+    expect(row).not.toBeNull()
+    expect(row?.querySelector('[data-slot="status-dot"]')).toBeNull()
+    expect(row?.querySelector(`time[datetime="${deadline}"]`)).not.toBeNull()
+    const record = useStore.getState().runs.run_1
+    act(() => useStore.setState({ feed: [{ ...retention, payload: {} }] }))
+    expect(screen.queryByText(cause, { exact: false })).toBeNull()
+    expect(document.querySelector(`time[datetime="${deadline}"]`)).toBeNull()
+    expect(useStore.getState().runs.run_1).toBe(record)
+  })
+
   it('opens the run a row names on its terminal tab', async () => {
     seed()
     render(<ActivityRoute params={{}} client={feedApi()} />)
@@ -282,6 +303,18 @@ describe('activity filter', () => {
     await pickOption(screen.getByLabelText('Show'), 'Run title')
     await vi.waitFor(() => expect(client.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({ types: ['run.title'] })))
     expect(screen.getByRole('button', { name: 'Filter · 1' })).toBeDefined()
+  })
+
+  it('filters runtime retention separately from business status', async () => {
+    const client = feedApi()
+    seed()
+    render(<ActivityRoute params={{}} client={client} />)
+    await screen.findByText(/waiting on a question/)
+    await openFilter()
+    await pickOption(screen.getByLabelText('Show'), eventLabel['run.retention'])
+    await vi.waitFor(() => expect(client.workspaceTimeline).toHaveBeenCalledWith(
+      expect.objectContaining({ types: ['run.retention'] }),
+    ))
   })
 
   it('narrows the query to one run and one member', async () => {

@@ -187,8 +187,8 @@ func TestSharedLaunchKeepsTheLaunchersInstallation(t *testing.T) {
 		t.Fatalf("owner Launch: %v", err)
 	}
 	spec := e.rt.byName(string(own.ID)).spec
-	if len(spec.Mounts) != 1 || spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) {
-		t.Fatalf("own launch mounts = %+v, want only the owner's home", spec.Mounts)
+	if len(spec.Mounts) != 2 || spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) {
+		t.Fatalf("own launch mounts = %+v, want only owner's home/cache", spec.Mounts)
 	}
 	assertNoBorrowedPath(t, spec)
 }

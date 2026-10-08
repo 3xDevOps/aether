@@ -219,11 +219,26 @@ function files(value: unknown): string {
   return `${count} ${count === 1 ? 'file' : 'files'}`
 }
 
+function retentionLine(p: Payload): ReactNode {
+  const deadline = text(p.container_retained_until)
+  const error = text(p.cleanup_error)
+  const pending = p.cleanup_pending === true
+  return (
+    <>
+      {deadline
+        ? <>Runtime grace ends <time dateTime={deadline}>{new Date(deadline).toLocaleString()}</time>{pending && ' · Cleanup pending'}</>
+        : pending || error ? 'Runtime cleanup pending' : 'Runtime retention cleared'}
+      {error && <> · {error}</>}
+    </>
+  )
+}
+
 const tokens = new Intl.NumberFormat()
 
 // Keyed by `EventType` so a type without words is a compile error.
 const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.status': (p) => statusLine(p),
+  'run.retention': retentionLine,
   'run.input': (p) => Array.isArray(p.pending_inputs) && p.pending_inputs.length > 0
     ? `The agent is waiting on ${p.pending_inputs.length === 1 ? 'an answer' : `${p.pending_inputs.length} answers`}`
     : "The agent's questions were answered",

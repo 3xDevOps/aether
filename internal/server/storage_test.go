@@ -68,6 +68,9 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 		runs = append(runs, run)
 	}
 	write(filepath.Join("homes", string(admin.ID), "private-token"), []byte("secret content"))
+	for _, pool := range []string{"runs", "terminal"} {
+		write(filepath.Join("home-caches", string(admin.ID), pool, "data", "package"), []byte("cache"))
+	}
 	write("profiles/profile", []byte("profile bytes"))
 	packet := &store.EvidencePacket{WorkspaceID: workspace.ID, RunID: runs[0].ID, CreatorID: admin.ID, Trigger: store.EvidenceFinish, Objective: "evidence", ExpiresAt: &past, IdempotencyKey: "storage-expiry"}
 	if err := s.db.CreateEvidencePacket(t.Context(), packet); err != nil {
@@ -89,6 +92,25 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 	result, raw := readDisk(admin.ID)
 	if result.TotalBytes == 0 || result.HomeBytes == 0 || result.EvidenceBytes == 0 || result.OtherBytes == 0 || result.SnapshotBytes == 0 || result.SnapshotBytes >= result.WorktreeBytes {
 		t.Fatalf("missing storage data: %+v", result)
+	}
+	if result.CacheBytes != 10 {
+		t.Fatalf("cache aggregate = %d, want independent pool bytes", result.CacheBytes)
+	}
+	cachePools := make(map[string]bool)
+	for _, entry := range result.Entries {
+		if entry.Kind != "cache" {
+			continue
+		}
+		cachePools[entry.Pool] = true
+		if entry.OwnerKind != "member" || entry.OwnerID != string(admin.ID) || entry.Bytes != 5 || entry.ReclaimableBytes != nil || entry.Reason == "" {
+			t.Fatalf("cache pool attribution: %+v", entry)
+		}
+		if entry.Error == "" || entry.RetainedUntil != "" {
+			t.Fatalf("missing ownership metadata must not promise age-based cleanup: %+v", entry)
+		}
+	}
+	if !cachePools["runs"] || !cachePools["terminal"] || len(cachePools) != 2 {
+		t.Fatalf("missing cache ownership pools: %v", cachePools)
 	}
 	if result.Docker == nil || result.Docker.Error == "" || result.Docker.ImagesBytes != nil {
 		t.Fatalf("unavailable Docker was presented as measured: %+v", result.Docker)
@@ -135,6 +157,9 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 			t.Fatal(err)
 		}
 		got, body := readDisk(member.ID)
+		if got.CacheBytes != result.CacheBytes {
+			t.Fatalf("%s did not receive safe aggregate cache usage", role)
+		}
 		if len(got.Entries) != 0 || got.Truncated || strings.Contains(body, string(runs[0].ID)) || strings.Contains(body, string(admin.ID)) {
 			t.Fatalf("%s received private owners: %s", role, body)
 		}

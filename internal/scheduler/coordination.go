@@ -105,9 +105,11 @@ func (s *Scheduler) coordinationSeam() *coordination {
 const verificationBridgeRefDirName = "verification-bridges"
 
 type verificationBridgeRef struct {
-	CreationKey  string `json:"creation_key"`
-	BridgeDigest string `json:"bridge_digest"`
-	BridgePath   string `json:"bridge_path"`
+	CreationKey  string          `json:"creation_key"`
+	BridgeDigest string          `json:"bridge_digest"`
+	BridgePath   string          `json:"bridge_path"`
+	CacheMember  domain.MemberID `json:"cache_member,omitempty"`
+	CachePool    string          `json:"cache_pool,omitempty"`
 }
 
 func (s *Scheduler) verificationBridgeRefDir() string {
@@ -126,6 +128,10 @@ func (s *Scheduler) verificationBridgeRefPath(creationKey string) string {
 func validateVerificationBridgeRef(ref verificationBridgeRef) error {
 	if ref.CreationKey == "" || ref.BridgeDigest == "" || ref.BridgePath == "" {
 		return errors.New("scheduler: incomplete verification bridge reference")
+	}
+	if (ref.CacheMember == "") != (ref.CachePool == "") ||
+		(ref.CachePool != "" && ref.CachePool != "runs") {
+		return errors.New("scheduler: invalid verification cache reference")
 	}
 	if len(ref.BridgeDigest) != sha256.Size*2 {
 		return errors.New("scheduler: invalid verification bridge digest")
@@ -204,37 +210,66 @@ func (s *Scheduler) readVerificationBridgeRef(creationKey string) (verificationB
 	return ref, nil
 }
 
-// PrepareVerificationRuntime adds only the version-matched, read-only CLI
-// mount. It deliberately does not provision a run socket or lifecycle files.
-// The durable reference is installed while staging is serialized with the
-// collector, before the caller can invoke Runtime.Create.
-func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtime.Spec) error {
+// PrepareVerificationRuntime reserves startup capacity and durably owns the
+// cache and read-only CLI before Create. The returned allowance must be released
+// after Start (or any earlier failure), not after the verification command exits.
+// No run socket or lifecycle files are provisioned.
+func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtime.Spec) (release func(), err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
 	}
 	if spec == nil {
-		return errors.New("scheduler: verification runtime spec is nil")
+		return nil, errors.New("scheduler: verification runtime spec is nil")
 	}
 	if spec.CreationKey == "" {
-		return errors.New("scheduler: verification runtime creation key is required")
+		return nil, errors.New("scheduler: verification runtime creation key is required")
+	}
+	release, err = s.reserveCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			release()
+			release = nil
+		}
+	}()
+	if spec.CPULimit == 0 {
+		spec.CPULimit = s.cfg.RunCPULimit
+	}
+	if spec.MemoryLimitBytes == 0 {
+		spec.MemoryLimitBytes = s.cfg.RunMemoryBytes
+	}
+	if spec.PidsLimit == 0 {
+		spec.PidsLimit = s.cfg.RunPidsLimit
 	}
 	c := s.coordinationSeam()
 	if c == nil {
-		return errors.New("scheduler: verification coordination is unavailable")
+		return release, errors.New("scheduler: verification coordination is unavailable")
+	}
+	member, pool, err := s.verificationCacheOwner(spec)
+	if err != nil {
+		return release, err
+	}
+	// Match ordinary provisioning: cache lock before CLI staging, never the
+	// reverse. The durable owner covers the gap after these locks are dropped.
+	if member != "" {
+		unlock := s.cfg.Homes.LockCaches(member)
+		defer unlock()
 	}
 	c.stageMu.Lock()
 	defer c.stageMu.Unlock()
 	digest, bin, err := c.stageLocked()
 	if err != nil {
-		return fmt.Errorf("stage verification coordination CLI: %w", err)
+		return release, fmt.Errorf("stage verification coordination CLI: %w", err)
 	}
 	for _, mount := range spec.Mounts {
 		switch mount.ContainerPath {
 		case coordtransport.CLIPath, coordtransport.BinaryPath, coordtransport.MountDir:
-			return fmt.Errorf("scheduler: verification spec already uses reserved coordination mount %q", mount.ContainerPath)
+			return release, fmt.Errorf("scheduler: verification spec already uses reserved coordination mount %q", mount.ContainerPath)
 		}
 	}
 	mounts := append([]runtime.Mount(nil), spec.Mounts...)
@@ -242,25 +277,44 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
 	})
 	if err := checkCoordinationMounts(mounts[len(mounts)-1:]); err != nil {
-		return err
+		return release, err
 	}
 	env := maps.Clone(spec.Env)
 	if env == nil {
 		env = make(map[string]string)
 	}
 	ensureCoordinationCLIPath(env)
-	if err := s.writeVerificationBridgeRef(verificationBridgeRef{
+	ref := verificationBridgeRef{
 		CreationKey: spec.CreationKey, BridgeDigest: digest,
-		BridgePath: mounts[len(mounts)-1].HostPath,
-	}); err != nil {
-		return err
+		BridgePath:  mounts[len(mounts)-1].HostPath,
+		CacheMember: member, CachePool: pool,
+	}
+	prior, readErr := s.readVerificationBridgeRef(spec.CreationKey)
+	if readErr == nil && prior != ref {
+		return release, errors.New("scheduler: verification resource reference changed")
+	}
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return release, readErr
+	}
+	// Persist the cleanup mapping before publishing the pool owner. A failed
+	// pool write can then be retried using the same verification creation key.
+	if err := s.writeVerificationBridgeRef(ref); err != nil {
+		return release, err
+	}
+	if member != "" {
+		if _, err := s.cfg.Homes.CachePath(member, pool); err != nil {
+			return release, err
+		}
+		if err := s.cfg.Homes.AddCacheOwner(member, pool, spec.CreationKey); err != nil {
+			return release, err
+		}
 	}
 	spec.Mounts = mounts
 	spec.Env = env
-	return nil
+	return release, nil
 }
 
-// ReleaseVerificationRuntime clears the durable staged-CLI reference. The
+// ReleaseVerificationRuntime clears durable cache and CLI ownership. The
 // integration engine calls this only after it has proved the runtime absent;
 // this method intentionally performs no runtime lookup or destruction.
 func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey string) error {
@@ -274,6 +328,20 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 		return errors.New("scheduler: verification runtime creation key is required")
 	}
 	c := s.coordinationSeam()
+	ref, err := s.readVerificationBridgeRef(creationKey)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if ref.CacheMember != "" {
+		if s.cfg.Homes == nil {
+			return errors.New("scheduler: verification cache manager is unavailable")
+		}
+		unlock := s.cfg.Homes.LockCaches(ref.CacheMember)
+		defer unlock()
+	}
 	locked := c != nil
 	if locked {
 		c.stageMu.Lock()
@@ -288,6 +356,11 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 			return nil
 		}
 		return err
+	}
+	if ref.CacheMember != "" {
+		if err := s.cfg.Homes.RemoveCacheOwner(ref.CacheMember, ref.CachePool, creationKey); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(s.verificationBridgeRefPath(creationKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("scheduler: remove verification bridge ref: %w", err)

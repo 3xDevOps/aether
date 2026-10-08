@@ -24,6 +24,8 @@ type Type string
 const (
 	// TypeRunStatus signals a run lifecycle transition.
 	TypeRunStatus Type = "run.status"
+	// TypeRunRetention replaces runtime ownership metadata, not run status.
+	TypeRunRetention Type = "run.retention"
 	// TypeRunInput replaces the correlated pending native interaction set.
 	TypeRunInput Type = "run.input"
 	// TypeRunDeleted tells clients that a run's durable record was removed.
@@ -117,6 +119,18 @@ type RunStatusPayload struct {
 	// OutcomeUnseen is the run's outcome_unseen flag after this transition.
 	OutcomeUnseen bool `json:"outcome_unseen,omitempty"`
 }
+
+// RunRetentionPayload replaces the runtime retention metadata. Omitted fields
+// clear their previous values; this event never changes the execution outcome.
+type RunRetentionPayload struct {
+	ContainerRetainedUntil string `json:"container_retained_until,omitempty"`
+	CleanupPending         bool   `json:"cleanup_pending,omitempty"`
+	CleanupError           string `json:"cleanup_error,omitempty"`
+}
+
+func (RunRetentionPayload) EventType() Type { return TypeRunRetention }
+
+func init() { registerPayload[RunRetentionPayload](TypeRunRetention) }
 
 // RunInputPayload carries the complete pending set, including [] on last close.
 // It is independent of RunStatusPayload: work and input may coexist.

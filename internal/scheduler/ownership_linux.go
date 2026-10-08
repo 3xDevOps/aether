@@ -244,13 +244,15 @@ func chownRoot(root *os.Root, uid, gid int, protected map[inodeKey]struct{}) err
 		if err != nil {
 			return err
 		}
-		if d.Type().IsRegular() && len(protected) > 0 {
+		if d.Type().IsRegular() {
 			info, ierr := root.Lstat(name)
 			if ierr != nil {
 				return ierr
 			}
 			st := info.Sys().(*syscall.Stat_t)
-			if _, ok := protected[inodeKey{st.Dev, st.Ino}]; ok {
+			// Writable caches and homes may contain links to files outside
+			// the mount. Never mutate another link's ownership.
+			if _, ok := protected[inodeKey{st.Dev, st.Ino}]; ok || st.Nlink > 1 {
 				return nil
 			}
 		}

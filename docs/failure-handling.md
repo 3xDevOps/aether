@@ -16,8 +16,8 @@ for `--run-container-ttl`, negative means no retention and immediate cleanup.
 | --- | --- | --- |
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
-| `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long a closed TUI run, a TUI run its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--checkout-ttl` | `72h` | When a finished run's worktree becomes eligible for cleanup, subject to evidence and execution ownership protection. Negative disables this GC. |
+| `--run-container-ttl` | `1h` | Closed-compute grace for a closed/reported-finished TUI run or completed swarm run's exact container. `0` uses the one-hour default; a positive duration overrides it, and negative requests immediate release. Active/waiting runs and services are not expired. |
 | `--min-free-disk` | `0` (automatic) | Per-filesystem reserve: `max(5 GiB, min(5% of capacity, 20 GiB))`, plus provisioning headroom. Positive values override the reserve in bytes; negative disables the disk guard. |
 | `--run-cpus` | `0` (automatic) | New run/member container CPU ceiling: up to 8 cores, capped at the server host CPU count. Positive values override; negative/non-finite values are invalid. |
 | `--run-memory` | `0` (automatic) | New run/member container memory ceiling: 8 GiB. Positive values override in bytes; negative is invalid. |
@@ -393,21 +393,25 @@ containers:
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run cannot be reopened.
 - **The run never started** (it died between the row and the container): any
-  container that was created is destroyed first - found by its sidecar or,
-  in the narrow window before the sidecar exists, by the run ID the runtime
-  persists as the container's creation key - and then the same wip-commit and
-  interrupt applies.
+  container is found by its sidecar or, in the narrow window before that
+  exists, by the runtime's durable creation key. Recovery preserves partial
+  work and required evidence before destroying the container and marking the
+  run interrupted. Uncertain lookup or cleanup keeps its retry owner.
 - **A retained container survived**: its terminal row (merged or abandoned
   after a Close, completed or failed after an ordinary run's agent report or
   a swarm worker's completion), checkout, member account, and coordination
-  surfaces remain owned by that exact container. Boot reconciliation
-  preserves paused swarm workers and already-exited swarm containers
-  until expiry. Only ordinary TUI runs that were closed or finished by their
-  agent's report can be reopened; completion never revives an
-  assigned worker.
-- **A retained container is gone or expired**: boot cleanup destroys any
-  remaining runtime object, removes its retention metadata, and leaves the
-  row unable to reopen. It never creates a replacement.
+  surfaces remain owned by that exact container. Boot reconciliation first
+  clamps older deadlines to durable completion time plus the current
+  `--run-container-ttl`, never extending an earlier deadline or changing an
+  active/reopened run. It preserves paused swarm workers and already-exited
+  swarm containers until that deadline. Only ordinary TUI runs closed or
+  finished by their agent's report can be reopened; completion never revives
+  an assigned worker.
+- **A retained container is gone or expired**: boot cleanup preserves required
+  evidence, destroys any remaining runtime object, then releases retention
+  ownership. It never creates a replacement. A capture, runtime or persistence
+  failure keeps ownership and a bounded cleanup cause for automatic retries;
+  the deadline can pass while safe cleanup is still pending.
 
 Ordinary headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
@@ -426,7 +430,7 @@ Swarm-assigned integrator and worker runs keep that same persistent supervisor
 even in headless mode, so a one-shot agent exit does not destroy the container
 or mark the run completed. They stay until Close, Kill, a terminal worker
 report, or worker cancel. Accepted success/failure reports pause and retain the
-exact worker container for `--run-container-ttl` (default 7 days), and an actual
+exact worker container for `--run-container-ttl` (default one hour), and an actual
 swarm container exit retains that exited container for the same duration.
 Attempts release execution capacity only after evidence, runtime quiescence,
 and durable retention have settled. Failed capture, runtime, or persistence
@@ -481,10 +485,11 @@ aether close <run> --outcome abandoned
 
 Closing a live TUI run pauses its container, commits and publishes the current
 checkout, records the selected outcome, and retains the exact container,
-checkout, run row, member account, and coordination surfaces for
-`--run-container-ttl`. Zero uses the default `168h` (7 days); negative TTL
-disables retention and cleans up immediately. Kill stops and destroys a run
-immediately.
+checkout, run row, member account, and coordination surfaces during
+`--run-container-ttl`. Zero uses the default **`1h`**; a positive duration
+overrides it and negative TTL requests immediate cleanup. Pausing still holds
+RAM; it is not memory reclamation. Kill stops and destroys a run immediately,
+subject to the same required evidence and confirmed-cleanup safeguards.
 Delete stops any live container and removes the checkout, transcript, and
 durable run records; its timeline remains audit history. Its recorded cost
 survives inside its workspace's and its member's spend totals - the numbers
@@ -504,6 +509,15 @@ instead of reporting that resources were freed.
 **Archive closed runs…** only hides runs and starts the archive deletion
 timer; it does not release container memory.
 
+The **one-hour compute grace** is separate from the **72-hour checkout
+eligibility** (`--checkout-ttl`) and retained history/evidence policies.
+Expiring compute does not delete published Git result branches or captured
+evidence. Required capture or failed destruction protects the checkout until
+cleanup is confirmed. Run details show the exact retention deadline and
+whether cleanup remains pending, including a safe operation-level failure
+that survives restart and clears when its retry succeeds. Detailed runtime
+errors remain in server logs, not in public diagnostics.
+
 **Reopen** is available only for a retained TUI run - closed, or finished by
 its agent's report - whose retention deadline has not passed. From the CLI:
 
@@ -514,11 +528,13 @@ aether reopen <run>
 It resumes the same run row, container, checkout, member account, and
 coordination surfaces, and frees the run's terminal report so the agent can
 report again. It does not create a run, checkout, branch, or replacement
-container, and it performs no new launch or disk-floor admission.
+container, restarts no stopped process, replays no tool, and performs no new
+launch or disk-floor admission.
 An expired, unavailable, interrupted, killed, deleted, or headless run cannot
-be reopened. The expiry sweep runs within at most one minute; boot
-reconciliation also sweeps expired or unavailable retained runs, so a failed
-reopen never falls back to a new run. When retention ends, a closed run's
+be reopened. The expiry sweep normally runs within at most one minute; boot
+reconciliation also handles expired or unavailable retained runs, so a failed
+reopen never falls back to a new run. Failures retain ownership for retry
+rather than promising that resources were already freed. When retention ends, a closed run's
 reason becomes `retained container expired` or `retained container
 unavailable`; a run its agent finished keeps `completed` or `failed` and its
 reason drops `; retained container`.

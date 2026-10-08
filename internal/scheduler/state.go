@@ -97,6 +97,149 @@ func publicRunStatusReason(reason string) string {
 	return reason
 }
 
+// Cleanup diagnostics cross the public API boundary. Keep an allowlist rather
+// than truncating raw errors: runtime and filesystem errors may contain host
+// paths, command output or credentials. The detailed error stays in server logs.
+const (
+	cleanupEvidenceError = "Evidence preservation failed; cleanup will retry"
+	cleanupRuntimeError  = "Execution cleanup failed; cleanup will retry"
+	cleanupStateError    = "Cleanup state persistence failed; cleanup will retry"
+	cleanupLookupError   = "Execution ownership lookup failed; cleanup will retry"
+	cleanupUnknownError  = "Execution cleanup failed; see server logs"
+)
+
+func publicCleanupError(cause string) string {
+	switch cause {
+	case "", cleanupEvidenceError, cleanupRuntimeError, cleanupStateError, cleanupLookupError, cleanupUnknownError:
+		return cause
+	default:
+		return cleanupUnknownError
+	}
+}
+
+func (s *Scheduler) recordCleanupError(entry *supervised, cause string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordCleanupErrorLocked(entry, cause)
+}
+
+// recordCleanupErrorLocked keeps the live cause even if its durable write
+// fails, just like the ownership marker. Caller must hold s.mu.
+func (s *Scheduler) recordCleanupErrorLocked(entry *supervised, cause string) {
+	if entry == nil || s.runs[entry.runID] != entry {
+		return
+	}
+	cause = publicCleanupError(cause)
+	changed := entry.cleanupError != cause
+	entry.cleanupError = cause
+	if err := s.persistRetainedSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: persist cleanup diagnostic", "run", entry.runID, "error", err)
+	}
+	if changed {
+		s.publishRetentionLocked(entry.runID)
+	}
+}
+
+func (s *Scheduler) recordRunCleanupError(run domain.RunID, cause string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil {
+		s.recordCleanupErrorLocked(entry, cause)
+		return
+	}
+	sc, err := s.readSidecar(run)
+	if err != nil || sc.RunID != string(run) {
+		// Never replace corrupt or unknown ownership with a diagnostic.
+		slog.Warn("scheduler: read ownership for cleanup diagnostic", "run", run, "error", err)
+		return
+	}
+	cause = publicCleanupError(cause)
+	changed := sc.CleanupError != cause
+	sc.CleanupError = cause
+	if err := s.persistRetainedSidecar(sc); err != nil {
+		slog.Warn("scheduler: persist cleanup diagnostic", "run", run, "error", err)
+		return
+	}
+	if changed {
+		s.publishRetentionLocked(run)
+	}
+}
+
+func (s *Scheduler) publishRetention(run domain.RunID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publishRetentionLocked(run)
+}
+
+func retentionPayload(info RetentionInfo) events.RunRetentionPayload {
+	payload := events.RunRetentionPayload{
+		CleanupPending: info.CleanupPending,
+		CleanupError:   info.CleanupError,
+	}
+	if info.RetainedUntil != nil {
+		payload.ContainerRetainedUntil = info.RetainedUntil.UTC().Format(time.RFC3339Nano)
+	}
+	return payload
+}
+
+// rememberRetentionLocked establishes the pre-mutation baseline when adopting
+// durable ownership after restart. Adoption itself is not a metadata change.
+func (s *Scheduler) rememberRetentionLocked(row *domain.Run) {
+	if _, known := s.retentionPublished[row.ID]; known || s.cfg.Bus == nil {
+		return
+	}
+	info, _, err := s.retentionLocked(row)
+	if err != nil {
+		return
+	}
+	payload := retentionPayload(info)
+	if payload != (events.RunRetentionPayload{}) {
+		if s.retentionPublished == nil {
+			s.retentionPublished = make(map[domain.RunID]events.RunRetentionPayload)
+		}
+		s.retentionPublished[row.ID] = payload
+	}
+}
+
+// publishRetentionLocked publishes only changed runtime metadata, independently
+// of business status. Persistence precedes publication; a failed sidecar write
+// still leaves the live owner authoritative. Caller holds s.mu.
+func (s *Scheduler) publishRetentionLocked(run domain.RunID) {
+	if s.cfg.Bus == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
+	defer cancel()
+	row, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return
+	}
+	info, _, err := s.retentionLocked(row)
+	if err != nil {
+		return
+	}
+	payload := retentionPayload(info)
+	if s.retentionPublished[run] == payload {
+		return
+	}
+	if _, publishErr := s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: row.WorkspaceID,
+		RunID:       run,
+		Payload:     payload,
+	}); publishErr != nil {
+		slog.Warn("scheduler: publish retention failed", "run", run, "error", publishErr)
+		return
+	}
+	if payload == (events.RunRetentionPayload{}) {
+		delete(s.retentionPublished, run)
+	} else {
+		if s.retentionPublished == nil {
+			s.retentionPublished = make(map[domain.RunID]events.RunRetentionPayload)
+		}
+		s.retentionPublished[run] = payload
+	}
+}
+
 // transitionLocked persists a legal status change via UpdateRunStatus and
 // publishes the run.status event. The caller must hold s.mu; from must be
 // the run's current status.
@@ -156,6 +299,9 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		ActorID:     actor,
 		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public, OutcomeUnseen: reported},
 	})
+	if to.Terminal() || s.retentionPublished[run] != (events.RunRetentionPayload{}) {
+		s.publishRetentionLocked(run)
+	}
 	return nil
 }
 
@@ -195,6 +341,7 @@ type sidecar struct {
 	RetainedUntil   *time.Time        `json:"retained_until,omitempty"`
 	DestroyPending  bool              `json:"destroy_pending,omitempty"`
 	EvidencePending bool              `json:"evidence_pending,omitempty"`
+	CleanupError    string            `json:"cleanup_error,omitempty"`
 	RunUser         string            `json:"run_user,omitempty"`
 	Home            string            `json:"home,omitempty"`
 	// LoginMember is the account owner whose login paths the container
@@ -259,6 +406,7 @@ func (e *supervised) sidecar() sidecar {
 		RetainedUntil:       e.retainedUntil,
 		DestroyPending:      e.destroyPending,
 		EvidencePending:     e.evidencePending,
+		CleanupError:        publicCleanupError(e.cleanupError),
 		RunUser:             e.runUser,
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
@@ -370,6 +518,7 @@ func (s *Scheduler) removeTerminalSidecar(member domain.MemberID) {
 // writeSidecar writes atomically: temp file in the same directory, fsync,
 // then rename.
 func (s *Scheduler) writeSidecar(sc sidecar) error {
+	sc.CleanupError = publicCleanupError(sc.CleanupError)
 	data, err := json.Marshal(sc)
 	if err != nil {
 		return fmt.Errorf("scheduler: encode sidecar: %w", err)
@@ -405,6 +554,7 @@ func (s *Scheduler) readSidecar(run domain.RunID) (sidecar, error) {
 	if err := json.Unmarshal(data, &sc); err != nil {
 		return sidecar{}, fmt.Errorf("scheduler: decode sidecar for %s: %w", run, err)
 	}
+	sc.CleanupError = publicCleanupError(sc.CleanupError)
 	return sc, nil
 }
 

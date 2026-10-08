@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -506,9 +508,11 @@ func TestPrepareVerificationRuntimeReferenceLifetime(t *testing.T) {
 		Image: "busybox:1.36", Command: []string{"true"},
 		User: "1000:1000", CreationKey: key,
 	}
-	if err := e.sched.PrepareVerificationRuntime(t.Context(), &spec); err != nil {
+	release, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	if err != nil {
 		t.Fatalf("PrepareVerificationRuntime: %v", err)
 	}
+	defer release()
 	cli, ok := mountFor(spec, coordtransport.CLIPath)
 	if !ok || !cli.ReadOnly {
 		t.Fatalf("verification CLI mount = %+v, want read-only mount", cli)
@@ -544,6 +548,7 @@ func TestPrepareVerificationRuntimeReferenceLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fake runtime Create: %v", err)
 	}
+	release()
 	if !sawReferenceAtCreate {
 		t.Fatal("verification bridge reference was not durable before Runtime.Create")
 	}
@@ -583,9 +588,11 @@ func TestPrepareVerificationRuntimeDisabledCoordinationKeepsNonRootCLI(t *testin
 		Env:  map[string]string{"PATH": "/usr/bin"},
 		User: "1000:1000", CreationKey: key,
 	}
-	if err := e.sched.PrepareVerificationRuntime(t.Context(), &spec); err != nil {
+	release, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	if err != nil {
 		t.Fatalf("PrepareVerificationRuntime with coordination disabled: %v", err)
 	}
+	defer release()
 	if spec.User != "1000:1000" {
 		t.Fatalf("verification runtime user = %q, want non-root user", spec.User)
 	}
@@ -617,7 +624,7 @@ func TestPrepareVerificationRuntimeFailsClosedWhenStagingFails(t *testing.T) {
 		Image: "busybox:1.36", Command: []string{"true"},
 		CreationKey: key,
 	}
-	err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	_, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
 	if err == nil || !strings.Contains(err.Error(), "stage verification coordination CLI") {
 		t.Fatalf("PrepareVerificationRuntime error = %v, want staging refusal", err)
 	}
@@ -652,4 +659,161 @@ func TestVerificationBridgeCollectionRetainsUnknownReference(t *testing.T) {
 	if _, err := os.Stat(stagedPath); err != nil {
 		t.Fatalf("unknown verification cleanup outcome reclaimed %s: %v", stagedPath, err)
 	}
+}
+
+func TestVerificationCacheOwnerSurvivesCreationGapAndFailedCleanupRestart(t *testing.T) {
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "verification cache")))
+	coord, binDir := withCoordination(t, e)
+	plan, err := e.sched.BuildEnvironmentPlan(t.Context(), &domain.Run{Worktree: t.TempDir()}, e.ws, e.member, harness.Profile{}, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := runtime.Spec{Image: plan.Image, Env: plan.Env, Mounts: plan.Mounts, CreationKey: "verification-cache-key", Command: []string{"true"}}
+	replay := spec
+	cache, ok := mountFor(spec, "/aether-cache")
+	if !ok {
+		t.Fatal("environment omitted runs cache")
+	}
+	// Planning is not publication: GC may reclaim this unowned pool. Preparing
+	// must recreate it before a runtime can receive the mount.
+	e.sched.sweepCaches(t.Context(), true)
+	requireCacheExists(t, cache.HostPath, false)
+	release, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	replayRelease, err := e.sched.PrepareVerificationRuntime(t.Context(), &replay)
+	if err != nil {
+		t.Fatalf("same-key preparation replay: %v", err)
+	}
+	replayRelease()
+	requireCacheExists(t, cache.HostPath, true)
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(home, ".npm", "_cacache")
+	if mkdirErr := os.MkdirAll(legacy, 0o700); mkdirErr != nil {
+		t.Fatal(mkdirErr)
+	}
+	assertProtected := func(s *Scheduler) {
+		t.Helper()
+		s.sweepCaches(t.Context(), true)
+		requireCacheExists(t, cache.HostPath, true)
+		requireCacheExists(t, legacy, true)
+		info, cacheErr := s.cfg.Homes.ReadCache(e.member.ID, memberhome.CachePoolRuns)
+		if cacheErr != nil || !slices.Contains(info.Owners, spec.CreationKey) {
+			t.Fatalf("missing durable verification owner: %+v, %v", info, cacheErr)
+		}
+		ref, refErr := s.readVerificationBridgeRef(spec.CreationKey)
+		if refErr != nil || ref.CacheMember != e.member.ID || ref.CachePool != memberhome.CachePoolRuns {
+			t.Fatalf("missing cleanup attribution: %+v, %v", ref, refErr)
+		}
+	}
+	// The key is not yet discoverable by the runtime; GC must not infer absence.
+	assertProtected(e.sched)
+	cid, err := e.rt.Create(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	failed := &destroyFailureRuntime{Runtime: e.rt, destroyErr: errors.New("destroy unavailable")}
+	if destroyErr := failed.Destroy(t.Context(), cid); destroyErr == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	reboot := e.newScheduler(t, e.rt, newFakePTY())
+	reboot.UseCoordination(coord, binDir)
+	assertProtected(reboot)
+	found, err := e.rt.FindByCreationKey(t.Context(), spec.CreationKey)
+	if err != nil || found != cid {
+		t.Fatalf("restart lost runtime cleanup key: %q, %v", found, err)
+	}
+	if destroyErr := e.rt.Destroy(t.Context(), found); destroyErr != nil {
+		t.Fatal(destroyErr)
+	}
+	before, err := reboot.cfg.Homes.ReadCache(e.member.ID, memberhome.CachePoolRuns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock := reboot.cfg.Homes.LockCaches(e.member.ID)
+	err = reboot.cfg.Homes.AddCacheOwner(e.member.ID, memberhome.CachePoolRuns, "another-verification")
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if releaseErr := reboot.ReleaseVerificationRuntime(t.Context(), spec.CreationKey); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	after, err := reboot.cfg.Homes.ReadCache(e.member.ID, memberhome.CachePoolRuns)
+	if err != nil || slices.Contains(after.Owners, spec.CreationKey) || after.LastUsed.Before(before.LastUsed) {
+		t.Fatalf("owner release did not preserve last-use activity: %+v, %v", after, err)
+	}
+	if !slices.Contains(after.Owners, "another-verification") {
+		t.Fatal("release removed another verification's owner")
+	}
+	if idempotentReleaseErr := reboot.ReleaseVerificationRuntime(t.Context(), spec.CreationKey); idempotentReleaseErr != nil {
+		t.Fatalf("idempotent release: %v", idempotentReleaseErr)
+	}
+	unlock = reboot.cfg.Homes.LockCaches(e.member.ID)
+	err = reboot.cfg.Homes.RemoveCacheOwner(e.member.ID, memberhome.CachePoolRuns, "another-verification")
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reboot.sweepCaches(t.Context(), true)
+	requireCacheExists(t, cache.HostPath, false)
+	requireCacheExists(t, legacy, false)
+}
+
+func TestVerificationAdmissionDefaultsOverridesAndAllowanceRelease(t *testing.T) {
+	e, rt := newAdmissionEnv(t, withServerBinary(fakeServerBinary(t, "verification admission")))
+	withCoordination(t, e)
+	host := healthyAdmissionHost()
+	host.MemoryAvailableBytes = 1
+	rt.setHost(host)
+	spec := runtime.Spec{Image: "busybox", Command: []string{"true"}, CreationKey: "verification-pressure"}
+	if release, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec); !errors.Is(err, ErrMemoryPressure) || release != nil {
+		t.Fatalf("memory pressure was not refused before publication: %v", err)
+	}
+	if _, err := os.Stat(e.sched.verificationBridgeRefPath(spec.CreationKey)); !os.IsNotExist(err) {
+		t.Fatalf("refused provisioning published runtime ownership: %v", err)
+	}
+	rt.setHost(healthyAdmissionHost())
+	release, err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.CPULimit != e.sched.cfg.RunCPULimit || spec.MemoryLimitBytes != e.sched.cfg.RunMemoryBytes || spec.PidsLimit != e.sched.cfg.RunPidsLimit {
+		t.Fatalf("verification bypassed resolved budgets: %+v", spec)
+	}
+	if e.sched.capacityReservations != 1 {
+		t.Fatal("preparation did not reserve provisioning capacity")
+	}
+	release()
+	release()
+	if e.sched.capacityReservations != 0 {
+		t.Fatal("allowance release leaked or underflowed")
+	}
+	trusted := runtime.Spec{Image: "busybox", Command: []string{"true"}, CreationKey: "verification-trusted", CPULimit: 0.5, MemoryLimitBytes: 256 << 20, PidsLimit: 64}
+	release, err = e.sched.PrepareVerificationRuntime(t.Context(), &trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if trusted.CPULimit != 0.5 || trusted.MemoryLimitBytes != 256<<20 || trusted.PidsLimit != 64 {
+		t.Fatalf("trusted overrides changed: %+v", trusted)
+	}
+	bad := runtime.Spec{Image: "busybox", Command: []string{"true"}, CreationKey: "verification-bad-mount", Mounts: []runtime.Mount{{ContainerPath: coordtransport.CLIPath}}}
+	if badRelease, prepareErr := e.sched.PrepareVerificationRuntime(t.Context(), &bad); prepareErr == nil || badRelease != nil {
+		t.Fatalf("invalid preparation accepted: %v", prepareErr)
+	}
+	if e.sched.capacityReservations != 0 {
+		t.Fatal("failed preparation stranded later jobs")
+	}
+	later, err := e.sched.reserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("later provisioning stranded: %v", err)
+	}
+	later()
 }

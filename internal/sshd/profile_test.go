@@ -36,7 +36,7 @@ func withProfilesHomes(t *testing.T) func(*Config) {
 	t.Helper()
 	return func(c *Config) {
 		withProfiles(t)(c)
-		homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+		homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}

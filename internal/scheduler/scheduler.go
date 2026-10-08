@@ -82,7 +82,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 168h; negative destroys on close/completion
+	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
 	// ExitProbeTimeout bounds recovery's startup probe of whether a container
 	// exited before attach.
 	ExitProbeTimeout time.Duration
@@ -114,7 +114,7 @@ type Config struct {
 	filesystemCapacity   func(string) (disk.Usage, error)
 }
 
-const DefaultRunContainerTTL = 7 * 24 * time.Hour
+const DefaultRunContainerTTL = time.Hour
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].
@@ -163,6 +163,8 @@ type Scheduler struct {
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// retentionPublished tracks only nonempty runtime metadata under mu.
+	retentionPublished map[domain.RunID]events.RunRetentionPayload
 	// archiveMu serializes SetArchived against Relaunch restoring an archived run.
 	archiveMu sync.Mutex
 	// workspaceLocks fence launch and retained relaunch during deletion.
@@ -283,10 +285,11 @@ type supervised struct {
 	evidencePending bool
 	// finalizing reserves the post-exit transition briefly; finalize's work
 	// runs without lifecycleMu so Kill can still record cancellation.
-	finalizing  bool
-	done        chan struct{}
-	doneOnce    sync.Once
-	waitStarted bool
+	finalizing   bool
+	cleanupError string
+	done         chan struct{}
+	doneOnce     sync.Once
+	waitStarted  bool
 	// lifecycleMu serializes close, relaunch, expiry and steering admission for
 	// this container. It is separate from Scheduler.mu: runtime and git calls
 	// must not run under the scheduler lock.
@@ -546,6 +549,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.sweepCheckouts(ctx)
 	}
 	s.sweepArchived(ctx)
+	s.sweepCaches(ctx, false)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
 	for {
@@ -566,6 +570,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 				s.sweepCheckouts(ctx)
 			}
 			s.sweepArchived(ctx)
+			s.cleanupTerminalSidecars(ctx)
+			s.sweepCaches(ctx, false)
 		}
 	}
 }

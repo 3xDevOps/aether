@@ -15,7 +15,7 @@ import (
 )
 
 func TestConfigWriteRevisionAndMemberIsolation(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestConfigWriteRevisionAndMemberIsolation(t *testing.T) {
 }
 
 func TestConfigReadAndWriteAllowLargeText(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestConfigReadAndWriteAllowLargeText(t *testing.T) {
 }
 
 func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
 
 func TestConfigImportPreservesExistingModes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestAtomicConfigWriteRejectsChangedTarget(t *testing.T) {
 }
 
 func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 
 func TestConfigImportPreflightsSymlinkBeforeMutation(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestConfigImportPreflightsSymlinkBeforeMutation(t *testing.T) {
 }
 
 func TestConfigRejectsHardlinkedDestination(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestConfigRejectsHardlinkedDestination(t *testing.T) {
 }
 
 func TestConfigImportPreservesBinaryAsReadOnly(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestConfigImportPreservesBinaryAsReadOnly(t *testing.T) {
 }
 
 func TestConfigImportPreflightsCandidateCollisions(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestConfigImportPreflightsCandidateCollisions(t *testing.T) {
 }
 
 func TestConfigImportAcceptsFileAboveOneMiB(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestConfigImportAcceptsFileAboveOneMiB(t *testing.T) {
 }
 
 func TestConfigImportRequestBounds(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestConfigImportRequestBounds(t *testing.T) {
 }
 
 func TestConfigTreeAllowsOmittedRootPath(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

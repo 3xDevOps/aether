@@ -251,10 +251,7 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
-		return nil, fmt.Errorf("memberhome: create root: %w", err)
-	}
-	roots, err := os.OpenRoot(m.root)
+	roots, err := openManagedRoot(m.root, true)
 	if err != nil {
 		return nil, fmt.Errorf("memberhome: open root: %w", err)
 	}
@@ -275,7 +272,7 @@ func (m *Manager) openExistingHome(member domain.MemberID) (*os.Root, error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	roots, err := os.OpenRoot(m.root)
+	roots, err := openManagedRoot(m.root, false)
 	if err != nil {
 		return nil, fmt.Errorf("memberhome: open root: %w", err)
 	}

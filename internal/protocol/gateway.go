@@ -45,6 +45,7 @@ type ServerDiskResult struct {
 	DatabaseBytes   uint64            `json:"database_bytes"`
 	RepoBytes       uint64            `json:"repo_bytes"`
 	HomeBytes       uint64            `json:"home_bytes"`
+	CacheBytes      uint64            `json:"cache_bytes"`
 	EvidenceBytes   uint64            `json:"evidence_bytes"`
 	OtherBytes      uint64            `json:"other_bytes"`
 	SnapshotBytes   uint64            `json:"snapshot_bytes"`
@@ -74,6 +75,7 @@ type ServerDiskEntry struct {
 	Kind             string  `json:"kind"`
 	OwnerKind        string  `json:"owner_kind"`
 	OwnerID          string  `json:"owner_id,omitempty"`
+	Pool             string  `json:"pool,omitempty"`
 	Bytes            uint64  `json:"bytes"`
 	ReclaimableBytes *uint64 `json:"reclaimable_bytes,omitempty"`
 	RetainedUntil    string  `json:"retained_until,omitempty"`

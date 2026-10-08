@@ -17,6 +17,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+type imageCacheEnvironmentResolver interface {
+	ImageCacheEnvironment(context.Context, string) (map[string]string, error)
+}
+
 type EnvironmentPurpose string
 
 const (
@@ -44,6 +48,8 @@ type EnvironmentPlan struct {
 // shared account also mounts the harness's login paths from the owner's home
 // and, when the member has no installation, the owner's read-only - nothing
 // else of the owner's.
+// Callers hold Homes.LockCaches across planning and durable runtime ownership
+// publication; planning creates/touches cache metadata, not just an inert spec.
 func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, ws *domain.Workspace, member *domain.Member, profile harness.Profile, purpose EnvironmentPurpose) (*EnvironmentPlan, error) {
 	switch purpose {
 	case EnvironmentPurposeRun, EnvironmentPurposeTerminal:
@@ -159,10 +165,33 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		for _, m := range plan.Mounts[1:] {
 			nestings[m.ContainerPath] = home
 		}
+		pool := "runs"
+		if purpose == EnvironmentPurposeTerminal {
+			pool = "terminal"
+		}
+		cachePath, cacheErr := s.cfg.Homes.CachePath(member.ID, pool)
+		if cacheErr != nil {
+			return nil, fmt.Errorf("scheduler: resolve member cache: %w", cacheErr)
+		}
+		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: cachePath, ContainerPath: "/aether-cache"})
+		if resolver, ok := s.cfg.Runtime.(imageCacheEnvironmentResolver); ok {
+			inherited, err := resolver.ImageCacheEnvironment(ctx, image)
+			if err != nil {
+				return nil, fmt.Errorf("scheduler: resolve image cache settings: %w", err)
+			}
+			for _, key := range []string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"} {
+				if value, present := inherited[key]; present {
+					if _, explicit := env[key]; !explicit {
+						env[key] = value
+					}
+				}
+			}
+		}
+		applyCacheEnvironment(env)
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
-		roots = []string{s.cfg.Homes.Root()}
+		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot()}
 	}
 	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{
 		OwnedRoots:        roots,
@@ -173,6 +202,22 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		return nil, validateErr
 	}
 	return plan, nil
+}
+
+// Explicit tool settings win; HOME, PATH, XDG and installation paths are not caches.
+func applyCacheEnvironment(env map[string]string) {
+	env["AETHER_CACHE_DIR"] = "/aether-cache"
+	for _, setting := range [...]struct{ key, value string }{
+		{"npm_config_cache", "/aether-cache/npm"},
+		{"PIP_CACHE_DIR", "/aether-cache/pip"},
+		{"UV_CACHE_DIR", "/aether-cache/uv"},
+		{"GOCACHE", "/aether-cache/go-build"},
+		{"GOMODCACHE", "/aether-cache/go-mod"},
+	} {
+		if _, set := env[setting.key]; !set {
+			env[setting.key] = setting.value
+		}
+	}
 }
 
 func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {

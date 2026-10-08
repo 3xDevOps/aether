@@ -92,10 +92,32 @@ func (s *Scheduler) EnsureTerminal(ctx context.Context, member domain.MemberID) 
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	return s.ensureTerminalAdmittedLocked(ctx, member)
+}
+
+// The caller holds terminalLock. Only disk-pressure reclamation releases it:
+// provisioning is then restarted under the lock, rechecking member existence
+// and terminal ownership before admission. Existing terminals need no admission.
+func (s *Scheduler) ensureTerminalAdmittedLocked(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
+	terminal, err := s.ensureTerminalLocked(ctx, member)
+	if !errors.Is(err, ErrDiskFull) || s.cfg.Homes == nil || ctx.Err() != nil {
+		return terminal, err
+	}
+	lock := s.terminalLock(member)
+	lock.Unlock()
+	s.sweepCaches(ctx, true)
+	lock.Lock()
 	return s.ensureTerminalLocked(ctx, member)
 }
 
 func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
+	// Lock order: terminalLock -> cache lock -> short Scheduler.mu snapshots.
+	// Keep it through durable publication, including creation-key adoption.
+	if s.cfg.Homes != nil {
+		unlock := s.cfg.Homes.LockCaches(member)
+		defer unlock()
+		defer func() { _ = s.cfg.Homes.TouchCache(member, "terminal") }()
+	}
 	if existing, cleanupPending := s.terminalSnapshot(member); existing != nil {
 		if cleanupPending {
 			if err := s.cleanupExitedTerminalLocked(ctx, existing); err != nil {
@@ -140,7 +162,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			return nil, adoptErr
 		}
 	}
-	release, err := s.reserveCapacity(ctx)
+	release, err := s.tryReserveCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -658,6 +680,8 @@ func (s *Scheduler) superviseTerminal(sup *terminalSupervision) {
 	}
 	if err := s.cleanupExitedTerminalLocked(context.Background(), sup); err != nil {
 		slog.Warn("scheduler: clean up exited terminal", "member", sup.member, "container", sup.containerID, "error", err)
+	} else {
+		s.touchTerminalCache(sup.member)
 	}
 }
 
@@ -672,7 +696,7 @@ func (s *Scheduler) EnsureTerminalTab(ctx context.Context, member domain.MemberI
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
-	terminal, err := s.ensureTerminalLocked(ctx, member)
+	terminal, err := s.ensureTerminalAdmittedLocked(ctx, member)
 	if err != nil {
 		return err
 	}
@@ -686,7 +710,12 @@ func (s *Scheduler) EnsureTerminalTab(ctx context.Context, member domain.MemberI
 	if err != nil {
 		return fmt.Errorf("scheduler: get terminal tab member: %w", err)
 	}
+	unlockCaches := func() {}
+	if s.cfg.Homes != nil {
+		unlockCaches = s.cfg.Homes.LockCaches(member)
+	}
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, memberRow, harness.Profile{}, EnvironmentPurposeTerminal)
+	unlockCaches()
 	if err != nil {
 		return fmt.Errorf("scheduler: build terminal tab environment: %w", err)
 	}
@@ -743,10 +772,25 @@ func terminalTabs(keys []ptyhost.SessionKey, member domain.MemberID) []string {
 
 // StopTerminal stops a member's terminal and all of its tab sessions.
 func (s *Scheduler) StopTerminal(ctx context.Context, member domain.MemberID) error {
+	return s.WithStoppedTerminal(ctx, member, nil)
+}
+
+// WithStoppedTerminal keeps EnsureTerminal excluded through an operation that
+// follows confirmed stop, such as deleting the member row and home. afterStop
+// may acquire the member cache lock (terminal -> cache ordering), but must not
+// reenter terminal lifecycle methods. Nil performs only the stop.
+func (s *Scheduler) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.stopTerminalLocked(ctx, member)
+	if err := s.stopTerminalLocked(ctx, member); err != nil {
+		return err
+	}
+	s.touchTerminalCache(member)
+	if afterStop != nil {
+		return afterStop()
+	}
+	return nil
 }
 
 // stopTerminalLocked stops a member's terminal while its member lock is held.

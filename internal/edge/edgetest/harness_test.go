@@ -654,6 +654,13 @@ type (
 
 func (noRuns) StopTerminal(context.Context, domain.MemberID) error { return nil }
 
+func (noRuns) WithStoppedTerminal(_ context.Context, _ domain.MemberID, afterStop func() error) error {
+	if afterStop != nil {
+		return afterStop()
+	}
+	return nil
+}
+
 // serverNode is one Aether server: sshd over a real store, and the edge
 // agent enrolled with the harness's edge, under an access policy.
 type serverNode struct {

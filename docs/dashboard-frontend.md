@@ -720,6 +720,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   `run.title`, `run.protected` and `run.archived` follow the same fetch-first
   rule on a run the client has never seen; `run.controller` skips an unknown
   run, whose snapshot carries the holder.
+  `run.retention` also fetches an unknown run, then replaces only its runtime
+  deadline and cleanup metadata. It does not re-fetch known runs or change
+  `finished_at`, `stateChangedAt`, the business status, or `outcome_unseen`.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
 - **`run.agent` events set a run's `activity`** (`{verb, target, at}` on
@@ -2460,6 +2463,10 @@ questions and queued messages stay contextual to their run, in its Details
   the payload's ids, and a delivery word only
   once the message is in the messages slice; the event alone does not say
   whether it was delivered.
+  `run.retention` has its own **Runtime retention** filter and describes the
+  exact grace deadline, pending cleanup, and safe cleanup diagnostic. It has
+  no business-state dot; cleared metadata is not another completed outcome
+  or proof that a reopened run's runtime was removed.
 - **The feed is virtualized.** `virtua` mounts only the rows near the
   viewport of the view's scroller (`routes/activity/virtual-list.tsx`); each
   row carries `aria-setsize` and `aria-posinset`, so a screen reader still
@@ -2958,18 +2965,22 @@ every gateway:
 - **Server**: the server version and protocol, with **Update…** when an
   update is waiting; data-filesystem used and available space, separate from
   Aether's attributed worktrees, transcripts, database, repositories, homes,
-  evidence and other data. Snapshots are included in worktrees, not added
+  managed caches, evidence and other data. Snapshots are included in worktrees, not added
   again. Daemon-wide Docker accounting includes non-Aether workloads and has
   its own block; filesystem used totals are never added together. Docker's
   unused classification is not permission to delete saved environments.
   Missing values stay unknown, and partial-measurement warnings and Docker
   errors remain visible. Admins can expand **Largest storage owners** for up
-  to 50 entries with ownership, bytes, retention deadlines and errors; these
-  overlap category totals and are not extra usage. **Free retained containers…**
+  to 50 entries with ownership, bytes, retention deadlines and errors; their
+  bytes overlap category totals and are not extra usage. Cache-pool deadlines
+  are age targets, not guaranteed minimum retention. **Free retained containers…**
   opens the same admin confirmation as the board's Finished menu for the
   active workspace. It prevents reopening those runs but does not delete
   all run data: checkouts, homes, repositories and history retain their
   existing lifecycle. Storage accounting adds no manual pruning controls.
+  Run headers, action confirmations and the Finished release dialog show the
+  exact runtime deadline and cleanup failures. Cleanup-only refreshes preserve
+  the completion time; reopening clears the old retention disclosure.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you.
 

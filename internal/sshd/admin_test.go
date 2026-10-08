@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -148,7 +149,7 @@ func TestRefuseDeletingLastAdmin(t *testing.T) {
 func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	t.Parallel()
 	homeRoot := t.TempDir()
-	homes, err := memberhome.New(homeRoot, nil)
+	homes, err := memberhome.New(homeRoot, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,21 +160,132 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(home, "marker")
-	if err := os.WriteFile(marker, []byte("keep?"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(marker, []byte("keep?"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	c := controlClient(t, e)
-	if err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil); err != nil {
-		t.Fatalf("member.remove: %v", err)
+	if callErr := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil); callErr != nil {
+		t.Fatalf("member.remove: %v", callErr)
 	}
-	if _, err := os.Stat(home); !os.IsNotExist(err) {
-		t.Fatalf("member home still exists: stat err = %v", err)
+	if _, statErr := os.Stat(home); !os.IsNotExist(statErr) {
+		t.Fatalf("member home still exists: stat err = %v", statErr)
+	}
+	reopened, err := memberhome.New(homeRoot, homes.CacheRoot(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryOwners, err := reopened.CacheMembers()
+	if err != nil || !slices.Contains(retryOwners, target.ID) {
+		t.Fatalf("removed member lost its saved-image cleanup retry key: %v, %v", retryOwners, err)
 	}
 	calls := e.runs.Calls()
 	want := "terminal-stop:" + string(target.ID)
 	if len(calls) == 0 || calls[len(calls)-1] != want {
 		t.Fatalf("RunController calls = %v, want final %q", calls, want)
+	}
+}
+
+func TestMemberRemovePreservesIdentityAndHomeWhenRetryMarkerCannotBeWritten(t *testing.T) {
+	t.Parallel()
+	homeRoot, cacheRoot, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	homes, err := memberhome.New(homeRoot, cacheRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
+	home, err := homes.Path(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := filepath.Join(home, "credential")
+	if writeErr := os.WriteFile(credential, []byte("preserved"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	poolParent := filepath.Join(cacheRoot, string(target.ID))
+	if mkdirErr := os.MkdirAll(poolParent, 0o700); mkdirErr != nil {
+		t.Fatal(mkdirErr)
+	}
+	if symlinkErr := os.Symlink(outside, filepath.Join(poolParent, memberhome.CachePoolTerminal)); symlinkErr != nil {
+		t.Fatal(symlinkErr)
+	}
+	err = controlClient(t, e).Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeUnavailable {
+		t.Fatalf("unsafe retry-marker storage did not refuse removal: %v", err)
+	}
+	if strings.Contains(pe.Message, cacheRoot) || strings.Contains(pe.Message, outside) {
+		t.Fatalf("marker failure leaked private paths: %s", pe.Message)
+	}
+	if _, err := e.store.GetMember(t.Context(), target.ID); err != nil {
+		t.Fatalf("member row lost before retry ownership persisted: %v", err)
+	}
+	if body, err := os.ReadFile(credential); err != nil || string(body) != "preserved" {
+		t.Fatalf("home changed after marker refusal: %q, %v", body, err)
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatalf("marker creation followed an unsafe pool link: %v, %v", entries, err)
+	}
+}
+
+func TestMemberRemoveKeepsDeletedLegacyOwnerDiscoverableAfterHomeCleanupFailure(t *testing.T) {
+	t.Parallel()
+	homeRoot, cacheRoot := t.TempDir(), t.TempDir()
+	cacheLockHeld := make(chan bool, 1)
+	var homes *memberhome.Manager
+	var target *domain.Member
+	var err error
+	homes, err = memberhome.New(homeRoot, cacheRoot, func(context.Context, string) error {
+		unlock, available := homes.TryLockCaches(target.ID)
+		if available {
+			unlock()
+		}
+		cacheLockHeld <- !available
+		return errors.New("home cleanup failed")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	_, target = addMember(t, e, "Legacy target", domain.RoleCollaborator, false)
+	home, err := homes.Path(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyWriteErr := os.WriteFile(filepath.Join(home, "legacy-install"), []byte("kept for retry"), 0o600); legacyWriteErr != nil {
+		t.Fatal(legacyWriteErr)
+	}
+	if removeErr := controlClient(t, e).Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	if !<-cacheLockHeld {
+		t.Fatal("member home removal allowed concurrent cache provisioning")
+	}
+	if _, memberLookupErr := e.store.GetMember(t.Context(), target.ID); !errors.Is(memberLookupErr, store.ErrNotFound) {
+		t.Fatalf("member deletion did not complete: %v", memberLookupErr)
+	}
+	reopened, err := memberhome.New(homeRoot, cacheRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members, err := reopened.CacheMembers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, id := range members {
+		found = found || id == target.ID
+	}
+	if !found {
+		t.Fatalf("removed legacy member is no longer discoverable for home/image cleanup: %v", members)
+	}
+	info, err := reopened.ReadCache(target.ID, memberhome.CachePoolTerminal)
+	if err != nil || info.MetadataError != "" || info.CleanupError == "" {
+		t.Fatalf("durable cleanup retry cause lost: %+v, %v", info, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(home, "legacy-install")); err != nil || string(body) != "kept for retry" {
+		t.Fatalf("failed cleanup lost its retry target: %q, %v", body, err)
 	}
 }
 

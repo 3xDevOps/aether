@@ -351,7 +351,7 @@ type Config struct {
     Runtime     runtime.Runtime
     Root        string
     Environment func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-    PrepareRuntime func(context.Context, *runtime.Spec) error
+    PrepareRuntime func(context.Context, *runtime.Spec) (func(), error)
     ReleaseRuntime func(context.Context, string) error
     Admission   AdmissionFunc
     Now         func() time.Time
@@ -402,10 +402,18 @@ review and authorized cleanup remain available. The engine does not own
 swarm state.
 
 `PrepareRuntime` and `ReleaseRuntime` must be supplied together or both omitted.
-The server wires them to verified CLI staging keyed by the persisted runtime
-creation key. Verification containers receive the CLI but no run socket or
-fabricated assignment. Staged references survive restart and remain retained
-while runtime liveness or destruction is uncertain.
+The server wires them to verified CLI staging and cache ownership keyed by
+the persisted runtime creation key. Verification uses the launcher's `runs`
+cache pool, including the original home owner after a handoff or account share.
+The owner remains durable until runtime absence is confirmed, including across
+failed cleanup and restart.
+
+Preparation fills unspecified server-selected CPU, memory and PID budgets
+from the managed defaults and acquires a provisioning allowance. Its returned
+release is called after Create/Start, before command waiting, and on every
+failure path. `ReleaseRuntime` separately removes durable auxiliary ownership
+only after the container is gone. Verification containers receive the CLI but
+no run socket or fabricated assignment.
 
 ## Retention and recovery
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -162,13 +163,41 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, rpcError(listErr)
 		}
 	}
-	// Stop the bind-mounted terminal before deleting its member row. If
-	// cleanup fails, retain the member as the durable recovery path.
+	// Hold the terminal lifecycle lock through removal: EnsureTerminal must not
+	// recreate an owner between stopping the terminal and deleting its home.
+	// Lock order is terminal lifecycle -> cache; never call StopTerminal while
+	// holding the cache lock.
 	remove := func() error {
-		if err := s.cfg.Runs.StopTerminal(ctx, id); err != nil {
+		stopped := false
+		err := s.cfg.Runs.WithStoppedTerminal(ctx, id, func() error {
+			stopped = true
+			if s.cfg.Homes != nil {
+				unlock := s.cfg.Homes.LockCaches(id)
+				defer unlock()
+				// Even legacy homes need a discoverable retry owner before their
+				// member row disappears, including for saved image cleanup.
+				if err := s.cfg.Homes.EnsureCacheMetadata(id, memberhome.CachePoolTerminal); err != nil {
+					slog.Warn("sshd: member cleanup marker failed", "member", id, "error", err)
+					return &protocol.Error{Code: protocol.CodeUnavailable, Message: "member.remove: cleanup ownership could not be preserved; member was not removed"}
+				}
+			}
+			if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
+				return err
+			}
+			if s.cfg.Homes != nil {
+				if err := s.cfg.Homes.Remove(ctx, id); err != nil {
+					slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)
+					if markerErr := s.cfg.Homes.SetCacheCleanupError(id, memberhome.CachePoolTerminal, "Member home cleanup failed"); markerErr != nil {
+						slog.Warn("sshd: member cleanup cause persistence failed", "member", id, "error", markerErr)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil && !stopped {
 			return fmt.Errorf("member.remove: stop terminal: %w", err)
 		}
-		return s.cfg.Store.DeleteMember(ctx, id)
+		return err
 	}
 	if len(activeRuns) == 0 || s.cfg.Control == nil {
 		if err := remove(); err != nil {
@@ -198,11 +227,6 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	}
 	s.closeMemberConns(id)
 	s.notifyDirectory()
-	if s.cfg.Homes != nil {
-		if err := s.cfg.Homes.Remove(ctx, id); err != nil {
-			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)
-		}
-	}
 	return struct{}{}, nil
 }
 

@@ -99,3 +99,25 @@ func TestLoginPathIsDirRefusesAFIFO(t *testing.T) {
 		t.Fatalf("FIFO login = %v, want refusal", err)
 	}
 }
+
+func TestCacheMetadataRefusesAFIFO(t *testing.T) {
+	manager := newCacheManager(t, nil)
+	data, err := manager.CachePath("member", CachePoolRuns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := filepath.Join(filepath.Dir(data), cacheMetadataName)
+	if err = os.Remove(metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err = syscall.Mkfifo(metadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := manager.ReadCache("member", CachePoolRuns)
+	if err != nil || info.MetadataError == "" || !info.DataExists {
+		t.Fatalf("FIFO metadata not protected: %+v, %v", info, err)
+	}
+	if err := manager.RemoveCache(t.Context(), "member", CachePoolRuns); err == nil {
+		t.Fatal("deleted data behind FIFO ownership metadata")
+	}
+}

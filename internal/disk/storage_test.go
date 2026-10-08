@@ -159,3 +159,61 @@ func TestPartialMeasurementKeepsReadableBytesAndFailedOwner(t *testing.T) {
 	}
 	t.Fatal("failed owner omitted from partial inventory")
 }
+
+func TestCachePoolsShareGlobalInodeAccountingWithoutFollowingLinks(t *testing.T) {
+	dir := t.TempDir()
+	cacheRoot := filepath.Join(dir, "home-caches")
+	write := func(name string, size int) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	repo := write("repos/ws.git/object", 31)
+	run := write("home-caches/launcher/runs/data/build", 17)
+	write("home-caches/launcher/terminal/data/private", 13)
+	write("homes/account/credential", 7)
+	for target, source := range map[string]string{
+		"home-caches/launcher/runs/data/repo":       repo,
+		"home-caches/launcher/terminal/data/shared": run,
+	} {
+		if err := os.Link(source, filepath.Join(dir, target)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(cacheRoot, "launcher/runs/data/escape")); err != nil {
+		t.Fatal(err)
+	}
+	u := components(dir)
+	if u.CacheBytes != 30 || u.RepoBytes != 31 || u.HomeBytes != 7 || len(u.Warnings) != 0 {
+		t.Fatalf("cache attribution counted a shared inode or symlink target: %+v", u)
+	}
+	entries := make(map[string]uint64)
+	for _, entry := range u.Entries {
+		if entry.Kind == "cache" {
+			entries[entry.Key] = entry.Bytes
+			if entry.ReclaimableBytes != nil {
+				t.Fatal("apparent size is not a physical reclaimability promise")
+			}
+		}
+	}
+	if entries["launcher/runs"] != 17 || entries["launcher/terminal"] != 13 {
+		t.Fatalf("wrong pool attribution: %v", entries)
+	}
+	pools, err := MeasureCachePools(cacheRoot)
+	if err != nil || len(pools) != 2 || pools["launcher/runs"] != 48 || pools["launcher/terminal"] != 13 {
+		t.Fatalf("cache-only inode walk: %v, %v", pools, err)
+	}
+	if _, err := MeasureCachePools(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("missing cache root was reported as a complete zero-byte scan")
+	}
+}

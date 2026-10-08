@@ -207,6 +207,15 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
+		retention, err := s.cfg.Runs.Retention(run)
+		if retention.RetainedUntil != nil {
+			until := retention.RetainedUntil.UTC().Format(time.RFC3339Nano)
+			out.ContainerRetainedUntil = &until
+		}
+		out.CleanupPending, out.CleanupError = retention.CleanupPending, retention.CleanupError
+		if err != nil {
+			out.CleanupError = "Runtime retention could not be checked; resources remain protected"
+		}
 	}
 	if s.cfg.Control != nil {
 		if holder, ok := s.cfg.Control.Status(string(run.ID)); ok {
@@ -267,7 +276,7 @@ func (s *Server) runSeen(ctx context.Context, member domain.MemberID, params jso
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
 func (s *Server) runPause(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

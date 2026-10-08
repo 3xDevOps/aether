@@ -467,11 +467,20 @@ func TestRecoveryUnstartedDestroyFailureRetainsPendingOwner(t *testing.T) {
 	if !sc.DestroyPending || sc.Retained {
 		t.Fatalf("unstarted pending sidecar = %+v, want destroy-pending active state", sc)
 	}
+	info, err := s2.Retention(r)
+	if err != nil || !info.CleanupPending || info.CleanupError != cleanupRuntimeError ||
+		sc.CleanupError != info.CleanupError {
+		t.Fatalf("destroy failure visibility = %+v, sidecar %+v, %v", info, sc, err)
+	}
 	s2.sweepRetained(ctx)
 	waitFor(t, "unstarted retry destroy", func() bool { return e.rt.byName(string(r.ID)) == nil })
 	row := e.waitStoreStatus(t, r.ID, domain.RunInterrupted)
 	if row.Status != domain.RunInterrupted {
 		t.Fatalf("unstarted row after retry = %s, want interrupted", row.Status)
+	}
+	info, err = s2.Retention(row)
+	if err != nil || info.CleanupPending || info.CleanupError != "" || info.RetainedUntil != nil {
+		t.Fatalf("successful retry retained cleanup diagnostic: %+v, %v", info, err)
 	}
 	s2.mu.Lock()
 	defer s2.mu.Unlock()
@@ -2111,5 +2120,232 @@ func TestRecoveryEvidenceUsesPublishedTipIdentity(t *testing.T) {
 	want := "finish:" + string(run.ID) + ":tip:interrupted"
 	if request.IdempotencyKey != want {
 		t.Fatalf("recovery evidence key = %q, want %q", request.IdempotencyKey, want)
+	}
+}
+
+func TestRecoveryMigratesClosedComputeDeadlineFromDurableFinish(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		worker      bool
+		age         time.Duration
+		oldTTL      time.Duration
+		currentTTL  time.Duration
+		wantExpired bool
+	}{
+		{name: "paused recent", age: 20 * time.Minute, oldTTL: 7 * 24 * time.Hour, currentTTL: time.Hour},
+		{name: "paused expired", age: 2 * time.Hour, oldTTL: 7 * 24 * time.Hour, currentTTL: time.Hour, wantExpired: true},
+		{name: "completed worker", worker: true, age: 20 * time.Minute, oldTTL: 7 * 24 * time.Hour, currentTTL: time.Hour},
+		{name: "completed worker expired", worker: true, age: 2 * time.Hour, oldTTL: 7 * 24 * time.Hour, currentTTL: time.Hour, wantExpired: true},
+		{name: "shorter deadline never extended", age: 10 * time.Minute, oldTTL: 20 * time.Minute, currentTTL: time.Hour},
+		{name: "positive override", age: 90 * time.Minute, oldTTL: 7 * 24 * time.Hour, currentTTL: 2 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = 7 * 24 * time.Hour })
+			ctx := t.Context()
+			var run *domain.Run
+			var container *fakeContainer
+			if tc.worker {
+				run, container = launchRetentionWorker(t, e, domain.LaunchHeadless)
+				if err := e.sched.CompleteMission(ctx, run.ID, domain.RunCompleted); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				run, container = e.launchFake(t, "migrate retained grace")
+				if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := e.sched.Close(); err != nil {
+				t.Fatal(err)
+			}
+			row, err := e.db.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finished := time.Now().UTC().Add(-tc.age)
+			if err = e.db.UpdateRunStatus(ctx, row.ID, row.Status, row.Reason, nil, &finished); err != nil {
+				t.Fatal(err)
+			}
+			row, err = e.db.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sc, err := e.sched.readSidecar(run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldDeadline := row.FinishedAt.Add(tc.oldTTL)
+			sc.RetainedUntil = &oldDeadline
+			if err = e.sched.writeSidecar(sc); err != nil {
+				t.Fatal(err)
+			}
+			e.cfg.RunContainerTTL = tc.currentTTL
+			s2 := e.newScheduler(t, e.rt, newFakePTY())
+			if err = s2.recoverRuns(ctx); err != nil {
+				t.Fatal(err)
+			}
+			info, err := s2.Retention(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantExpired {
+				if e.rt.byName(string(run.ID)) != nil || s2.RetainsContainer(ctx, run.ID) ||
+					info.RetainedUntil != nil || info.CleanupPending || info.CleanupError != "" {
+					t.Fatalf("expired compute survived migration: %+v", info)
+				}
+				fresh, freshErr := e.db.GetRun(ctx, run.ID)
+				if freshErr != nil || fresh.Status != row.Status || fresh.Worktree != row.Worktree {
+					t.Fatalf("compute expiry changed durable result/checkout: %+v, %v", fresh, freshErr)
+				}
+				return
+			}
+			want := row.FinishedAt.Add(tc.currentTTL)
+			if oldDeadline.Before(want) {
+				want = oldDeadline
+			}
+			if info.RetainedUntil == nil || !info.RetainedUntil.Equal(want) ||
+				e.rt.byName(string(run.ID)) != container || container.currentState() != "paused" {
+				t.Fatalf("retention after migration = %+v, want same paused container until %v", info, want)
+			}
+			migrated, err := s2.readSidecar(run.ID)
+			if err != nil || migrated.RetainedUntil == nil || !migrated.RetainedUntil.Equal(want) {
+				t.Fatalf("migration was not durable: %+v, %v", migrated, err)
+			}
+		})
+	}
+}
+
+func TestRecoveryRetentionPolicyDoesNotExpireActiveOrReopenedRuns(t *testing.T) {
+	for _, mode := range []string{"working", "waiting", "paused active", "reopened"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = 7 * 24 * time.Hour })
+			ctx := t.Context()
+			run, container := e.launchFake(t, mode)
+			switch mode {
+			case "waiting":
+				if err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "waiting", nil, nil); err != nil {
+					t.Fatal(err)
+				}
+			case "paused active":
+				if err := e.sched.Pause(ctx, run.ID, e.member.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "reopened":
+				if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := e.sched.Close(); err != nil {
+				t.Fatal(err)
+			}
+			before, err := e.db.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sc, err := e.sched.readSidecar(run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Simulate the crash window where the active row won but the
+			// old retained marker has not yet been cleared.
+			due := time.Now().UTC().Add(-24 * time.Hour)
+			sc.Retained, sc.RetainedUntil = true, &due
+			if err = e.sched.writeSidecar(sc); err != nil {
+				t.Fatal(err)
+			}
+			e.cfg.RunContainerTTL = time.Hour
+			s2 := e.newScheduler(t, e.rt, newFakePTY())
+			if err = s2.recoverRuns(ctx); err != nil {
+				t.Fatal(err)
+			}
+			s2.sweepRetained(ctx)
+			after, err := e.db.GetRun(ctx, run.ID)
+			if err != nil || after.Status != before.Status || e.rt.byName(string(run.ID)) != container {
+				t.Fatalf("retention policy touched active owner: %+v, %v", after, err)
+			}
+			info, err := s2.Retention(after)
+			if err != nil || info.RetainedUntil != nil || info.CleanupPending || info.CleanupError != "" {
+				t.Fatalf("active run has terminal cleanup metadata: %+v, %v", info, err)
+			}
+		})
+	}
+}
+
+func TestMigratedExpiryRetriesEvidenceBeforeDestroyAndKeepsFailureVisible(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = 7 * 24 * time.Hour })
+	ctx := t.Context()
+	run, container := e.launchFake(t, "migration failure ownership")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := time.Now().UTC().Add(-2 * time.Hour)
+	if err = e.db.UpdateRunStatus(ctx, run.ID, row.Status, row.Reason, nil, &finished); err != nil {
+		t.Fatal(err)
+	}
+	row, err = e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.RunContainerTTL = time.Hour
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	retry := &destroyRetryRuntime{Runtime: e.rt}
+	s2.cfg.Runtime = retry
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.failures = 2
+	s2.UseEvidence(capture)
+	if err = s2.recoverRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	captureKey := capture.lastRequest().IdempotencyKey
+	s2.sweepRetained(ctx)
+	if got := capture.lastRequest().IdempotencyKey; got != captureKey {
+		t.Fatalf("terminal retry changed its durable evidence key: %q -> %q", captureKey, got)
+	}
+	_, destroys, _ := retry.counts()
+	info, err := s2.Retention(row)
+	if err != nil || destroys != 0 || !info.CleanupPending || info.CleanupError != cleanupEvidenceError ||
+		info.RetainedUntil == nil || !info.RetainedUntil.Equal(row.FinishedAt.Add(time.Hour)) ||
+		e.rt.byName(string(run.ID)) != container {
+		t.Fatalf("evidence failure lost expired ownership or destroyed before capture: %+v, destroys %d, %v", info, destroys, err)
+	}
+	sc, err := s2.readSidecar(run.ID)
+	if err != nil || !sc.EvidencePending || !sc.DestroyPending || sc.CleanupError != cleanupEvidenceError {
+		t.Fatalf("evidence retry marker = %+v, %v", sc, err)
+	}
+	s2.sweepRetained(ctx)
+	_, destroys, _ = retry.counts()
+	info, err = s2.Retention(row)
+	if err != nil || destroys != 1 || info.CleanupError != cleanupRuntimeError ||
+		e.rt.byName(string(run.ID)) != container {
+		t.Fatalf("destroy failure after successful capture = %+v, destroys %d, %v", info, destroys, err)
+	}
+	if err = s2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Inspect the sidecar fallback before a second boot retries destruction.
+	s3 := e.newScheduler(t, e.rt, newFakePTY())
+	s3.cfg.Runtime = retry
+	s3.UseEvidence(capture)
+	info, err = s3.Retention(row)
+	if err != nil || !info.CleanupPending || info.CleanupError != cleanupRuntimeError {
+		t.Fatalf("destroy diagnostic did not survive restart: %+v, %v", info, err)
+	}
+	if recoverErr := s3.recoverRuns(ctx); recoverErr != nil {
+		t.Fatal(recoverErr)
+	}
+	info, err = s3.Retention(row)
+	if err != nil || info.CleanupPending || info.CleanupError != "" || info.RetainedUntil != nil ||
+		e.rt.byName(string(run.ID)) != nil {
+		t.Fatalf("successful reboot retry left cleanup ownership: %+v, %v", info, err)
 	}
 }

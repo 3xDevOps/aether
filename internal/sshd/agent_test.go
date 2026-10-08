@@ -192,7 +192,7 @@ func TestAgentListSwitchableFollowsTheResolvedDefinition(t *testing.T) {
 func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
 	t.Parallel()
 	s, member := newAgentTestServer(t)
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			s, member := newAgentTestServer(t)
-			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,7 +307,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

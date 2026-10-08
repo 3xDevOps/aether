@@ -8,6 +8,7 @@ import { eventLabel, type EventType } from '@/lib/events'
 
 const filterTypes: EventType[] = [
   'run.status',
+  'run.retention',
   'run.input',
   'run.title',
   'run.agent',

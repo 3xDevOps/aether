@@ -123,7 +123,12 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	if err != nil {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: get member to connect github: %w", err)
 	}
+	unlockCaches := func() {}
+	if s.cfg.Homes != nil {
+		unlockCaches = s.cfg.Homes.LockCaches(member)
+	}
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, m, harness.Profile{}, EnvironmentPurposeTerminal)
+	unlockCaches()
 	if err != nil {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: build github environment: %w", err)
 	}

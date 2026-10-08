@@ -105,3 +105,83 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 		return os.IsNotExist(err)
 	})
 }
+
+// Real bind mounts, native shell environment and credential survival exercise
+// the same sweep used at startup, hourly and before a disk-admission refusal.
+func TestIntegrationAutomaticCachePoolsDocker(t *testing.T) {
+	docker, err := runtime.NewDocker(
+		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
+		runtime.WithNetworkMode("none"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Close() })
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Runtime = docker
+		cfg.RunContainerTTL = -time.Second
+		cfg.Harnesses = map[string]HarnessSpec{"fake": {TUIArgs: []string{"sh", "-c", "sleep 3600"}}}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	terminal, err := e.sched.EnsureTerminal(ctx, e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = e.sched.StopTerminal(context.Background(), e.member.ID) })
+	exec := func(cid runtime.ID, script string) {
+		t.Helper()
+		code, stdout, stderr, err := docker.Exec(ctx, cid, []string{"sh", "-c", script}, "/root")
+		if err != nil || code != 0 {
+			t.Fatalf("cache shell: code=%d stdout=%s stderr=%s err=%v", code, stdout, stderr, err)
+		}
+	}
+	exec(runtime.ID(terminal.ContainerID), `test "$AETHER_CACHE_DIR" = /aether-cache &&
+		test "$GOCACHE" = /aether-cache/go-build &&
+		printf terminal-cache > /aether-cache/build &&
+		mkdir -p "$HOME/.local/bin" "$HOME/.config/gh" "$HOME/.ssh" &&
+		printf installed > "$HOME/.local/bin/cache-survival" &&
+		printf credential > "$HOME/.config/gh/cache-survival" &&
+		printf signing > "$HOME/.ssh/cache-survival"`)
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "cache smoke", "fake", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Destroy(context.Background(), runtime.ID(sc.ContainerID)) })
+	exec(runtime.ID(sc.ContainerID), `test "$npm_config_cache" = /aether-cache/npm &&
+		test ! -e /aether-cache/build &&
+		printf run-cache > /aether-cache/build &&
+		test "$(cat "$HOME/.config/gh/cache-survival")" = credential`)
+	runsPath := filepath.Join(e.cfg.Homes.CacheRoot(), string(e.member.ID), "runs", "data")
+	terminalPath := filepath.Join(e.cfg.Homes.CacheRoot(), string(e.member.ID), "terminal", "data")
+	e.sched.sweepCaches(ctx, true)
+	requireCacheExists(t, runsPath, true)
+	requireCacheExists(t, terminalPath, true)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.sweepCaches(ctx, true)
+	requireCacheExists(t, runsPath, false)
+	requireCacheExists(t, terminalPath, true)
+	exec(runtime.ID(terminal.ContainerID), `test "$(cat /aether-cache/build)" = terminal-cache &&
+		test "$(cat "$HOME/.local/bin/cache-survival")" = installed &&
+		test "$(cat "$HOME/.ssh/cache-survival")" = signing`)
+	if err := e.sched.StopTerminal(ctx, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.sweepCaches(ctx, true)
+	requireCacheExists(t, terminalPath, false)
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".local/bin/cache-survival", ".config/gh/cache-survival", ".ssh/cache-survival"} {
+		if _, err := os.Stat(filepath.Join(home, rel)); err != nil {
+			t.Fatalf("durable home file lost: %s: %v", rel, err)
+		}
+	}
+}

@@ -110,6 +110,7 @@ export interface ReleaseFinishedPlan {
 /** The existing status and reason pair is the wire evidence of retention. */
 export function isRetainedRun(run: RunRecord): boolean {
   if (!isTerminal(run.status)) return false
+  if (run.container_retained_until || run.cleanup_pending) return true
   switch (run.reason) {
     case 'closed; retained container':
       return run.status === 'merged' || run.status === 'abandoned'
@@ -364,7 +365,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       done: 'Freed container',
       confirm: {
         title: 'Free this run’s container?',
-        body: 'Its container is removed and the run cannot be reopened. The run and its history remain visible; this does not archive it.',
+        body: 'Its compute is released and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all run data or archive it.',
         action: 'Free container',
       },
       perform: (d) => d.api.runRelease(id),

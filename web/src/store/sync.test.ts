@@ -897,6 +897,58 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.finished_at).toBe('2026-08-14T11:00:00Z')
   })
 
+  it('applies runtime retention independently of completion and clears it when the run reopens', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const runGet = vi.fn()
+    const client = fakeApi({ runGet })
+    const deadline = '2030-01-02T03:04:05Z'
+    await applyEvent(store, statusEvent({ seq: 1, payload: {
+      to: 'completed', reason: 'agent reported success', outcome_unseen: true,
+    } }), client)
+    const completed = store.getState().runs.run_1
+    const retention = {
+      container_retained_until: deadline,
+      cleanup_pending: true,
+      cleanup_error: 'Evidence preservation failed',
+    }
+    await applyEvent(store, statusEvent({
+      seq: 2, type: 'run.retention', time: '2026-08-14T12:00:00Z', payload: retention,
+    }), client)
+    expect(store.getState().runs.run_1).toEqual({ ...completed, ...retention })
+    await applyEvent(store, statusEvent({
+      seq: 3, type: 'run.retention', time: '2026-08-14T13:00:00Z', payload: {},
+    }), client)
+    expect(store.getState().runs.run_1).toEqual({
+      ...completed,
+      container_retained_until: undefined,
+      cleanup_pending: undefined,
+      cleanup_error: undefined,
+    })
+    expect(runGet).not.toHaveBeenCalled()
+    await applyEvent(store, statusEvent({ seq: 4, type: 'run.retention', payload: retention }), client)
+    await applyEvent(store, statusEvent({ seq: 5, payload: { to: 'running' } }), client)
+    expect(store.getState().runs.run_1.container_retained_until).toBeUndefined()
+    expect(store.getState().runs.run_1.cleanup_error).toBeUndefined()
+  })
+
+  it('hydrates an unknown run before applying its retention metadata', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const retained = run({
+      id: 'run_retained', status: 'completed', finished_at: '2026-08-14T10:00:00Z',
+      outcome_unseen: true, reason: 'agent reported success',
+    })
+    const runGet = vi.fn().mockResolvedValue(retained)
+    const cleanup = { cleanup_pending: true, cleanup_error: 'Execution cleanup failed' }
+    await applyEvent(store, statusEvent({
+      run_id: retained.id, type: 'run.retention', payload: cleanup,
+    }), fakeApi({ runGet }))
+    expect(runGet).toHaveBeenCalledWith(retained.id)
+    expect(store.getState().runs[retained.id]).toMatchObject({ ...retained, ...cleanup })
+    expect(store.getState().runs[retained.id].stateChangedAt).toBe(retained.finished_at)
+  })
+
   it('flags an agent-reported outcome, and clears it on run.outcome_seen or the next transition', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

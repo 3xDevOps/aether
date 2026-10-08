@@ -66,6 +66,17 @@ func diskReserve(total uint64, override int64) uint64 {
 // the sum of container memory ceilings. A completed reservation is released
 // under the same gate so the next probe cannot reuse a pre-completion snapshot.
 func (s *Scheduler) reserveCapacity(ctx context.Context) (func(), error) {
+	release, err := s.tryReserveCapacity(ctx)
+	if errors.Is(err, ErrDiskFull) && s.cfg.Homes != nil && ctx.Err() == nil {
+		// One eligible-owned cleanup attempt, then fresh measurements. Never
+		// loop, evict active owners, or reinterpret unavailable capacity.
+		s.sweepCaches(ctx, true)
+		return s.tryReserveCapacity(ctx)
+	}
+	return release, err
+}
+
+func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 	probeCtx, cancel := context.WithTimeout(ctx, capacityProbeTimeout)
 	defer cancel()
 	select {

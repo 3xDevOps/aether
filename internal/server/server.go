@@ -304,7 +304,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, perr
 	}
 	homesRoot := filepath.Join(cfg.DataDir, "homes")
-	homes, herr := memberhome.New(homesRoot, removeAgentFiles)
+	homes, herr := memberhome.New(homesRoot, filepath.Join(cfg.DataDir, "home-caches"), removeAgentFiles)
 	if herr != nil {
 		return nil, fmt.Errorf("server: create member homes: %w", herr)
 	}

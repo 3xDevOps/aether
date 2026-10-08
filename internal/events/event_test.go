@@ -12,6 +12,8 @@ import (
 func TestPayloadCodecRoundtrip(t *testing.T) {
 	payloads := []Payload{
 		RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed, Reason: "agent exited 1"},
+		RunRetentionPayload{ContainerRetainedUntil: "2026-10-08T12:34:56Z", CleanupPending: true, CleanupError: "Execution cleanup failed; cleanup will retry"},
+		RunRetentionPayload{},
 		RunDeletedPayload{},
 		WorkspaceDeletedPayload{},
 		RunTitlePayload{Title: "Fixing the login bug"},

@@ -10,7 +10,7 @@ import (
 
 func TestPathValidatesAndCreatesMemberHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestPathValidatesAndCreatesMemberHome(t *testing.T) {
 
 func TestRemoveDeletesMemberHome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

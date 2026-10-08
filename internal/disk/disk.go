@@ -22,6 +22,7 @@ type Usage struct {
 	DatabaseBytes   uint64
 	RepoBytes       uint64
 	HomeBytes       uint64
+	CacheBytes      uint64
 	EvidenceBytes   uint64
 	OtherBytes      uint64
 	SnapshotBytes   uint64
@@ -37,6 +38,7 @@ type Entry struct {
 	Key              string
 	OwnerKind        string
 	OwnerID          string
+	Pool             string
 	Bytes            uint64
 	ReclaimableBytes *uint64
 	RetainedUntil    *time.Time
@@ -86,6 +88,10 @@ func components(dataDir string) Usage {
 }
 
 func componentTree(tree fs.FS, counted seen) Usage {
+	return componentTreeOwners(tree, counted, componentOwner)
+}
+
+func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, string)) Usage {
 	var u Usage
 	top, err := fs.ReadDir(tree, ".")
 	if err != nil {
@@ -104,7 +110,7 @@ func componentTree(tree fs.FS, counted seen) Usage {
 			continue
 		}
 		walkErr := fs.WalkDir(tree, dir.Name(), func(name string, d fs.DirEntry, err error) error {
-			kind, key := componentOwner(name)
+			kind, key := owner(name)
 			index := [2]string{kind, key}
 			e := entries[index]
 			if e == nil {
@@ -135,6 +141,8 @@ func componentTree(tree fs.FS, counted seen) Usage {
 						u.DatabaseBytes += n
 					case "home":
 						u.HomeBytes += n
+					case "cache":
+						u.CacheBytes += n
 					case "evidence":
 						u.EvidenceBytes += n
 					default:
@@ -157,7 +165,7 @@ func componentTree(tree fs.FS, counted seen) Usage {
 		}
 	}
 	for _, entry := range entries {
-		if entry.Bytes > 0 || entry.Error != "" {
+		if entry.Bytes > 0 || entry.Error != "" || entry.Kind == "cache" {
 			u.Entries = append(u.Entries, *entry)
 		}
 	}
@@ -191,6 +199,8 @@ func componentOwner(name string) (kind, key string) {
 		return "transcript", key
 	case "homes":
 		return "home", key
+	case "home-caches":
+		return cachePoolOwner(rest)
 	case "evidence":
 		return "evidence", strings.TrimSuffix(strings.TrimSuffix(key, ".captures"), ".transcript")
 	case "coord":
@@ -200,6 +210,37 @@ func componentOwner(name string) (kind, key string) {
 	default:
 		return "other", ""
 	}
+}
+
+// MeasureCachePools measures only the managed cache root, sharing one inode
+// set across pools. Partial results are accompanied by an error and must not
+// be interpreted as complete pressure or cleanup eligibility information.
+func MeasureCachePools(cacheRoot string) (map[string]uint64, error) {
+	root, err := os.OpenRoot(cacheRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	u := componentTreeOwners(root.FS(), newSeen(root), cachePoolOwner)
+	pools := make(map[string]uint64)
+	for _, entry := range u.Entries {
+		if entry.Kind == "cache" {
+			pools[entry.Key] = entry.Bytes
+		}
+	}
+	if len(u.Warnings) != 0 {
+		return pools, errors.New(strings.Join(u.Warnings, "; "))
+	}
+	return pools, nil
+}
+
+func cachePoolOwner(name string) (string, string) {
+	member, poolPath, _ := strings.Cut(name, "/")
+	pool, _, _ := strings.Cut(poolPath, "/")
+	if member != "" && (pool == "runs" || pool == "terminal") {
+		return "cache", member + "/" + pool
+	}
+	return "other", ""
 }
 
 func measurementError(err error) string {

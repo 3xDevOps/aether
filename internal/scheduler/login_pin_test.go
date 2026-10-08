@@ -58,6 +58,40 @@ func subpathMounts(spec runtime.Spec) []runtime.Mount {
 	return out
 }
 
+// Login protection is independent of reconstructible cache mounts: HOME and
+// cache storage belong to the launcher, while only explicit login subpaths
+// may expose another account's home.
+func (e *shareEnv) assertLoginMounts(t *testing.T, spec runtime.Spec, pool string, pins ...runtime.Mount) {
+	t.Helper()
+	home := runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}
+	if got, ok := mountFor(spec, "/root"); !ok || got != home || spec.Env["HOME"] != "/root" {
+		t.Fatalf("launcher HOME = %+v, %q; want %+v", got, spec.Env["HOME"], home)
+	}
+	if got := subpathMounts(spec); !slices.Equal(got, pins) {
+		t.Fatalf("protected login mounts = %+v, want %+v", got, pins)
+	}
+	cache := runtime.Mount{
+		HostPath:      filepath.Join(e.cfg.Homes.CacheRoot(), string(e.member.ID), pool, "data"),
+		ContainerPath: "/aether-cache",
+	}
+	if got, ok := mountFor(spec, cache.ContainerPath); !ok || got != cache {
+		t.Fatalf("launcher cache = %+v, want %+v", got, cache)
+	}
+	for _, mount := range spec.Mounts {
+		reach := filepath.Join(mount.HostPath, mount.Subpath)
+		if (within(reach, e.ownerHome) || within(e.ownerHome, reach)) && !slices.Contains(pins, mount) {
+			t.Fatalf("unexpected account-owner exposure: %+v", mount)
+		}
+		if (mount.ContainerPath == "/root" || strings.HasPrefix(mount.ContainerPath, "/root/")) &&
+			mount != home && !slices.Contains(pins, mount) {
+			t.Fatalf("unexpected mount over protected HOME: %+v", mount)
+		}
+		if within(mount.HostPath, e.cfg.Homes.CacheRoot()) && mount != cache {
+			t.Fatalf("unexpected cache exposure: %+v", mount)
+		}
+	}
+}
+
 // A member who shares their account gets their own Claude login mounted in
 // place in their own run and environment terminal, created empty when it is
 // missing, and nothing else beyond what a non-sharer gets.
@@ -65,22 +99,14 @@ func TestSharerContainersPinTheirOwnLogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
 	spec := e.ownRun(t)
-	if want := []runtime.Mount{{HostPath: e.adaHome, ContainerPath: "/root"}, e.pin()}; !slices.Equal(spec.Mounts, want) {
-		t.Fatalf("sharer run mounts = %+v, want %+v", spec.Mounts, want)
-	}
+	e.assertLoginMounts(t, spec, "runs", e.pin())
 	info, err := os.Lstat(filepath.Join(e.adaHome, claudeLogin))
 	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 || info.Mode().Perm() != 0o600 {
 		t.Fatalf("login stub = %v, %v; want an empty 0600 file", info, err)
 	}
 
 	terminal := e.terminal(t)
-	if got := subpathMounts(terminal); !slices.Equal(got, []runtime.Mount{e.pin()}) {
-		t.Fatalf("sharer terminal subpath mounts = %+v, want only %+v", got, e.pin())
-	}
-	plain := newShareEnv(t, nil).terminal(t)
-	if len(terminal.Mounts) != len(plain.Mounts)+1 {
-		t.Fatalf("sharer terminal mounts = %+v, want a non-sharer's %+v and the pin", terminal.Mounts, plain.Mounts)
-	}
+	e.assertLoginMounts(t, terminal, "terminal", e.pin())
 }
 
 // An existing login is pinned as it is: content and mode unchanged.
@@ -105,8 +131,8 @@ func TestSharerPinLeavesExistingLoginUnchanged(t *testing.T) {
 	}
 }
 
-// A member with no outgoing share gets exactly the plan they always had:
-// their home, and nothing created in it.
+// A member with no outgoing share keeps their own HOME and isolated cache,
+// with no login pin or credential stub created.
 func TestNonSharerContainersAreUnchanged(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
@@ -114,12 +140,8 @@ func TestNonSharerContainersAreUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := e.ownRun(t)
-	if want := []runtime.Mount{{HostPath: e.adaHome, ContainerPath: "/root"}}; !slices.Equal(spec.Mounts, want) {
-		t.Fatalf("non-sharer run mounts = %+v, want %+v", spec.Mounts, want)
-	}
-	if got := subpathMounts(e.terminal(t)); len(got) != 0 {
-		t.Fatalf("non-sharer terminal subpath mounts = %+v, want none", got)
-	}
+	e.assertLoginMounts(t, spec, "runs")
+	e.assertLoginMounts(t, e.terminal(t), "terminal")
 	if _, err := os.Lstat(filepath.Join(e.adaHome, ".claude")); !os.IsNotExist(err) {
 		t.Fatalf("non-sharer's home gained .claude: %v", err)
 	}
@@ -132,25 +154,20 @@ func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
 	writeHomeFiles(t, e.ownerHome, claudeLogin, ".codex/auth.json")
-	home := runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}
 
 	run, err := e.launch(t, "claude")
 	if err != nil {
 		t.Fatalf("claude Launch: %v", err)
 	}
 	foreign := runtime.Mount{HostPath: e.ownerHome, Subpath: claudeLogin, ContainerPath: "/root/" + claudeLogin}
-	if got := e.rt.byName(string(run.ID)).spec.Mounts; !slices.Equal(got, []runtime.Mount{home, foreign}) {
-		t.Fatalf("claude mounts = %+v, want %+v", got, []runtime.Mount{home, foreign})
-	}
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign)
 
 	run, err = e.launch(t, "codex")
 	if err != nil {
 		t.Fatalf("codex Launch: %v", err)
 	}
 	codex := runtime.Mount{HostPath: e.ownerHome, Subpath: ".codex/auth.json", ContainerPath: "/root/.codex/auth.json"}
-	if got := e.rt.byName(string(run.ID)).spec.Mounts; !slices.Equal(got, []runtime.Mount{home, codex, e.pin()}) {
-		t.Fatalf("codex mounts = %+v, want %+v", got, []runtime.Mount{home, codex, e.pin()})
-	}
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", codex, e.pin())
 }
 
 // A sharer's own login path that cannot be shared is left unpinned, and the

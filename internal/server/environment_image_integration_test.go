@@ -134,7 +134,7 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 
 	// Everything the GitHub connection keeps in the member home, plus a
 	// gh token, all of it inside the running container's $HOME mount.
-	homes, err := memberhome.New(filepath.Join(dataDir, "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(dataDir, "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("open the member homes: %v", err)
 	}

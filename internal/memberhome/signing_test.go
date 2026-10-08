@@ -17,7 +17,7 @@ import (
 func newSigningManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

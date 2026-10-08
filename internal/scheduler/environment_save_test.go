@@ -21,9 +21,7 @@ func TestSaveEnvironmentRequiresRunningTerminal(t *testing.T) {
 	}
 }
 
-// stepClock returns a Config.Now override that starts at time.Now() and
-// advances by step on every call, so two image tags taken moments apart
-// never collide on Unix()'s one-second granularity without a real sleep.
+// stepClock advances deterministic lifecycle time for tests that need it.
 func stepClock(step time.Duration) func() time.Time {
 	next := time.Now()
 	return func() time.Time {
@@ -35,7 +33,8 @@ func stepClock(step time.Duration) func() time.Time {
 
 func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, func(cfg *Config) { cfg.Now = stepClock(2 * time.Second) })
+	now := time.Now()
+	e := newTestEnv(t, func(cfg *Config) { cfg.Now = func() time.Time { return now } })
 	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
@@ -44,7 +43,7 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first SaveEnvironment: %v", err)
 	}
-	if !regexp.MustCompile(`^aether/member-` + regexp.QuoteMeta(string(e.member.ID)) + `:\d+$`).MatchString(first) {
+	if !regexp.MustCompile(`^aether/member-` + regexp.QuoteMeta(string(e.member.ID)) + `:[a-z2-7]+$`).MatchString(first) {
 		t.Fatalf("first image = %q, want member image tag", first)
 	}
 	member, err := e.db.GetMember(t.Context(), e.member.ID)

@@ -120,6 +120,39 @@ that survived a server restart, is not retrofitted or recreated just to add
 init; it keeps the runtime settings it started with. A newly created terminal
 container or run receives the setting.
 
+### Closed-run compute grace
+
+Closing or finishing a retained TUI run, or completing a swarm worker, keeps
+its exact container for **one hour** by default (`--run-container-ttl=1h`).
+The clock starts at completion, not at server restart. A positive override
+changes that grace; zero selects the default, and a negative duration requests
+immediate release. Working agents, agents waiting for input, active paused
+runs and services are not expired because they are quiet.
+
+A paused container still holds its process memory: pausing stops execution,
+not RAM ownership. The grace is for recovering the same live processes, not
+for keeping closed compute indefinitely. **Reopen** is available for eligible
+retained interactive runs only while their exact runtime remains available
+and their deadline has not passed; it does not restart stopped processes,
+replay tools or create a replacement container. Completed swarm workers are
+not reopened.
+
+Compute, checkout and evidence lifetimes are separate. The finished checkout
+is normally eligible for cleanup after **72 hours** (`--checkout-ttl`), but
+required evidence or unresolved execution ownership protects it. Published
+Git result branches and captured evidence are not removed just because the
+one-hour container grace expires; retained history has its own policies.
+**Free container…** releases retained compute early without deleting the run's
+history. **Delete** is the separate destructive run-removal action.
+
+On recovery, older retained deadlines are shortened to the earlier of their
+existing deadline and durable completion time plus the current compute grace.
+Deadlines are never extended and active/reopened runs are not migrated.
+Failed evidence preservation or runtime cleanup keeps ownership and retries
+automatically. The run's retention deadline, cleanup-pending state and safe
+operation-level failure explain why resources can remain after the deadline;
+expiry is not permission to discard uncaptured work.
+
 ## Resource limits and launch admission
 
 New run and member-environment containers get generous automatic limits,
