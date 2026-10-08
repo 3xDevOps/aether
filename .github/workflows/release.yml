@@ -144,7 +144,7 @@ jobs:
           config=$(mktemp -d)
           trap 'rm -rf "$config"' EXIT
           image=ghcr.io/3xdevops/aether-browser
-          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | awk '$1 == "Digest:" { print $2; exit }')
+          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" --format '{{.Manifest.Digest}}')
           test -n "$digest"
           index=$(docker buildx imagetools inspect --raw "$image@$digest")
           printf '%s' "$index" | jq -e \
@@ -155,7 +155,7 @@ jobs:
               '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
             tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
               'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
-            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" --format '{{.Manifest.Digest}}')
             test "$platform" = "$tested"
             docker --config "$config" pull "$image@$platform"
             pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")
@@ -285,7 +285,7 @@ jobs:
             set -- "$@" --tag "$tag"
           done
           docker buildx imagetools create "$@" "$image:$GITHUB_REF_NAME-amd64" "$image:$GITHUB_REF_NAME-arm64"
-          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | awk '$1 == "Digest:" { print $2; exit }')
+          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" --format '{{.Manifest.Digest}}')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       # Pulls with this job's login: a package GHCR has just created is
       # private until an administrator makes it public.
@@ -296,7 +296,7 @@ jobs:
         run: |
           image=ghcr.io/3xdevops/aether-edge
           for ref in $TAGS; do
-            tagged=$(docker buildx imagetools inspect "$ref" | awk '$1 == "Digest:" { print $2; exit }')
+            tagged=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
             if [ "$tagged" != "$DIGEST" ]; then
               echo "::error::$ref is $tagged, not the published $DIGEST"
               exit 1
@@ -321,7 +321,7 @@ jobs:
             # architecture, whether that push was a manifest or an index.
             tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
               'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
-            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" --format '{{.Manifest.Digest}}')
             if [ "$platform" != "$tested" ]; then
               echo "::error::$image@$DIGEST carries $platform for linux/$arch, not the smoke-tested $tested"
               exit 1
@@ -589,7 +589,7 @@ jobs:
           docker buildx imagetools create \
             --tag "$image:$GITHUB_REF_NAME" --tag "$image:$COMMIT" --tag "$image:sha-$short" \
             "$image:$GITHUB_REF_NAME-amd64" "$image:$GITHUB_REF_NAME-arm64"
-          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | awk '$1 == "Digest:" { print $2; exit }')
+          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" --format '{{.Manifest.Digest}}')
           test -n "$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Verify tested manifest contents and anonymous pulls
@@ -600,7 +600,7 @@ jobs:
           image=ghcr.io/3xdevops/aether-standard
           short=${COMMIT:0:7}
           for tag in "$GITHUB_REF_NAME" "$COMMIT" "sha-$short"; do
-            tagged=$(docker buildx imagetools inspect "$image:$tag" | awk '$1 == "Digest:" { print $2; exit }')
+            tagged=$(docker buildx imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')
             test "$tagged" = "$DIGEST"
           done
           index=$(docker buildx imagetools inspect --raw "$image@$DIGEST")
@@ -616,7 +616,7 @@ jobs:
               '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
             tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
               'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
-            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" --format '{{.Manifest.Digest}}')
             test "$platform" = "$tested"
             docker --config "$config" pull "$image@$platform"
             pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")

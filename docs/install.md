@@ -1526,6 +1526,12 @@ Browser publishes `ghcr.io/3xdevops/aether-browser:<tag>`; standard publishes
 pulls of the tested architecture digests. Edge's private-package exception is
 described below.
 
+Manifest digest lookups use `docker buildx imagetools inspect <image>
+--format '{{.Manifest.Digest}}'`. Do not pipe the inspection output through
+an early-exiting reader such as `awk '... { print; exit }'`: closing Docker's
+stdout pipe can fail the release with exit code 255 even when the digest is
+correct.
+
 The final `release` job requires all six Go lanes, signed Android and all three
 verified image manifests. It downloads artifacts from this workflow run only,
 never promotes unsigned CI builds, and requires exactly these twelve nonempty,
