@@ -370,7 +370,7 @@ and is never delivered, but still lists, without `acked_at`.
 A task-bearing run receives this capability-neutral launch instruction automatically:
 
 ```
-Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
 ```
 
 No skill package, manual identity argument, or credential setup is required.
