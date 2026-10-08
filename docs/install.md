@@ -1167,7 +1167,8 @@ thinking swarm workers are not refused just because their maxima add up to more
 than host RAM.
 
 Low capacity refuses new work with a resource-specific reason; it does not evict
-an active run. A retained run's explicit relaunch is checked before it reopens.
+an active run. Reopening a retained run reuses existing compute and skips
+capacity admission.
 New browser companions and agent-updater containers share these admission
 checks; an updater refusal leaves the installed native agent version available
 for the run. Existing environment execs and lookups, including a replay of an
