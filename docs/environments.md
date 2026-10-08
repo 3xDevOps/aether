@@ -120,6 +120,89 @@ that survived a server restart, is not retrofitted or recreated just to add
 init; it keeps the runtime settings it started with. A newly created terminal
 container or run receives the setting.
 
+## Resource limits and launch admission
+
+New run and member-environment containers get generous automatic limits,
+intended for hosts with at least 32 GiB RAM and moderate agent swarms:
+
+| `aether-server serve` flag | `0` selects |
+| --- | --- |
+| `--run-cpus` | Up to 8 CPU cores, capped at the server host's CPU count |
+| `--run-memory` | 8 GiB (`8589934592` bytes) |
+| `--run-pids` | 4096 tasks (processes and threads) |
+
+Positive values override the corresponding limit; negative values and
+non-finite CPU values are rejected. These are server-wide creation defaults,
+not per-run sliders. The matching `server.Config` fields are `RunCPULimit`,
+`RunMemoryBytes` and `RunPidsLimit`. Persist flags through
+`aether-server config set`, for example:
+
+```sh
+sudo aether-server config set run-memory 12884901888
+sudo systemctl restart aether-server
+```
+
+That selects a 12 GiB memory ceiling for newly created containers. Existing
+containers keep their original limits; restarting the server does not resize
+or recreate them. Browser companions retain their separate limits.
+Docker must report support for CPU quotas, memory and swap limits, and PID
+limits. Missing controller support refuses new provisioning instead of letting
+Docker silently drop a ceiling; this check also applies when host swap is off.
+The memory limit is a **ceiling, not a reservation or guarantee**: idle agents
+do not reserve 8 GiB each. Docker gets no extra swap allowance beyond that
+memory ceiling. Container stdout/stderr uses Docker's rotating `local` log
+driver (`max-size=10m`, `max-file=3`); this does not cap Aether's transcripts,
+agent caches or files in the checkout/home.
+
+Before provisioning a new run, member environment, browser or agent updater
+container, Aether checks capacity with a five-second probe deadline.
+Existing-environment execs and reopening live or paused retained containers
+do not reserve another container's startup allowance. Reopening only resumes
+existing compute: it does not restart stopped processes or create a replacement
+container if unpausing fails. Starting new compute still requires admission.
+Admission checks the Aether data filesystem, the Docker storage filesystems
+and available host memory:
+
+- Each filesystem must retain `max(5 GiB, min(5% of its size, 20 GiB))`.
+  A positive `--min-free-disk` overrides that reserve in bytes; `0` selects
+  the automatic reserve, and a negative value disables the disk guard.
+- Host available memory must retain `max(2 GiB, 10% of host RAM)`.
+- The new provisioning and each other outstanding provisioning additionally
+  need 1 GiB disk and 512 MiB available memory. These short-lived admission
+  reservations are released on completion, error or cancellation, not held
+  for a run's lifetime.
+
+Admission uses available memory, not the sum of every container's maximum,
+so idle/thinking agents can coexist. It refuses new provisioning rather than
+evicting active runs; idempotently retrieving an already-created run does not
+require another admission. A burst of later allocations can still exhaust
+host resources. These defaults reduce contention; they are not an uptime
+guarantee or a substitute for host capacity planning.
+
+Docker capacity is measured only after verifying a local Unix-socket daemon
+against its data-root engine ID. A Unix socket alone is not proof of locality.
+Classic storage checks Docker's data root and the actual layer directory:
+`overlay2`, or `vfs/dir` (the verified `vfs` parent before the first layer).
+These directories may occupy different filesystems. For a containerd image
+store, supported `overlayfs`/`native` snapshotters use the actual
+content and snapshotter roots exported by containerd's `PluginInfo` API at
+Docker's reported `Containerd.Address`; each filesystem is checked separately.
+There is no guessed `/var/lib/containerd` fallback. Linux `MemAvailable` and
+`MemTotal` are read only after local identity verification, not replaced with
+swap capacity.
+
+Remote or unverifiable daemons, unsupported storage drivers, missing
+containerd exports and failed probes refuse new provisioning with an explicit
+capacity error. Storage usage may still report an unknown aggregate filesystem
+when the roots span different filesystems; admission checks each root.
+See [admission failures](failure-handling.md#picking-a-disk-floor) for diagnosis
+and disk-override behavior.
+
+Native agent tools remain in the same container as the agent. A limit can
+contain a workload without keeping its agent process alive; completed writes
+in the mounted home and checkout are distinct from a recoverable live session.
+See [the execution-boundary decision](harness-integration.md#execution-boundary-keep-native-tools-with-the-agent).
+
 ## Install in your environment
 
 Open your environment with `aether terminal`, or select

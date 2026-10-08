@@ -79,6 +79,11 @@ func (s *Scheduler) browserClient(ctx context.Context, live LiveRun, create bool
 	if !create || !errors.Is(err, os.ErrNotExist) {
 		return status, client, err
 	}
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return status, nil, err
+	}
+	defer release()
 	if err := s.reserveBrowser(live.Run.ID); err != nil {
 		return status, nil, err
 	}
@@ -535,10 +540,14 @@ func (s *Scheduler) restartDevelopmentBrowser(ctx context.Context, live LiveRun,
 		if _, err := s.ResolveLiveRun(ctx, live.Run.ID, false); err != nil {
 			return err
 		}
-		if err := s.reserveBrowser(live.Run.ID); err != nil {
+		release, err := s.reserveCapacity(ctx)
+		if err != nil {
 			return err
 		}
-		var err error
+		defer release()
+		if reserveErr := s.reserveBrowser(live.Run.ID); reserveErr != nil {
+			return reserveErr
+		}
 		fresh, err = d.manager.Restart(ctx, browser.Run{ID: string(live.Run.ID), ContainerID: live.ContainerID})
 		return err
 	})

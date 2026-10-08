@@ -90,6 +90,13 @@ The run's **Terminal** tab is that login shell, not the agent: use it to log
 the agent in, inspect the checkout, or run commands next to the agent
 ([terminal.md](terminal.md)).
 
+The agent's native tools and subprocesses share that container's resource
+limits with the agent. ACP tool-call and terminal-output items describe work;
+they do not send that work to a separate executor. Aether does not advertise
+ACP client filesystem/terminal execution capabilities. Enhanced mode therefore
+does not guarantee that an agent survives a tool's out-of-memory failure.
+See the [native execution-boundary decision](harness-integration.md#execution-boundary-keep-native-tools-with-the-agent).
+
 ## The Session view
 
 An Enhanced run opens on its **Session** view: the session item log as one
@@ -305,9 +312,9 @@ does not reach an enhanced run.
 ## Restarts and failures
 
 Every reattach (a server restart, Reopen after Close, a failed Close) stops
-the previous ACP server and starts a fresh one, then restores the agent
-session with `session/resume`, or `session/load` with the replayed history
-dropped because the log already holds it. The session id is stored in the
+the previous ACP server and starts a fresh one, then attempts to restore the
+agent session with `session/resume`, or `session/load` with the replayed
+history dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
 the run parks at `needs-attention` until the next prompt. Messages still
@@ -317,9 +324,17 @@ again once the session is back. The restored
 session is switched back to the last mode the log recorded. A session that
 cannot be restored starts a new one and says so in the log.
 
-An adapter that fails to start, or exits on its own, never fails the run.
-The shell stays up, a notice with the real error and the end of the
-adapter's stderr goes to the log, and the run parks at `needs-attention`:
+Restoration depends on the agent's own persisted session and login state.
+The session item log is a display transcript, not a backup of the agent's
+live process or private context. Docker exec streams cannot be reattached;
+this is process replacement, not uninterrupted agent survival. Inspect the
+checkout and native tool state before retrying interrupted work: a recorded
+tool call does not prove whether its side effects completed.
+
+An adapter that fails to start or exits while the run container and shell
+remain healthy leaves that shell available. A notice with the real error and
+the end of the adapter's stderr goes to the log, and the run parks at
+`needs-attention`:
 
 ```
 enhanced session failed: open the agent session: acphost: session/new: {"code":-32000,"message":"Authentication required"}

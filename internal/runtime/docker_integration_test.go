@@ -229,8 +229,8 @@ func TestDockerLifecycle(t *testing.T) {
 	}
 }
 
-// TestDockerResourceLimits verifies cpu/mem limits land on the created
-// container.
+// TestDockerResourceLimits starts real processes and verifies both Docker's
+// settings and the effective cgroup ceilings visible inside the container.
 func TestDockerResourceLimits(t *testing.T) {
 	t.Parallel()
 	d := newTestDocker(t)
@@ -238,11 +238,17 @@ func TestDockerResourceLimits(t *testing.T) {
 	spec := Spec{
 		Name:             fmt.Sprintf("it-limits-%d", time.Now().UnixNano()),
 		Image:            testImage,
-		Command:          []string{"sleep", "30"},
+		Command:          []string{"sleep", "120"},
 		CPULimit:         0.5,
 		MemoryLimitBytes: 128 << 20,
+		PidsLimit:        64,
 	}
 	id := createContainer(t, d, spec)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := d.Start(ctx, id); err != nil {
+		t.Fatal(err)
+	}
 
 	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -253,6 +259,41 @@ func TestDockerResourceLimits(t *testing.T) {
 	}
 	if got := info.Container.HostConfig.Memory; got != 128<<20 {
 		t.Errorf("Memory = %d, want %d", got, 128<<20)
+	}
+	h := info.Container.HostConfig
+	if h.MemorySwap != spec.MemoryLimitBytes || h.PidsLimit == nil || *h.PidsLimit != spec.PidsLimit {
+		t.Fatalf("swap/PID limits = %+v", h.Resources)
+	}
+	if h.LogConfig.Type != "local" || h.LogConfig.Config["max-size"] != "10m" || h.LogConfig.Config["max-file"] != "3" {
+		t.Fatalf("log rotation = %+v", h.LogConfig)
+	}
+	code, out, stderr, err := d.Exec(ctx, id, []string{"sh", "-c", `
+set -eu
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  echo v2
+  cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.swap.max /sys/fs/cgroup/pids.max /sys/fs/cgroup/cpu.max
+else
+  echo v1
+  cat /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes /sys/fs/cgroup/pids/pids.max
+  printf '%s %s\n' "$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)" "$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)"
+fi`}, "")
+	if err != nil || code != 0 {
+		t.Fatalf("read effective cgroup limits: code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
+	}
+	fields := strings.Fields(out)
+	if len(fields) != 6 || fields[1] != "134217728" || fields[3] != "64" {
+		t.Fatalf("effective cgroup limits = %q", out)
+	}
+	wantSwap := "0"
+	if fields[0] == "v1" {
+		wantSwap = "134217728"
+	}
+	if fields[2] != wantSwap {
+		t.Fatalf("swap limit = %q, want %s", fields[2], wantSwap)
+	}
+	var quota, period int64
+	if _, err := fmt.Sscan(fields[4]+" "+fields[5], &quota, &period); err != nil || period <= 0 || quota*2 != period {
+		t.Fatalf("effective CPU quota/period = %q", out)
 	}
 }
 

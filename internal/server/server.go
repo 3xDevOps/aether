@@ -142,13 +142,18 @@ type Config struct {
 	// RunContainerTTL retains exact containers after TUI Close, an agent-finished
 	// TUI run, or mission-run completion (negative disables retention).
 	// Completed mission workers never reopen.
-	// MinFreeDiskBytes is the free-space floor below which new runs are
-	// refused (negative disables the floor).
+	// MinFreeDiskBytes overrides the automatic data/runtime filesystem
+	// reserve. Negative disables disk admission, not host memory checks.
 	StallThreshold   time.Duration
 	PollInterval     time.Duration
 	CheckoutTTL      time.Duration
 	RunContainerTTL  time.Duration
 	MinFreeDiskBytes int64
+	// Run budgets apply to runs and member environments. Zero selects
+	// automatic up-to-8 CPUs, 8 GiB memory, and 4096 processes.
+	RunCPULimit    float64
+	RunMemoryBytes int64
+	RunPidsLimit   int64
 }
 
 // Server is the assembled Aether server.
@@ -221,6 +226,9 @@ func (p ptyTranscript) Replay(run domain.RunID) (io.ReadCloser, error) {
 // per the Wave 1 contract's layout. The PTY write gate enforces the Wave 3
 // permission model (steer capability) against the store.
 func New(ctx context.Context, cfg Config) (srv *Server, err error) {
+	if err = scheduler.ValidateRunBudgets(cfg.RunCPULimit, cfg.RunMemoryBytes, cfg.RunPidsLimit); err != nil {
+		return nil, err
+	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = DefaultDataDir
 	}
@@ -331,6 +339,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:           lazyGit{s.git},
 		PTY:           s.pty,
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
+		DataDir:       cfg.DataDir,
 		Homes:         homes,
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
 		Profiles:      prof,
@@ -346,6 +355,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		CheckoutTTL:          cfg.CheckoutTTL,
 		RunContainerTTL:      cfg.RunContainerTTL,
 		MinFreeBytes:         cfg.MinFreeDiskBytes,
+		RunCPULimit:          cfg.RunCPULimit,
+		RunMemoryBytes:       cfg.RunMemoryBytes,
+		RunPidsLimit:         cfg.RunPidsLimit,
 		ServerBinary:         cfg.ServerBinary,
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,

@@ -1142,8 +1142,44 @@ uses the default; negative values have the semantics in the table.
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
 | `--run-container-ttl` | `168h` (7 days) | How long a closed Standard or Enhanced run, one its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
-| `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
+| `--min-free-disk` | `0` (automatic) | Free-byte reserve on the Aether data and runtime storage filesystems: 5% of each filesystem, at least 5 GiB and at most 20 GiB. A positive integer overrides the reserve in bytes; negative disables disk admission, not memory checks. Provisioning also needs a 1 GiB startup allowance. |
+| `--run-cpus` | `0` (automatic) | CPU ceiling per run and member environment: up to 8 CPUs, clamped to the host CPU count. A positive number overrides it. |
+| `--run-memory` | `0` (automatic) | Memory ceiling per run and member environment: 8 GiB. A positive integer overrides it in bytes, for example `17179869184` for 16 GiB. |
+| `--run-pids` | `0` (automatic) | Process/thread ceiling per run and member environment: 4096. A positive integer overrides it. |
 | `--agent-definitions` | none | Inline JSON custom agent definitions via this flag or `AETHER_AGENT_DEFINITIONS`; see [harnesses.md](harnesses.md). |
+
+These generous resource limits are automatic: a 32 GiB-or-larger host does not
+need routine budget settings to run a moderate swarm. They apply to new run,
+member-terminal and agent-updater containers; the browser retains its separate
+1 CPU / 1 GiB limits. Negative or nonfinite run budgets are rejected by flags,
+config edits and server startup. Config-file keys use the flag names without
+`--`; `aether-server config set run-memory 17179869184` changes the ceiling for
+new containers after the service restarts. Existing containers are not resized.
+
+Before provisioning, Aether checks actual available host memory and free space
+on its data filesystem and the runtime's verified storage filesystems, including
+containerd content and snapshot storage when used. The disk reserve above is
+kept in addition to a 1 GiB allowance for each concurrent provisioning. Memory
+admission keeps the larger of 2 GiB or 10% of host RAM, plus 512 MiB for each
+concurrent provisioning. These temporary allowances are released on success,
+failure or cancellation. The 8 GiB ceiling is not an 8 GiB reservation: idle or
+thinking swarm workers are not refused just because their maxima add up to more
+than host RAM.
+
+Low capacity refuses new work with a resource-specific reason; it does not evict
+an active run. Reopening a retained run reuses existing compute and skips
+capacity admission.
+New browser companions and agent-updater containers share these admission
+checks; an updater refusal leaves the installed native agent version available
+for the run. Existing environment execs and lookups, including a replay of an
+already-created assigned run, do not consume another allowance. Runtime capacity
+probes are bounded; remote/unverified Docker hosts or unmeasurable required
+storage/memory produce an explicit unavailable refusal rather than guessed capacity. A custom
+runtime without the capacity interface keeps the data-filesystem check only.
+These checks reduce host pressure but cannot guarantee that all running workloads
+fit: a run's memory limit covers its native agent **and all its subprocesses**,
+not a separately protected agent brain. See [environments.md](environments.md)
+for container isolation and limit behavior.
 
 Swarms run over conflict coordination, so `--conflict-coordination=false` also
 turns them off. The dashboard still offers **Swarm**, but `mission.create`
@@ -1320,7 +1356,8 @@ Three consequences worth knowing:
 - **Four of these grow without bound**: `checkouts/` (reclaimed by the TTL
   GC), `transcripts/`, `aether.db` (the event log), and `repos/` (every push,
   run branch and reflog entry stays). The disk usage in Settings > **Server** reports those
-  four, and new runs are refused below `--min-free-disk`. A checkout is a
+  four, and new provisioning is refused when the automatic or configured
+  `--min-free-disk` reserve plus startup allowances would not fit. A checkout is a
   `git clone --local` of its workspace repo, so its object files are hard
   links to the same bytes in `repos/`; the gauge counts them once, under
   `repos/`, and the checkout line is what reclaiming that checkout would give

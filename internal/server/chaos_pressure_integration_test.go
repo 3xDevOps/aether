@@ -208,9 +208,9 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		}
 	}
 
-	// Relaunch reopens the same retained row and container. It does not
-	// perform new checkout admission, so the free-space floor applies only
-	// to the refused new launch above.
+	// Relaunch thaws the same retained processes in the same container. It
+	// does not provision or restart stopped compute, so it must not charge
+	// another startup allowance even below the free-space floor.
 	var reopened protocol.RunResult
 	if err := env.ctrl.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{
 		RunID: retained.Run.ID,

@@ -231,6 +231,12 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	if hostCfg.Memory != 64<<20 {
 		t.Errorf("Memory = %d, want %d", hostCfg.Memory, 64<<20)
 	}
+	if hostCfg.MemorySwap != spec.MemoryLimitBytes || hostCfg.PidsLimit == nil || *hostCfg.PidsLimit != spec.PidsLimit {
+		t.Errorf("memory+swap/PID limits = %+v", hostCfg.Resources)
+	}
+	if hostCfg.LogConfig.Type != "local" || hostCfg.LogConfig.Config["max-size"] != "10m" || hostCfg.LogConfig.Config["max-file"] != "3" {
+		t.Errorf("unbounded logs: %+v", hostCfg.LogConfig)
+	}
 }
 
 func TestContainerConfigSetupGate(t *testing.T) {
@@ -281,7 +287,7 @@ func TestContainerConfigNoMountNoLimits(t *testing.T) {
 	if len(hostCfg.Mounts) != 0 {
 		t.Errorf("Mounts = %v, want none", hostCfg.Mounts)
 	}
-	if hostCfg.NanoCPUs != 0 || hostCfg.Memory != 0 {
+	if hostCfg.NanoCPUs != 0 || hostCfg.Memory != 0 || hostCfg.MemorySwap != 0 || hostCfg.PidsLimit != nil {
 		t.Errorf("Resources = %+v, want zero", hostCfg.Resources)
 	}
 	if cfg.Env != nil {

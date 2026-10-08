@@ -140,6 +140,11 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 			return nil, adoptErr
 		}
 	}
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, m, harness.Profile{}, EnvironmentPurposeTerminal)
 	if err != nil {
@@ -170,11 +175,14 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		Env:        plan.Env,
 		WorkingDir: plan.Home,
 		// Init hides child exec failures from Start, so select the shell inside the container.
-		Command:     []string{"/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash -l; else exec /bin/sh -l; fi"},
-		TTY:         true,
-		Mounts:      plan.Mounts,
-		User:        plan.User,
-		CreationKey: key,
+		Command:          []string{"/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash -l; else exec /bin/sh -l; fi"},
+		TTY:              true,
+		Mounts:           plan.Mounts,
+		User:             plan.User,
+		CreationKey:      key,
+		CPULimit:         s.cfg.RunCPULimit,
+		MemoryLimitBytes: s.cfg.RunMemoryBytes,
+		PidsLimit:        s.cfg.RunPidsLimit,
 	}
 	cid, err = s.createAndStartTerminal(ctx, spec)
 	if err != nil {

@@ -15,8 +15,6 @@ import (
 	containerruntime "github.com/3xDevOps/Aether/internal/runtime"
 )
 
-const browserReservationBytes int64 = (1 << 30) + containerruntime.BrowserSharedMemoryBytes
-
 func (s *Scheduler) reserveBrowser(id domain.RunID) error {
 	d := s.developmentState()
 	d.mu.Lock()
@@ -24,13 +22,8 @@ func (s *Scheduler) reserveBrowser(id domain.RunID) error {
 	if d.reserved[id] {
 		return nil
 	}
-	available, total, err := developmentMemory()
-	if err != nil {
-		return fmt.Errorf("browser resource admission: %w", err)
-	}
-	count := len(d.reserved) + 1
-	if count > runtime.NumCPU() || int64(count)*browserReservationBytes > total || available < browserReservationBytes {
-		return errors.New("browser resource admission: insufficient CPU/memory capacity (requires 1 CPU, 1 GiB memory and 256 MiB shared memory)")
+	if len(d.reserved) >= runtime.NumCPU() {
+		return fmt.Errorf("%w: each browser requires one CPU; %d already reserved", ErrBrowserCPUCapacity, len(d.reserved))
 	}
 	d.reserved[id] = true
 	return nil

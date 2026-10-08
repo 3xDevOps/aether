@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/moby/moby/api/types/system"
@@ -17,6 +19,8 @@ import (
 // StorageUsage is an optional reporting seam, not part of Runtime. It never
 // prunes resources or exposes daemon paths and volume names to callers.
 func (d *Docker) StorageUsage(ctx context.Context, dataDir string) disk.DockerUsage {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	var out disk.DockerUsage
 	usage, err := d.cli.DiskUsage(ctx, client.DiskUsageOptions{
 		Images: true, Containers: true, Volumes: true, BuildCache: true, Verbose: true,
@@ -31,21 +35,32 @@ func (d *Docker) StorageUsage(ctx context.Context, dataDir string) disk.DockerUs
 		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("info", err))
 		return out
 	}
-	root, err := dockerFilesystemRoot(d.cli.DaemonHost(), info.Info)
+	roots, err := dockerFilesystemRoots(ctx, d.cli.DaemonHost(), info.Info)
 	if err != nil {
 		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("filesystem", err))
 		return out
 	}
-	fs, err := disk.Filesystem(root)
+	for _, root := range roots[1:] {
+		same, identityErr := disk.SameFilesystem(roots[0].path, root.path)
+		if identityErr != nil {
+			out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("filesystem identity", identityErr))
+			return out
+		}
+		if !same {
+			out.Error = strings.TrimSpace(out.Error + " Docker storage spans multiple filesystems; aggregate filesystem capacity is unknown.")
+			return out
+		}
+	}
+	fs, err := disk.Filesystem(roots[0].path)
 	if err != nil {
 		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("data-root filesystem", err))
 		return out
 	}
 	out.UsedBytes, out.TotalBytes, out.FreeBytes = &fs.UsedBytes, &fs.TotalBytes, &fs.FreeBytes
-	if same, err := disk.SameFilesystem(dataDir, info.Info.DockerRootDir); err == nil {
+	if same, identityErr := disk.SameFilesystem(dataDir, roots[0].path); identityErr == nil {
 		out.SharedFilesystem = &same
 	} else {
-		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("filesystem identity", err))
+		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("filesystem identity", identityErr))
 	}
 	return out
 }
@@ -136,28 +151,38 @@ func knownDockerBytes(n int64) *uint64 {
 	return &u
 }
 
-func dockerFilesystemRoot(host string, info system.Info) (string, error) {
-	if !strings.HasPrefix(host, "unix://") || info.DockerRootDir == "" {
-		return "", errors.New("filesystem usage is unavailable for a remote daemon")
+func verifyLocalDocker(host string, info system.Info) error {
+	if !strings.HasPrefix(host, "unix://") || !filepath.IsAbs(info.DockerRootDir) {
+		return errors.New("filesystem usage is unavailable for a remote daemon or unknown local data root")
 	}
-	for _, status := range info.DriverStatus {
-		if strings.Contains(strings.ToLower(status[1]), "containerd") {
-			return "", errors.New("containerd image-store filesystem is not verified")
-		}
-	}
-	// Only these layouts establish that image/container layers live below
-	// DockerRootDir. Other storage drivers may use separate backing devices.
-	if info.Driver != "overlay2" && info.Driver != "vfs" {
-		return "", errors.New("image-store filesystem layout is not verified")
-	}
-	id, err := os.ReadFile(filepath.Join(info.DockerRootDir, "engine-id"))
+	path := filepath.Join(info.DockerRootDir, "engine-id")
+	st, err := os.Lstat(path)
 	if err != nil {
-		return "", fmt.Errorf("local daemon identity could not be verified: %w", err)
+		return fmt.Errorf("local daemon identity could not be verified: %w", err)
 	}
-	if info.ID == "" || strings.TrimSpace(string(id)) != info.ID {
-		return "", errors.New("local daemon identity does not match connected engine")
+	if !st.Mode().IsRegular() || st.Size() > 4096 {
+		return errors.New("local daemon identity must be a regular non-symlink engine-id file")
 	}
-	return info.DockerRootDir, nil
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("local daemon identity could not be read: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	opened, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("local daemon identity could not be inspected: %w", err)
+	}
+	if !os.SameFile(st, opened) {
+		return errors.New("local daemon identity changed during verification")
+	}
+	id, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil {
+		return fmt.Errorf("local daemon identity could not be read: %w", err)
+	}
+	if len(id) > 4096 || info.ID == "" || strings.TrimSpace(string(id)) != info.ID {
+		return errors.New("local daemon identity does not match connected engine")
+	}
+	return nil
 }
 
 // Endpoint URLs can include credentials, query tokens and private paths. Strip
@@ -173,10 +198,6 @@ func dockerErrorDetail(err error) string {
 
 func dockerStorageError(operation string, err error) string {
 	reason := dockerErrorDetail(err)
-	var pathErr *os.PathError
-	if errors.As(err, &pathErr) {
-		reason = pathErr.Op + ": " + dockerErrorDetail(pathErr.Err)
-	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		reason = "request timed out: " + reason

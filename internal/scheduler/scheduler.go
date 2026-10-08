@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -29,14 +30,6 @@ import (
 )
 
 var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
-
-// ErrDiskFull refuses a new run below Config.MinFreeBytes; nothing is created
-// and existing runs keep going.
-var ErrDiskFull = errors.New("scheduler: not enough free disk space to start a new run")
-
-// DefaultMinFreeBytes leaves headroom for a new run's checkout, container
-// writes and event log.
-const DefaultMinFreeBytes = 1 << 30
 
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
@@ -64,13 +57,16 @@ func (e *BaseCaptureError) Unwrap() error {
 }
 
 type Config struct {
-	Store                       store.Store
-	Runtime                     runtime.Runtime
-	Bus                         events.Bus
-	Git                         GitEngine
-	PTY                         PTYHost
-	Bases                       BaseCapture
-	StateDir                    string
+	Store    store.Store
+	Runtime  runtime.Runtime
+	Bus      events.Bus
+	Git      GitEngine
+	PTY      PTYHost
+	Bases    BaseCapture
+	StateDir string
+	// DataDir is the data filesystem protected by admission. Direct scheduler
+	// callers may omit it to use StateDir.
+	DataDir                     string
 	Homes                       *memberhome.Manager
 	Profiles                    profileService
 	ReposDir                    string
@@ -93,10 +89,14 @@ type Config struct {
 	// Now defaults to time.Now; tests set it to control the second-granularity
 	// saved-environment image tag.
 	Now func() time.Time
-	// MinFreeBytes refuses a launch or relaunch below it with ErrDiskFull. Runs
-	// already provisioned are never touched: a half-written checkout is worse
-	// than a refused one.
+	// MinFreeBytes overrides the filesystem reserve; zero is automatic and
+	// negative disables disk admission only. Existing work is never evicted.
 	MinFreeBytes int64
+	// Managed run and member-environment ceilings; zero selects automatic
+	// up-to-8 CPUs, 8 GiB memory, and 4096 processes.
+	RunCPULimit    float64
+	RunMemoryBytes int64
+	RunPidsLimit   int64
 	// Harnesses overrides or extends the shipped harness registry. An override
 	// replaces the registry argv and drops its coordination flag, which would be
 	// appended to an argv nothing has checked.
@@ -111,6 +111,7 @@ type Config struct {
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
 	harnessUpdateWait    time.Duration
+	filesystemCapacity   func(string) (disk.Usage, error)
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -155,6 +156,10 @@ type Scheduler struct {
 	superCtx    context.Context
 	superCancel context.CancelFunc
 	wg          sync.WaitGroup
+
+	// capacityGate protects admission probes/accounting, never lifecycle state.
+	capacityGate         chan struct{}
+	capacityReservations uint64
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
@@ -423,6 +428,10 @@ func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool
 
 // New validates cfg, applies defaults, and prepares the state directory.
 func New(cfg Config) (*Scheduler, error) {
+	if err := ValidateRunBudgets(cfg.RunCPULimit, cfg.RunMemoryBytes, cfg.RunPidsLimit); err != nil {
+		return nil, err
+	}
+	resolveRunBudgets(&cfg)
 	switch {
 	case cfg.Store == nil:
 		return nil, errors.New("scheduler: config requires a Store")
@@ -474,9 +483,6 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.ServerBinary == "" {
 		cfg.ServerBinary = DefaultServerBinary
 	}
-	if cfg.MinFreeBytes == 0 {
-		cfg.MinFreeBytes = DefaultMinFreeBytes
-	}
 	if cfg.Profiles == nil {
 		if db, ok := cfg.Store.(*store.DB); ok {
 			svc, err := profile.New(db)
@@ -493,6 +499,7 @@ func New(cfg Config) (*Scheduler, error) {
 	s := &Scheduler{
 		cfg:                  cfg,
 		harnesses:            harnesses,
+		capacityGate:         make(chan struct{}, 1),
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
@@ -832,6 +839,9 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		TTY:               true,
 		Mounts:            plan.Mounts,
 		User:              plan.User,
+		CPULimit:          s.cfg.RunCPULimit,
+		MemoryLimitBytes:  s.cfg.RunMemoryBytes,
+		PidsLimit:         s.cfg.RunPidsLimit,
 		CreationKey:       string(run.ID),
 	}
 }
