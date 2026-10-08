@@ -903,7 +903,7 @@ Task-bearing and taskless launches use the same capability-neutral discovery
 instruction:
 
 ```
-Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
 ```
 
 For a taskless launch, the same instruction is delivered through the
