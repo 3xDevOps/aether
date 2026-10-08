@@ -137,10 +137,8 @@ func TestCoordReportOutboxRetriesTheFinish(t *testing.T) {
 	}
 }
 
-// TestCoordReportSkipsWorkerAndSupersededReports: a mission worker keeps its
-// own lifecycle while a mission integrator finishes like an ordinary run, and
-// a report a relaunch superseded before it was published must not finish the
-// reopened run.
+// Mission workers keep their own lifecycle, integrators use the ordinary
+// outcome path, and a superseded report must not affect a reopened run.
 func TestCoordReportSkipsWorkerAndSupersededReports(t *testing.T) {
 	ctx := context.Background()
 	outcomes := &recordingOutcomes{}
@@ -252,5 +250,120 @@ func TestCoordReportRefusesAReservationSupersededDuringCapture(t *testing.T) {
 	}
 	if got := outcomes.recorded(); len(got) != 0 {
 		t.Fatalf("scheduler calls = %+v, want none", got)
+	}
+}
+
+func TestInteractiveRunReportsSuccessiveTasks(t *testing.T) {
+	for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchACP} {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx := context.Background()
+			outcomes := &recordingOutcomes{}
+			capture := &coordReportEvidenceCapture{id: "ev_followup"}
+			h := newHarness(t, 1, func(c *Config) {
+				c.Evidence = capture
+				c.Outcomes = outcomes
+			})
+			run := h.run(0)
+			if err := h.db.SetRunMode(ctx, run, mode, mode == domain.LaunchACP); err != nil {
+				t.Fatalf("SetRunMode: %v", err)
+			}
+			first := report(t, h, run, protocol.CoordOutcomeSuccess, "first task verified", "task-1")
+			firstSnapshot, err := h.db.GetCoordReport(ctx, first.ReportID)
+			if err != nil {
+				t.Fatalf("first report: %v", err)
+			}
+			second := report(t, h, run, protocol.CoordOutcomeFailure, "second task cannot proceed", "task-2")
+			replay := report(t, h, run, protocol.CoordOutcomeFailure, "second task cannot proceed", "task-2")
+			if replay.ReportID != second.ReportID || capture.calls.Load() != 2 {
+				t.Fatalf("replay = %+v after %d captures; want %s and 2", replay, capture.calls.Load(), second.ReportID)
+			}
+			if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+				Outcome: protocol.CoordOutcomeSuccess, Summary: "different", IdempotencyKey: "task-2",
+			}); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
+				t.Fatalf("changed-key payload = %v, want conflict", rpcErr)
+			}
+			if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+				Outcome: protocol.CoordOutcomeSuccess, Summary: "first task verified", IdempotencyKey: "task-1",
+			}); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
+				t.Fatalf("superseded replay = %v, want conflict", rpcErr)
+			}
+			if err := h.svc.applyRunOutcome(ctx, firstSnapshot); err != nil {
+				t.Fatalf("stale loaded report delivery: %v", err)
+			}
+			blocked := report(t, h, run, protocol.CoordOutcomeBlocked, "need another decision", "task-3")
+			last := report(t, h, run, protocol.CoordOutcomeSuccess, "follow-up verified", "task-4")
+			want := []outcomeCall{
+				{run: run, status: domain.RunCompleted, reportID: first.ReportID},
+				{run: run, status: domain.RunFailed, reportID: second.ReportID},
+				{run: run, reason: "need another decision", reportID: blocked.ReportID},
+				{run: run, status: domain.RunCompleted, reportID: last.ReportID},
+			}
+			got := outcomes.recorded()
+			if len(got) != len(want) {
+				t.Fatalf("outcome calls = %+v, want %+v", got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("outcome call %d = %+v, want %+v", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestInteractiveReportOutboxSkipsOlderTaskOutcome(t *testing.T) {
+	ctx := context.Background()
+	outcomes := &recordingOutcomes{err: errors.New("scheduler not ready")}
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_older_task"}
+		c.Outcomes = outcomes
+	})
+	run := h.run(0)
+	first := report(t, h, run, protocol.CoordOutcomeSuccess, "first task done", "task-1")
+	outcomes.fail(nil)
+	second := report(t, h, run, protocol.CoordOutcomeFailure, "second task failed", "task-2")
+	if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
+		t.Fatalf("drain old report: %v", err)
+	}
+	if got := outcomes.recorded(); len(got) != 1 || got[0] != (outcomeCall{run: run, status: domain.RunFailed, reportID: second.ReportID}) {
+		t.Fatalf("outcomes after delayed publication = %+v, want only the second task", got)
+	}
+	pub, err := h.db.GetCoordReportPublication(ctx, first.ReportID)
+	if err != nil || pub.State != store.CoordReportPublicationPublished {
+		t.Fatalf("older report publication = %+v, %v; want published without its outcome", pub, err)
+	}
+}
+
+func TestInteractiveFollowupStillRequiresEvidence(t *testing.T) {
+	ctx := context.Background()
+	outcomes := &recordingOutcomes{}
+	capture := &coordReportEvidenceCapture{id: "ev_first_task"}
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = capture
+		c.Outcomes = outcomes
+	})
+	run := h.run(0)
+	report(t, h, run, protocol.CoordOutcomeSuccess, "first task verified", "task-1")
+	capture.id = ""
+	params := protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "second task verified", IdempotencyKey: "task-2",
+	}
+	if _, rpcErr := h.svc.CoordReport(ctx, run, params); rpcErr == nil || rpcErr.Code != protocol.CodeInternal {
+		t.Fatalf("missing follow-up evidence = %v, want internal error", rpcErr)
+	}
+	pending, err := h.db.GetCoordReportByIdempotency(ctx, run, "task-2")
+	if err != nil || pending.State != store.CoordReportPending || pending.FinalizedAt != nil {
+		t.Fatalf("follow-up report = %+v, %v; want pending evidence", pending, err)
+	}
+	if got := outcomes.recorded(); len(got) != 1 {
+		t.Fatalf("outcomes before evidence accepted = %+v, want only first task", got)
+	}
+	capture.id = "ev_second_task"
+	accepted := report(t, h, run, params.Outcome, params.Summary, params.IdempotencyKey)
+	if accepted.ReportID != pending.ID || accepted.EvidenceRef != capture.id {
+		t.Fatalf("follow-up retry = %+v, want pending report %s with new evidence", accepted, pending.ID)
+	}
+	if got := outcomes.recorded(); len(got) != 2 || got[1].reportID != accepted.ReportID {
+		t.Fatalf("outcomes after evidence accepted = %+v, want both tasks", got)
 	}
 }

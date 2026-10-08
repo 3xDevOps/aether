@@ -158,7 +158,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long closed or agent-finished Standard and Enhanced run containers and completed swarm run containers are retained (0 = 1h, negative = no retention)")
+		"how long explicitly closed Standard and Enhanced run containers and completed swarm worker containers are retained (0 = 168h, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")
 	o.runCPUs = new(runCPUValue)

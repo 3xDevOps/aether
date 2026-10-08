@@ -68,7 +68,7 @@ export interface Run {
   cleanup_error?: string
   /** Holder of the run's control lease; '' means nobody, absent on older gateways. */
   controller_member_id?: string
-  /** An agent report finished the run and its owner has not opened it yet. */
+  /** An agent-reported outcome its owner has not opened yet; the session may remain live. */
   outcome_unseen?: boolean
   base_commit?: string
   base_branch?: string

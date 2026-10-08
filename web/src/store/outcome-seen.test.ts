@@ -62,6 +62,35 @@ describe('watchOutcomeSeen', () => {
     stop()
   })
 
+  it.each(['tui', 'acp'] as const)('reviews repeated %s reports without closing the live session', async (mode) => {
+    const store = setup()
+    const initial = run({ mode, acp: mode === 'acp', status: 'running', finished_at: null })
+    store.setState({ runs: { [initial.id]: toRecord(initial) } })
+    const client = fakeApi({ runSeen: vi.fn(async () => ({
+      ...store.getState().runs[initial.id], outcome_unseen: false,
+    })) })
+    const stop = watchOutcomeSeen(store, client, fakeDocument())
+    store.getState().navigate('run', { runId: initial.id })
+    for (const outcome of ['success', 'failure'] as const) {
+      store.getState().applyRunStatus(initial.id, 'needs-attention', `agent reported ${outcome}`, '2026-08-14T11:00:00Z', true)
+      expect(store.getState().runs[initial.id].outcome_unseen).toBe(true)
+      await settle()
+      const seen = store.getState().runs[initial.id]
+      expect(seen.outcome_unseen).toBe(false)
+      expect(seen.status).toBe('needs-attention')
+      expect(seen.finished_at).toBeNull()
+      expect(seen.container_retained_until).toBeUndefined()
+      const question = { id: 'question_1', session_id: 'session_1', kind: 'question' as const }
+      store.getState().applyRunInput(initial.id, [question])
+      expect(store.getState().runs[initial.id].pending_inputs).toEqual([question])
+      store.getState().applyRunInput(initial.id, [])
+      store.getState().applyRunStatus(initial.id, 'running', 'agent resumed', '2026-08-14T11:01:00Z')
+      expect(store.getState().runs[initial.id].outcome_unseen).toBe(false)
+    }
+    expect(client.runSeen).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
   it('changes nothing when someone other than the owner opens the run', async () => {
     const store = setup(bob)
     const client = fakeApi()

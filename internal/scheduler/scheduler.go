@@ -114,7 +114,7 @@ type Config struct {
 	filesystemCapacity   func(string) (disk.Usage, error)
 }
 
-const DefaultRunContainerTTL = time.Hour
+const DefaultRunContainerTTL = 7 * 24 * time.Hour
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].
@@ -261,9 +261,8 @@ type supervised struct {
 	paused        bool
 	killRequested bool
 	killActor     domain.MemberID
-	// agentReport is the last execution report only; input deltas are never
-	// retained or replayed. A turn-end idle report that starts a reported finish
-	// is recorded without the park (see ReportAgentState).
+	// agentReport is the last native execution report, independent of outcome
+	// presentation. Input deltas are never retained or replayed.
 	agentReport agentstatus.Report
 	// pendingInputs is an immutable, sorted set for this execution lifetime.
 	pendingInputs []domain.RunInputRequest
@@ -332,19 +331,19 @@ type supervised struct {
 	// coAuthorMu serializes the co-author list's read-modify-write so
 	// concurrent steers cannot leave the shorter list on disk.
 	coAuthorMu sync.Mutex
-	// reported is the outcome a terminal coord.report armed (empty when
-	// unarmed), reportedAt when it was armed, and reportFinishing is set while
-	// finishReported owns the finish.
+	// reported is the background terminal outcome awaiting settlement (also
+	// present on legacy retained sidecars), reportedAt when it was armed,
+	// and reportFinishing is set while finishReported owns the finish.
 	reported        domain.RunStatus
 	reportedAt      time.Time
 	reportFinishing bool
-	// blockedReason is the latest blocked report as a status reason and
-	// blockedShown whether a park has shown it. blockedReportID/At outlive the
-	// reason so a replay or an older retried report cannot bring it back.
-	blockedReason   string
-	blockedShown    bool
-	blockedReportID string
-	blockedReportAt time.Time
+	// idleReason carries blocked and interactive success/failure outcomes. It
+	// is shown only at a settled turn; Working clears it only after that park.
+	// The report identity/time outlive the reason to fence stale deliveries.
+	idleReason   string
+	idleShown    bool
+	idleReportID string
+	idleReportAt time.Time
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time

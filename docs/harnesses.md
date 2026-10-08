@@ -207,8 +207,9 @@ described under [managed loading](#managed-native-loading).
 
 - **Standard (`tui`).** Container PID 1 supervises the agent and opens a
   login shell after any normal agent exit. Exiting that shell opens another, so the run and
-  container remain `running` until an explicit Close, Kill, or Delete, or until
-  the agent's own success or failure report finishes the run (see
+  container remain available until an explicit Close, Kill, or Delete.
+  Reporting success or failure marks the task's outcome without ending the
+  session; follow up in the same terminal or message box (see
   [Report an outcome](coordination.md#report-an-outcome)).
 - **Background (`headless`).** The agent is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
@@ -219,7 +220,7 @@ described under [managed loading](#managed-native-loading).
   its adapter runs on the Claude Agent SDK
   ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
-Close a Standard run explicitly:
+Close a Standard or Enhanced run explicitly:
 
 ```sh
 aether close <run> --outcome merged
@@ -232,9 +233,8 @@ default is `168h` (7 days); `0` uses that default. A negative value
 disables retention and cleans up immediately. Kill and Delete remain immediate
 cleanup operations.
 
-Reopen (`aether reopen`) is available only for a retained Standard or
-Enhanced run - closed, or finished by its agent's report - while its
-retention deadline has not passed:
+Reopen (`aether reopen`) is available for a retained Standard or Enhanced run
+after Close, while its retention deadline has not passed:
 
 ```sh
 aether reopen <run>

@@ -150,7 +150,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	var clearErr error
 	if sameEntry {
 		entry.reported = ""
-		entry.blockedReason, entry.blockedShown = "", false
+		entry.idleReason, entry.idleShown = "", false
 		entry.agentReport, entry.parkedAt = agentstatus.Report{}, time.Time{}
 		entry.relaunchedAt = now
 		clearErr = s.writeSidecar(entry.sidecar())
@@ -501,7 +501,7 @@ func (s *Scheduler) adoptLiveSidecar(r *domain.Run, sc sidecar) *supervised {
 	entry.destroyPending = false
 	s.runs[r.ID] = entry
 	s.syncRunUserReservationsLocked()
-	if err := s.writeSidecar(sc); err != nil {
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: clear stale retained sidecar during close recovery", "run", r.ID, "error", err)
 	}
 	return entry
@@ -1414,6 +1414,13 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 		s.mu.Unlock()
 		return nil, false
 	}
+	mode := current.Mode
+	if mode == "" {
+		mode = fresh.Mode
+	}
+	resumeReported := current.Paused && (current.Retained || current.RetainedUntil != nil) &&
+		current.ReportedOutcome != "" && mode.Interactive() &&
+		(!current.MissionAssigned || fresh.MissionRole == "integrator")
 	// The active row is authoritative if a relaunch won just before this
 	// admission. Do not let a stale retained marker turn this owner into a
 	// terminal cleanup candidate.
@@ -1426,6 +1433,23 @@ func (s *Scheduler) admitRecoveryAttachment(ctx context.Context, r *domain.Run, 
 	entry.lifecycleMu.Lock()
 	s.runs[r.ID] = entry
 	s.syncRunUserReservationsLocked()
+	if resumeReported {
+		// An older server could pause a reported run before committing its
+		// terminal row. The active row now wins: recover the same live
+		// container rather than leaving the upgraded idle outcome frozen.
+		s.mu.Unlock()
+		resumeErr := s.cfg.Runtime.Resume(ctx, cid)
+		s.mu.Lock()
+		if resumeErr != nil {
+			delete(s.runs, r.ID)
+			s.syncRunUserReservationsLocked()
+			s.mu.Unlock()
+			entry.lifecycleMu.Unlock()
+			slog.Warn("scheduler: resume legacy reported container", "run", r.ID, "error", resumeErr)
+			return nil, false
+		}
+		entry.paused = false
+	}
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: persist recovered run owner", "run", r.ID, "error", werr)
 	} else if perr := s.publishPendingInputLocked(ctx, entry); perr != nil {
@@ -1614,12 +1638,12 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 			reportedAt = reportedAt.Add(-reportFinishDeadline)
 		}
 	}
-	var relaunched, blockedAt time.Time
+	var relaunched, idleAt time.Time
 	if sc.RelaunchedAt != nil {
 		relaunched = *sc.RelaunchedAt
 	}
-	if sc.BlockedReportAt != nil {
-		blockedAt = *sc.BlockedReportAt
+	if sc.IdleReportAt != nil {
+		idleAt = *sc.IdleReportAt
 	}
 	mode := sc.Mode
 	if mode == "" {
@@ -1629,6 +1653,21 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	acp := r.ACP
 	if mode.Interactive() {
 		acp = mode == domain.LaunchACP
+	}
+	// Older servers armed interactive reports for terminal completion. Upgrade
+	// an active owner to a nonterminal outcome instead; workers keep their
+	// mission completion path. A boot-time watermark fences old outbox retries.
+	if mode.Interactive() && (!sc.MissionAssigned || r.MissionRole == "integrator") &&
+		!r.Status.Terminal() && sc.ReportedOutcome != "" {
+		sc.IdleReason = reportedClose(sc.ReportedOutcome).reason
+		sc.IdleShown = false
+		idleAt = time.Now().UTC()
+		sc.ReportedOutcome = ""
+	}
+	// A crash can leave the shown sidecar durable before the parked row.
+	// Reapply that pending outcome, but never mark an already reviewed one unseen.
+	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != sc.IdleReason) {
+		sc.IdleShown = false
 	}
 	return &supervised{
 		runID: r.ID,
@@ -1647,10 +1686,10 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		parkedAt:            parked,
 		reported:            sc.ReportedOutcome,
 		reportedAt:          reportedAt,
-		blockedReason:       sc.BlockedReason,
-		blockedShown:        sc.BlockedShown,
-		blockedReportID:     sc.BlockedReportID,
-		blockedReportAt:     blockedAt,
+		idleReason:          sc.IdleReason,
+		idleShown:           sc.IdleShown,
+		idleReportID:        sc.IdleReportID,
+		idleReportAt:        idleAt,
 		launchMode:          mode,
 		acp:                 acp,
 		missionAssigned:     sc.MissionAssigned,

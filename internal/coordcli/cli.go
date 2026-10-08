@@ -250,20 +250,22 @@ are explicit identities for retry-safe starts and retries.
 `,
 	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
-Submit one durable outcome. Success and failure are terminal: a run has one
-terminal report, and after it any new report fails with a conflict until the
-run is relaunched. A relaunch supersedes it: report again under a new
-idempotency key, because the old key now fails with a conflict. Blocked is
-nonterminal, may repeat, and is not a way to wait for a peer or human.
-Ordinary run: success or failure finishes the run when your turn ends. Aether
-commits your work, publishes the run branch, and moves the run out of Working
-to completed (success) or failed (failure). Blocked moves it to Idle with
-the summary as the reason once your turn ends.
+Submit a durable outcome after verification and required evidence collection.
+Interactive non-worker Standard/TUI and Enhanced/ACP runs stay open: report
+success or failure, end your turn, and await follow-up in the same session.
+Reporting does not close the session; only an explicit user Close normally
+shuts it down.
+Use a fresh idempotency key for each later task's outcome. Retry the same
+request with the same key; a superseded report's key conflicts.
+Background runs have one success/failure report per launch; assigned workers
+have one per attempt. Further new keys conflict. Blocked is nonterminal, may
+repeat, and shows the summary as the Needs you reason at turn end, not while
+input is open. It is not a way to wait for a peer or human.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
 Mission integrator: success completes an active mission and stops leftover
-workers; failure ends this run and leaves the mission in its phase for Replace
-integrator.
+workers; failure leaves the mission in its phase for Replace integrator.
+Neither closes an interactive integrator session.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
@@ -448,7 +450,7 @@ Check the inbox before waiting or reporting. Wait without reporting an outcome:
 Handle the batch, then acknowledge it: aether-internal ack <ack_token>.
 Until then the same frozen batch repeats; new steering waits behind it.
 Acknowledge handled batches before waiting.
-Read the inbox once more before a terminal report:
+Read the inbox once more before reporting:
   aether-internal report --help
 `
 
@@ -462,27 +464,32 @@ Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
 `
 
-const integratorOutcomes = `Success and failure are terminal integrator outcomes. Report success only after
-the verified candidate is delivered, or, when the objective has nothing to
-deliver, once its findings are gathered: it completes the mission, stops
-leftover workers, and finishes this run. Success is refused before mission
-start. Report failure only if the mission cannot be finished: it ends this run
-and leaves the mission in its phase for Replace integrator.
+const integratorOutcomes = `Report success only after the verified candidate is delivered, or, when the
+objective has nothing to deliver, once its findings are gathered: it completes
+the mission and stops leftover workers. Success is refused before mission start.
+Report failure only if the mission cannot be finished; it leaves the mission in
+its phase for Replace integrator. An interactive Standard/TUI or Enhanced/ACP
+integrator stays open after either outcome: end your turn and await follow-up
+in this session. Only an explicit user Close normally shuts it down.
+A Background integrator finishes when its turn ends and takes no new work.
 Blocked is a nonterminal durable observation, not a way to wait. Do not report
-while idle or waiting on workers. After a terminal report, take no new work.
+while idle or waiting on workers. Use a new idempotency key for a later outcome.
 `
 
-const ordinaryOutcomes = `Success or failure finishes this run once your turn ends: Aether commits your
-work, publishes the run branch, and moves the run out of Working to completed
-(success) or failed (failure). This run has one such report. Report success
-only after finishing with required evidence, failure only if irrecoverable.
-Verify the changed behavior and collect required screenshots/evidence BEFORE
-reporting: finishing cleans up the run's development resources.
-Blocked moves the run to Idle with your summary as the reason once your
-turn ends. It may repeat and does not use up the terminal report; it is not a
-way to wait. Do not report while idle or waiting on a peer or human. After a
-terminal report, end your turn and take no new work. If the run is relaunched,
-report again with a new idempotency key.
+const ordinaryOutcomes = `Report success only after finishing with required evidence, failure only if
+irrecoverable. Verify the changed behavior and collect required screenshots
+and evidence BEFORE reporting.
+Interactive Standard/TUI and Enhanced/ACP runs stay open after success or
+failure: end your turn and await follow-up in the same session. Do not close
+the session to mark a task done. Only an explicit user Close normally shuts it
+down. Use a new idempotency key for each later task's outcome; retry an unchanged
+request with its original key.
+Background runs finish at turn end: Aether commits the work, publishes the run
+branch, and records completed or failed. They have one success/failure report
+per launch and take no new work afterwards.
+Blocked shows your summary as the Needs you reason at turn end, not while input
+is open. It may repeat; it is not a way to wait. Do not report while idle or
+waiting on a peer or human.
 `
 
 const skillRetry = `For an uncertain mutation, retry identical inputs with the same idempotency

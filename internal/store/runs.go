@@ -256,8 +256,8 @@ func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*d
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the
 // home a run's container mounts is fixed when the row is created, and a
 // stale or hand-built snapshot must not be able to change or clear it. It
-// never writes archived_at or outcome_unseen either; a status change clears
-// outcome_unseen, as UpdateRunStatus does.
+// never writes archived_at or outcome_unseen directly; a changed status or
+// needs-attention reason clears outcome_unseen, as UpdateRunStatus does.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err
@@ -286,12 +286,12 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?,
 		     harness_session_id = ?, base_commit = ?, base_branch = ?, base_source = ?,
 		     base_checked_at = ?,
-		     outcome_unseen = CASE WHEN status = ? THEN outcome_unseen ELSE 0 END
+		     outcome_unseen = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.Status, r.ID,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.Status, r.Reason, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -370,16 +370,15 @@ func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain
 	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false)
 }
 
-// FinishRunReported is UpdateRunStatus for the transition an agent's
-// terminal report causes: the same write sets outcome_unseen.
+// FinishRunReported records an agent's success/failure outcome, either
+// parking an interactive run or finishing a background run, and marks it unseen.
 func (d *DB) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
 	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, true)
 }
 
-// updateRunStatus sets outcome_unseen when unseen, keeps it on a
-// same-status write, and clears it on any other status change. SQLite
-// evaluates every SET expression against the row before the update, so
-// the CASE compares the old status.
+// updateRunStatus sets outcome_unseen when unseen, keeps it for the same
+// outcome, and clears it when status or an idle reason changes. Terminal
+// retention relabels keep it. SET expressions see the row before the update.
 func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, unseen bool) error {
 	if !status.Valid() {
 		return fmt.Errorf("store: update run status: invalid status %q", status)
@@ -396,9 +395,9 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		`UPDATE runs SET status = ?, reason = ?,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
-		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? THEN outcome_unseen ELSE 0 END
+		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END
 		 WHERE id = ?`,
-		status, reason, started, finished, unseen, status, id))
+		status, reason, started, finished, unseen, status, reason, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run status: %w", err)
 	}

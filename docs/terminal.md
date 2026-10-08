@@ -272,10 +272,14 @@ expires Aether attempts delivery. The row then reads **Sent** (`sent`),
 **Not sent** (`not_sent`), **Delivery uncertain** (`uncertain`), **Denied**
 or **Cancelled**. **Sent** means the PTY write was accepted, not that the
 agent read or answered it. Retries reuse the message identity, so they never
-create a second request. When the viewer cannot message the agent the
-composer is replaced by one line saying why: **This run has finished.**
-(with **Reopen it from More to message the agent.** when the run can be
-reopened), **The agent is still starting.**, **This run is protected: only
+create a second request.
+
+A reported task outcome leaves an interactive run open: send a follow-up
+here or type into its native terminal without reopening. **Close** ends the
+session. When the viewer cannot message the agent, the composer instead
+explains why: **This run has finished.**
+(with **Reopen it from More to message the agent.** when the retained run can
+be reopened), **The agent is still starting.**, **This run is protected: only
 its owner or an admin can message the agent.**, or **You can watch this run
 but not message the agent.**
 

@@ -179,13 +179,10 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	return nil
 }
 
-// reconcileIntegratorReport moves the mission of run, its current integrator,
-// to completed on a success report; the reconcile loop then stops leftover
-// workers. The integrator's run itself finishes through the ordinary
-// reported-outcome path, whatever the outcome, so a failure report ends the
-// run and leaves the mission where it is for Replace integrator to recover.
-// An ended mission takes no report: a replay finds it completed, and a
-// cancelled mission stays cancelled.
+// reconcileIntegratorReport completes the current integrator's mission on
+// success; reconciliation then stops leftover workers. Failure leaves the
+// mission in its phase. Interactive integrators stay open for follow-up.
+// A completed or cancelled mission is unchanged by later reports.
 func (s *Service) reconcileIntegratorReport(ctx context.Context, m *domain.Mission, run domain.RunID, report *store.CoordReport) error {
 	if report.Outcome != store.CoordOutcomeSuccess || m.Phase.Terminal() {
 		return nil

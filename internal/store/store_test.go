@@ -1401,9 +1401,9 @@ func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	}
 }
 
-// FinishRunReported sets outcome_unseen with the status; a same-status
-// write keeps it; a status change through UpdateRunStatus or UpdateRun
-// clears it; ClearRunOutcomeUnseen clears it only for the owner, once.
+// FinishRunReported sets outcome_unseen with the status; a terminal retention
+// relabel keeps it; a status change clears it; ClearRunOutcomeUnseen clears it
+// only for the owner, once.
 func TestRunOutcomeUnseen(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)

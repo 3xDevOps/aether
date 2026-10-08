@@ -898,8 +898,7 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 		t.Fatalf("main after exact delivery = %s, want candidate %s", got, candidate.CandidateRevision)
 	}
 
-	// The integrator's own success report completes the mission and
-	// finishes its run.
+	// Mission completion leaves its interactive integrator open for follow-up.
 	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodCoordReport, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeSuccess, Summary: "delivered both workers", IdempotencyKey: "docker-integrator-success",
 	}, nil); err != nil {
@@ -912,8 +911,7 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 	if completed.Mission.Phase != string(domain.MissionPhaseCompleted) {
 		t.Fatalf("mission phase after the integrator's success report = %q, want completed", completed.Mission.Phase)
 	}
-	// The run finishes at the turn-end idle report a real harness's hook
-	// sends; the shell fixture sends none, so the test sends it.
+	// The shell fixture has no native reporter, so end its turn explicitly.
 	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodRunReport, protocol.RunReportParams{
 		State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle,
 	}, nil); err != nil {
@@ -925,11 +923,14 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 		if err := adaCtrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: integratorRun}, &run); err != nil {
 			t.Fatalf("run.get integrator: %v", err)
 		}
-		if run.Run.Status == string(domain.RunCompleted) {
+		if run.Run.Status == string(domain.RunNeedsAttention) && run.Run.Reason == "agent reported success" {
+			if run.Run.FinishedAt != nil || run.Run.ContainerRetainedUntil != nil || run.Run.Paused {
+				t.Fatalf("completed mission stopped the integrator's environment: %+v", run.Run)
+			}
 			break
 		}
 		if time.Now().After(finishDeadline) {
-			t.Fatalf("integrator run after its success report = %q, want completed", run.Run.Status)
+			t.Fatalf("integrator run after its success report = %+v, want open reported completion", run.Run)
 		}
 		time.Sleep(time.Second)
 	}

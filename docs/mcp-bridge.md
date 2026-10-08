@@ -111,6 +111,11 @@ shown explicitly. Evidence is not an atomic environment snapshot and does not
 assert that the outcome was verified. A failed capture or persistence step
 leaves the outcome unaccepted and the runtime recoverable.
 
+Interactive Standard and Enhanced runs remain open after a success or failure
+report; the agent ends its turn and waits for follow-up. Each later task uses
+a fresh report idempotency key. Background runs and swarm workers retain
+terminal report behavior. See [Report an outcome](coordination.md#report-an-outcome).
+
 ## MCP errors
 
 Coordination failures are returned as MCP tool results with `isError`, not as

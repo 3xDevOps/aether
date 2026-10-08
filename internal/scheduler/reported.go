@@ -16,9 +16,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// reportFinishDeadline is how long the poll loop waits after an arm (or a
-// failed finish) before finishing an armed run whose harness cannot report a
-// turn end, or one a stall parked at needs-attention.
+// reportFinishDeadline is the existing fallback for outcome settlement when a
+// harness cannot report a turn end, or a stall parked it at needs-attention.
+// Interactive outcomes park; background outcomes finish.
 const reportFinishDeadline = 2 * time.Minute
 
 const (
@@ -154,13 +154,10 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 	return fresh, nil
 }
 
-// FinishReported arms a live run to finish with the outcome its agent reported
-// through coord.report reportID. The run finishes on the next turn-end idle
-// report with no input request open (at once if it already came), at
-// reportFinishDeadline when the harness cannot report one, or on process exit.
-// A mission worker is left to CompleteMission, and a report finalized before
-// the run's last relaunch is ignored. A run with no live owner that is not
-// terminal yet returns an error so the caller retries.
+// FinishReported settles an interactive run at its turn boundary without
+// ending its execution lifetime. Background runs retain automatic completion;
+// assigned workers are left to CompleteMission. The report watermark survives
+// follow-up work so outbox retries cannot resurrect a cleared outcome.
 func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error {
 	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
 		return fmt.Errorf("%w: reported outcome must be completed or failed, got %q", ErrInvalidTransition, outcome)
@@ -171,7 +168,7 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	if entry == nil || entry.status.Terminal() {
 		return s.overrideExitLocked(ctx, run, reportID, outcome)
 	}
-	if reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
+	if reportedAt.Before(entry.relaunchedAt) {
 		return nil
 	}
 	if entry.missionAssigned {
@@ -183,11 +180,20 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 			return nil
 		}
 	}
-	prior, priorAt, blocked, shown := entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown
+	if superseded, err := s.reportSuperseded(ctx, reportID); err != nil || superseded {
+		return err
+	}
+	if entry.launchMode.Interactive() {
+		return s.recordIdleReportLocked(ctx, entry, reportID, reportedClose(outcome).reason, reportedAt)
+	}
+	if entry.reported == outcome {
+		return nil
+	}
+	prior, priorAt, idle, shown := entry.reported, entry.reportedAt, entry.idleReason, entry.idleShown
 	entry.reported, entry.reportedAt = outcome, time.Now().UTC()
-	entry.blockedReason, entry.blockedShown = "", false
+	entry.idleReason, entry.idleShown = "", false
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.reported, entry.reportedAt, entry.blockedReason, entry.blockedShown = prior, priorAt, blocked, shown
+		entry.reported, entry.reportedAt, entry.idleReason, entry.idleShown = prior, priorAt, idle, shown
 		return fmt.Errorf("scheduler: arm reported finish for %s: %w", run, err)
 	}
 	// The hand-off can trail the turn end it belongs to - the agent
@@ -195,6 +201,74 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 	if entry.turnEnded() && !entry.atPrompt() {
 		s.startReportedFinishLocked(entry)
 	}
+	return nil
+}
+
+// reportSuperseded fences an outbox hand-off loaded before a newer reservation.
+// Direct lifecycle callers may not have a coordination row.
+func (s *Scheduler) reportSuperseded(ctx context.Context, id string) (bool, error) {
+	reports, ok := s.cfg.Store.(store.CoordTerminalReportStore)
+	if !ok {
+		return false, nil
+	}
+	report, err := reports.GetCoordReport(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("scheduler: read reported outcome %s: %w", id, err)
+	}
+	return report.SupersededAt != nil, nil
+}
+
+func reportedIdleReason(reason string) bool {
+	return reason == reportedSuccessReason || reason == reportedFailureReason
+}
+
+// recordIdleReportLocked shares the blocked-report watermark and park machinery
+// with interactive outcomes. No native execution report is synthesized.
+func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
+	if entry.killRequested || entry.finalizing || entry.destroyPending ||
+		entry.idleReportID == id || !at.After(entry.idleReportAt) || at.Before(entry.relaunchedAt) {
+		return nil
+	}
+	old := entry.sidecar()
+	entry.idleReason, entry.idleShown = reason, false
+	entry.idleReportID, entry.idleReportAt = id, at
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
+		entry.idleReportID = old.IdleReportID
+		entry.idleReportAt = time.Time{}
+		if old.IdleReportAt != nil {
+			entry.idleReportAt = *old.IdleReportAt
+		}
+		return fmt.Errorf("scheduler: record idle report for %s: %w", entry.runID, err)
+	}
+	if entry.turnEnded() && !entry.atPrompt() {
+		return s.parkIdleReportLocked(ctx, entry)
+	}
+	return nil
+}
+
+// parkIdleReportLocked never pauses the runtime or stops its adapter. Persist
+// the shown marker before the row; a retry repairs a crash between those writes.
+func (s *Scheduler) parkIdleReportLocked(ctx context.Context, entry *supervised) error {
+	if entry.idleReason == "" || entry.atPrompt() || entry.status.Terminal() ||
+		entry.killRequested || entry.finalizing || entry.destroyPending {
+		return nil
+	}
+	shown := entry.idleShown
+	entry.idleShown = true
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		entry.idleShown = shown
+		return fmt.Errorf("scheduler: persist idle outcome: %w", err)
+	}
+	if err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status,
+		domain.RunNeedsAttention, entry.idleReason, "", reportedIdleReason(entry.idleReason)); err != nil {
+		entry.idleShown = shown
+		return errors.Join(err, s.writeSidecar(entry.sidecar()))
+	}
+	entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
 	return nil
 }
 
@@ -249,11 +323,9 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	return nil
 }
 
-// ReportBlocked records the summary of blocked report reportID. The next
-// turn-end park shows it as the needs-attention reason, and the first resume
-// after that clears it. Parking right away would not survive: the report is
-// made inside a tool call, so a working report follows it. Replays, older
-// reports and reports from before the last relaunch change nothing.
+// ReportBlocked records a nonterminal outcome at its settled turn boundary.
+// Same-turn Working callbacks do not erase it; the first resume after it is
+// shown does. The shared watermark fences replays, older reports and relaunches.
 func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
 	reason := blockedReasonPrefix + summary
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
@@ -262,19 +334,10 @@ func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportI
 	s.mu.Lock()
 	if entry := s.runs[run]; entry != nil {
 		defer s.mu.Unlock()
-		if entry.status.Terminal() || entry.reported != "" || entry.blockedReportID == reportID ||
-			!reportedAt.After(entry.blockedReportAt) || reportedAt.Before(entry.relaunchedAt) {
+		if entry.status.Terminal() || entry.reported != "" {
 			return nil
 		}
-		blocked, shown, id, at := entry.blockedReason, entry.blockedShown, entry.blockedReportID, entry.blockedReportAt
-		entry.blockedReason, entry.blockedShown = reason, false
-		entry.blockedReportID, entry.blockedReportAt = reportID, reportedAt
-		if err := s.writeSidecar(entry.sidecar()); err != nil {
-			entry.blockedReason, entry.blockedShown = blocked, shown
-			entry.blockedReportID, entry.blockedReportAt = id, at
-			return fmt.Errorf("scheduler: record blocked report for %s: %w", run, err)
-		}
-		return nil
+		return s.recordIdleReportLocked(ctx, entry, reportID, reason, reportedAt)
 	}
 	s.mu.Unlock()
 	return s.requireFinished(ctx, run, "blocked report")
@@ -307,20 +370,27 @@ func (s *Scheduler) startReportedFinishLocked(entry *supervised) {
 	go s.finishReported(entry)
 }
 
-// finishOverdueReports finishes armed runs whose turn end cannot or did not
-// arrive (no reporter, a stall park, or a failed finish). A run at an input
-// prompt waits for its owner, and a running run on a reporting harness is
-// finished only by its report, so an agent still working is not cut off.
+// finishOverdueReports settles outcomes whose native turn end cannot arrive.
+// Input requests always fence settlement. Interactive reports only park; a
+// reporting harness that is still working is never cut off by the deadline.
 func (s *Scheduler) finishOverdueReports() {
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, entry := range s.runs {
-		if entry.reported != "" && !entry.status.Terminal() &&
-			(entry.reporter == harness.ReporterNone ||
-				((entry.turnEnded() || entry.status == domain.RunNeedsAttention) && !entry.atPrompt())) &&
-			now.Sub(entry.reportedAt) >= reportFinishDeadline {
+		if entry.status.Terminal() || entry.atPrompt() {
+			continue
+		}
+		ready := entry.reporter == harness.ReporterNone || entry.turnEnded() || entry.status == domain.RunNeedsAttention
+		if entry.reported != "" && ready && now.Sub(entry.reportedAt) >= reportFinishDeadline {
 			s.startReportedFinishLocked(entry)
+		}
+		if entry.idleReason != "" && !entry.idleShown &&
+			(entry.turnEnded() || (reportedIdleReason(entry.idleReason) && ready &&
+				now.Sub(entry.idleReportAt) >= reportFinishDeadline)) {
+			if err := s.parkIdleReportLocked(s.superCtx, entry); err != nil {
+				slog.Warn("scheduler: park reported outcome", "run", entry.runID, "error", err)
+			}
 		}
 	}
 }

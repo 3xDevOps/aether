@@ -122,12 +122,16 @@ container or run receives the setting.
 
 ### Closed-run compute grace
 
-Closing or finishing a retained TUI run, or completing a swarm worker, keeps
-its exact container for **one hour** by default (`--run-container-ttl=1h`).
-The clock starts at completion, not at server restart. A positive override
-changes that grace; zero selects the default, and a negative duration requests
-immediate release. Working agents, agents waiting for input, active paused
-runs and services are not expired because they are quiet.
+Reporting success or failure leaves an interactive Standard or Enhanced run
+open for follow-up; it does not start a cleanup timer. Working agents, agents
+waiting for input, active paused runs and services do not expire because they
+are quiet.
+
+Explicitly closing an interactive run, or completing a swarm worker, keeps
+its exact container for **seven days** by default (`--run-container-ttl=168h`).
+The clock starts at close or worker completion, not at server restart. A
+positive override changes that grace; zero selects the default, and a
+negative duration requests immediate release.
 
 A paused container still holds its process memory: pausing stops execution,
 not RAM ownership. The grace is for recovering the same live processes, not
@@ -141,7 +145,7 @@ Compute, checkout and evidence lifetimes are separate. The finished checkout
 is normally eligible for cleanup after **72 hours** (`--checkout-ttl`), but
 required evidence or unresolved execution ownership protects it. Published
 Git result branches and captured evidence are not removed just because the
-one-hour container grace expires; retained history has its own policies.
+seven-day container grace expires; retained history has its own policies.
 **Free container…** releases retained compute early without deleting the run's
 history. **Delete** is the separate destructive run-removal action.
 

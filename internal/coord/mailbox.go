@@ -536,10 +536,9 @@ func (s *Service) resolveRun(ctx context.Context, method string, run domain.RunI
 	return r, nil
 }
 
-// CoordReport persists one bounded outcome. A run holds any number of
-// blocked reports and one active terminal report; the report is reserved
-// before capture so a second terminal key cannot race it, and capture failure
-// leaves the pending reservation retryable by that same key.
+// CoordReport reserves an outcome before evidence capture. Live non-worker
+// interactive runs may supersede earlier terminal reports; background runs and
+// workers keep one terminal slot. Failed capture leaves the reservation retryable.
 func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.CoordReportParams) (protocol.CoordReportResult, *protocol.Error) {
 	const method = protocol.MethodCoordReport
 	if s.cfg.Disabled {
@@ -636,7 +635,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		WorkspaceID: self.WorkspaceID, RunID: run, Outcome: store.CoordOutcome(p.Outcome),
 		Summary: summary, NextAction: nextAction, EvidenceRefs: refs, IdempotencyKey: p.IdempotencyKey,
 	}
-	supersededMessage := fmt.Sprintf("%s: the report under idempotency_key %q was superseded when the run was relaunched; report again with a new idempotency key", method, p.IdempotencyKey)
+	supersededMessage := fmt.Sprintf("%s: the report under idempotency_key %q was superseded; report again with a new idempotency key", method, p.IdempotencyKey)
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
 		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||

@@ -283,9 +283,8 @@ func TestMissionNegativeTTLFailedDestroyHoldsCapacityUntilCleanup(t *testing.T) 
 	}
 }
 
-// TestIntegratorReportArmsTheReportedFinish: a mission integrator's terminal
-// report finishes its run like an ordinary run's does.
-func TestIntegratorReportArmsTheReportedFinish(t *testing.T) {
+// Interactive integrators keep their execution lifetime after reporting.
+func TestInteractiveIntegratorReportKeepsRunOpen(t *testing.T) {
 	e := newTestEnv(t, nil)
 	m := &domain.Mission{
 		WorkspaceID: e.ws.ID, Objective: "integrator finish", AccountableHumanID: e.member.ID,
@@ -306,11 +305,15 @@ func TestIntegratorReportArmsTheReportedFinish(t *testing.T) {
 	if err := e.sched.FinishReported(t.Context(), run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	e.sched.mu.Lock()
-	armed := e.sched.runs[run.ID].reported
-	e.sched.mu.Unlock()
-	if armed != domain.RunCompleted {
-		t.Fatalf("integrator armed for %q, want a completed reported finish", armed)
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waitingForInput); err != nil {
+		t.Fatal(err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || row.FinishedAt != nil {
+		t.Fatalf("integrator outcome = %+v", row)
+	}
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.Retained || sc.Paused || sc.RetainedUntil != nil {
+		t.Fatalf("integrator execution changed: %+v, %v", sc, err)
 	}
 }
 

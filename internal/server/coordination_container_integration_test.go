@@ -174,15 +174,52 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 		att.waitOutput(t, "cli-reported:")
 		assertNoAgentError(t, att)
 	}
-	// An ordinary run's success report finishes it once the turn ends:
-	// committed, published, and retained in Done rather than parked in
-	// needs-attention.
 	for _, run := range []protocol.Run{runA, runB} {
-		waitEvent(t, sub, &seen, "run "+run.ID+" finished by its report", func(e events.Event) bool {
+		waitEvent(t, sub, &seen, "run "+run.ID+" ready for follow-up", func(e events.Event) bool {
 			p, ok := e.Payload.(events.RunStatusPayload)
-			return ok && string(e.RunID) == run.ID && p.To == domain.RunCompleted &&
-				p.Reason == "agent reported success; retained container"
+			return ok && string(e.RunID) == run.ID && p.To == domain.RunNeedsAttention &&
+				p.Reason == "agent reported success" && p.OutcomeUnseen
 		})
+		ctrl, att := adaCtrl, attA
+		if run.ID == runB.ID {
+			ctrl, att = boCtrl, attB
+		}
+		var before protocol.RunResult
+		if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: run.ID}, &before); err != nil {
+			t.Fatalf("run.get before follow-up: %v", err)
+		}
+		if before.Run.FinishedAt != nil || before.Run.ContainerRetainedUntil != nil || before.Run.Paused {
+			t.Fatalf("reported run stopped its live environment: %+v", before.Run)
+		}
+		if _, err := att.stdin.Write([]byte("follow-up\r")); err != nil {
+			t.Fatalf("type follow-up into the same terminal: %v", err)
+		}
+		att.waitOutput(t, "cli-followup:"+run.ID+":follow-up")
+		var after protocol.RunResult
+		if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: run.ID}, &after); err != nil {
+			t.Fatalf("run.get after follow-up: %v", err)
+		}
+		if after.Run.Status != string(domain.RunNeedsAttention) || after.Run.Reason != "agent reported success" ||
+			!after.Run.OutcomeUnseen || after.Run.FinishedAt != nil || after.Run.ContainerRetainedUntil != nil || after.Run.Paused {
+			t.Fatalf("follow-up outcome did not leave the same run open: %+v", after.Run)
+		}
+		if before.Run.StartedAt == nil || after.Run.StartedAt == nil || *before.Run.StartedAt != *after.Run.StartedAt {
+			t.Fatalf("follow-up restarted the run: before=%+v after=%+v", before.Run, after.Run)
+		}
+		if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{RunID: run.ID, Outcome: string(domain.RunMerged)}, nil); err != nil {
+			t.Fatalf("explicit run.close: %v", err)
+		}
+		var closed protocol.RunResult
+		if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: run.ID}, &closed); err != nil {
+			t.Fatalf("run.get after close: %v", err)
+		}
+		if closed.Run.ContainerRetainedUntil == nil || !closed.Run.Paused {
+			t.Fatalf("explicit close did not retain the environment: %+v", closed.Run)
+		}
+		until, err := time.Parse(time.RFC3339Nano, *closed.Run.ContainerRetainedUntil)
+		if err != nil || time.Until(until) < 6*24*time.Hour {
+			t.Fatalf("close did not provide the seven-day grace: %v, %v", closed.Run.ContainerRetainedUntil, err)
+		}
 	}
 }
 
@@ -607,9 +644,18 @@ case "$report" in
 	*'"ok":true'*) echo "cli-reported:$AETHER_RUN_ID" ;;
 	*) fail "report not acknowledged:$report" ;;
 esac
-# End the turn the way a harness Stop hook does, so the reported success
-# finishes the run.
-printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
+printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude || fail idle
+turn=0
+while IFS= read -r line; do
+	turn=$((turn + 1))
+	printf '%s\n' '{"hook_event_name":"UserPromptSubmit"}' | /opt/aether/aether-server report claude || fail working
+	/usr/local/bin/aether-internal report \
+		--outcome success \
+		--summary "Handled follow-up." \
+		--idempotency-key "shell-followup-$AETHER_RUN_ID-$turn" >/dev/null || fail followup
+	printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude || fail idle
+	echo "cli-followup:$AETHER_RUN_ID:$line"
+done
 `)
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid == 0 {

@@ -17,6 +17,21 @@ import {
 
 const record = (over: Parameters<typeof run>[0] = {}): RunRecord => toRecord(run(over))
 
+it.each(['tui', 'acp'] as const)('keeps actual requests ahead of an unseen %s outcome', (mode) => {
+  const parked = record({
+    mode, acp: mode === 'acp', status: 'needs-attention',
+    reason: 'agent reported success', outcome_unseen: true,
+  })
+  expect(needsYou(parked, stateContext())?.id).toBe('unreviewed-finish')
+  expect(needsYou(parked, stateContext({
+    approvalsByRun: { [parked.id]: [approval()] },
+  }))?.id).toBe('permission')
+  expect(needsYou({
+    ...parked, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }],
+  }, stateContext())?.id).toBe('question')
+  expect(needsYou({ ...parked, outcome_unseen: false }, stateContext())).toBeUndefined()
+})
+
 const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
 const worker = record({
   id: 'run_worker',

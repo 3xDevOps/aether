@@ -697,6 +697,13 @@ make test-integration INTEGRATION_PKGS='./internal/scheduler ./internal/server' 
   INTEGRATION_RUN='TestIntegrationEnhancedRun'
 ```
 
+The gateway scenario reports success and failure between turns, then sends
+follow-ups through the same ACP stream and checks that the agent session ID
+is unchanged. `TestIntegrationCoordinationCLIFromShellHarnesses` reports from
+inside real Standard containers, sends follow-ups through their existing raw
+terminal attachments, reports again, and checks that only explicit Close
+starts the seven-day retention grace.
+
 `web/e2e/run-session.spec.ts` drives the dashboard's Session view against
 the same agent: the e2e fixture `installACPMock` builds it (`go build`, so
 the e2e host needs Go) into the member's `~/.local/bin` and registers it as
@@ -1052,7 +1059,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `account-sharing` | One member shares their agent account from **Profile > Account sharing** with a teammate. Before the share, the teammate's **New run** offers no account choice; after it, choosing the shared account lists the agents installed in the owner's home and disables each one the owner has no login for, with a status sentence naming the missing logins. The owner's already running Environment prompts **Stop environment**. Once the owner has a login, the teammate's run launches with the owner's login mounted, and **Details** shows the teammate as Owner and the sharer under Agent account |
 | `activity` | A real run's log in Activity: rows in product words with no wire names, one **Filter** popover narrowing to Run state, **Raw events** from the page's More menu printing wire types and payloads, and **Show** > Agent messages switching to the empty agent-message history with its search box. A second scenario creates a swarm over RPC, sends real agent messages between its runs, and narrows them by search and to one **Thread** |
 | `admin-pages-focus` | Keyboard focus through admin pages: the Members and Devices tabs keep focus on activation, Escape from **Invite…** returns focus to it, and the Manage workspaces row's **More actions** menu and its **Delete…** confirm both return focus to the row button |
-| `agent-outcome` | An agent that reports success lands in **Needs you** reading "Finished, review the result", offers **Review** on hover and opens on Changes; opening it clears the server's unseen outcome and the card moves to Finished |
+| `agent-outcome` | An interactive success report lands in **Needs you**, offers **Review** and opens on Changes. Opening clears the unseen outcome and moves the card to Finished without closing the run; a follow-up through the Session composer returns the same execution lifetime to Working. |
 | `board-card` | A run whose agent reports an idle turn lands in Needs you; its **Reply** stays hidden until the card is hovered, sits above the card's open target, and posts through `run.inject` into the run's message history (`run.room.list`); `o` on the focused card opens the run - hit testing and hover only a real browser does |
 | `candidate-delivery` | Two retained runs reviewed in **More > Captures… > Candidate review**: packets selected, a candidate prepared and its combined patch loaded, a source-mutating verification fenced as `source_changed` with **Request delivery** disabled, a passing verification in a real container, delivery requested, **Approve delivery** disabled while offline, then approved and delivered after a reload, landing the exact candidate revision. Reloading a delivered candidate reopens its receipt without delivering again. A second scenario prepares a conflicted candidate and applies only the selected resolution, leaving the other file conflicted until its own resolution is applied. Attachments: `candidate delivery review and landed receipt`, `candidate review with one selected conflict resolution` |
 | `development-browser/browser.spec.ts` | Shared login, live app update, agent/member control, popups and stale authority through the real companion. **Page tools** owns page/viewport selection, Screenshot and confirmed Close page/Reset session; cancelling close preserves the page and returns keyboard focus, observers cannot close/reset, and reset requires explicit reacquisition before opening another page. The scenario attaches `shared authenticated app` |

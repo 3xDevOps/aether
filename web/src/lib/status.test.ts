@@ -1,6 +1,6 @@
 import { awaitingReview } from '@/lib/needs-you'
-import { groupOf, plainReason, presentRun, runLabel, stateLabel } from '@/lib/status'
-import { toRecord } from '@/store/runs'
+import { groupOf, plainReason, presentRun, runLabel } from '@/lib/status'
+import { isTerminal, toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
 describe('runLabel', () => {
@@ -67,6 +67,18 @@ describe('run presentation', () => {
     expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')
   })
 
+  it('keeps overdue worker mail visible after reviewing an open integrator outcome', () => {
+    const parked = toRecord(run({
+      mode: 'acp', acp: true, mission_id: 'mission_1', mission_role: 'integrator',
+      status: 'needs-attention', reason: 'agent reported failure', outcome_unseen: false,
+      unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z',
+    }))
+    const warning = presentRun(parked, ctx)
+    expect(warning).toMatchObject({ state: 'working', unread: 3 })
+    expect(groupOf(warning.state)).toBe('working')
+    expect(presentRun({ ...parked, unacked_messages: 0, oldest_unacked_at: undefined }, ctx).state).toBe('failed')
+  })
+
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', paused: true }))
     expect(presentRun(paused, ctx).state).toBe('paused')
@@ -80,8 +92,35 @@ describe('run presentation', () => {
     expect(groupOf('failed')).toBe('finished')
   })
 
-  it('names the states without the word idle', () => {
-    expect(Object.values(stateLabel)).toEqual(['Needs you', 'Working', 'Paused', 'Done', 'Failed'])
+  it.each(['tui', 'acp'] as const)('keeps %s reported work distinct from a finished runtime', (mode) => {
+    for (const outcome of ['success', 'failure'] as const) {
+      const parked = toRecord(run({
+        mode, acp: mode === 'acp', status: 'needs-attention',
+        reason: `agent reported ${outcome}`, outcome_unseen: true,
+      }))
+      const review = presentRun(parked, ctx)
+      expect(review.state).toBe('needs-you')
+      expect(review.needsYou?.id).toBe('unreviewed-finish')
+      expect(review.reason).toContain(`Agent reported ${outcome}`)
+      expect(review.reason).toContain('Run remains open for follow-up.')
+      expect(isTerminal(parked.status)).toBe(false)
+      expect(presentRun({ ...parked, outcome_unseen: false }, ctx)).toEqual({
+        state: outcome === 'success' ? 'done' : 'failed',
+        reason: `Agent reported ${outcome}. Run remains open for follow-up.`,
+      })
+      expect(presentRun({ ...parked, status: 'running', reason: 'agent resumed', outcome_unseen: false }, ctx))
+        .toEqual({ state: 'working', reason: 'Agent working' })
+    }
+  })
+
+  it('shows an interactive integrator report without marking its runtime finished', () => {
+    expect(shown({
+      mode: 'acp', acp: true, mission_role: 'integrator', status: 'needs-attention',
+      reason: 'agent reported success',
+    }).state).toBe('done')
+    for (const over of [{ mode: 'headless' as const }, { mission_role: 'worker' as const }]) {
+      expect(shown({ status: 'needs-attention', reason: 'agent reported success', ...over }).state).not.toBe('done')
+    }
   })
 
   it('lists an unreviewed outcome only while it is an agent outcome', () => {

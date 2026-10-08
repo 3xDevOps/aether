@@ -776,6 +776,9 @@ func TestCoordReportValidationAndIdempotency(t *testing.T) {
 	h := newHarness(t, 1, func(c *Config) { c.Evidence = capture })
 	ctx := context.Background()
 	run := h.run(0)
+	if err := h.db.SetRunMode(ctx, run, domain.LaunchHeadless, false); err != nil {
+		t.Fatalf("SetRunMode: %v", err)
+	}
 	first, err := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeBlocked, Summary: "needs review",
 		EvidenceRefs: []string{"ev_01"}, IdempotencyKey: "report-1",
