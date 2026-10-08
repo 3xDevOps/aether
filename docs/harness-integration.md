@@ -1,8 +1,9 @@
 # Integrating an unsupported agent
 
-An Aether **run** is a task with a server-owned identity; its compute and
-checkout can end before its history does. An **agent** is the CLI executing
-that task. Launching it does not automatically give it an inbox hook or native
+An Aether **run** is an agent session with a server-owned identity, including
+follow-up tasks; its compute and checkout can end before its history does.
+An **agent** is the CLI handling those tasks. Launching it does not
+automatically give it an inbox hook or native
 wake API. This guide connects an existing agent to Aether's durable inbox
 without inventing a second transport, daemon, or terminal-input fallback.
 

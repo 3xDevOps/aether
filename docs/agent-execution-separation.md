@@ -25,8 +25,9 @@ commands, tests, builds and their child processes. A real split lets an
 execution process or container fail without killing the agent process that
 receives and explains the failure.
 
-A **run** is Aether's durable identity for one task. Its compute, checkout and
-recorded history have separate lifetimes. Separating execution does not
+A **run** is Aether's durable identity for an agent session, including
+follow-up tasks. Its compute, checkout and recorded history have separate
+lifetimes. Separating execution does not
 require deleting history: recordings and captured diff history persist until
 explicit deletion, independently of whether either process is running.
 
@@ -58,6 +59,14 @@ The [ACP host](../internal/acphost/conn.go) advertises terminal authentication
 and output display, not client-side filesystem or terminal execution.
 Tool-call updates are observations; they are not instructions for Aether to
 execute again.
+
+Interactive runs already remain replyable after a success/failure report;
+explicit Close ends that live use and starts the configured compute grace.
+Background runs and swarm workers still complete automatically. That
+[lifecycle policy](environments.md#resource-limits-and-launch-admission)
+provides conversation continuity without a second runtime. A split would
+need to justify its additional complexity through execution isolation or
+measured resource savings, not merely the ability to send a follow-up.
 
 [ACP v1 filesystem](https://agentclientprotocol.com/protocol/v1/file-system)
 and [terminal methods](https://agentclientprotocol.com/protocol/v1/terminals)
