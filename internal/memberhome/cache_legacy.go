@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/rootfs"
@@ -20,6 +21,66 @@ var legacyCachePaths = [...]string{
 	".cache/uv",
 	".cache/go-build",
 	"go/pkg/mod",
+}
+
+// ProtectLegacyCaches remembers explicit home-relative cache choices, including
+// ancestors and descendants of allowlisted directories. Only a bounded mask is
+// persisted; no environment values or credentials enter cache metadata.
+// Callers hold LockCaches. Protection survives restart and later config edits.
+func (m *Manager) ProtectLegacyCaches(member domain.MemberID, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	home, err := m.openExistingHome(member)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if home != nil {
+		defer func() { _ = home.Close() }()
+	}
+	var mask uint8
+	for _, rel := range paths {
+		if rel != "." && !fs.ValidPath(rel) {
+			return fmt.Errorf("memberhome: invalid explicit cache path")
+		}
+		// Never resolve links through the host filesystem. An alias can point
+		// at any old cache, so an uncertain path protects the entire allowlist.
+		if home != nil && rel != "." {
+			parts := strings.Split(rel, "/")
+			for i := range parts {
+				prefix := strings.Join(parts[:i+1], "/")
+				parent, openErr := rootfs.OpenRoot(home, path.Dir(prefix))
+				if errors.Is(openErr, fs.ErrNotExist) {
+					break
+				}
+				if openErr != nil {
+					rel = "."
+					break
+				}
+				entry, statErr := parent.Lstat(path.Base(prefix))
+				_ = parent.Close()
+				if errors.Is(statErr, fs.ErrNotExist) {
+					break
+				}
+				if statErr != nil || entry.Mode()&os.ModeSymlink != 0 {
+					rel = "."
+					break
+				}
+			}
+		}
+		for i, candidate := range legacyCachePaths {
+			if rel == "." || rel == candidate || strings.HasPrefix(rel, candidate+"/") || strings.HasPrefix(candidate, rel+"/") {
+				mask |= 1 << i
+			}
+		}
+	}
+	if mask == 0 {
+		return nil
+	}
+	return m.updateCacheMetadata(member, CachePoolRuns, true, func(meta *cacheMetadata) error {
+		meta.LegacyProtected |= mask
+		return nil
+	})
 }
 
 // RemoveLegacyCaches removes only known reconstructible home cache directories.
@@ -61,6 +122,9 @@ func (m *Manager) RemoveLegacyCaches(ctx context.Context, member domain.MemberID
 	}
 	var cleanupErr error
 	for i, rel := range legacyCachePaths {
+		if meta.LegacyProtected&(1<<i) != 0 {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 			break

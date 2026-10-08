@@ -338,6 +338,12 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 			}
 			// Legacy caches share HOME, so both pools' owners must be absent.
 			if !owners.legacy[info.Member] && len(latest.Owners) == 0 {
+				if current[info.Member] {
+					if err := s.protectConfiguredLegacyCaches(ctx, info.Member); err != nil {
+						_ = s.cfg.Homes.SetCacheCleanupError(info.Member, info.Pool, "Legacy cache configuration unavailable; cleanup deferred")
+						return
+					}
+				}
 				if err := s.cfg.Homes.RemoveLegacyCaches(ctx, info.Member); err != nil {
 					_ = s.cfg.Homes.SetCacheCleanupError(info.Member, info.Pool, "Legacy cache cleanup failed; automatic retry pending")
 					return

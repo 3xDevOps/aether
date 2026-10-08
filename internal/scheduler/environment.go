@@ -90,27 +90,10 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if ws != nil {
 		setupScript = ws.Environment.SetupPolicy.Script
 	}
-	var variableCount int
-	if ws != nil {
-		variableCount = len(ws.Environment.Variables)
+	env, err := explicitEnvironment(profile, ws)
+	if err != nil {
+		return nil, err
 	}
-	env := make(map[string]string, variableCount+len(profile.EnvPassthrough)+5)
-	for _, key := range profile.EnvPassthrough {
-		if value, ok := os.LookupEnv(key); ok && value != "" {
-			env[key] = value
-		}
-	}
-	if err := harness.MergeEnv(env, profile.PermissionEnv); err != nil {
-		return nil, fmt.Errorf("scheduler: apply %s's permission setting: %w", profile.Name, err)
-	}
-	if ws != nil {
-		if err := harness.MergeEnv(env, ws.Environment.Variables); err != nil {
-			return nil, fmt.Errorf("scheduler: apply the workspace variables over %s's permission setting: %w", profile.Name, err)
-		}
-	}
-	// The harness's own launch requirements come after workspace
-	// variables: a run whose agent refuses to start is not a preference.
-	maps.Copy(env, profile.Env)
 	env["HOME"] = home
 	env["TERM"] = "xterm-256color"
 	localBin := filepath.Join(home, ".local", "bin")
@@ -179,13 +162,10 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			if err != nil {
 				return nil, fmt.Errorf("scheduler: resolve image cache settings: %w", err)
 			}
-			for _, key := range []string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"} {
-				if value, present := inherited[key]; present {
-					if _, explicit := env[key]; !explicit {
-						env[key] = value
-					}
-				}
-			}
+			inheritCacheEnvironment(env, inherited)
+		}
+		if err := s.cfg.Homes.ProtectLegacyCaches(member.ID, explicitHomeCachePaths(env, home)); err != nil {
+			return nil, fmt.Errorf("scheduler: protect explicit home caches: %w", err)
 		}
 		applyCacheEnvironment(env)
 	}
@@ -202,6 +182,117 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		return nil, validateErr
 	}
 	return plan, nil
+}
+
+var cacheEnvironmentKeys = [...]string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"}
+
+func explicitEnvironment(profile harness.Profile, ws *domain.Workspace) (map[string]string, error) {
+	env := make(map[string]string)
+	for _, key := range profile.EnvPassthrough {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			env[key] = value
+		}
+	}
+	if err := harness.MergeEnv(env, profile.PermissionEnv); err != nil {
+		return nil, fmt.Errorf("scheduler: apply %s's permission setting: %w", profile.Name, err)
+	}
+	if ws != nil {
+		if err := harness.MergeEnv(env, ws.Environment.Variables); err != nil {
+			return nil, fmt.Errorf("scheduler: apply the workspace variables over %s's permission setting: %w", profile.Name, err)
+		}
+	}
+	maps.Copy(env, profile.Env)
+	return env, nil
+}
+
+func inheritCacheEnvironment(env, inherited map[string]string) {
+	for _, key := range cacheEnvironmentKeys {
+		if value, present := inherited[key]; present {
+			if _, explicit := env[key]; !explicit {
+				env[key] = value
+			}
+		}
+	}
+}
+
+func explicitHomeCachePaths(env map[string]string, home string) []string {
+	var paths []string
+	for _, key := range cacheEnvironmentKeys {
+		value, explicit := env[key]
+		if !explicit {
+			continue
+		}
+		// Relative paths, expansion and traversal depend on tool semantics or
+		// links we cannot establish here. Preserve rather than guess.
+		if !path.IsAbs(value) || strings.ContainsAny(value, "$~") || slices.Contains(strings.Split(value, "/"), "..") {
+			return []string{"."}
+		}
+		value = path.Clean(value)
+		if value == home || value == "/" || strings.HasPrefix(home, value+"/") {
+			return []string{"."}
+		}
+		if strings.HasPrefix(value, home+"/") {
+			paths = append(paths, strings.TrimPrefix(value, home+"/"))
+		}
+	}
+	return paths
+}
+
+// Re-read durable configuration even for never-launched/pre-upgrade homes and
+// edits made while idle. Launch metadata alone cannot cover those choices.
+func (s *Scheduler) protectConfiguredLegacyCaches(ctx context.Context, memberID domain.MemberID) error {
+	member, err := s.cfg.Store.GetMember(ctx, memberID)
+	if err != nil {
+		return err
+	}
+	image := member.Image
+	if image == "" {
+		image = s.cfg.StandardImage
+	}
+	resolver, ok := s.cfg.Runtime.(imageCacheEnvironmentResolver)
+	if !ok || image == "" {
+		return errors.New("scheduler: image cache configuration unavailable")
+	}
+	inherited, err := resolver.ImageCacheEnvironment(ctx, image)
+	if err != nil {
+		return err
+	}
+	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
+	if err != nil {
+		return err
+	}
+	// The blank profile covers terminals and member-defined harnesses, whose
+	// definitions cannot override environment settings. Registry profiles use
+	// the same configured launch resolution as actual runs.
+	profiles := []harness.Profile{{}}
+	for _, registered := range harness.Profiles() {
+		profile, _, err := s.launchProfile(ctx, memberID, memberID, registered.Name)
+		if err != nil {
+			return err
+		}
+		profiles = append(profiles, profile)
+	}
+	workspaces = append(workspaces, nil)
+	var paths []string
+	for _, profile := range profiles {
+		user, err := s.resolveContainerUser(ctx, image, profile)
+		if err != nil {
+			return err
+		}
+		home := harness.HomeDir(user)
+		if home == "" {
+			home = "/root"
+		}
+		for _, ws := range workspaces {
+			env, err := explicitEnvironment(profile, ws)
+			if err != nil {
+				return err
+			}
+			inheritCacheEnvironment(env, inherited)
+			paths = append(paths, explicitHomeCachePaths(env, home)...)
+		}
+	}
+	return s.cfg.Homes.ProtectLegacyCaches(memberID, paths)
 }
 
 // Explicit tool settings win; HOME, PATH, XDG and installation paths are not caches.

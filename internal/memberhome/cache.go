@@ -57,6 +57,7 @@ type cacheMetadata struct {
 	ImageCleanupError   string    `json:"image_cleanup_error,omitempty"`
 	RuntimeCleanupError string    `json:"runtime_cleanup_error,omitempty"`
 	Owners              []string  `json:"owners,omitempty"`
+	LegacyProtected     uint8     `json:"legacy_protected,omitempty"`
 }
 
 // LockCaches serializes ownership publication and cache maintenance for one
@@ -379,6 +380,9 @@ func loadCacheMetadata(root *os.Root, initialize bool) (cacheMetadata, error) {
 		len(meta.RuntimeCleanupError) > maxCacheErrorBytes || meta.RuntimeCleanupError != boundedCacheError(meta.RuntimeCleanupError) ||
 		len(meta.ImageCleanupError) > maxCacheErrorBytes || meta.ImageCleanupError != boundedCacheError(meta.ImageCleanupError) || len(meta.Owners) > maxCacheOwners {
 		return meta, fmt.Errorf("memberhome: unsupported or invalid cache metadata")
+	}
+	if meta.LegacyProtected >= 1<<len(legacyCachePaths) {
+		return meta, fmt.Errorf("memberhome: invalid legacy cache protection")
 	}
 	for i, owner := range meta.Owners {
 		if !validCacheOwner(owner) || slices.Contains(meta.Owners[:i], owner) {

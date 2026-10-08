@@ -217,6 +217,9 @@ type credentialUserReservation struct {
 	owner    string
 	run      *supervised
 	terminal *terminalSupervision
+	// verificationKey keeps a durable verification's reservation until its
+	// creation key has been confirmed absent and its journal released.
+	verificationKey string
 	// pending covers reserveTerminalUser to registerTerminal; the reservation
 	// must survive registry sync then, or a concurrent run could chown the home.
 	pending bool
@@ -512,6 +515,10 @@ func New(cfg Config) (*Scheduler, error) {
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
 		terminals:            make(map[domain.MemberID]*terminalSupervision),
 		credentialUsers:      make(map[*credentialUserReservation]struct{}),
+	}
+	if err := s.restoreVerificationUsers(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("scheduler: restore verification users: %w", err)
 	}
 	s.acp = newACPDriver(s)
 	return s, nil

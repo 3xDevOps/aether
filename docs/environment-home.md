@@ -39,6 +39,12 @@ Candidate verification also uses that launcher's run pool (the originating
 run's immutable home owner for an agent request). Its durable creation key
 protects both cache data and legacy home caches through startup and failed
 runtime lookup/destruction; only confirmed cleanup releases that ownership.
+Verification resolves the container UID:GID before creating its runtime and
+grants that user access only to the managed cache, not the persistent home.
+Its journal preserves the same home-user reservation across server restart;
+conflicting users cannot change cache ownership beneath a live verification.
+Malformed published ownership journals stop startup rather than guessing that
+the cache is unused; unpublished temporary files cannot own a runtime.
 
 Only tool variables unset by the image, workspace and profile receive defaults:
 
@@ -66,6 +72,18 @@ mount; normal maintenance retries them even if a partial removal brought the
 remaining data below its age or size target. Successful image cleanup does not
 clear a pending cache-data failure. An open environment protects its cache
 data, not an exited updater container whose cleanup needs retrying.
+
+Before legacy cleanup, Aether re-reads the current image, workspace and harness
+cache settings, including configurations that have never launched or were edited
+while idle. Explicit paths inside the resolved container home protect overlapping
+allowlisted directories (including configured ancestors or descendants); a
+similarly named sibling does not. Protection observed by planning or cleanup is
+remembered in server-owned metadata across restart and subsequent configuration
+edits. Unavailable configuration or image inspection defers legacy cleanup.
+Ambiguous paths or symlink aliases are preserved conservatively, without following
+links. These protections do not prevent reclaiming inactive managed cache pools.
+Before the first managed cache is created, an absent cache root is an empty
+inventory. Existing broken or unreadable roots remain measurement errors.
 
 For homes created before managed caches, cleanup waits until all users of
 the old home are gone, then removes only `.npm/_cacache`, `.npm/_logs`,

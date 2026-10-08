@@ -215,9 +215,17 @@ func componentOwner(name string) (kind, key string) {
 // MeasureCachePools measures only the managed cache root, sharing one inode
 // set across pools. Partial results are accompanied by an error and must not
 // be interpreted as complete pressure or cleanup eligibility information.
+// A root not yet created is an empty cache inventory, not a failed scan.
 func MeasureCachePools(cacheRoot string) (map[string]uint64, error) {
 	root, err := os.OpenRoot(cacheRoot)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// OpenRoot also reports ENOENT for an existing dangling symlink.
+			// Only an absent root itself is a legitimate empty inventory.
+			if _, statErr := os.Lstat(cacheRoot); errors.Is(statErr, fs.ErrNotExist) {
+				return nil, nil
+			}
+		}
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()

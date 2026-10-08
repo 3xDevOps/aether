@@ -110,6 +110,7 @@ type verificationBridgeRef struct {
 	BridgePath   string          `json:"bridge_path"`
 	CacheMember  domain.MemberID `json:"cache_member,omitempty"`
 	CachePool    string          `json:"cache_pool,omitempty"`
+	CacheUser    string          `json:"cache_user,omitempty"`
 }
 
 func (s *Scheduler) verificationBridgeRefDir() string {
@@ -132,6 +133,12 @@ func validateVerificationBridgeRef(ref verificationBridgeRef) error {
 	if (ref.CacheMember == "") != (ref.CachePool == "") ||
 		(ref.CachePool != "" && ref.CachePool != "runs") {
 		return errors.New("scheduler: invalid verification cache reference")
+	}
+	if ref.CacheUser != "" {
+		user, err := harness.ResolveUser(ref.CacheUser, "")
+		if err != nil || user != ref.CacheUser || ref.CacheMember == "" {
+			return errors.New("scheduler: invalid verification cache user")
+		}
 	}
 	if len(ref.BridgeDigest) != sha256.Size*2 {
 		return errors.New("scheduler: invalid verification bridge digest")
@@ -276,8 +283,8 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 	mounts = append(mounts, runtime.Mount{
 		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
 	})
-	if err := checkCoordinationMounts(mounts[len(mounts)-1:]); err != nil {
-		return release, err
+	if mountErr := checkCoordinationMounts(mounts[len(mounts)-1:]); mountErr != nil {
+		return release, mountErr
 	}
 	env := maps.Clone(spec.Env)
 	if env == nil {
@@ -289,6 +296,9 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 		BridgePath:  mounts[len(mounts)-1].HostPath,
 		CacheMember: member, CachePool: pool,
 	}
+	if member != "" {
+		ref.CacheUser = spec.User
+	}
 	prior, readErr := s.readVerificationBridgeRef(spec.CreationKey)
 	if readErr == nil && prior != ref {
 		return release, errors.New("scheduler: verification resource reference changed")
@@ -296,17 +306,40 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 		return release, readErr
 	}
-	// Persist the cleanup mapping before publishing the pool owner. A failed
-	// pool write can then be retried using the same verification creation key.
-	if err := s.writeVerificationBridgeRef(ref); err != nil {
+	reservation, added, err := s.reserveVerificationUser(ref)
+	if err != nil {
 		return release, err
 	}
-	if member != "" {
-		if _, err := s.cfg.Homes.CachePath(member, pool); err != nil {
-			return release, err
+	defer func() {
+		if err != nil && added {
+			s.mu.Lock()
+			delete(s.credentialUsers, reservation)
+			s.mu.Unlock()
 		}
-		if err := s.cfg.Homes.AddCacheOwner(member, pool, spec.CreationKey); err != nil {
-			return release, err
+	}()
+	if member != "" {
+		if _, cacheErr := s.cfg.Homes.CachePath(member, pool); cacheErr != nil {
+			return release, cacheErr
+		}
+		// Only the managed cache needs ownership here. In particular, never
+		// reassign a shared login or the current run owner's home.
+		for i, mount := range spec.Mounts {
+			if mount.ContainerPath == "/aether-cache" {
+				if ownErr := s.applyRunOwnership(nil, &domain.Run{}, member, spec.Mounts[i:i+1], spec.User); ownErr != nil {
+					return release, ownErr
+				}
+				break
+			}
+		}
+	}
+	// Persist the cleanup mapping before publishing the pool owner. A failed
+	// pool write can then be retried using the same verification creation key.
+	if writeErr := s.writeVerificationBridgeRef(ref); writeErr != nil {
+		return release, writeErr
+	}
+	if member != "" {
+		if ownerErr := s.cfg.Homes.AddCacheOwner(member, pool, spec.CreationKey); ownerErr != nil {
+			return release, ownerErr
 		}
 	}
 	spec.Mounts = mounts
@@ -330,9 +363,21 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 	c := s.coordinationSeam()
 	ref, err := s.readVerificationBridgeRef(creationKey)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
+		// A prior release may have unlinked the journal before its fsync
+		// failed. Still take the member lock before dropping its reservation:
+		// preparation may currently own that lock and not yet have published.
+		s.mu.Lock()
+		for reservation := range s.credentialUsers {
+			if reservation.verificationKey == creationKey {
+				ref.CacheMember = reservation.home
+				break
+			}
+		}
+		s.mu.Unlock()
+		if ref.CacheMember == "" {
+			return nil
+		}
+	} else if err != nil {
 		return err
 	}
 	if ref.CacheMember != "" {
@@ -351,26 +396,33 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 			}
 		}()
 	}
-	if _, err := s.readVerificationBridgeRef(creationKey); err != nil {
+	current, err := s.readVerificationBridgeRef(creationKey)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			s.releaseVerificationUser(creationKey)
 			return nil
 		}
 		return err
 	}
+	if current.CacheMember != ref.CacheMember {
+		return errors.New("scheduler: verification resource member changed during release")
+	}
+	ref = current
 	if ref.CacheMember != "" {
-		if err := s.cfg.Homes.RemoveCacheOwner(ref.CacheMember, ref.CachePool, creationKey); err != nil {
-			return err
+		if ownerErr := s.cfg.Homes.RemoveCacheOwner(ref.CacheMember, ref.CachePool, creationKey); ownerErr != nil {
+			return ownerErr
 		}
 	}
-	if err := os.Remove(s.verificationBridgeRefPath(creationKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("scheduler: remove verification bridge ref: %w", err)
+	if removeErr := os.Remove(s.verificationBridgeRefPath(creationKey)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("scheduler: remove verification bridge ref: %w", removeErr)
 	}
-	if err := fsyncDir(s.verificationBridgeRefDir()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if syncErr := fsyncDir(s.verificationBridgeRefDir()); syncErr != nil && !errors.Is(syncErr, os.ErrNotExist) {
+		return syncErr
 	}
-	if err := fsyncDir(s.cfg.StateDir); err != nil {
-		return err
+	if syncErr := fsyncDir(s.cfg.StateDir); syncErr != nil {
+		return syncErr
 	}
+	s.releaseVerificationUser(creationKey)
 	if c != nil {
 		// Release is durable before collecting, and staging remains serialized
 		// until the reference unlink and both directory fsyncs complete.
@@ -843,22 +895,21 @@ func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 		return nil, err
 	}
 	for _, e := range verificationEntries {
-		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".json") &&
-			!strings.HasPrefix(e.Name(), ".aether-verification-")) {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(verificationDir, e.Name()))
-		if err != nil {
-			return nil, err
+		data, readErr := os.ReadFile(filepath.Join(verificationDir, e.Name()))
+		if readErr != nil {
+			return nil, readErr
 		}
 		var ref verificationBridgeRef
-		if err := json.Unmarshal(data, &ref); err != nil {
-			// A partially written reference is an unknown cleanup outcome:
-			// retain every staged byte rather than guessing what is live.
-			return nil, fmt.Errorf("scheduler: decode verification bridge ref %s: %w", e.Name(), err)
+		if decodeErr := json.Unmarshal(data, &ref); decodeErr != nil {
+			// A malformed published reference is unknown live ownership.
+			// Unpublished atomic-write temporaries cannot own a runtime.
+			return nil, fmt.Errorf("scheduler: decode verification bridge ref %s: %w", e.Name(), decodeErr)
 		}
-		if err := validateVerificationBridgeRef(ref); err != nil {
-			return nil, err
+		if validateErr := validateVerificationBridgeRef(ref); validateErr != nil {
+			return nil, validateErr
 		}
 		referenced[ref.BridgeDigest] = true
 	}

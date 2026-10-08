@@ -1,7 +1,10 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -33,4 +36,80 @@ func (s *Scheduler) verificationCacheOwner(spec *runtime.Spec) (domain.MemberID,
 		return "", "", nil
 	}
 	return member, memberhome.CachePoolRuns, nil
+}
+
+// Verification uses the same uid:gid exclusion as runs and terminals. Cache
+// and journal locks serialize repeated preparation/release of a creation key;
+// the reservation outlives the short startup capacity allowance.
+func (s *Scheduler) reserveVerificationUser(ref verificationBridgeRef) (*credentialUserReservation, bool, error) {
+	if ref.CacheMember == "" || ref.CacheUser == "" {
+		return nil, false, nil
+	}
+	s.mu.Lock()
+	for reservation := range s.credentialUsers {
+		if reservation.verificationKey != ref.CreationKey {
+			continue
+		}
+		s.mu.Unlock()
+		if reservation.home != ref.CacheMember || reservation.user != ref.CacheUser {
+			return nil, false, errors.New("scheduler: verification user reservation changed")
+		}
+		return reservation, false, nil
+	}
+	s.mu.Unlock()
+	reservation, err := s.reserveCredentialUser(ref.CacheMember, "", ref.CacheUser, true, "verification "+ref.CreationKey, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	s.mu.Lock()
+	reservation.verificationKey = ref.CreationKey
+	s.mu.Unlock()
+	return reservation, true, nil
+}
+
+func (s *Scheduler) releaseVerificationUser(creationKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for reservation := range s.credentialUsers {
+		if reservation.verificationKey == creationKey {
+			delete(s.credentialUsers, reservation)
+		}
+	}
+}
+
+// Restore before run/terminal admission or recovery can change cache ownership.
+// A malformed published journal is unknown live ownership. Atomic-write
+// temporaries cannot own a runtime: creation requires a durable final rename.
+func (s *Scheduler) restoreVerificationUsers() error {
+	dir := s.verificationBridgeRefDir()
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if readErr != nil {
+			return readErr
+		}
+		var ref verificationBridgeRef
+		if decodeErr := json.Unmarshal(data, &ref); decodeErr != nil {
+			return fmt.Errorf("decode %s: %w", entry.Name(), decodeErr)
+		}
+		if validateErr := validateVerificationBridgeRef(ref); validateErr != nil {
+			return validateErr
+		}
+		if entry.Name() != verificationBridgeRefName(ref.CreationKey) {
+			return errors.New("scheduler: verification user journal name mismatch")
+		}
+		if _, _, reserveErr := s.reserveVerificationUser(ref); reserveErr != nil {
+			return reserveErr
+		}
+	}
+	return nil
 }

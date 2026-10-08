@@ -213,7 +213,22 @@ func TestCachePoolsShareGlobalInodeAccountingWithoutFollowingLinks(t *testing.T)
 	if err != nil || len(pools) != 2 || pools["launcher/runs"] != 48 || pools["launcher/terminal"] != 13 {
 		t.Fatalf("cache-only inode walk: %v, %v", pools, err)
 	}
-	if _, err := MeasureCachePools(filepath.Join(dir, "missing")); err == nil {
-		t.Fatal("missing cache root was reported as a complete zero-byte scan")
+	missing := filepath.Join(dir, "missing")
+	if pools, err := MeasureCachePools(missing); err != nil || len(pools) != 0 {
+		t.Fatalf("uncreated cache root: %v, %v", pools, err)
+	}
+	if _, err := os.Lstat(missing); !os.IsNotExist(err) {
+		t.Fatalf("measurement created the missing root: %v", err)
+	}
+	broken := filepath.Join(dir, "broken")
+	if err := os.Symlink(missing, broken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MeasureCachePools(broken); err == nil {
+		t.Fatal("dangling cache root was reported as an empty inventory")
+	}
+	file := write("not-a-directory", 1)
+	if _, err := MeasureCachePools(file); err == nil {
+		t.Fatal("invalid cache root was reported as an empty inventory")
 	}
 }

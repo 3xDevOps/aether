@@ -11,7 +11,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func writeCacheFixture(t *testing.T, e *testEnv, member domain.MemberID, pool string, size int64) string {
@@ -48,6 +50,7 @@ func requireCacheExists(t *testing.T, path string, want bool) {
 
 func TestCachePressureSeparatesRunAndPermanentTerminalPools(t *testing.T) {
 	e := newTestEnv(t, nil)
+	e.sched.cfg.Runtime = &cacheImageRuntime{fakeRuntime: e.rt}
 	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -263,11 +266,113 @@ func TestUpdaterCreationMarkerPreservesUnknownRuntimeAndRetriesExited(t *testing
 
 type cacheImageRuntime struct {
 	*fakeRuntime
-	env map[string]string
+	env  map[string]string
+	err  error
+	user string
 }
 
 func (r *cacheImageRuntime) ImageCacheEnvironment(context.Context, string) (map[string]string, error) {
-	return r.env, nil
+	return r.env, r.err
+}
+
+func (r *cacheImageRuntime) ImageUser(context.Context, string) (string, error) {
+	return r.user, nil
+}
+
+type cacheConfigReadFailure struct{ store.Store }
+
+func (s cacheConfigReadFailure) ListWorkspaces(context.Context) ([]*domain.Workspace, error) {
+	return nil, errors.New("configuration unavailable")
+}
+
+func TestLegacyCacheExplicitChoicesSurviveInactiveSweep(t *testing.T) {
+	for _, source := range []string{"image", "idle workspace edit", "profile plan"} {
+		t.Run(source, func(t *testing.T) {
+			e := newTestEnv(t, nil)
+			rt := &cacheImageRuntime{fakeRuntime: e.rt, user: "1000:1000"}
+			e.sched.cfg.Runtime = rt
+			home, err := e.sched.cfg.Homes.Path(e.member.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			explicit := "/home/aether/.cache/uv"
+			switch source {
+			case "image":
+				rt.env = map[string]string{"UV_CACHE_DIR": explicit}
+			case "idle workspace edit":
+				// No plan has ever been built: GC must consult current storage.
+				e.ws.Environment.Variables["UV_CACHE_DIR"] = explicit
+				if err = e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+					t.Fatal(err)
+				}
+			case "profile plan":
+				_, err = e.sched.BuildEnvironmentPlan(t.Context(), nil, e.ws, e.member,
+					harness.Profile{Env: map[string]string{"UV_CACHE_DIR": explicit}}, EnvironmentPurposeRun)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, rel := range []string{".cache/uv", ".cache/pip", ".local/bin", ".config", ".ssh"} {
+				dir := filepath.Join(home, rel)
+				if err = os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(filepath.Join(dir, "keep"), []byte("data"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			managed := writeCacheFixture(t, e, e.member.ID, "runs", 4096)
+			e.sched.cfg.Now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
+			e.sched.sweepCaches(t.Context(), false)
+			requireCacheExists(t, managed, false)
+			requireCacheExists(t, filepath.Join(home, ".cache/pip"), false)
+			for _, rel := range []string{".cache/uv/keep", ".local/bin/keep", ".config/keep", ".ssh/keep"} {
+				requireCacheExists(t, filepath.Join(home, rel), true)
+			}
+			// A fresh manager has only the on-disk protection record.
+			restarted, err := memberhome.New(e.sched.cfg.Homes.Root(), e.sched.cfg.Homes.CacheRoot(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock := restarted.LockCaches(e.member.ID)
+			err = restarted.RemoveLegacyCaches(t.Context(), e.member.ID)
+			unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCacheExists(t, filepath.Join(home, ".cache/uv/keep"), true)
+		})
+	}
+}
+
+func TestLegacyCacheConfigurationFailurePreservesHomeOnly(t *testing.T) {
+	for _, failure := range []string{"store", "image", "unsupported inspection"} {
+		t.Run(failure, func(t *testing.T) {
+			e := newTestEnv(t, nil)
+			rt := &cacheImageRuntime{fakeRuntime: e.rt}
+			e.sched.cfg.Runtime = rt
+			switch failure {
+			case "store":
+				e.sched.cfg.Store = cacheConfigReadFailure{e.db}
+			case "image":
+				rt.err = errors.New("image unavailable")
+			case "unsupported inspection":
+				e.sched.cfg.Runtime = e.rt
+			}
+			home, err := e.sched.cfg.Homes.Path(e.member.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := filepath.Join(home, ".cache/uv")
+			if err = os.MkdirAll(legacy, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			managed := writeCacheFixture(t, e, e.member.ID, "runs", 4096)
+			e.sched.sweepCaches(t.Context(), true)
+			requireCacheExists(t, managed, false)
+			requireCacheExists(t, legacy, true)
+		})
+	}
 }
 
 func TestCacheDefaultsPreserveImageSettingsWithExplicitPlanPrecedence(t *testing.T) {
@@ -417,5 +522,43 @@ func TestStoppedTerminalFailureDoesNotRunDeletionCallback(t *testing.T) {
 	}
 	if _, err := e.db.GetMember(t.Context(), e.member.ID); err != nil {
 		t.Fatalf("member removed despite failed stop: %v", err)
+	}
+}
+
+func TestLegacyCacheExplicitPathBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		uv, pip     bool
+		link        bool
+	}{
+		{name: "exact", value: "/root/.cache/uv", uv: true},
+		{name: "ancestor", value: "/root/.cache", uv: true, pip: true},
+		{name: "descendant", value: "/root/.cache/uv/custom", uv: true},
+		{name: "sibling prefix", value: "/root/.cache/uv-other"},
+		{name: "outside home prefix", value: "/root-other/.cache/uv"},
+		{name: "symlink alias", value: "/root/cache-alias", uv: true, pip: true, link: true},
+		{name: "relative unknown", value: ".cache/uv", uv: true, pip: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEnv(t, nil)
+			e.sched.cfg.Runtime = &cacheImageRuntime{fakeRuntime: e.rt, env: map[string]string{"UV_CACHE_DIR": tc.value}}
+			home, err := e.sched.cfg.Homes.Path(e.member.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, rel := range []string{".cache/uv", ".cache/pip"} {
+				if err = os.MkdirAll(filepath.Join(home, rel), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.link {
+				if err = os.Symlink(".cache/uv", filepath.Join(home, "cache-alias")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.sched.sweepCaches(t.Context(), true)
+			requireCacheExists(t, filepath.Join(home, ".cache/uv"), tc.uv)
+			requireCacheExists(t, filepath.Join(home, ".cache/pip"), tc.pip)
+		})
 	}
 }
