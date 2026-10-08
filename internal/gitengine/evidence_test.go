@@ -57,6 +57,9 @@ func TestCaptureEvidenceRetainsUntrackedTreeAfterCheckoutRemoval(t *testing.T) {
 	if removeErr := e.RemoveRunCheckout(context.Background(), "run-evidence"); removeErr != nil {
 		t.Fatalf("RemoveRunCheckout: %v", removeErr)
 	}
+	if removeErr := e.RemoveRunHistory(context.Background(), "run-evidence"); removeErr != nil {
+		t.Fatalf("RemoveRunHistory: %v", removeErr)
+	}
 	patch, err := e.RenderEvidence(context.Background(), "ws1", revision.Commit, 0)
 	if err != nil {
 		t.Fatalf("RenderEvidence after cleanup: %v", err)

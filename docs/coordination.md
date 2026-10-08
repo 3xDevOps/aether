@@ -360,8 +360,8 @@ run snapshot's
 `unacked_messages` counts mail addressed to the run that it has not
 acknowledged, and `oldest_unacked_at` is when the oldest of it was sent.
 
-Mail stays as history until its run is deleted, by `aether delete` or the
-archive sweep. When a run's container is released, mail it never
+Mail stays as history until its run is explicitly deleted, including through
+swarm or workspace deletion. When a run's container is released, mail it never
 acknowledged is retired: it stops counting toward the 100-message inbox cap
 and is never delivered, but still lists, without `acked_at`.
 
@@ -898,9 +898,8 @@ wait for its runs to stop`.
   the job.
 
 Each publishes `mission.changed`; after a delete its payload carries
-`"deleted":true`. An archived swarm is deleted 14 days after archiving, like
-an archived run; its runs, archived with it, follow on the next run sweep
-(see [failure-handling.md](failure-handling.md#disk-pressure)).
+`"deleted":true`. Archiving a swarm or run does not schedule deletion. Archived
+records remain restorable until an authorized member explicitly deletes them.
 
 ### Inspect and manage mission tasks and workers
 

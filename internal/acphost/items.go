@@ -35,9 +35,6 @@ const (
 	// MaxItemBytes caps one encoded item. Larger payloads are cut and the
 	// item is flagged Truncated.
 	MaxItemBytes = 256 << 10
-	// MaxRunBytes bounds the retained latest window, including its private
-	// state checkpoint. All item kinds keep recording as older items expire.
-	MaxRunBytes = 64 << 20
 
 	maxTextSegment  = 64 << 10
 	maxOutputDelta  = 64 << 10

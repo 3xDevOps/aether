@@ -56,6 +56,7 @@ export interface RunDiffState {
   base: string
   patch: string
   truncated: boolean
+  recorded: boolean
   /** Loaded, loading, or the message from the attempt that failed. */
   status: 'loading' | 'ready' | 'error'
   error?: string
@@ -81,6 +82,7 @@ export const initialDiff: RunDiffState = {
   base: '',
   patch: '',
   truncated: false,
+  recorded: false,
   status: 'loading',
   intervals: {},
   revision: 0,
@@ -124,6 +126,7 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
           base: patch.base,
           patch: patch.patch,
           truncated: patch.truncated,
+          recorded: patch.recorded ?? false,
           status: 'ready',
           error: undefined,
           fetched: revision,

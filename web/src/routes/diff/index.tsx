@@ -100,8 +100,13 @@ export function ChangesView({ runID }: { runID: string }) {
         onRefresh={() => useStore.getState().refreshDiff(runID)}
         onJump={jump}
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
-        publishable={cumulative.length > 0}
+        publishable={!state.recorded && cumulative.length > 0}
       />
+      {!snapshot && state.recorded && (
+        <Callout tone="neutral" role="status" className="m-2 shrink-0">
+          Checkout removed. Showing the last recorded changes.
+        </Callout>
+      )}
       {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
         <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2 shrink-0">
           {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
@@ -136,18 +141,19 @@ export function ChangesView({ runID }: { runID: string }) {
           ) : (
             files.map(patchAt)
           )}
-          {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} />}
+          {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} recorded={state.recorded} />}
         </div>
       </div>
     </div>
   )
 }
 
-function Empty({ snapshot, loading }: { snapshot: DiffSnapshot | null; loading: boolean }) {
+function Empty({ snapshot, loading, recorded }: { snapshot: DiffSnapshot | null; loading: boolean; recorded: boolean }) {
   if (loading) {
     return <p className="p-4 text-ui text-muted">{snapshot ? 'Loading what changed then…' : 'Loading the diff…'}</p>
   }
   if (snapshot) return <EmptyState title="No changes in this interval.">That interval recorded no textual change.</EmptyState>
+  if (recorded) return <EmptyState title="No recorded changes.">The last snapshot matched the fork point.</EmptyState>
   return <EmptyState title="No changes yet.">Nothing differs from the fork point. Files the agent changes show up here.</EmptyState>
 }
 

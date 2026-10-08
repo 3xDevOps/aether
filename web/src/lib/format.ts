@@ -33,17 +33,6 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return ''
 }
 
-/** Floors to whole days so a destructive countdown never overstates the time left. */
-export function deletesInLabel(iso: string, now = Date.now()): string {
-  const deletesAt = new Date(iso).getTime()
-  if (!Number.isFinite(deletesAt)) return ''
-  const hours = Math.floor((deletesAt - now) / 3_600_000)
-  if (hours < 24) return 'deleted today'
-  const days = Math.floor(hours / 24)
-  if (days === 1) return 'deleted in 1 day'
-  return `deleted in ${days} days`
-}
-
 /** Release tags are "v1.2.3" but the desktop shell records "1.2.3". */
 export function bareVersion(version: string): string {
   return version.replace(/^v/, '')

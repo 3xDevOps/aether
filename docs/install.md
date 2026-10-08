@@ -1331,8 +1331,8 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees. An explicitly closed Standard or Enhanced run and a completed swarm worker keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Open interactive runs are not eligible for finished-checkout cleanup. Each run's `<run-id>.diffsnap/` sidecar has bounded retained snapshot history, described below, and is counted in `worktree_bytes`. |
-| `transcripts/` | Rolling per-session PTY transcripts (asciicast v2): 16 MiB complete-event segments, a 128 MiB retained target and seven-day sealed-segment age limit, preserving the active segment/latest screen. Enhanced runs retain a rolling latest 64 MiB ACP item log; compaction needs temporary copy space. These bounds do not stop live recording or erase native agent state. |
+| `checkouts/` | Per-run worktrees. An explicitly closed Standard or Enhanced run and a completed swarm worker keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Open interactive runs are not eligible for finished-checkout cleanup. Each run's `<run-id>.diffsnap/` sidecar holds durable recorded diff history, survives checkout cleanup, and is counted in `worktree_bytes`. |
+| `transcripts/` | Per-session PTY recordings (asciicast v2), rotated into 16 MiB files without deleting older segments. Enhanced runs also have an append-only ACP item log. Recordings persist until explicit run/session deletion, not until a byte or age threshold. |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `home-caches/<member>/{runs,terminal}/data/` | Reconstructible npm, pip, uv and Go caches, separate from HOME. Runs use `runs`; the member environment and updater use `terminal`. Small server-owned metadata beside `data/` preserves last use, ownership and cleanup retries; it is not mounted into containers. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
@@ -1347,21 +1347,16 @@ keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
 publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
-Diff sidecars target 512 MiB per run, the newest 1,024 changed trees and seven
-days of history. The base, latest and trees needed for the valid current
-interval remain protected. Consecutive unchanged snapshots do not add
-duplicate refs; changed reverts refresh recency.
-Only sidecar refs and unreferenced sidecar objects are pruned, never workspace
-branches, source files or retained evidence refs. Legacy `last` markers
-migrate their published tip even on a range read without a new capture;
-older uncatalogued snapshot history can expire. Published interval refs are
-atomic, with two bounded in-flight pins protecting delivered endpoints across
-ref/event failures and evidence-triggered GC.
+Diff sidecars retain captured trees until explicit run deletion. Checkout
+cleanup preserves their objects and historical ranges; it does not delete
+source branches or retained evidence. Consecutive unchanged snapshots do not
+add duplicate refs. Published intervals remain recoverable across ref or
+event-publication failures.
 Watch and current-diff staging allow at most 128 MiB of visible input, while
-evidence staging keeps its stricter 64 MiB bound. These are soft retained
-history budgets, not live disk quotas or limits on valuable workspace data.
-Expired ranges and skipped intervals are explicit in Changes. Evidence
-imports are serialized against pruning and retain independent durable copies.
+evidence staging keeps its 64 MiB bound. These are per-operation safety
+limits, not stored-history retention limits. Previously missing ranges and
+skipped captures remain explicit in Changes; changing retention cannot
+recover bytes an older server already deleted.
 
 Each member home is mounted as `$HOME` only in that member's environment
 terminal and the runs they launch. An account share additionally mounts the
@@ -1371,9 +1366,9 @@ the recipient's runs, through a Docker volume named `aether-home-<hash>`
 
 Storage rules:
 
-- **Back up `aether.db`, `repos/`, `homes/`, `profiles/`, and `mirrors/` to
-  recover core state, installed agents, login state, profile snapshots, and
-  configured source mirrors.**
+- **Back up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`,
+  `homes/`, `profiles/`, and `mirrors/`** to recover core state, recorded history,
+  installed agents, credentials, profile snapshots and source mirrors.
 - **Durable code and retained runtime have separate lifetimes.** Closed compute
   expires automatically after the `1h` default grace; old retained terminal
   deadlines are shortened on recovery from their durable completion time,
@@ -1390,12 +1385,14 @@ Storage rules:
   credentials and installed tools in `homes/`. Settings > **Server** reports
   cache ownership, deadlines and cleanup failures. Byte accounting de-duplicates
   hardlinks and is not a guarantee that deletion returns those bytes to disk.
-- **Per-run history is bounded, total valuable data is not.** Rolling
-  transcripts and snapshot sidecars reclaim older history automatically, but
-  retained runs, workspace files, `aether.db` and `repos/` can still grow.
-  Provisioning is refused when filesystem reserves and startup allowances
-  cannot fit. Local clones share Git objects through hardlinks; accounting
-  charges them once to repositories, not again to each checkout.
+- **User history persists until explicit deletion.** Terminal recordings,
+  Enhanced conversations and recorded diff history outlive compute, checkout
+  cleanup and archiving. Browser rendering and history requests remain bounded.
+  Storage can grow; monitor capacity and explicitly delete unwanted runs,
+  swarms or workspaces. Provisioning is refused when reserves and startup
+  allowances cannot fit, but active writers can still exhaust a finite disk.
+  Local clones share Git objects through hardlinks; accounting charges shared
+  objects once rather than once per checkout.
   See [failure handling](failure-handling.md).
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit

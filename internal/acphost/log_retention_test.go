@@ -15,38 +15,13 @@ import (
 
 func TestLogCheckpointRestoresActiveTurnAndMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "items.jsonl")
-	l, err := OpenLog(path)
-	if err != nil {
+	// This is the on-disk format written by the former compaction policy.
+	// The lost prefix is not reconstructed, and the incomplete tail is repaired
+	// only when the sole writer opens the log.
+	const checkpoint = "{\"_acphost_checkpoint\":{\"last\":{\"seq\":3,\"epoch\":1,\"turn\":7,\"kind\":\"turn_start\"},\"open_turn\":true,\"mode\":\"ask\"}}\n"
+	const suffix = "{\"seq\":4,\"epoch\":1,\"turn\":7,\"kind\":\"message\",\"message\":{\"text\":\"still working\"}}\n"
+	if err := os.WriteFile(path, []byte(checkpoint+suffix+`{"seq":5,"kind":"turn_end"`), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	for _, it := range []Item{
-		{Kind: KindReset, Turn: 6},
-		{Kind: KindModeChange, Turn: 6, Mode: "ask"},
-		{Kind: KindTurnStart, Turn: 7},
-		{Kind: KindMessage, Turn: 7, Message: &Message{Text: "still working"}},
-	} {
-		if appendErr := l.Append(&it); appendErr != nil {
-			t.Fatal(appendErr)
-		}
-	}
-	// Keep only the message: the turn boundary and mode are now private state.
-	if compactErr := l.compact(l.size - l.offsets[3]); compactErr != nil {
-		t.Fatal(compactErr)
-	}
-	if closeErr := l.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.WriteString(`{"seq":5,"kind":"turn_end"`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = f.Close()
-	if writeErr := os.WriteFile(path+".compact", []byte(`{"_acphost_checkpoint":`), 0o600); writeErr != nil {
-		t.Fatal(writeErr)
 	}
 	ro, err := OpenLogReadOnly(path)
 	if err != nil {
@@ -60,17 +35,11 @@ func TestLogCheckpointRestoresActiveTurnAndMode(t *testing.T) {
 	if !strings.HasSuffix(readFile(t, path), `"turn_end"`) {
 		t.Fatal("read-only snapshot changed torn suffix")
 	}
-	if _, statErr := os.Stat(path + ".compact"); statErr != nil {
-		t.Fatalf("read-only snapshot removed interrupted copy: %v", statErr)
-	}
-	l, err = OpenLog(path)
+	l, err := OpenLog(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
-	if _, statErr := os.Stat(path + ".compact"); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("interrupted copy not reclaimed: %v", statErr)
-	}
 	last, _, active := l.state()
 	if last.Seq != 4 || last.Epoch != 1 || last.Turn != 7 || !active || l.Mode() != "ask" {
 		t.Fatalf("restored last=%+v active=%v mode=%q", last, active, l.Mode())
@@ -104,13 +73,70 @@ func TestLogCheckpointRestoresActiveTurnAndMode(t *testing.T) {
 	if appendErr := l.Append(&reset); appendErr != nil || reset.Seq != 6 || reset.Epoch != 2 {
 		t.Fatalf("continued reset: %+v, %v", reset, appendErr)
 	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("compacted permissions: %v, %v", info, err)
+	if closeErr := l.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	l, err = OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, _, active = l.state()
+	if last.Seq != 6 || last.Epoch != 2 || last.Turn != 7 || active || l.Mode() != "ask" {
+		t.Fatalf("reopened last=%+v active=%v mode=%q", last, active, l.Mode())
+	}
+	page, err = l.History(math.MaxInt64, 10)
+	if err != nil || !page.TruncatedBefore || page.OldestSeq != 4 || len(page.Items) != 3 || page.Items[0].Seq != 4 || page.Items[2].Seq != 6 {
+		t.Fatalf("continued history: %+v, %v", page, err)
+	}
+	if !strings.HasPrefix(readFile(t, path), checkpoint+suffix) {
+		t.Fatal("opening and appending changed the legacy prefix or retained item")
 	}
 }
 
-func TestLogPinnedReadersSurviveAtomicCompaction(t *testing.T) {
+func TestLogCheckpointWithoutPublicItemsContinues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "items.jsonl")
+	const checkpoint = "{\"_acphost_checkpoint\":{\"last\":{\"seq\":40,\"epoch\":3,\"turn\":9,\"kind\":\"turn_start\"},\"open_turn\":true,\"mode\":\"ask\"}}\n"
+	if err := os.WriteFile(path, []byte(checkpoint), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	last, _, active := l.state()
+	if l.Len() != 0 || last.Seq != 40 || last.Epoch != 3 || last.Turn != 9 || !active || l.Mode() != "ask" {
+		t.Fatalf("checkpoint-only state: last=%+v active=%v mode=%q len=%d", last, active, l.Mode(), l.Len())
+	}
+	replay, err := l.Replay(40)
+	if err != nil || replay.Reset || !replay.TruncatedBefore || replay.Seq != 40 || replay.Epoch != 3 || len(replay.Items) != 0 {
+		t.Fatalf("checkpoint-only replay: %+v, %v", replay, err)
+	}
+	it := Item{Kind: KindMessage, Turn: 9, Message: &Message{Text: "continued"}}
+	if appendErr := l.Append(&it); appendErr != nil || it.Seq != 41 || it.Epoch != 3 {
+		t.Fatalf("continued item: %+v, %v", it, appendErr)
+	}
+	if closeErr := l.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	l, err = OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := l.History(math.MaxInt64, 10)
+	if err != nil || !page.TruncatedBefore || page.OldestSeq != 41 || len(page.Items) != 1 || page.Items[0].Seq != 41 {
+		t.Fatalf("continued page: %+v, %v", page, err)
+	}
+	last, _, active = l.state()
+	if last.Seq != 41 || last.Epoch != 3 || last.Turn != 9 || !active || l.Mode() != "ask" {
+		t.Fatalf("continued state: last=%+v active=%v mode=%q", last, active, l.Mode())
+	}
+	if _, _, itemErr := l.Item(40); !errors.Is(itemErr, ErrHistoryExpired) {
+		t.Fatalf("missing prefix item: %v", itemErr)
+	}
+}
+
+func TestLogSnapshotsSurviveAppendAndDelete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "items.jsonl")
 	l, err := OpenLog(path)
 	if err != nil {
@@ -123,43 +149,44 @@ func TestLogPinnedReadersSurviveAtomicCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ro.Close() }()
-	// Pin the subscription boundary, then let a writer replace its inode before
-	// decoding. This is the same interleaving as a slow replay or evidence read.
-	boundary, pinned := l.beginReplay(0)
-	written := make(chan error, 1)
-	go func() {
-		l.mu.Lock()
-		writeErr := l.compact(l.size - l.offsets[15])
-		l.mu.Unlock()
-		if writeErr == nil {
-			writeErr = l.Append(&Item{Kind: KindNotice, Notice: &Notice{Title: "latest"}})
-		}
-		written <- writeErr
-	}()
-	if writeErr := <-written; writeErr != nil {
-		t.Fatal(writeErr)
-	}
-	old, err := pinned.items()
-	if err != nil || len(old) != 20 || old[0].Seq != 1 || old[19].Seq != boundary.Seq {
-		t.Fatalf("pinned reader: %v, %v", seqs(old), err)
+	// Capture the subscription boundary before the next append. A slow replay
+	// must see exactly that prefix even if the log is then explicitly deleted.
+	boundary, first := l.beginReplay(0)
+	_, second := l.beginReplay(10)
+	if appendErr := l.Append(&Item{Kind: KindNotice, Notice: &Notice{Title: "latest"}}); appendErr != nil {
+		t.Fatal(appendErr)
 	}
 	page, err := ro.History(math.MaxInt64, 0)
 	if err != nil || page.TruncatedBefore || page.OldestSeq != 1 || len(page.Items) != 20 {
-		t.Fatalf("read-only inode snapshot: %+v, %v", page, err)
+		t.Fatalf("read-only snapshot: %+v, %v", page, err)
 	}
 	page, err = l.History(math.MaxInt64, 0)
-	if err != nil || !page.TruncatedBefore || page.OldestSeq != 16 || len(page.Items) != 6 || page.Items[5].Seq != 21 {
+	if err != nil || page.TruncatedBefore || page.OldestSeq != 1 || len(page.Items) != 21 || page.Items[20].Seq != 21 {
 		t.Fatalf("current snapshot: %+v, %v", page, err)
 	}
-	// No private checkpoint may leak through any public reader.
-	for _, it := range page.Items {
-		if it.Seq < page.OldestSeq || it.Kind == "" {
-			t.Fatalf("private record exposed: %+v", it)
-		}
+	if deleteErr := l.Delete(); deleteErr != nil {
+		t.Fatal(deleteErr)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("deleted history still exists: %v", statErr)
+	}
+	old, err := first.items()
+	if err != nil || len(old) != 20 || old[0].Seq != 1 || old[19].Seq != boundary.Seq {
+		t.Fatalf("first snapshot: %v, %v", seqs(old), err)
+	}
+	old, err = second.items()
+	if err != nil || len(old) != 10 || old[0].Seq != 11 || old[9].Seq != boundary.Seq {
+		t.Fatalf("second snapshot: %v, %v", seqs(old), err)
+	}
+	if _, readErr := l.ReadAfter(0, 1); !errors.Is(readErr, ErrLogClosed) {
+		t.Fatalf("read after deletion: %v", readErr)
+	}
+	if deleteErr := l.Delete(); deleteErr != nil {
+		t.Fatalf("repeated deletion: %v", deleteErr)
 	}
 }
 
-func TestEssentialHistoryRollsWithoutLosingPendingPermission(t *testing.T) {
+func TestLargeHistoryKeepsPendingPermission(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	answered := make(chan string, 1)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
@@ -179,15 +206,15 @@ func TestEssentialHistoryRollsWithoutLosingPendingPermission(t *testing.T) {
 	requestSeq := ofKind(items(t, s), KindRequest)[0].Seq
 	payload := strings.Repeat("n", 64<<10)
 	s.mu.Lock()
-	for range MaxRunBytes/len(payload) + 32 {
+	for range (64<<20)/len(payload) + 32 {
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Title: "activity", Description: payload}})
 	}
 	s.mu.Unlock()
-	if _, size, active := s.Log().state(); size > MaxRunBytes || !active {
-		t.Fatalf("active retained state: size=%d active=%v", size, active)
+	if _, size, active := s.Log().state(); size <= 64<<20 || !active {
+		t.Fatalf("active history state: size=%d active=%v", size, active)
 	}
-	if _, _, err := s.Log().Item(requestSeq); !errors.Is(err, ErrHistoryExpired) {
-		t.Fatalf("old public permission item: %v", err)
+	if it, found, err := s.Log().Item(requestSeq); err != nil || !found || it.Request == nil || it.Request.ID != pending[0].ID || it.Request.Status != RequestPending {
+		t.Fatalf("original permission item: %+v, found=%v err=%v", it, found, err)
 	}
 	if st := s.State(); !st.TurnInFlight || len(st.Pending) != 1 || st.Pending[0].ID != pending[0].ID {
 		t.Fatalf("live permission was lost: %+v", st)
@@ -197,11 +224,11 @@ func TestEssentialHistoryRollsWithoutLosingPendingPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cancel()
-	if !replay.Reset || !replay.TruncatedBefore || len(replay.Items) == 0 || replay.Items[0].Seq != replay.OldestSeq {
-		t.Fatalf("expired subscriber: %+v", replay)
+	if replay.Reset || replay.TruncatedBefore || len(replay.Items) != ReplayWindow || replay.Items[0].Seq != replay.OldestSeq {
+		t.Fatalf("bounded subscriber: %+v", replay)
 	}
-	if err := s.Answer(pending[0].ID, "allow", nil); err != nil {
-		t.Fatal(err)
+	if answerErr := s.Answer(pending[0].ID, "allow", nil); answerErr != nil {
+		t.Fatal(answerErr)
 	}
 	if got := <-answered; got != `{"outcome":{"optionId":"allow","outcome":"selected"}}` {
 		t.Fatalf("agent answer: %s", got)
@@ -214,18 +241,18 @@ func TestEssentialHistoryRollsWithoutLosingPendingPermission(t *testing.T) {
 	}
 }
 
-func TestOversizedLegacyLogMigratesOnOpen(t *testing.T) {
+func TestOversizedExistingLogStaysIntactOnOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "items.jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old versions let essential notices grow without limit. Write that old
-	// format directly, then open it through the normal migration path.
+	// Write a complete pre-existing log directly, beyond the former 64 MiB
+	// ceiling, so opening it cannot hide deletion behind append behavior.
 	payload := strings.Repeat("x", 64<<10)
-	count := MaxRunBytes/len(payload) + 2
-	for i := 1; i <= count; i++ {
-		b, marshalErr := json.Marshal(Item{Seq: int64(i), Epoch: 3, Turn: 9, Kind: KindNotice, Notice: &Notice{Title: payload}})
+	count := (64<<20)/len(payload) + 2
+	for i := range count {
+		b, marshalErr := json.Marshal(Item{Seq: int64(i + 1), Epoch: 3, Turn: 9, Kind: KindNotice, Notice: &Notice{Title: payload}})
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
@@ -236,24 +263,47 @@ func TestOversizedLegacyLogMigratesOnOpen(t *testing.T) {
 	if closeErr := f.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	l, err := OpenLog(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
 	page, err := l.History(math.MaxInt64, 1)
-	if err != nil || !page.TruncatedBefore || page.OldestSeq <= 1 || len(page.Items) != 1 || page.Items[0].Seq != int64(count) {
-		t.Fatalf("migrated page: %+v, %v", page, err)
+	if err != nil || page.TruncatedBefore || page.OldestSeq != 1 || len(page.Items) != 1 || page.Items[0].Seq != int64(count) {
+		t.Fatalf("existing page: %+v, %v", page, err)
 	}
-	if _, size, _ := l.state(); size > MaxRunBytes {
-		t.Fatalf("migrated size %d", size)
+	if _, size, _ := l.state(); size <= 64<<20 || size != before.Size() {
+		t.Fatalf("existing size %d, want %d above 64 MiB", size, before.Size())
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o640 {
-		t.Fatalf("legacy permissions: %v, %v", info, err)
+	if err != nil || info.Mode().Perm() != 0o640 || !os.SameFile(before, info) {
+		t.Fatalf("existing file changed: %v, %v", info, err)
+	}
+	earliest, found, err := l.Item(1)
+	if err != nil || !found || earliest.Notice == nil || earliest.Notice.Title != payload || earliest.Epoch != 3 || earliest.Turn != 9 {
+		t.Fatalf("earliest item: seq=%d found=%v err=%v", earliest.Seq, found, err)
 	}
 	it := Item{Kind: KindMessage, Turn: 9, Message: &Message{Text: "continued"}}
 	if appendErr := l.Append(&it); appendErr != nil || it.Seq != int64(count+1) || it.Epoch != 3 {
-		t.Fatalf("migrated append: %+v, %v", it, appendErr)
+		t.Fatalf("continued append: %+v, %v", it, appendErr)
+	}
+	if closeErr := l.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	l, err = OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earliest, found, err = l.Item(1)
+	if err != nil || !found || earliest.Notice == nil || earliest.Notice.Title != payload {
+		t.Fatalf("earliest item after reopen: seq=%d found=%v err=%v", earliest.Seq, found, err)
+	}
+	latest, found, err := l.Item(it.Seq)
+	if err != nil || !found || latest.Message == nil || latest.Message.Text != "continued" || latest.Epoch != 3 || latest.Turn != 9 {
+		t.Fatalf("latest item after reopen: %+v found=%v err=%v", latest, found, err)
 	}
 }

@@ -228,6 +228,16 @@ test('nothing changed is an empty state with nothing to publish', async () => {
   expect(screen.queryByRole('button', { name: 'Publish…' })).toBeNull()
 })
 
+test('recorded changes remain readable without checkout-only publishing', () => {
+  seed({ ...ready, recorded: true })
+  useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
+  renderDiff()
+  expect(screen.getByRole('region', { name: 'cmd/main.go' }).textContent).toContain('new line')
+  expect(screen.queryByRole('button', { name: 'Publish…' })).toBeNull()
+  act(() => useStore.getState().setDiff(active.id, { recorded: false }))
+  expect(screen.getByRole('button', { name: 'Publish…' })).toBeTruthy()
+})
+
 test('a diff snapshot refetches the patch and joins the interval menu', async () => {
   seed(ready)
   renderDiff()

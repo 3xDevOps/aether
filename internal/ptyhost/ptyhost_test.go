@@ -26,7 +26,6 @@ type (
 	schedulerPTYHost interface {
 		StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error
 		StopSession(ctx context.Context, key SessionKey) error
-		PruneTranscripts(ctx context.Context) error
 		LastOutput(key SessionKey) (time.Time, bool)
 		Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error
 	}
@@ -1925,6 +1924,10 @@ func TestRemoveRunTranscripts(t *testing.T) {
 	for _, name := range []string{
 		"run-shell-run-1-main.cast",
 		"run-shell-run-1-main.screen",
+		"run-shell-run-1-main.~123.cast",
+		"run-shell-run-1-main.cast.next",
+		"run-shell-run-1-main.retention",
+		"run-shell-run-1-main.retention.next",
 		"run-2.cast",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("transcript"), 0o644); err != nil {
@@ -1995,6 +1998,11 @@ func TestRemoveRunTranscripts(t *testing.T) {
 	if _, err := os.Stat(checkpointPath(current)); err != nil {
 		t.Fatalf("repaired checkpoint missing before removal: %v", err)
 	}
+	for _, path := range []string{current + ".next", castRetentionPath(current), castRetentionPath(current) + ".next"} {
+		if err := os.WriteFile(path, []byte("obsolete sidecar"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
 		t.Fatalf("RemoveRunTranscripts: %v", err)
@@ -2004,8 +2012,15 @@ func TestRemoveRunTranscripts(t *testing.T) {
 		legacy,
 		canonical,
 		checkpointPath(current),
+		current + ".next",
+		castRetentionPath(current),
+		castRetentionPath(current) + ".next",
 		filepath.Join(dir, "run-shell-run-1-main.cast"),
 		filepath.Join(dir, "run-shell-run-1-main.screen"),
+		filepath.Join(dir, "run-shell-run-1-main.~123.cast"),
+		filepath.Join(dir, "run-shell-run-1-main.cast.next"),
+		filepath.Join(dir, "run-shell-run-1-main.retention"),
+		filepath.Join(dir, "run-shell-run-1-main.retention.next"),
 	} {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s still exists (err %v)", filepath.Base(path), err)

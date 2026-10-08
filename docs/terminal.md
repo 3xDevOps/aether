@@ -616,29 +616,21 @@ screen. Some content can appear on both sides: the dashboard does not
 heuristically deduplicate text against VT rows or replay the raw recording
 into xterm.
 
-The server keeps a rolling archive, not an unlimited recording: complete
-events rotate at 16 MiB, with a 128 MiB retained target (eight segments)
-per session and a seven-day age limit for sealed segments. The active
-segment and latest compact screen remain available; these are retention
-targets, not a hard quota on an event being written. Output keeps flowing,
-and absolute sequence positions do not restart when older segments expire.
-Container, checkout and retained evidence lifetimes are separate.
-Retention is applied during ordinary live checkpoint maintenance, at startup,
-hourly, and when full cold replay is opened. Startup/hourly maintenance
-also expires sealed segments from stopped run terminals, member terminal tabs,
-and run shells without requiring anyone to read or reopen them. Active or
-starting sessions remain under their live writer's retention policy.
-During maintenance or full cold replay, legacy archives with missing,
-old-format or stale checkpoints are repaired one segment at a time before
-pruning and opening retained replay descriptors. The latest compact screen
-and absolute byte accounting survive that migration. Paged history and bounded
-recent replay remain lazy reads: they do not force full legacy repair or scan
-unrelated older segments. Recent replay without a validated checkpoint does
-not claim a proven terminal position.
-The private retention frontier keeps absolute byte accounting without replaying
-expired data. Already-open replay readers pin their finite window: removed
-segments can still occupy disk space until those readers close. A replay's
-proven end boundary is independent of whether its earlier prefix has expired.
+The server retains recorded output until explicit deletion of its run or
+terminal session. Complete events rotate into 16 MiB files without removing
+older segments. Closing compute, reclaiming a checkout, archiving a run,
+reopening the server and reading history do not expire recordings.
+Replay streams sealed segments lazily and pins the active segment's byte
+boundary, keeping descriptors bounded without loading the complete archive.
+Explicit deletion can interrupt a reader that has not opened an older segment;
+it returns an error rather than silently skipping output.
+
+Recordings previously trimmed by an older server retain their existing
+expiry frontier and absolute sequence positions. Missing output cannot be
+recovered by changing the retention policy. Paged history and bounded recent
+replay remain lazy; they do not force full legacy repair or scan unrelated
+older segments. Recent replay without a validated checkpoint does not claim
+a proven terminal position.
 
 Archived attach acknowledgments report `truncated_before: true` when earlier
 recorded output has expired, including compact screen snapshots and the

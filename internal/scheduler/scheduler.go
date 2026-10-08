@@ -549,14 +549,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
-	// sweepArchived runs regardless of CheckoutTTL: archive retention is
-	// unconditional, unlike checkout GC.
 	if s.cfg.CheckoutTTL > 0 {
 		s.sweepCheckouts(ctx)
 	}
-	s.sweepArchived(ctx)
 	s.sweepCaches(ctx, false)
-	s.pruneTranscripts(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
 	for {
@@ -576,17 +572,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			if s.cfg.CheckoutTTL > 0 {
 				s.sweepCheckouts(ctx)
 			}
-			s.sweepArchived(ctx)
 			s.cleanupTerminalSidecars(ctx)
 			s.sweepCaches(ctx, false)
-			s.pruneTranscripts(ctx)
 		}
-	}
-}
-
-func (s *Scheduler) pruneTranscripts(ctx context.Context) {
-	if err := s.cfg.PTY.PruneTranscripts(ctx); err != nil {
-		slog.Warn("scheduler: prune stopped terminal transcripts", "error", err)
 	}
 }
 

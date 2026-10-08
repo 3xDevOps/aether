@@ -82,8 +82,8 @@ func TestRunArchiveProtectedRunDeniedForCollaborator(t *testing.T) {
 	}
 }
 
-// The run.archive RPC's RunResult carries archived_at and deletes_at
-// while archived, and both are absent after a restore.
+// The run.archive RPC's RunResult carries archived_at while archived,
+// and the field is absent after a restore.
 func TestRunArchiveWireShape(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -95,8 +95,8 @@ func TestRunArchiveWireShape(t *testing.T) {
 		protocol.RunArchiveParams{RunID: string(r.ID), Archived: true}, &archived); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	if archived.Run.ArchivedAt == nil || archived.Run.DeletesAt == nil {
-		t.Fatalf("archived run = %+v, want archived_at and deletes_at set", archived.Run)
+	if archived.Run.ArchivedAt == nil {
+		t.Fatalf("archived run = %+v, want archived_at set", archived.Run)
 	}
 
 	var restored protocol.RunResult
@@ -104,8 +104,8 @@ func TestRunArchiveWireShape(t *testing.T) {
 		protocol.RunArchiveParams{RunID: string(r.ID), Archived: false}, &restored); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	if restored.Run.ArchivedAt != nil || restored.Run.DeletesAt != nil {
-		t.Fatalf("restored run wire fields = %+v, want both nil", restored.Run)
+	if restored.Run.ArchivedAt != nil {
+		t.Fatalf("restored run wire fields = %+v, want archived_at nil", restored.Run)
 	}
 }
 

@@ -630,10 +630,16 @@ func (h *Host) replayWindow(run domain.RunID, maxBytes int) (ReplayWindow, error
 		}
 	}
 	// Bounded recent reads must not repair or scan unrelated older archives.
-	// Full replay repairs and prunes before pinning its retained descriptors.
+	// Full replay repairs the checkpoint before pinning its descriptors.
 	if maxBytes <= 0 && (s == nil || s.tr == nil) {
-		if err := pruneColdCast(path, time.Now()); err != nil {
-			return ReplayWindow{}, err
+		checkpoint, err := decodeCheckpoint(checkpointPath(path))
+		if err == nil && checkpoint.Version == screenCheckpointVersion {
+			_, err = validateCheckpointSegments(path, checkpoint, true)
+		}
+		if err != nil || checkpoint.Version != screenCheckpointVersion {
+			if _, err = repairColdSnapshotLocked(path); err != nil {
+				return ReplayWindow{}, err
+			}
 		}
 	}
 	retention, err := readCastRetention(path)

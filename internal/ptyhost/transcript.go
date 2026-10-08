@@ -171,8 +171,7 @@ func renameAsideTranscript(path string) error {
 	if err := os.Rename(path, aside); err != nil {
 		return fmt.Errorf("ptyhost: preserve prior transcript: %w", err)
 	}
-	now := time.Now()
-	return os.Chtimes(aside, now, now)
+	return nil
 }
 
 // readCastTail decodes output events from the bounded tail of an asciinema
@@ -789,38 +788,53 @@ func (w *castWriter) snapshot() (io.ReadCloser, int, error) {
 	return replay, total, err
 }
 
-// castReplay pins its immutable boundary with opened descriptors. Retention and
-// removal can unlink these files without blocking live output or a slow reader.
+// castReplay opens immutable sealed segments lazily and pins only the active
+// segment's descriptor and byte fence. Rotation and appends cannot change its
+// finite window; explicit deletion may make an unread segment unavailable.
 type castReplay struct {
-	readers []*replayReader
-	index   int
-	tail    *bytes.Reader
+	segments []castSegment
+	index    int
+	current  *replayReader
+	active   *replayReader
+	tail     *bytes.Reader
 }
 
 func openCastReplay(segments []castSegment, tail []byte) (*castReplay, error) {
-	r := &castReplay{tail: bytes.NewReader(append([]byte(nil), tail...))}
-	for _, segment := range segments {
-		f, err := os.Open(segment.path)
+	r := &castReplay{segments: segments, tail: bytes.NewReader(append([]byte(nil), tail...))}
+	if len(segments) > 0 {
+		last := segments[len(segments)-1]
+		f, err := os.Open(last.path)
 		if err != nil {
-			_ = r.Close()
 			return nil, fmt.Errorf("ptyhost: open transcript: %w", err)
 		}
-		r.readers = append(r.readers, newReplayReader(f, segment.fileBytes))
+		r.active = newReplayReader(f, last.fileBytes)
 	}
 	return r, nil
 }
 
 func (r *castReplay) Read(p []byte) (int, error) {
-	for r.index < len(r.readers) {
-		current := r.readers[r.index]
-		n, err := current.Read(p)
+	for r.index < len(r.segments) {
+		if r.current == nil {
+			if r.index == len(r.segments)-1 {
+				r.current, r.active = r.active, nil
+			} else {
+				segment := r.segments[r.index]
+				f, err := os.Open(segment.path)
+				if err != nil {
+					return 0, fmt.Errorf("ptyhost: open transcript: %w", err)
+				}
+				r.current = newReplayReader(f, segment.fileBytes)
+			}
+		}
+		n, err := r.current.Read(p)
 		if n > 0 {
 			return n, nil
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return 0, err
 		}
-		_ = current.Close()
+		_ = r.current.Close()
+		r.current = nil
 		r.index++
 	}
 	return r.tail.Read(p)
@@ -828,10 +842,15 @@ func (r *castReplay) Read(p []byte) (int, error) {
 
 func (r *castReplay) Close() error {
 	var err error
-	for r.index < len(r.readers) {
-		err = errors.Join(err, r.readers[r.index].Close())
-		r.index++
+	if r.current != nil {
+		err = r.current.Close()
+		r.current = nil
 	}
+	if r.active != nil {
+		err = errors.Join(err, r.active.Close())
+		r.active = nil
+	}
+	r.segments = nil
 	r.tail = bytes.NewReader(nil)
 	return err
 }

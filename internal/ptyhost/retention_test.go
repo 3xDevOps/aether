@@ -17,7 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
+func TestCastRotationPreservesHistoryBeyondFormerLimits(t *testing.T) {
 	h, dir := newTestHost(t)
 	run := domain.RunID("rolling-cast")
 	key := RunSession(run)
@@ -46,6 +46,7 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	if err != nil || page.NextCursor == "" {
 		t.Fatalf("initial cursor: %+v, %v", page, err)
 	}
+	originalCursor := page.NextCursor
 	pinned, err := h.Replay(run)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +62,6 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	// Real 16 MiB events cross the disk budget without filling the emulator
 	// with irrelevant text. Markers do not alter live output or its sequence.
 	marker := strings.Repeat("x", castSegmentBytes)
-	var retained []byte
 	sequence := before.Sequence
 	live := append([]byte(nil), first...)
 	for i := range 9 {
@@ -92,9 +92,6 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 				t.Fatalf("split UTF-8 rotation changed recorded bytes: %q, want %q, %v", data, live, readErr)
 			}
 		}
-		if i >= 2 {
-			retained = append(retained, whole...)
-		}
 	}
 	if position := s.ring.position(); position.Epoch != before.Epoch || position.Sequence != sequence {
 		t.Fatalf("rotation reset the live position: %+v, expected %s/%d", position, before.Epoch, sequence)
@@ -102,13 +99,13 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	if err = stale.persist(); !errors.Is(err, errCheckpointSuperseded) {
 		t.Fatalf("old capture could overwrite the rotated checkpoint: %v", err)
 	}
-	// A reader opened before unlink still has its original file and byte fence.
+	// A reader opened before rotation still has its original byte fence.
 	got, err := io.ReadAll(pinned.Reader)
 	if err != nil || !bytes.Equal(got, first) || pinned.TruncatedBefore {
 		t.Fatalf("pinned replay changed during rotation: %q, %+v, %v", got, pinned, err)
 	}
-	if _, err = h.History(t.Context(), run, page.NextCursor, "", 1); !errors.Is(err, ErrHistoryCursorExpired) {
-		t.Fatalf("authenticated expired cursor = %v", err)
+	if older, historyErr := h.History(t.Context(), run, page.NextCursor, "", 1); historyErr != nil || strings.Join(historyTexts(older.Lines), ",") != "second" {
+		t.Fatalf("original cursor lost history: %+v, %v", older, historyErr)
 	}
 	forged, err := base64.RawURLEncoding.DecodeString(page.NextCursor)
 	if err != nil {
@@ -116,14 +113,13 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	}
 	forged[len(forged)-1] ^= 1
 	if _, err = h.History(t.Context(), run, base64.RawURLEncoding.EncodeToString(forged), "", 1); !errors.Is(err, ErrInvalidHistoryCursor) {
-		t.Fatalf("forged pruned cursor = %v", err)
+		t.Fatalf("forged cursor = %v", err)
 	}
 	s.deliver([]byte("CURRENT"))
-	retained = append(retained, "CURRENT"...)
 	sequence += TerminalSequence(len("CURRENT"))
 	live = append(live, "CURRENT"...)
 	if tapped := <-tapDone; tapped.err != nil || !bytes.Equal(tapped.data, live) {
-		t.Fatalf("live tap reset or lost bytes across retention: %q, %v", tapped.data, tapped.err)
+		t.Fatalf("live tap reset or lost bytes across rotation: %q, %v", tapped.data, tapped.err)
 	}
 	if err = h.StopSession(t.Context(), key); err != nil {
 		t.Fatal(err)
@@ -134,15 +130,15 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	}
 	got, readErr := io.ReadAll(window.Reader)
 	_ = window.Reader.Close()
-	if readErr != nil || !bytes.Equal(got, retained) || window.Bytes != len(retained) {
-		t.Fatalf("retained raw output lost byte fidelity: %q, want %q, %v", got, retained, readErr)
+	if readErr != nil || !bytes.Equal(got, live) || window.Bytes != len(live) {
+		t.Fatalf("recorded output lost byte fidelity: %q, want %q, %v", got, live, readErr)
 	}
-	if !window.TruncatedBefore || !window.Complete || window.Position.Sequence != sequence || window.Position.Epoch != before.Epoch {
-		t.Fatalf("retained replay metadata = %+v", window)
+	if window.TruncatedBefore || !window.Complete || window.Position.Sequence != sequence || window.Position.Epoch != before.Epoch {
+		t.Fatalf("replay metadata = %+v", window)
 	}
 	page, err = h.History(t.Context(), run, "", "", 2)
-	if err != nil || !page.TruncatedBefore {
-		t.Fatalf("retained page metadata = %+v, %v", page, err)
+	if err != nil || page.TruncatedBefore {
+		t.Fatalf("history page metadata = %+v, %v", page, err)
 	}
 	path := filepath.Join(dir, string(run)+".cast")
 	segments, err := collectCastHeaders(path)
@@ -153,8 +149,8 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	for _, segment := range segments {
 		disk += segment.fileBytes
 	}
-	if len(segments) > castRetainedSegments || disk > castRetainedBytes {
-		t.Fatalf("retention not bounded: %d segments, %d bytes", len(segments), disk)
+	if len(segments) <= 8 || disk <= 128<<20 {
+		t.Fatalf("test did not cross former limits: %d segments, %d bytes", len(segments), disk)
 	}
 	if err = h.Close(); err != nil {
 		t.Fatal(err)
@@ -165,20 +161,32 @@ func TestRollingCastRetainsLiveBoundaryAndRestartScreen(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = restarted.Close() })
 	snapshot, err := restarted.Snapshot(run)
-	if err != nil || !snapshot.TruncatedBefore || snapshot.Position != window.Position || !bytes.Contains(snapshot.Data, []byte("CURRENT")) {
-		t.Fatalf("latest compact screen did not survive expiry/restart: %+v, %v", snapshot, err)
+	if err != nil || snapshot.TruncatedBefore || snapshot.Position != window.Position || !bytes.Contains(snapshot.Data, []byte("CURRENT")) {
+		t.Fatalf("latest compact screen did not survive restart: %+v, %v", snapshot, err)
+	}
+	reopened, err := restarted.Replay(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(reopened.Reader)
+	_ = reopened.Reader.Close()
+	if readErr != nil || !bytes.Equal(data, live) || reopened.Position != window.Position || reopened.TruncatedBefore {
+		t.Fatalf("reopened recording lost history: %q, %+v, %v", data, reopened, readErr)
+	}
+	if older, historyErr := restarted.History(t.Context(), run, originalCursor, "", 1); historyErr != nil || older.TruncatedBefore || strings.Join(historyTexts(older.Lines), ",") != "second" {
+		t.Fatalf("reopened history = %+v, %v", older, historyErr)
 	}
 	if err = restarted.StartSession(t.Context(), key, newFakeAtt()); err != nil {
 		t.Fatal(err)
 	}
 	restarted.lookup(key).deliver([]byte("-resumed"))
 	resumed, err := restarted.Snapshot(run)
-	if err != nil || !resumed.TruncatedBefore || resumed.Position.Epoch != before.Epoch || resumed.Position.Sequence != sequence+TerminalSequence(len("-resumed")) {
+	if err != nil || resumed.TruncatedBefore || resumed.Position.Epoch != before.Epoch || resumed.Position.Sequence != sequence+TerminalSequence(len("-resumed")) {
 		t.Fatalf("restart did not continue absolute position: %+v, %v", resumed, err)
 	}
 }
 
-func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
+func TestCastAgeDoesNotDeleteHistoryAndExplicitDeletionStopsReplay(t *testing.T) {
 	h, dir := newTestHost(t)
 	run := domain.RunID("aged-cast")
 	key := RunSession(run)
@@ -203,13 +211,13 @@ func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
 	if err != nil || len(archives) != 1 {
 		t.Fatalf("archives = %v, %v", archives, err)
 	}
-	old := time.Now().Add(-castRetainedAge - time.Hour)
+	old := time.Now().Add(-8 * 24 * time.Hour)
 	for _, file := range []string{archives[0], path} {
 		if err = os.Chtimes(file, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Exercise history resolution concurrently with checkpoint-driven pruning.
+	// History remains readable concurrently with checkpoint publication.
 	readDone := make(chan error, 1)
 	go func() {
 		_, readErr := h.History(context.Background(), run, cursor.NextCursor, "", 1)
@@ -218,11 +226,11 @@ func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
 	if err = s.checkpointNow(); err != nil {
 		t.Fatal(err)
 	}
-	if readErr := <-readDone; readErr != nil && !errors.Is(readErr, ErrHistoryCursorExpired) {
-		t.Fatalf("history/prune race returned a false corruption error: %v", readErr)
+	if readErr := <-readDone; readErr != nil {
+		t.Fatalf("checkpoint invalidated history: %v", readErr)
 	}
-	if _, err = os.Stat(archives[0]); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("sealed age was not enforced: %v", err)
+	if _, err = os.Stat(archives[0]); err != nil {
+		t.Fatalf("old archive was removed: %v", err)
 	}
 	if _, err = os.Stat(path); err != nil {
 		t.Fatalf("old current segment was removed: %v", err)
@@ -232,10 +240,10 @@ func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
 	}
 	recovered, _, position, _, err := loadCurrentCheckpoint(path, false)
 	if err != nil {
-		t.Fatalf("valid checkpoint required an expired prefix: %v", err)
+		t.Fatalf("valid checkpoint lost its history: %v", err)
 	}
 	if !strings.Contains(recovered.screen.term.String(), "ANCHOR") || !strings.Contains(recovered.screen.term.String(), "current") {
-		t.Fatalf("screen lost expired-prefix state: %q", recovered.screen.term.String())
+		t.Fatalf("screen lost earlier state: %q", recovered.screen.term.String())
 	}
 	recovered.screen.dispose()
 	window, err := h.Replay(run)
@@ -243,7 +251,7 @@ func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = window.Reader.Close() }()
-	if !window.TruncatedBefore || !window.Complete || window.Position != position {
+	if window.TruncatedBefore || !window.Complete || window.Position != position {
 		t.Fatalf("atomic replay metadata = %+v", window)
 	}
 	if err = os.WriteFile(h.ItemLogPath(run)+".compact", []byte("interrupted ACP compaction"), 0o600); err != nil {
@@ -255,51 +263,116 @@ func TestCastAgeExpiryPreservesCheckpointAndPinnedDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := io.ReadAll(window.Reader)
-	if err != nil || string(data) != "current" {
-		t.Fatalf("opened replay failed after concurrent delete: %q, %v", data, err)
+	if !errors.Is(err, os.ErrNotExist) || len(data) != 0 {
+		t.Fatalf("replay silently skipped explicitly deleted history: %q, %v", data, err)
 	}
-	for _, file := range []string{path, checkpointPath(path), castRetentionPath(path), h.ItemLogPath(run) + ".compact"} {
+	for _, file := range []string{archives[0], path, checkpointPath(path), castRetentionPath(path), h.ItemLogPath(run) + ".compact"} {
 		if _, err = os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("run deletion left %s: %v", filepath.Base(file), err)
 		}
 	}
 }
 
-func TestCastPublishedExpirySurvivesInterruptedUnlink(t *testing.T) {
-	h, dir := newTestHost(t)
-	run := domain.RunID("prune-publication")
-	key := RunSession(run)
-	for _, output := range []string{"old\r\n", "latest"} {
-		if err := h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
-			t.Fatal(err)
-		}
-		h.lookup(key).deliver([]byte(output))
-		if err := h.StopSession(t.Context(), key); err != nil {
-			t.Fatal(err)
-		}
-	}
-	path := filepath.Join(dir, string(run)+".cast")
-	checkpoint, err := decodeCheckpoint(checkpointPath(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := checkpoint.Segments[0]
-	// Simulate a stop after metadata publication but before unlink. The
-	// existing compact checkpoint still describes both original segments.
-	if err = writeCastRetention(path, castRetention{Before: checkpoint.Incarnation, OutputBytes: uint64(old.OutputBytes)}); err != nil {
-		t.Fatal(err)
-	}
-	window, err := h.Replay(run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = window.Reader.Close() }()
-	data, err := io.ReadAll(window.Reader)
-	if err != nil || string(data) != "latest" || !window.TruncatedBefore || !window.Complete {
-		t.Fatalf("interrupted prune replay = %q, %+v, %v", data, window, err)
-	}
-	if _, err = os.Stat(filepath.Join(dir, old.Path)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("published prune did not retry its unlink: %v", err)
+func TestCastExistingFrontierPreservesPositionAndRemainingHistory(t *testing.T) {
+	for _, removed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("prefix-removed-%t", removed), func(t *testing.T) {
+			h, dir := newTestHost(t)
+			run := domain.RunID("old-frontier")
+			key := RunSession(run)
+			var cursor string
+			for _, output := range []string{"old\r\nolder\r\n", "latest\r\nremaining\r\n"} {
+				if err := h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
+					t.Fatal(err)
+				}
+				h.lookup(key).deliver([]byte(output))
+				if cursor == "" {
+					page, err := h.History(t.Context(), run, "", "", 1)
+					if err != nil || page.NextCursor == "" {
+						t.Fatalf("initial history = %+v, %v", page, err)
+					}
+					cursor = page.NextCursor
+				}
+				if err := h.StopSession(t.Context(), key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(dir, string(run)+".cast")
+			checkpoint, err := decodeCheckpoint(checkpointPath(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := checkpoint.Segments[0]
+			// Cover both completed old pruning and interruption after publication.
+			frontier, err := json.Marshal(castRetention{Before: checkpoint.Incarnation, OutputBytes: uint64(old.OutputBytes)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(castRetentionPath(path), frontier, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			oldPath := filepath.Join(dir, old.Path)
+			if removed {
+				if err = os.Remove(oldPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = h.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := New(Config{TranscriptDir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			window, err := reopened.Replay(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, readErr := io.ReadAll(window.Reader)
+			_ = window.Reader.Close()
+			position := TerminalPosition{Epoch: checkpoint.Epoch, Sequence: checkpoint.Sequence}
+			if readErr != nil || string(data) != "latest\r\nremaining\r\n" || !window.TruncatedBefore || !window.Complete || window.Position != position {
+				t.Fatalf("existing frontier replay = %q, %+v, %v", data, window, readErr)
+			}
+			page, err := reopened.History(t.Context(), run, "", "", 10)
+			if err != nil || !page.TruncatedBefore || strings.Join(historyTexts(page.Lines), ",") != "latest,remaining" {
+				t.Fatalf("remaining history = %+v, %v", page, err)
+			}
+			if _, err = reopened.History(t.Context(), run, cursor, "", 1); !errors.Is(err, ErrHistoryCursorExpired) {
+				t.Fatalf("old authenticated cursor = %v", err)
+			}
+			if !removed {
+				if _, err = os.Stat(oldPath); err != nil {
+					t.Fatalf("reading old frontier deleted more data: %v", err)
+				}
+			}
+			if err = reopened.StartSession(t.Context(), key, newFakeAtt()); err != nil {
+				t.Fatal(err)
+			}
+			reopened.lookup(key).deliver([]byte("resumed"))
+			if err = reopened.lookup(key).checkpointNow(); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := reopened.Snapshot(run)
+			if err != nil || !snapshot.TruncatedBefore || snapshot.Position.Epoch != position.Epoch || snapshot.Position.Sequence != position.Sequence+TerminalSequence(len("resumed")) || !bytes.Contains(snapshot.Data, []byte("resumed")) {
+				t.Fatalf("frontier restart reset state: %+v, %v", snapshot, err)
+			}
+			persisted, err := os.ReadFile(castRetentionPath(path))
+			if err != nil || !bytes.Equal(persisted, frontier) {
+				t.Fatalf("frontier was changed: %q, %v", persisted, err)
+			}
+			if err = reopened.StopSession(t.Context(), key); err != nil {
+				t.Fatal(err)
+			}
+			if err = reopened.RemoveRunTranscripts(t.Context(), run); err != nil {
+				t.Fatal(err)
+			}
+			for _, file := range []string{oldPath, path, checkpointPath(path), castRetentionPath(path)} {
+				if _, err = os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("explicit deletion left %s: %v", file, err)
+				}
+			}
+		})
 	}
 }
 
@@ -346,10 +419,10 @@ func TestCastRotationCrashRecoversAbsoluteCheckpointSuffix(t *testing.T) {
 	}
 }
 
-func TestMaintenancePrunesStoppedRecordingKinds(t *testing.T) {
+func TestCastOldRecordingKindsSurviveReopen(t *testing.T) {
 	for _, key := range []SessionKey{RunSession("cold-run"), TerminalSession("member", "tab"), RunShellSession("cold-run", "shell")} {
 		t.Run(string(key), func(t *testing.T) {
-			h, _ := newTestHost(t)
+			h, dir := newTestHost(t)
 			for _, text := range []string{"old\r\n", "LATEST"} {
 				if err := h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
 					t.Fatal(err)
@@ -368,93 +441,77 @@ func TestMaintenancePrunesStoppedRecordingKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run, isRun := key.Run(); isRun {
-				snapshot, snapshotErr := h.Snapshot(run)
-				if snapshotErr != nil || snapshot.TruncatedBefore {
-					t.Fatalf("complete cold screen = %+v, %v", snapshot, snapshotErr)
-				}
-			}
-			old := time.Now().Add(-castRetainedAge - time.Hour)
+			old := time.Now().Add(-8 * 24 * time.Hour)
 			for _, file := range []string{archives[0], path} {
 				if err = os.Chtimes(file, old, old); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err = h.PruneTranscripts(t.Context()); err != nil {
+			if err = h.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if run, isRun := key.Run(); isRun {
-				snapshot, snapshotErr := h.Snapshot(run)
-				if snapshotErr != nil || !snapshot.TruncatedBefore || !bytes.Contains(snapshot.Data, []byte("LATEST")) {
-					t.Fatalf("cached screen hid newly expired history: %+v, %v", snapshot, snapshotErr)
-				}
-			}
-			if _, err = os.Stat(archives[0]); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("stopped archive survived maintenance: %v", err)
-			}
-			recovered, _, position, _, err := loadCurrentCheckpoint(path, false)
+			reopened, err := New(Config{TranscriptDir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer recovered.screen.dispose()
-			if position.Epoch != checkpoint.Epoch || position.Sequence != checkpoint.Sequence {
-				t.Fatalf("maintenance changed absolute position: %+v", position)
+			t.Cleanup(func() { _ = reopened.Close() })
+			snapshot, err := repairColdSnapshot(path)
+			if err != nil || snapshot.Position.Epoch != checkpoint.Epoch || snapshot.Position.Sequence != checkpoint.Sequence {
+				t.Fatalf("cold repair changed absolute position: %+v, %v", snapshot, err)
 			}
-			if _, err = os.Stat(path); err != nil {
-				t.Fatalf("latest segment lost: %v", err)
+			reader, _, err := openFullCastReplay(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr != nil || string(data) != "old\r\nLATEST" {
+				t.Fatalf("old recording lost history: %q, %v", data, readErr)
+			}
+			if err = reopened.StartSession(t.Context(), key, newFakeAtt()); err != nil {
+				t.Fatal(err)
+			}
+			reopened.lookup(key).deliver([]byte("-resumed"))
+			if err = reopened.lookup(key).checkpointNow(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = os.Stat(archives[0]); err != nil {
+				t.Fatalf("restart removed old archive: %v", err)
 			}
 		})
 	}
 }
 
-func TestMaintenanceProtectsActiveAndStartingRecordings(t *testing.T) {
+func TestCastReplayKeepsFiniteWindowAcrossRestart(t *testing.T) {
 	h, _ := newTestHost(t)
-	key := TerminalSession("member", "active")
-	for range 2 {
+	run := domain.RunID("finite-replay")
+	key := RunSession(run)
+	for _, text := range []string{"sealed\r\n", "active"} {
 		if err := h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
 			t.Fatal(err)
 		}
-		h.lookup(key).deliver([]byte("screen"))
+		h.lookup(key).deliver([]byte(text))
 		if err := h.StopSession(t.Context(), key); err != nil {
 			t.Fatal(err)
 		}
 	}
-	path := h.transcriptPath(key)
-	archives, err := priorCastPaths(path)
-	if err != nil || len(archives) != 1 {
-		t.Fatalf("archives = %v, %v", archives, err)
-	}
-	old := time.Now().Add(-castRetainedAge - time.Hour)
-	if err = os.Chtimes(archives[0], old, old); err != nil {
+	window, err := h.Replay(run)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = h.reserve(key); err != nil {
-		t.Fatal(err)
-	}
-	if err = h.PruneTranscripts(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Stat(archives[0]); err != nil {
-		t.Fatalf("starting recording was pruned: %v", err)
-	}
-	h.unreserve(key)
-	now := time.Now()
-	if err = os.Chtimes(archives[0], now, now); err != nil {
-		t.Fatal(err)
-	}
+	defer func() { _ = window.Reader.Close() }()
 	if err = h.StartSession(t.Context(), key, newFakeAtt()); err != nil {
 		t.Fatal(err)
 	}
-	s := h.lookup(key)
-	s.checkpointMu.Lock()
-	defer s.checkpointMu.Unlock()
-	if err = os.Chtimes(archives[0], old, old); err != nil {
+	h.lookup(key).deliver([]byte("-outside-window"))
+	data, err := io.ReadAll(window.Reader)
+	if err != nil || string(data) != "sealed\r\nactive" || len(data) != window.Bytes {
+		t.Fatalf("replay changed across restart: %q, %+v, %v", data, window, err)
+	}
+	if err = window.Reader.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err = h.PruneTranscripts(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Stat(archives[0]); err != nil {
-		t.Fatalf("active recording was pruned: %v", err)
+	if err = window.Reader.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
 	}
 }

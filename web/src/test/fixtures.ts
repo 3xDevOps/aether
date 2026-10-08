@@ -706,7 +706,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       run({
         id: runID,
         archived_at: archived ? '2026-08-14T10:00:00Z' : undefined,
-        deletes_at: archived ? '2026-08-28T10:00:00Z' : undefined,
       }),
     ),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),

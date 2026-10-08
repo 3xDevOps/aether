@@ -174,8 +174,8 @@ export function clearDonePlan(
   return plan
 }
 
-// internal/protocol.CodeNotFound: the run was already deleted, which is the
-// outcome bulk archive was trying to reach anyway.
+// internal/protocol.CodeNotFound: the run was already deleted, so there is
+// nothing left to archive.
 const codeRunNotFound = -32000
 
 // Both bulk actions bound gateway requests rather than opening one per run.

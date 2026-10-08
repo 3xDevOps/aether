@@ -495,7 +495,7 @@ export async function applyEvent(
           return false
         }
       }
-      store.getState().applyRunArchived(ev.run_id, p.archived_at, p.deletes_at)
+      store.getState().applyRunArchived(ev.run_id, p.archived_at)
       break
     }
     case 'run.diff': {

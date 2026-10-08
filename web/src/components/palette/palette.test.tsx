@@ -389,7 +389,7 @@ describe('command palette', () => {
     fireEvent.pointerMove(first)
     act(() => {
       useStore.getState().applyRunStatus(active.id, 'merged', undefined, '2026-10-02T10:00:00Z')
-      useStore.getState().applyRunArchived(active.id, '2026-10-02T10:01:00Z', null)
+      useStore.getState().applyRunArchived(active.id, '2026-10-02T10:01:00Z')
     })
     await waitFor(() => expect(screen.queryByRole('option', { name: /rewrite the checkout flow/ })).toBeNull())
     await waitFor(() => expect(screen.getByRole('option', { name: /rewrite the billing flow/ }).getAttribute('aria-selected')).toBe('true'))
@@ -755,7 +755,6 @@ describe('command palette', () => {
           run({
             status: 'merged',
             archived_at: '2026-08-14T10:00:00Z',
-            deletes_at: '2026-08-28T10:00:00Z',
           }),
         ),
       },

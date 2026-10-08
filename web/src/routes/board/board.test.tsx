@@ -100,9 +100,8 @@ const archivedMerged = run({
   id: 'run_archived',
   task: 'already archived',
   status: 'merged',
-  finished_at: '2026-08-10T10:30:00Z',
-  archived_at: '2026-08-14T10:00:00Z',
-  deletes_at: '2099-08-28T10:00:00Z',
+  finished_at: '2020-08-10T10:30:00Z',
+  archived_at: '2020-08-14T10:00:00Z',
 })
 
 function timeline(kind: 'pause' | 'resume', seq: number) {
@@ -378,13 +377,13 @@ describe('Needs you actions', () => {
 })
 
 describe('Finished footer', () => {
-  it('swaps Finished for archived runs behind its link, with their deletion date', () => {
+  it('keeps old archived runs reachable through the Finished toggle', () => {
     seed([merged, archivedMerged])
     renderBoard()
 
     expect(column('Finished').queryByText('already archived')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Archived (1)' }))
-    expect(cardOf('already archived').getByText(/^Merged, deleted in \d+ days$/)).toBeDefined()
+    expect(cardOf('already archived').getByRole('button', { name: 'already archived' })).toBeDefined()
     expect(column('Finished').queryByText('landed already')).toBeNull()
 
     act(() => useStore.setState({ activeWorkspace: otherWorkspace.id }))

@@ -625,8 +625,8 @@ func ReplayStart(afterSeq, last int64) int64 { return max(afterSeq, last-ReplayW
 // resubscribes from its last seq. The channel is closed when the session
 // ends or cancel is called.
 func (s *Session) Subscribe(afterSeq int64) (SubscriptionReplay, <-chan Item, func(), error) {
-	// Pin the replay before releasing mu, so compaction cannot move its
-	// boundary between capturing history and registering live delivery.
+	// Capture the replay before releasing mu, so appends cannot leave a gap
+	// between the history boundary and registration for live delivery.
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()

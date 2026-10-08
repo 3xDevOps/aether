@@ -37,7 +37,7 @@ const (
 	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
 	TypeRunMode       Type = "run.mode"
-	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
+	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
 	// TypeRunOutcomeSeen signals that a run's owner opened it after an
@@ -194,11 +194,10 @@ func (RunModePayload) EventType() Type { return TypeRunMode }
 
 func init() { registerPayload[RunModePayload](TypeRunMode) }
 
-// RunArchivedPayload reports a run's archive state, both RFC3339. A nil
-// ArchivedAt (and DeletesAt) means the run was restored.
+// RunArchivedPayload reports a run's archive state as RFC3339. A nil
+// ArchivedAt means the run was restored.
 type RunArchivedPayload struct {
 	ArchivedAt *string `json:"archived_at"`
-	DeletesAt  *string `json:"deletes_at"`
 }
 
 func (RunArchivedPayload) EventType() Type { return TypeRunArchived }

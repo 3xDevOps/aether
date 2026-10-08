@@ -30,6 +30,7 @@ type GitEngine interface {
 	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
+	RemoveRunHistory(ctx context.Context, run domain.RunID) error
 	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
 	StopDiffWatch(run domain.RunID)
 	LastFileChange(run domain.RunID) (time.Time, bool)
@@ -40,7 +41,6 @@ type PTYHost interface {
 	SessionGeneration(key ptyhost.SessionKey) uint64
 	StopSession(ctx context.Context, key ptyhost.SessionKey) error
 	RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
-	PruneTranscripts(ctx context.Context) error
 	ItemLogPath(run domain.RunID) string
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey

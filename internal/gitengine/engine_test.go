@@ -23,6 +23,7 @@ type schedulerGitEngine interface {
 	CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error)
 	PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error)
 	RemoveRunCheckout(ctx context.Context, run domain.RunID) error
+	RemoveRunHistory(ctx context.Context, run domain.RunID) error
 	StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error
 	StopDiffWatch(run domain.RunID)
 	LastFileChange(run domain.RunID) (time.Time, bool)
@@ -95,6 +96,9 @@ func TestPathTraversalRejected(t *testing.T) {
 		if err := e.RemoveRunCheckout(ctx, run); err == nil {
 			t.Errorf("RemoveRunCheckout(%q) accepted a traversal id", run)
 		}
+		if err := e.RemoveRunHistory(ctx, run); err == nil {
+			t.Errorf("RemoveRunHistory(%q) accepted a traversal id", run)
+		}
 	}
 }
 
@@ -121,6 +125,9 @@ func TestMissingRepoAndCheckoutErrors(t *testing.T) {
 	}
 	if err := e.RemoveRunCheckout(ctx, "r1"); err != nil {
 		t.Errorf("RemoveRunCheckout missing checkout should be idempotent: %v", err)
+	}
+	if err := e.RemoveRunHistory(ctx, "r1"); err != nil {
+		t.Errorf("RemoveRunHistory missing history should be idempotent: %v", err)
 	}
 	if _, ok := e.LastFileChange("r1"); ok {
 		t.Error("LastFileChange without a watch should report false")

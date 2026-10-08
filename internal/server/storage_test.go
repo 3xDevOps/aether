@@ -35,13 +35,12 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 		until   *time.Time
 		pending bool
 		corrupt bool
-		want    string
 	}{
-		{name: "expired checkout", want: "Checkout TTL expired"},
-		{name: "retained", until: &future, want: "Retained execution"},
-		{name: "expired owner", until: &past, want: "Retention expired"},
-		{name: "evidence pending", pending: true, want: "Evidence preservation pending"},
-		{name: "unknown lifecycle", corrupt: true, want: "Lifecycle ownership could not be checked"},
+		{name: "expired checkout"},
+		{name: "retained", until: &future},
+		{name: "expired owner", until: &past},
+		{name: "evidence pending", pending: true},
+		{name: "unknown lifecycle", corrupt: true},
 	}
 	runs := make([]*domain.Run, 0, len(cases))
 	for _, tc := range cases {
@@ -126,8 +125,14 @@ func TestServerDiskDurableOwnershipAndPrivacy(t *testing.T) {
 			for _, entry := range result.Entries {
 				if entry.OwnerID == string(runs[i].ID) && entry.Kind == kind {
 					found = true
-					if !strings.Contains(entry.Reason, tc.want) || entry.ReclaimableBytes != nil {
+					if entry.ReclaimableBytes != nil {
 						t.Errorf("%s/%s: %+v", tc.name, kind, entry)
+					}
+					if kind != "checkout" {
+						if entry.RetainedUntil != "" || entry.Error != "" {
+							t.Errorf("history inherited compute expiry or uncertainty: %+v", entry)
+						}
+						continue
 					}
 					if tc.until != nil && entry.RetainedUntil != tc.until.Format(time.RFC3339Nano) {
 						t.Errorf("%s: lost actual deadline: %+v", tc.name, entry)
@@ -208,41 +213,29 @@ func TestServerDiskBoundsLargestUnknownOwners(t *testing.T) {
 	}
 }
 
-func TestTranscriptRetentionCheckoutTTLBoundary(t *testing.T) {
+func TestHistoryRetentionIsIndependentOfCheckout(t *testing.T) {
 	s, root, admin, workspace := newWorkspaceDeletionServer(t)
 	now := time.Now().UTC()
-	finished := now.Add(-time.Hour)
-	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: admin.ID, Task: "transcript TTL", Harness: "fake", Mode: domain.LaunchHeadless, Status: domain.RunCompleted, FinishedAt: &finished}
+	finished := now.Add(-30 * 24 * time.Hour)
+	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: admin.ID, Task: "durable history", Harness: "fake", Mode: domain.LaunchHeadless, Status: domain.RunCompleted, FinishedAt: &finished}
 	if err := s.db.CreateRun(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	run.Worktree = filepath.Join(root, "checkouts", string(run.ID))
-	if err := s.db.UpdateRun(t.Context(), run); err != nil {
-		t.Fatal(err)
-	}
 	deps := Deps{Store: s.db, Runs: s.sched, DataDir: root, Config: Config{CheckoutTTL: time.Hour}}
-	for _, tc := range []struct {
-		at   time.Time
-		want string
-	}{
-		{now.Add(-time.Nanosecond), "Retained until checkout TTL expires"},
-		{now, "Checkout TTL expired"},
-		{now.Add(time.Nanosecond), "Checkout TTL expired"},
-	} {
-		u := disk.Usage{Entries: []disk.Entry{{Kind: "transcript", Key: string(run.ID)}}}
-		attributeStorage(t.Context(), deps, &u, tc.at)
-		entry := u.Entries[0]
-		if !strings.Contains(entry.Reason, tc.want) || !strings.Contains(entry.Reason, "evidence") || entry.RetainedUntil == nil || !entry.RetainedUntil.Equal(now) || entry.ReclaimableBytes != nil {
-			t.Errorf("at %s: %+v", tc.at, entry)
+	for _, checkout := range []string{filepath.Join(root, "checkouts", string(run.ID)), ""} {
+		run.Worktree = checkout
+		if err := s.db.UpdateRun(t.Context(), run); err != nil {
+			t.Fatal(err)
 		}
-	}
-	run.Worktree = ""
-	if err := s.db.UpdateRun(t.Context(), run); err != nil {
-		t.Fatal(err)
-	}
-	u := disk.Usage{Entries: []disk.Entry{{Kind: "transcript", Key: string(run.ID)}}}
-	attributeStorage(t.Context(), deps, &u, now)
-	if entry := u.Entries[0]; !strings.Contains(entry.Reason, "eligibility unknown") || entry.RetainedUntil != nil || entry.ReclaimableBytes != nil {
-		t.Fatalf("transcript without checkout promised automatic expiry: %+v", entry)
+		u := disk.Usage{Entries: []disk.Entry{
+			{Kind: "transcript", Key: string(run.ID)},
+			{Kind: "snapshot", Key: string(run.ID)},
+		}}
+		attributeStorage(t.Context(), deps, &u, now)
+		for _, entry := range u.Entries {
+			if entry.OwnerKind != "run" || entry.OwnerID != string(run.ID) || entry.RetainedUntil != nil || entry.ReclaimableBytes != nil || entry.Error != "" {
+				t.Fatalf("history inherited checkout cleanup policy: %+v", entry)
+			}
+		}
 	}
 }

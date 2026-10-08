@@ -96,11 +96,6 @@ func (s RunStatus) Valid() bool {
 	return slices.Contains(AllRunStatuses, s)
 }
 
-// ArchiveRetention is how long an archived run's record survives before
-// the deletion sweep removes it. It is a constant, not a serve flag, so
-// the scheduler, the wire's deletes_at, and the docs cannot disagree.
-const ArchiveRetention = 14 * 24 * time.Hour
-
 // LaunchMode is how the agent process is hosted inside a run.
 type LaunchMode string
 
@@ -575,8 +570,8 @@ type Run struct {
 	// admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
 	// ArchivedAt is when this run was hidden from the board; nil means it
-	// is not archived. Only a Final run can be archived, and it is the
-	// single source the deletion sweep will use for ArchiveRetention.
+	// is not archived. Only a Final run can be archived. Archiving does
+	// not schedule deletion.
 	ArchivedAt *time.Time
 	// OutcomeUnseen is true while a run an agent's report finished
 	// (completed or failed) has not been opened by its owner. Any later

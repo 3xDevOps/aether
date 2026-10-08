@@ -868,8 +868,8 @@ the keys stay free elsewhere). Closing the reply composer returns focus to
 the card. A failed send keeps the draft and shows the server's error.
 
 **Finished footer.** **Archived (n)** swaps Finished for archived runs in
-scope (Mine applies), each with `deletesInLabel(deletes_at)`; **Back to
-Finished** returns. **More finished-run actions** (`…`, in the Finished
+scope (Mine applies); **Back to Finished** returns. Archived runs have no
+automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
 heading, only when it has an item) holds **Archive closed runs…** and, for
 admins, **Free retained containers…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
@@ -879,7 +879,7 @@ when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
 `runClearDone()` and `runReleaseFinished()` run at most six calls at once,
 continue past failures and report the first real error; archive counts
 `CodeNotFound` as done. Archiving hides a run whose status is final
-(`isArchivable`) from every group and schedules its deletion; freeing removes
+(`isArchivable`) from every group without deleting its history; freeing removes
 a retained container and keeps the run and its history.
 
 **Empty board.** With no runs in scope the board names the first unmet

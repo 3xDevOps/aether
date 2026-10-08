@@ -194,7 +194,7 @@ func (c *checkpointCapture) persist() error {
 	if err := c.boundary.sync(); err != nil {
 		return fmt.Errorf("ptyhost: sync checkpoint transcript: %w", err)
 	}
-	err := writeCheckpointFile(c.path, screenCheckpoint{
+	return writeCheckpointFile(c.path, screenCheckpoint{
 		Version:           screenCheckpointVersion,
 		Epoch:             c.snapshot.Position.Epoch,
 		Sequence:          c.snapshot.Position.Sequence,
@@ -207,12 +207,6 @@ func (c *checkpointCapture) persist() error {
 		Data:              c.snapshot.Data,
 		Segments:          c.segments,
 	})
-	if err != nil {
-		return err
-	}
-	c.boundary.writer.mu.Lock()
-	defer c.boundary.writer.mu.Unlock()
-	return c.boundary.writer.pruneLocked(time.Now())
 }
 
 // captureCheckpoint records the logical cast boundary represented by snap.

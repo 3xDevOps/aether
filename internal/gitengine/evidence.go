@@ -418,9 +418,13 @@ func (e *Engine) commitEvidence(ctx context.Context, repo, tree, base string, ru
 }
 
 func (e *Engine) gitBareBounded(ctx context.Context, repo string, limit int, args ...string) (string, bool, error) {
+	return e.gitBareBoundedEnv(ctx, repo, gitEnv(), limit, args...)
+}
+
+func (e *Engine) gitBareBoundedEnv(ctx context.Context, repo string, env []string, limit int, args ...string) (string, bool, error) {
 	argv := append([]string{"-C", repo, "-c", "safe.directory=*", "-c", "core.quotePath=false"}, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = gitEnv()
+	cmd.Env = env
 	out := &boundedBuffer{limit: limit}
 	var stderr bytes.Buffer
 	cmd.Stdout = out

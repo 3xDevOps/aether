@@ -63,7 +63,6 @@ describe('useNeedsYouCount', () => {
       status: 'merged',
       unanswered_questions: 1,
       archived_at: '2026-08-14T10:00:00Z',
-      deletes_at: '2026-08-28T10:00:00Z',
     })
     useStore.setState({ runs: { [archived.id]: toRecord(archived) } })
     render(<Probe />)

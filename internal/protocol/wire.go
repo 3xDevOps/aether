@@ -42,9 +42,7 @@ type Run struct {
 	LastCommit    string                   `json:"last_commit,omitempty"`
 	LastCommitAt  *string                  `json:"last_commit_at,omitempty"`
 	Protected     bool                     `json:"protected,omitempty"`
-	// DeletesAt is computed here so no client hardcodes the retention window.
-	ArchivedAt *string `json:"archived_at,omitempty"`
-	DeletesAt  *string `json:"deletes_at,omitempty"`
+	ArchivedAt    *string                  `json:"archived_at,omitempty"`
 	// run.seen clears OutcomeUnseen.
 	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`
 	CreatedAt         string  `json:"created_at"`
@@ -132,14 +130,6 @@ func rfc3339ValuePtr(t time.Time) *string {
 	return &s
 }
 
-func runDeletesAt(archivedAt *time.Time) *string {
-	if archivedAt == nil {
-		return nil
-	}
-	deletesAt := archivedAt.Add(domain.ArchiveRetention)
-	return rfc3339Ptr(&deletesAt)
-}
-
 func RunFromDomain(r *domain.Run) Run {
 	return Run{
 		ID:                  string(r.ID),
@@ -159,7 +149,6 @@ func RunFromDomain(r *domain.Run) Run {
 		LastCommitAt:        rfc3339ValuePtr(r.LastCommitAt),
 		Protected:           r.Protected,
 		ArchivedAt:          rfc3339Ptr(r.ArchivedAt),
-		DeletesAt:           runDeletesAt(r.ArchivedAt),
 		OutcomeUnseen:       r.OutcomeUnseen,
 		CreatedAt:           rfc3339(r.CreatedAt),
 		StartedAt:           rfc3339Ptr(r.StartedAt),

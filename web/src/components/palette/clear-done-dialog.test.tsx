@@ -53,7 +53,6 @@ describe('archive confirmation dialog', () => {
     useStore.setState({ runs: {} })
     render(<ClearDoneDialog />)
     expect(screen.getByText('No closed runs to archive')).toBeDefined()
-    expect(screen.queryByText(/schedules their deletion/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(useStore.getState().paletteDialog).toBeNull()

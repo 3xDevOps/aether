@@ -141,11 +141,13 @@ and their deadline has not passed; it does not restart stopped processes,
 replay tools or create a replacement container. Completed swarm workers are
 not reopened.
 
-Compute, checkout and evidence lifetimes are separate. The finished checkout
+Compute, checkout and history have separate lifetimes. The finished checkout
 is normally eligible for cleanup after **72 hours** (`--checkout-ttl`), but
-required evidence or unresolved execution ownership protects it. Published
-Git result branches and captured evidence are not removed just because the
-seven-day container grace expires; retained history has its own policies.
+required evidence or unresolved execution ownership protects it. Terminal
+recordings, Enhanced session logs and recorded diff history survive checkout
+cleanup and archiving; explicit run deletion removes them. Published Git
+result branches and captured evidence are not removed just because the
+seven-day container grace expires.
 **Free container…** releases retained compute early without deleting the run's
 history. **Delete** is the separate destructive run-removal action.
 

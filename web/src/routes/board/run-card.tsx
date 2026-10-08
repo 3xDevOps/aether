@@ -6,7 +6,6 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StateLine, type Tone } from '@/components/ui/status-dot'
-import { deletesInLabel } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
@@ -38,7 +37,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const tone: Tone = needsYou ? 'needs-you' : card.state
-  const reason = card.swarm ? swarmReason(card, mission?.phase) : archivedReason(card)
+  const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
   const owner = card.owner?.display_name ?? run.member_id
 
   return (
@@ -94,12 +93,6 @@ function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
   if (card.unread) return card.reason
   return phase ? phaseWord[phase] : 'Swarm'
-}
-
-function archivedReason(card: BoardCard): string {
-  const { run } = card
-  if (!run.archived_at || !run.deletes_at) return card.reason
-  return `${card.reason}, ${deletesInLabel(run.deletes_at)}`
 }
 
 function diffTotals(files: { additions: number; deletions: number }[] | undefined) {

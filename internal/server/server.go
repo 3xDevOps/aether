@@ -274,6 +274,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ReposDir:       filepath.Join(cfg.DataDir, "repos"),
 		CheckoutsDir:   filepath.Join(cfg.DataDir, "checkouts"),
 		Bus:            s.bus,
+		EventLog:       s.log,
 		RemoveCheckout: removeAgentFiles,
 		OnBranchPublished: func(run domain.RunID, commit string, at time.Time) {
 			if s.sched == nil {
