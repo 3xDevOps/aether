@@ -22,7 +22,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
 
   const missionObjective = 'mission candidate browser fixture'
   await page.goto(alice.url)
-  const surfaces = page.getByRole('navigation', { name: 'Aether' })
+  const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   await surfaces.getByRole('button', { name: 'Swarms', exact: true }).click()
   await page.getByRole('button', { name: 'New swarm', exact: true }).click()
   const launch = page.getByRole('dialog', { name: 'New swarm' })

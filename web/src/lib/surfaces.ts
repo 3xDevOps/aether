@@ -21,7 +21,7 @@ export interface Surface {
   name: string
   label: string
   Icon: LucideIcon
-  /** `nav` rows sit in the sidebar, `admin` rows under its hairline,
+  /** `nav` rows sit in the header, `admin` rows at the sidebar's bottom,
    * `palette` destinations are reached from the command palette only, and
    * `link` pages only from a link elsewhere in the dashboard. */
   place: 'nav' | 'admin' | 'palette' | 'link'

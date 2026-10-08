@@ -22,7 +22,7 @@ test('the environment terminal opens on request, zooms and finds', async ({ page
   await wizard.repository.addRemote(repo)
   await wizard.repository.continue().click()
   await wizard.agent.skip().click()
-  const nav = (target: Page) => target.getByRole('navigation', { name: 'Aether' })
+  const nav = (target: Page) => target.getByRole('navigation', { name: 'Main navigation' })
   await nav(page).getByRole('button', { name: 'Board', exact: true }).click()
   const dock = page.getByRole('region', { name: 'Environment terminal' })
   await expect(page.getByRole('heading', { name: 'Board', exact: true })).toBeVisible()

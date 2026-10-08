@@ -26,7 +26,7 @@ test('Activity narrows the log from one filter and switches to agent messages', 
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Activity', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Activity', exact: true }).click()
   const feed = page.getByRole('region', { name: 'Activity feed' })
   const runState = /Run queued|Run starting|Agent working|Needs you|Finished|Failed|Stopped/
   await expect(feed.getByRole('listitem').filter({ hasText: 'Agent working' }).first()).toBeVisible({ timeout: 120_000 })
@@ -101,7 +101,7 @@ test('Activity shows real agent messages and narrows them to one thread', async 
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Activity', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Activity', exact: true }).click()
   await page.getByRole('button', { name: 'Filter', exact: true }).click()
   await page.getByRole('dialog').getByLabel('Show').click()
   await page.getByRole('option', { name: 'Agent messages' }).click()

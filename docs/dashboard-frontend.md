@@ -298,9 +298,9 @@ with details behind a popover.
 
 ## Shell
 
-`src/components/shell/` is the shell: one sidebar and one content area, with
-the desktop window bar above them in the desktop app and the phone top bar
-above them under 768px. `AppShell` (`app-shell.tsx`) mounts it once, together
+`src/components/shell/` is the shell: a branded navigation header above one
+sidebar and one content area, with the desktop window bar above them in the
+desktop app. `AppShell` (`app-shell.tsx`) mounts it once, together
 with the shell-wide hosts: the command palette, the dialogs the store opens
 (`components/palette/dialogs.tsx`: launch, message, forward, close, archive
 and free), the shortcuts dialog, the updates dialog (`UpdateCenter`), the
@@ -336,9 +336,9 @@ top to bottom:
    and while more rows sit below the fold its bottom edge fades out. The
    sidebar never collapses on its own at narrow widths; the splitter and
    `⌘B` stay the reader's call.
-4. **Navigation**: Board, Swarms, Activity, Files, Environment, Agents and
-   Templates, then under a hairline Members (admins only) and Settings. The
-   current one carries `aria-current="page"`. Gates come from
+4. **Members** (admins only) and **Settings**. Board through Templates live
+   in the header instead, leaving the sidebar's height for runs. The current
+   destination carries `aria-current="page"`. Gates come from
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
    `palette` entries (Members › Devices, Manage workspaces, and Members for a
    non-admin) are reached from the palette only, and its `link` entries
@@ -382,14 +382,25 @@ fields without blocking run-status events or overwriting newer run state;
 reconnect hydration supersedes pending relationship requests. Older servers
 that omit the fields get a flat list.
 
-### Phone top bar
+### App header
 
-Under 768px `top-bar.tsx` is a 48px `banner`, padded by `--safe-top`: **Open
-sidebar** with an amber dot while anything needs you, the view's title,
-**Search** and **New run**. On a run page the title is "Run", because the run
-header under it already shows the run's title. A connection problem is one
-line under the bar. On a phone the view's own header keeps only its actions,
-and its `h1` stays for screen readers.
+`top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
+Its first row restores the Aether mark and title on the left, then **Board**,
+**Swarms**, **Activity**, **Files**, **Environment**, **Agents** and
+**Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
+styling and current-page selection. A `ResizeObserver` measures the row and
+its buttons, including font and text-size changes. Destinations that do not
+fit move into **More navigation**, a click-to-open menu; Board and Swarms
+never move into it. Gateway capability gates still apply. Hidden buttons
+are inert and excluded from the accessibility tree.
+
+Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
+while anything needs you, the view's title, **Search** and **New run**. On a
+run page the title is "Run", because the run header under it already shows
+the run's title. A connection problem is one line under the toolbar. On a
+phone the view's own header keeps only its actions, and its `h1` stays for
+screen readers. The header's measured bottom edge sets
+`--app-header-bottom` for the command palette's position and height limit.
 
 A phone screen has one filled button. A page whose own action is filled calls
 `useHeaderPrimary(shown)` (`src/store/hooks.ts`) while that action shows; the
@@ -410,8 +421,9 @@ it; every other shell key stands down while it is open.
 ### Landmarks and headers
 
 **Landmarks.** The skip link "Skip to content" is the first tab stop; the
-sidebar is `nav` "Aether" containing `region` "Runs"; the content is the one
-`main`, with one `h1` per view from `PaneHeader` (`tabIndex=-1`). After a route
+header navigation is `nav` "Main navigation"; the sidebar is `nav` "Aether"
+containing `region` "Runs"; the content is the one `main`, with one `h1` per
+view from `PaneHeader` (`tabIndex=-1`). After a route
 change focus moves to that `h1`, unless the view took focus for itself. Unit
 and end-to-end tests select by these names.
 
@@ -802,8 +814,8 @@ update.
 ## Board
 
 `src/routes/board/` is the default center view and the triage surface,
-reached through the sidebar's **Board** row; the sidebar is navigation and
-owns the primary New run action. The header's **Board / Map** choice switches
+reached through **Board** in the app header; the sidebar owns the run
+explorer and primary New run action. The view's **Board / Map** choice switches
 between triage columns and a run canvas. **Board** shows three columns,
 **Needs you**, **Working** and **Finished**, each headed by its name and count.
 `board()` in `src/routes/board/selectors.ts` reads `runGroups`, so the board
@@ -2343,8 +2355,9 @@ rather than creating a second board or lock surface.
 features (`internal/approvals`, `internal/timeline`, `internal/cost`).
 Watchers show in the run view, presence and spend are the **Team** line in
 the sidebar footer menu, and the two full views are registry routes:
-**Activity** (`timeline`) is a sidebar row, and **Approvals** (`approvals`)
-is reached from the palette. Each is gated on the method it needs.
+**Activity** (`timeline`) is in the header navigation (or its overflow menu),
+and **Approvals** (`approvals`) is reached from the palette. Each is gated on
+the method it needs.
 
 The approval inbox is for agent permission and plan approvals. Teammate
 questions and queued messages stay contextual to their run, in its Details
@@ -2770,8 +2783,8 @@ and failure semantics.
 own long-lived container, where they install tools, log in to agents and save
 the result as the image new runs start from
 ([environment-home.md](environment-home.md)). It is reached through the
-sidebar's **Environment** row or `g e`, and only when the gateway advertises
-the `terminal` WebSocket.
+header's **Environment** button (or **More navigation → Environment**) or
+`g e`, and only when the gateway advertises the `terminal` WebSocket.
 
 The view mounts `TerminalDock` (`terminal-dock.tsx`) with
 `containment="fill"`, so the dock fills the view with no resize handle and no

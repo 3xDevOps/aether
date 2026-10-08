@@ -7,7 +7,6 @@ import { WorkspaceSwitcher } from '@/components/shell/workspace-switcher'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ListRow } from '@/components/ui/list-row'
-import { Separator } from '@/components/ui/separator'
 import { useIsMobile } from '@/lib/breakpoints'
 import { canLaunch, launchBlocked } from '@/lib/commands'
 import { useDrag } from '@/lib/hooks'
@@ -210,9 +209,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
   const togglePalette = useStore((s) => s.togglePalette)
   const setDrawerOpen = useStore((s) => s.setSidebarDrawerOpen)
   const openDialog = useStore((s) => s.openPaletteDialog)
-  const all = surfaces(cap, admin)
-  const nav = all.filter((surface) => surface.place === 'nav')
-  const lower = all.filter((surface) => surface.place === 'admin')
+  const lower = surfaces(cap, admin).filter((surface) => surface.place === 'admin')
 
   return (
     <nav aria-label="Aether" className="flex min-h-0 flex-1 flex-col">
@@ -259,15 +256,11 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
         </div>
       )}
       <SidebarRuns />
-      <div className="shrink-0 border-t border-seam px-2 py-2">
-        <NavRows surfaces={nav} />
-        {lower.length > 0 && (
-          <>
-            <Separator className="my-1" />
-            <NavRows surfaces={lower} />
-          </>
-        )}
-      </div>
+      {lower.length > 0 && (
+        <div className="shrink-0 border-t border-seam px-2 py-2">
+          <NavRows surfaces={lower} />
+        </div>
+      )}
       <UpdateNotice />
       <SidebarFooter />
     </nav>

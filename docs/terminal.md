@@ -21,8 +21,9 @@ aether terminal status
 aether terminal stop
 ```
 
-In the dashboard, select **Environment** in the sidebar (or press `g` then
-`e`). Before the container exists the page shows **Your environment starts
+In the dashboard, select **Environment** in the header or its **More
+navigation** menu (or press `g` then `e`). Before the container exists the
+page shows **Your environment starts
 on first open** with **Open**. Once it runs, the terminal fills the page and
 **Add terminal tab** (`+`) in the tab strip opens another tab. The header
 holds **Save environment** and **Environment actions** (**Forward port**,

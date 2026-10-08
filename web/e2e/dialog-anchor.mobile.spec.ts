@@ -20,11 +20,8 @@ test('a confirm opens as a sheet along the bottom of a phone screen', async ({
   })
 
   await page.goto(alice.url)
-  await page.getByRole('button', { name: /^Open sidebar/ }).tap()
-  await page
-    .getByRole('dialog', { name: 'Aether' })
-    .getByRole('button', { name: 'Templates', exact: true })
-    .tap()
+  await page.getByRole('button', { name: 'More navigation' }).tap()
+  await page.getByRole('menuitem', { name: 'Templates', exact: true }).tap()
   await page.getByRole('button', { name: 'More for nightly' }).tap()
   await page.getByRole('menuitem', { name: 'Delete' }).tap()
 

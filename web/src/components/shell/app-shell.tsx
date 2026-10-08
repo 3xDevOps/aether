@@ -7,13 +7,11 @@ import { Sidebar } from '@/components/shell/sidebar'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
-import { useIsMobile } from '@/lib/breakpoints'
 import { useTeamRefresh } from '@/routes/team'
 
 export function AppShell() {
   useNavShortcuts()
   useTeamRefresh()
-  const mobile = useIsMobile()
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
       <a
@@ -26,7 +24,7 @@ export function AppShell() {
       >
         Skip to content
       </a>
-      {mobile && <TopBar />}
+      <TopBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main

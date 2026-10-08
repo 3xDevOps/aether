@@ -62,7 +62,7 @@ function CommandDialog({
         }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          'top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-seam/90 bg-raised p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--top-bar-height)_+_var(--safe-top)_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
+          'top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--app-header-bottom,var(--top-bar-height))_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-seam/90 bg-raised p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}

@@ -238,8 +238,9 @@ See [the execution-boundary decision](harness-integration.md#execution-boundary-
 
 ## Install in your environment
 
-Open your environment with `aether terminal`, or select
-**Environment** in the dashboard's sidebar. This is where a member installs system tools and language
+Open your environment with `aether terminal`, or select **Environment** in
+the dashboard's header (under **More navigation** if space is tight). This
+is where a member installs system tools and language
 runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
