@@ -126,8 +126,9 @@ turn:
 images, so it never interrupts; `Mod+Shift+Enter` always queues.
 
 **Attach an image** selects PNG, JPEG, GIF or WebP files; pasting actual image
-data into the composer attaches it too. Attach at most eight images, each at
-most 8 MiB. Uploads use `terminal.image` and store files in the run's persistent
+data into the composer attaches it too. A paste containing text and an image
+also inserts the text at the current selection. Attach at most eight images,
+each at most 8 MiB. Uploads use `terminal.image` and store files in the run's persistent
 member home, not its checkout. **Send**, **Steer** or **Queue** includes their
 container-visible paths in the prompt; uploading alone sends nothing. Images
 can be sent without text. Remove an attachment with its **×** button; this

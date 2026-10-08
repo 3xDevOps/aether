@@ -15,6 +15,9 @@ type optionCatalog struct {
 	options []nativeOption
 	model   legacyOption
 	mode    legacyOption
+	// Every authoritative catalog/selection update advances this, even when
+	// its rendered bytes are unchanged, to fence in-flight native responses.
+	generation uint64
 }
 
 type nativeOption struct {
@@ -88,6 +91,7 @@ func (o *optionCatalog) replace(raw json.RawMessage) {
 	if !present(raw) || json.Unmarshal(raw, &entries) != nil {
 		return
 	}
+	o.generation++
 	o.native = raw
 	o.options = make([]nativeOption, len(entries))
 	var seenModel, seenMode bool
@@ -192,6 +196,7 @@ func (o *optionCatalog) selection(id string, value any) (string, error) {
 }
 
 func (o *optionCatalog) setCurrent(category, value string) {
+	o.generation++
 	legacy := o.legacy(category)
 	legacy.current = value
 	legacy.revision++

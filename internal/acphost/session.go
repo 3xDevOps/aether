@@ -498,6 +498,7 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 	defer s.optionMu.Unlock()
 	s.mu.Lock()
 	category, err := s.options.selection(configID, value)
+	generation := s.options.generation
 	var revision uint64
 	if category != "" {
 		revision = s.options.legacy(category).revision
@@ -513,7 +514,11 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 		}
 		if present(opts) {
 			s.mu.Lock()
-			s.replaceOptionsLocked(opts)
+			// An agent update received during the RPC is authoritative, even
+			// when it repeats the previous catalog or current mode.
+			if s.options.generation == generation {
+				s.replaceOptionsLocked(opts)
+			}
 			s.mu.Unlock()
 		}
 		return nil

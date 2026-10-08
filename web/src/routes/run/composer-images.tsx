@@ -76,7 +76,7 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
     if (!target.current.enabled) return
     const files = imageFiles(event.clipboardData)
     if (!files.length) return
-    event.preventDefault()
+    if (!event.clipboardData.getData('text/plain')) event.preventDefault()
     void upload(files)
   }
 

@@ -289,3 +289,73 @@ func TestModeUpdatesPreserveNonSelectNativeValues(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeOptionResponseDoesNotOverwriteInFlightUpdates(t *testing.T) {
+	catalog := func(model, mode string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`[{"id":"engine","category":"model","type":"select","currentValue":%q,"options":[{"value":"provider/a","name":"A"},{"value":"provider/b","name":"B"}]},{"id":"permissions","category":"mode","type":"select","currentValue":%q,"options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]}]`, model, mode))
+	}
+	initial := catalog("provider/a", "ask")
+	selected := catalog("provider/b", "code")
+	for _, tc := range []struct {
+		name      string
+		config    json.RawMessage
+		mode      string
+		response  json.RawMessage
+		wantModel string
+		wantMode  string
+	}{
+		{"model_and_mode_updates", catalog("provider/b", "ask"), "code", initial, "provider/b", "code"},
+		{"same_catalog_update", initial, "", selected, "provider/a", "ask"},
+		{"mode_update", nil, "code", initial, "provider/a", "code"},
+		{"same_mode_update", nil, "ask", selected, "provider/a", "ask"},
+		{"no_update", nil, "", selected, "provider/b", "code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requested := make(chan *acp.Connection, 1)
+			release := make(chan struct{}, 1)
+			defer close(release)
+			s := startOptionSession(t, `{"sessionId":"options","configOptions":`+string(initial)+`}`, func(agent *acp.Connection, method string, _ json.RawMessage) (any, *acp.RequestError) {
+				if method != acp.AgentMethodSessionSetConfigOption {
+					return nil, acp.NewMethodNotFound(method)
+				}
+				requested <- agent
+				<-release
+				return map[string]any{"configOptions": tc.response}, nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- s.SetOption(ctx, "engine", "provider/b") }()
+			var agent *acp.Connection
+			select {
+			case agent = <-requested:
+			case <-ctx.Done():
+				t.Fatal("native option request did not reach the agent")
+			}
+			// Write notifications while the response is blocked. The SDK's
+			// response barrier guarantees their handlers run before SetOption
+			// receives the subsequently released response; no timing sleeps.
+			if tc.config != nil {
+				optionUpdate(t, agent, map[string]any{"sessionUpdate": "config_option_update", "configOptions": tc.config})
+			}
+			if tc.mode != "" {
+				optionUpdate(t, agent, map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": tc.mode})
+			}
+			release <- struct{}{}
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("native option response did not complete")
+			}
+			if got := optionCategory(t, s, "model")["currentValue"]; got != tc.wantModel {
+				t.Fatalf("current model = %v, want %s", got, tc.wantModel)
+			}
+			if got := optionCategory(t, s, "mode")["currentValue"]; got != tc.wantMode || s.State().Mode != tc.wantMode {
+				t.Fatalf("current mode = %v, snapshot mode = %s, want %s", got, s.State().Mode, tc.wantMode)
+			}
+		})
+	}
+}
