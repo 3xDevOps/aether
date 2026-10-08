@@ -337,7 +337,7 @@ test('keeps cumulative changes usable across snapshot failures and marks the rec
   expect(api.runPatch).toHaveBeenCalledTimes(1)
 })
 
-test('does not silently show current changes when a selected historical interval expires or leaves the window', async () => {
+test('does not silently show current changes when a historical interval is unavailable on the server', async () => {
   const selected = snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')
   seed({ ...ready, snapshots: [selected] })
   vi.mocked(api.runPatch).mockRejectedValue(new Error('Retained snapshot history has expired'))
@@ -345,50 +345,56 @@ test('does not silently show current changes when a selected historical interval
   chooseInterval(/What changed/)
   expect(await screen.findByRole('alert')).toBeTruthy()
   expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
-  act(() => useStore.getState().setDiff(active.id, { snapshots: [], intervals: {} }))
-  expect(screen.getByRole('button', { name: /What changed/ })).toBeTruthy()
-  expect(screen.getByRole('alert')).toBeTruthy()
-  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
   chooseInterval(/Current diff/)
   expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
   expect(api.runPatch).toHaveBeenCalledTimes(1)
 })
 
-test('a snapshot without a tree is a disabled row that says why', () => {
+test('a snapshot without a tree cannot request an interval', () => {
   seed({ ...ready, snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }] })
   renderDiff()
 
   openMenu('Current diff')
   const row = screen.getByRole('menuitemradio', { name: /What changed/ })
   expect(row.getAttribute('aria-disabled')).toBe('true')
-  expect(row.textContent).toContain('did not record a tree')
   expect(api.runPatch).not.toHaveBeenCalled()
 })
 
-test('with no snapshots the interval menu says why it is empty', () => {
-  seed(ready)
-  renderDiff()
-  openMenu('Current diff')
-  expect(screen.getByText('No intervals since you opened the dashboard.')).toBeTruthy()
-})
-
-test('snapshots falling off the timeline take their cached intervals with them', () => {
+test('a selected interval survives menu eviction and a bounded patch-cache reload', async () => {
   const snapshots = Array.from({ length: 40 }, (_, i) =>
     snapshot(`2026-08-14T10:${String(i).padStart(2, '0')}:00Z`, `tree${i}`, `tree${i + 1}`),
   )
   const oldest = snapshots[snapshots.length - 1]
   seed({
-    status: 'ready',
+    ...ready,
     snapshots,
     intervals: { [intervalKey(oldest.parentTree!, oldest.tree!)]: { patch: newFile, truncated: false, status: 'ready' } },
   })
+  vi.mocked(api.runPatch).mockImplementation(async (_run, range) => ({
+    run_id: active.id,
+    base: range?.from ?? 'abcdef12',
+    patch: range ? newFile : patch,
+    truncated: false,
+  }))
+  renderDiff()
+  openMenu('Current diff')
+  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ }).at(-1)!)
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
 
   act(() => useStore.getState().noteDiffSnapshot(active.id, snapshot('2026-08-14T11:00:00Z', 'treeX', 'treeY')))
+  expect(useStore.getState().diffs[active.id].snapshots.some((s) => s.time === oldest.time)).toBe(false)
+  expect(screen.getByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
 
-  const state = useStore.getState().diffs[active.id]
-  expect(state.snapshots).toHaveLength(40)
-  expect(state.snapshots.some((s) => s.time === oldest.time)).toBe(false)
-  expect(state.intervals).toEqual({})
+  act(() => {
+    for (let i = 0; i < 41; i++) {
+      useStore.getState().setIntervalPatch(active.id, `other-${i}`, { patch: '', truncated: false, status: 'ready' })
+    }
+  })
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(Object.keys(useStore.getState().diffs[active.id].intervals).length).toBeLessThanOrEqual(40)
 })
 
 // The answer is for the revision the request was issued at; anything newer

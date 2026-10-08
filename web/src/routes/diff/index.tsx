@@ -41,15 +41,14 @@ export function ChangesView({ runID }: { runID: string }) {
   const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
-  const outsideWindow = snapshot !== null && !state.snapshots.some((entry) => entry.time === snapshot.time)
-  const interval = useInterval(run ? runID : '', outsideWindow ? null : snapshot)
+  const interval = useInterval(run ? runID : '', snapshot)
   const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
   const files = snapshot ? changed : cumulative
   const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
-  const error = outsideWindow ? 'This interval is no longer in the dashboard history window.' : snapshot ? interval?.error : state.error
-  const failed = snapshot ? outsideWindow || interval?.status === 'error' : state.status === 'error'
-  const loading = snapshot ? !outsideWindow && (!interval || interval.status === 'loading') : state.status === 'loading'
+  const error = snapshot ? interval?.error : state.error
+  const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
+  const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
   const historyNotice = snapshot ?? state.snapshots.find((entry) => entry.historyGap || entry.snapshotError)
 
