@@ -112,10 +112,9 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 }
 
 // rangePatch renders one snapshot tree against another out of the run's own
-// snapshot store. A client-supplied id has to be a full object id, has to
-// resolve against this run's own object database and no other, and has to
-// name a tree: a committish would otherwise peel to its tree and render a
-// diff the timeline never offered.
+// snapshot store. Besides being complete tree object IDs, both endpoints must
+// belong to recorded run history. Merely resolving through checkout alternates
+// does not make an arbitrary source-history tree a recorded snapshot.
 func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, from, to string, maxBytes int) (Patch, error) {
 	lock := e.snapshotLock(run)
 	lock.Lock()
@@ -144,7 +143,56 @@ func (e *Engine) rangePatch(ctx context.Context, run domain.RunID, checkout, fro
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Patch{}, err
 	}
+	recorded, err := e.snapshotRangeRecorded(ctx, store, from, to)
+	if err != nil {
+		return Patch{}, err
+	}
+	if !recorded {
+		// Preserve the distinction between invalid object types and missing
+		// history before attempting legacy event-log recovery.
+		for _, id := range []string{from, to} {
+			if resolveErr := e.requireSnapshotTree(ctx, store, id); resolveErr != nil {
+				return Patch{}, resolveErr
+			}
+		}
+		if e.cfg.EventLog != nil {
+			meta, metaErr := e.readRunMeta(run)
+			if metaErr != nil && !errors.Is(metaErr, ErrRunMetadataNotFound) {
+				return Patch{}, metaErr
+			}
+			if metaErr == nil {
+				if retainErr := e.retainRecordedSnapshotTrees(ctx, meta.Workspace, run, store); retainErr != nil {
+					return Patch{}, retainErr
+				}
+				recorded, err = e.snapshotRangeRecorded(ctx, store, from, to)
+				if err != nil {
+					return Patch{}, err
+				}
+			}
+		}
+		if !recorded {
+			return Patch{}, fmt.Errorf("%w: range endpoints are not recorded for run %s", ErrSnapshotTreeMissing, run)
+		}
+	}
 	return e.snapshotPatch(ctx, store, from, to, maxBytes)
+}
+
+func (e *Engine) snapshotRangeRecorded(ctx context.Context, store, from, to string) (bool, error) {
+	// Filter in Git so the response contains only refs for these endpoints,
+	// not the run's entire indefinitely retained catalog.
+	refs, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref",
+		"--format=%(objectname)", "--points-at="+from, "--points-at="+to,
+		snapshotHistoryRoot, "refs/aether/base", "refs/aether/latest", "refs/aether/previous",
+		snapshotPublishedRef, snapshotInflightParentRef, snapshotInflightTreeRef)
+	if err != nil {
+		return false, err
+	}
+	var haveFrom, haveTo bool
+	for id := range strings.FieldsSeq(refs) {
+		haveFrom = haveFrom || id == from
+		haveTo = haveTo || id == to
+	}
+	return haveFrom && haveTo, nil
 }
 
 func (e *Engine) snapshotPatch(ctx context.Context, store, from, to string, maxBytes int) (Patch, error) {

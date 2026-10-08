@@ -204,6 +204,11 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 		t.Fatal(err)
 	}
 	tree = strings.TrimSpace(tree)
+	unrecordedLocal, localErr := e.gitInput(ctx, store, gitEnv(), []byte("040000 tree "+tree+"\tunrecorded\n"), "mktree")
+	if localErr != nil {
+		t.Fatal(localErr)
+	}
+	unrecordedLocal = strings.TrimSpace(unrecordedLocal)
 	// Durable events, not arbitrary alternate objects, identify old history.
 	// Cross a page boundary and include an already-pruned endpoint.
 	for range 256 {
@@ -222,6 +227,9 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	}
 	if _, err := bus.Publish(ctx, events.Event{WorkspaceID: "ws1", RunID: "other-run", Payload: events.RunDiffPayload{Tree: unrelatedTree}}); err != nil {
 		t.Fatal(err)
+	}
+	if _, publishErr := bus.Publish(ctx, events.Event{WorkspaceID: "other-workspace", RunID: "run1", Payload: events.RunDiffPayload{Tree: unrecordedLocal}}); publishErr != nil {
+		t.Fatal(publishErr)
 	}
 	if err := os.WriteFile(filepath.Join(store, lastTreeFile), []byte(tree+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -247,6 +255,44 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(store, lastTreeFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("read did not migrate last: %v", err)
+	}
+	// Object existence alone is never proof that this run recorded a tree.
+	// Known refs remain usable without a log; uncatalogued endpoints fail
+	// closed, even when they are present in local objects or alternates.
+	e.cfg.EventLog = nil
+	for _, unknown := range []string{borrowed, unrelatedTree, unrecordedLocal} {
+		for _, interval := range [][2]string{{base, unknown}, {unknown, tree}} {
+			if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: interval[0], To: interval[1]}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+				t.Fatalf("uncatalogued interval with no event log = %v", rangeErr)
+			}
+		}
+	}
+	if _, knownErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: tree}); knownErr != nil {
+		t.Fatalf("known recorded refs require an event log: %v", knownErr)
+	}
+	unavailableLog, logErr := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "unavailable-events.db"))
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if closeErr := unavailableLog.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	e.cfg.EventLog = unavailableLog
+	if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: tree}); rangeErr == nil || errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+		t.Fatalf("unavailable event log did not report its recovery error: %v", rangeErr)
+	}
+	if _, knownErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: tree}); knownErr != nil {
+		t.Fatalf("known recorded refs failed with an unavailable log: %v", knownErr)
+	}
+	e.cfg.EventLog = log
+	patch, err = e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: older})
+	if err != nil || !strings.Contains(patch.Text, "+local snapshot root") {
+		t.Fatalf("legacy event endpoints were not recovered for a live checkout: %+v, %v", patch, err)
+	}
+	for _, unknown := range []string{unrelatedTree, unrecordedLocal} {
+		if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unknown}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+			t.Fatalf("another run/workspace's source tree became recorded history: %v", rangeErr)
+		}
 	}
 	for range 3 {
 		if _, err := e.writeSnapshotTree(ctx, "run1", checkout); err != nil {
@@ -285,6 +331,9 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	}
 	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unrelatedTree}); !errors.Is(err, ErrSnapshotTreeMissing) {
 		t.Fatalf("unrelated alternate history was copied or unavailability hidden: %v", err)
+	}
+	if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unrecordedLocal}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+		t.Fatalf("unrecorded local tree became readable after checkout cleanup: %v", rangeErr)
 	}
 }
 
