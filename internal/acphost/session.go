@@ -498,7 +498,8 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 	defer s.optionMu.Unlock()
 	s.mu.Lock()
 	category, err := s.options.selection(configID, value)
-	generation := s.options.generation
+	nativeRevision := s.options.nativeRevision
+	modeRevision := s.options.mode.revision
 	var revision uint64
 	if category != "" {
 		revision = s.options.legacy(category).revision
@@ -514,10 +515,15 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 		}
 		if present(opts) {
 			s.mu.Lock()
-			// An agent update received during the RPC is authoritative, even
-			// when it repeats the previous catalog or current mode.
-			if s.options.generation == generation {
-				s.replaceOptionsLocked(opts)
+			// Full catalog notifications own the entire snapshot. A mode-only
+			// notification owns just mode, not the other accepted response values.
+			if s.options.nativeRevision == nativeRevision {
+				mode, modeChanged := s.options.mode.current, s.options.mode.revision != modeRevision
+				s.options.replace(opts)
+				if modeChanged {
+					s.options.setCurrent("mode", mode)
+				}
+				s.publishOptionsLocked()
 			}
 			s.mu.Unlock()
 		}

@@ -291,24 +291,29 @@ func TestModeUpdatesPreserveNonSelectNativeValues(t *testing.T) {
 }
 
 func TestNativeOptionResponseDoesNotOverwriteInFlightUpdates(t *testing.T) {
-	catalog := func(model, mode string) json.RawMessage {
-		return json.RawMessage(fmt.Sprintf(`[{"id":"engine","category":"model","type":"select","currentValue":%q,"options":[{"value":"provider/a","name":"A"},{"value":"provider/b","name":"B"}]},{"id":"permissions","category":"mode","type":"select","currentValue":%q,"options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]}]`, model, mode))
+	catalog := func(model, mode, effort string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`[{"id":"engine","category":"model","type":"select","currentValue":%q,"options":[{"value":"provider/a","name":"A"},{"value":"provider/b","name":"B"}]},{"id":"permissions","category":"mode","type":"select","currentValue":%q,"options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]},{"id":"effort","category":"thought_level","type":"select","currentValue":%q,"options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]},{"id":"enabled","category":"custom","type":"boolean","currentValue":true},{"id":"opaque","category":"extension","type":"_future","currentValue":{"vendor":true}}]`, model, mode, effort))
 	}
-	initial := catalog("provider/a", "ask")
-	selected := catalog("provider/b", "code")
+	initial := catalog("provider/a", "ask", "low")
+	selected := catalog("provider/b", "code", "high")
 	for _, tc := range []struct {
-		name      string
-		config    json.RawMessage
-		mode      string
-		response  json.RawMessage
-		wantModel string
-		wantMode  string
+		name       string
+		configID   string
+		value      string
+		config     json.RawMessage
+		mode       string
+		response   json.RawMessage
+		wantModel  string
+		wantMode   string
+		wantEffort string
 	}{
-		{"model_and_mode_updates", catalog("provider/b", "ask"), "code", initial, "provider/b", "code"},
-		{"same_catalog_update", initial, "", selected, "provider/a", "ask"},
-		{"mode_update", nil, "code", initial, "provider/a", "code"},
-		{"same_mode_update", nil, "ask", selected, "provider/a", "ask"},
-		{"no_update", nil, "", selected, "provider/b", "code"},
+		{"model_and_mode_updates", "engine", "provider/b", catalog("provider/b", "ask", "low"), "code", initial, "provider/b", "code", "low"},
+		{"same_catalog_update", "engine", "provider/b", initial, "", selected, "provider/a", "ask", "low"},
+		{"model_changed_mode_update", "engine", "provider/b", nil, "code", catalog("provider/b", "ask", "low"), "provider/b", "code", "low"},
+		{"model_same_mode_update", "engine", "provider/b", nil, "ask", selected, "provider/b", "ask", "high"},
+		{"effort_changed_mode_update", "effort", "high", nil, "code", catalog("provider/a", "ask", "high"), "provider/a", "code", "high"},
+		{"effort_same_mode_update", "effort", "high", nil, "ask", catalog("provider/a", "code", "high"), "provider/a", "ask", "high"},
+		{"no_update", "engine", "provider/b", nil, "", selected, "provider/b", "code", "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requested := make(chan *acp.Connection, 1)
@@ -322,10 +327,15 @@ func TestNativeOptionResponseDoesNotOverwriteInFlightUpdates(t *testing.T) {
 				<-release
 				return map[string]any{"configOptions": tc.response}, nil
 			})
+			_, events, unsubscribe, err := s.Subscribe(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer unsubscribe()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			result := make(chan error, 1)
-			go func() { result <- s.SetOption(ctx, "engine", "provider/b") }()
+			go func() { result <- s.SetOption(ctx, tc.configID, tc.value) }()
 			var agent *acp.Connection
 			select {
 			case agent = <-requested:
@@ -355,6 +365,37 @@ func TestNativeOptionResponseDoesNotOverwriteInFlightUpdates(t *testing.T) {
 			}
 			if got := optionCategory(t, s, "mode")["currentValue"]; got != tc.wantMode || s.State().Mode != tc.wantMode {
 				t.Fatalf("current mode = %v, snapshot mode = %s, want %s", got, s.State().Mode, tc.wantMode)
+			}
+			if got := optionCategory(t, s, "thought_level")["currentValue"]; got != tc.wantEffort {
+				t.Fatalf("current effort = %v, want %s", got, tc.wantEffort)
+			}
+			if got := optionCategory(t, s, "custom")["currentValue"]; got != true {
+				t.Fatalf("boolean value changed: %v", got)
+			}
+			if got := optionCategory(t, s, "extension")["currentValue"]; !reflect.DeepEqual(got, map[string]any{"vendor": true}) {
+				t.Fatalf("opaque value changed: %v", got)
+			}
+			// The response is complete, so all resulting events are already
+			// buffered. Check every publication, not only the final snapshot.
+			unsubscribe()
+			for event := range events {
+				if tc.config != nil || tc.mode == "" {
+					continue
+				}
+				if event.Kind == KindModeChange && event.Mode != tc.mode {
+					t.Fatalf("published stale mode: %q, want %q", event.Mode, tc.mode)
+				}
+				if event.Kind == KindConfigOptions {
+					var options []map[string]any
+					if err := json.Unmarshal(event.ConfigOptions, &options); err != nil {
+						t.Fatal(err)
+					}
+					for _, option := range options {
+						if option["category"] == "mode" && option["currentValue"] != tc.mode {
+							t.Fatalf("published stale native mode: %v, want %s", option["currentValue"], tc.mode)
+						}
+					}
+				}
 			}
 		})
 	}

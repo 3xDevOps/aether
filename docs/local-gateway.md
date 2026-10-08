@@ -587,6 +587,8 @@ The host routes those selectors to `session/set_model` or `session/set_mode`;
 native config selectors use `session/set_config_option` and take precedence.
 Model and mode notifications received during an option change remain
 authoritative if that request later returns an older option snapshot.
+A mode-only notification preserves that mode without discarding accepted model,
+effort or other option changes returned by the request.
 
 A run whose session is not running answers `-32004` with the reason.
 `run.mode.switch` also takes a Standard run, needs **Steer**, and while

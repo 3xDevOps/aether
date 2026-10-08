@@ -15,9 +15,8 @@ type optionCatalog struct {
 	options []nativeOption
 	model   legacyOption
 	mode    legacyOption
-	// Every authoritative catalog/selection update advances this, even when
-	// its rendered bytes are unchanged, to fence in-flight native responses.
-	generation uint64
+	// Complete native snapshots fence in-flight responses, even when unchanged.
+	nativeRevision uint64
 }
 
 type nativeOption struct {
@@ -91,7 +90,7 @@ func (o *optionCatalog) replace(raw json.RawMessage) {
 	if !present(raw) || json.Unmarshal(raw, &entries) != nil {
 		return
 	}
-	o.generation++
+	o.nativeRevision++
 	o.native = raw
 	o.options = make([]nativeOption, len(entries))
 	var seenModel, seenMode bool
@@ -196,7 +195,6 @@ func (o *optionCatalog) selection(id string, value any) (string, error) {
 }
 
 func (o *optionCatalog) setCurrent(category, value string) {
-	o.generation++
 	legacy := o.legacy(category)
 	legacy.current = value
 	legacy.revision++
@@ -234,6 +232,10 @@ func (o *optionCatalog) setCurrent(category, value string) {
 
 func (s *Session) replaceOptionsLocked(raw json.RawMessage) {
 	s.options.replace(raw)
+	s.publishOptionsLocked()
+}
+
+func (s *Session) publishOptionsLocked() {
 	s.emitOptionsLocked()
 	if mode := s.options.mode.current; mode != "" && mode != s.state.Mode {
 		s.emitLocked(Item{Kind: KindModeChange, Mode: mode})
