@@ -129,12 +129,26 @@ turn:
 | **Interrupt** | a turn runs and the box is empty | `run.acp.cancel`: stops the turn and cancels its requests |
 | **Resume** | the run is paused | resumes it |
 
-`Mod+Enter` does what the button says, and nothing while the box is empty, so
-it never interrupts; `Mod+Shift+Enter` always queues.
+`Mod+Enter` does what the button says, and nothing without text or attached
+images, so it never interrupts; `Mod+Shift+Enter` always queues.
+
+**Attach an image** selects PNG, JPEG, GIF or WebP files; pasting actual image
+data into the composer attaches it too. A paste containing text and an image
+also inserts the text at the current selection. Attach at most eight images,
+each at most 8 MiB. Uploads use `terminal.image` and store files in the run's persistent
+member home, not its checkout. **Send**, **Steer** or **Queue** includes their
+container-visible paths in the prompt; uploading alone sends nothing. Images
+can be sent without text. Remove an attachment with its **×** button; this
+removes the prompt reference, not the stored file. Failed uploads show the
+server error, and failed sends keep the text and attachments for retry.
 
 The menus under the box set the agent's mode, model and effort
-(`run.acp.set_option`); `/` lists the agent's commands and `@` completes a
-path in the run's checkout. Sending, answering and changing options need the
+(`run.acp.set_option`). The model picker searches names, IDs, descriptions and
+provider groups across every model the harness advertises; arrow keys and
+Enter select, and Escape closes it. Aether does not curate a shorter catalog.
+The harness's login, configuration and adapter policies determine which models
+it advertises. `/` lists the agent's commands and `@` completes a path in the
+run's checkout. Sending, answering and changing options need the
 run's control lease: the owner's desktop tab takes it when it first shows
 Session and nobody holds it. On any screen, the owner of a run nobody
 controls sends or answers in one step: the button takes the lease, then
@@ -180,7 +194,10 @@ the agent offered, plus `values` for an accepted form question
 ([local-gateway.md](local-gateway.md)). The first answer wins; a later one gets `CodeConflict` with
 `data.reason: "already_answered"`. Cancelling the turn (`run.acp.cancel`)
 answers every pending request `cancelled`. `run.acp.set_option` changes a
-config option the agent lists, such as its mode or model.
+config option the agent lists, such as its mode or model. Agents that advertise
+separate ACP `models` or `modes` instead of config selectors get the same
+controls: Aether routes those selections to `session/set_model` or
+`session/set_mode`. Native config selectors take precedence.
 
 Answering, cancelling and changing options need **Steer** and the run's
 **control lease**, the same authority as typing into a terminal. A dashboard

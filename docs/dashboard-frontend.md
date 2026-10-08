@@ -1406,9 +1406,16 @@ The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
-an empty box during a turn) or **Resume** (a paused run). `Mod+Enter` does
-what the pill says and nothing on an empty box, `Mod+Shift+Enter` queues; on
-touch only the pill sends. Footer menus set mode, model and effort with
+an empty composer during a turn) or **Resume** (a paused run). `Mod+Enter` does
+what the pill says and nothing without text or images, `Mod+Shift+Enter`
+queues; on touch only the pill sends. The shared upload state in
+`composer-images.tsx` accepts file selection and native image paste, enforces
+the eight-image limit, and uses `terminal.image`. Enhanced sends include the
+returned paths in the prompt, allow image-only messages, block while uploading,
+and retain text and images on failure. Footer controls wrap on narrow screens.
+Mode and effort menus use content-sized described rows; model selectors use
+`Command` inside `Popover`, preserving every advertised option and provider
+group with search by name, ID and description. Selections use
 `run.acp.set_option`; `/` completes the agent's commands and `@` paths from
 the Files tree cache. It closes with one line of reason while switching, for a
 Background run, while connecting, while a request is pending (keeping
