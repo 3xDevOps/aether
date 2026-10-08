@@ -80,15 +80,34 @@ Layers, per the design spec's testing strategy:
   These jobs are the merge gate the E2E suite owns.
   The runtime capacity scenario starts its own Docker and containerd daemons
   with private sockets and storage roots; it never reconfigures the host's
-  daemon. It needs root plus `dockerd` and `containerd` on `PATH`. The other
-  resource scenarios observe actual cgroup limits, PID exhaustion and OOM
-  containment, not agent-session isolation:
+  daemon. It needs root plus `dockerd` and `containerd` on `PATH`. Docker's
+  info API must expose `Containerd.Address` and namespaces (API 1.46+, including
+  Docker 28's API 1.48); missing metadata fails the proof, rather than skipping
+  it or guessing an address. The fixture uses the documented
+  [`--containerd-plugins-namespace` CLI flag](https://docs.docker.com/reference/cli/dockerd/),
+  because Docker 28/29's singular JSON tag does not match their flag validation.
+  Containerd's introspection API must export the actual content and overlayfs
+  roots, including the fixture's custom `root_path` override. Both daemon
+  readiness waits observe process exit immediately and retain their owned logs
+  on failure; teardown uses bounded TERM/KILL waits. The other resource
+  scenarios observe actual cgroup limits, PID exhaustion and OOM containment,
+  not agent-session isolation:
 
   ```sh
   sudo env "PATH=$PATH" "HOME=$HOME" go test -race -tags=integration \
     ./internal/runtime \
     -run '^TestDocker(CapacityContainerdIsolated|ResourceLimits|PIDLimitEnforced|OOMContained)$' -v
   ```
+
+  Classic-driver capacity unit tests also verify the separate layer-store
+  filesystem: Moby stores overlay2 layers under `data-root/overlay2` and VFS
+  layers under `data-root/vfs/dir`. Both driver homes are created during
+  initialization, but VFS creates `dir` only with the first layer; before that,
+  capacity uses the verified `vfs` parent. Missing driver homes, broken
+  symlinks, and non-directory layer stores fail closed. The cross-filesystem
+  regression resolves an owned symlink to an existing `/dev/shm` filesystem,
+  without creating mounts or changing shared paths, and requires aggregate
+  storage capacity to remain unknown when layer and data roots differ.
 
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in

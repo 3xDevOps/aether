@@ -67,6 +67,9 @@ func localCapacityInfo(t *testing.T) system.Info {
 	if err := os.WriteFile(filepath.Join(root, "engine-id"), []byte("engine-identity\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "overlay2"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	return system.Info{
 		ID: "engine-identity", DockerRootDir: root, Driver: "overlay2",
 		MemoryLimit: true, SwapLimit: true, CPUCfsPeriod: true, CPUCfsQuota: true, PidsLimit: true,
@@ -110,7 +113,12 @@ func TestDockerCapacityClassicAndContainerdRoots(t *testing.T) {
 		t.Run(driver, func(t *testing.T) {
 			info := localCapacityInfo(t)
 			info.Driver = driver
-			wantRoots := 1
+			wantRoots := 2
+			if driver == "vfs" {
+				if err := os.MkdirAll(filepath.Join(info.DockerRootDir, "vfs", "dir"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			content, snapshot := t.TempDir(), t.TempDir()
 			if driver == "overlayfs" || driver == "native" {
 				wantRoots = 3
@@ -144,6 +152,15 @@ func TestDockerCapacityClassicAndContainerdRoots(t *testing.T) {
 			}
 			if wantRoots == 3 && (roots[1].path != content || roots[2].path != snapshot) {
 				t.Fatalf("did not use effective plugin root overrides: %+v", roots)
+			}
+			if wantRoots == 2 {
+				want := filepath.Join(info.DockerRootDir, driver)
+				if driver == "vfs" {
+					want = filepath.Join(want, "dir")
+				}
+				if roots[1].path != want {
+					t.Fatalf("did not use classic layer root: %+v, want %s", roots, want)
+				}
 			}
 			u := d.StorageUsage(t.Context(), info.DockerRootDir)
 			if u.TotalBytes == nil || u.SharedFilesystem == nil || !*u.SharedFilesystem {
@@ -292,6 +309,73 @@ type failingMemoryReader struct{}
 
 func (failingMemoryReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
+func TestDockerCapacityClassicLayerDirectoryBoundaries(t *testing.T) {
+	for _, driver := range []string{"overlay2", "vfs"} {
+		for _, scenario := range []string{"missing home", "home file", "broken home symlink", "empty", "ready", "layer file", "broken layer symlink"} {
+			t.Run(driver+"/"+scenario, func(t *testing.T) {
+				info := localCapacityInfo(t)
+				info.Driver = driver
+				home := filepath.Join(info.DockerRootDir, driver)
+				if err := os.MkdirAll(home, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				layer := home
+				if driver == "vfs" {
+					layer = filepath.Join(home, "dir")
+				}
+				target := layer
+				if strings.Contains(scenario, "home") {
+					target = home
+				}
+				switch scenario {
+				case "missing home":
+					if err := os.Remove(home); err != nil {
+						t.Fatal(err)
+					}
+				case "home file", "layer file", "broken home symlink", "broken layer symlink":
+					if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+						t.Fatal(err)
+					}
+					if strings.Contains(scenario, "symlink") {
+						if err := os.Symlink(filepath.Join(info.DockerRootDir, "absent"), target); err != nil {
+							t.Fatal(err)
+						}
+					} else if err := os.WriteFile(target, nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				case "ready":
+					if err := os.MkdirAll(layer, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				roots, err := dockerFilesystemRoots(t.Context(), "unix:///daemon.sock", info)
+				if scenario != "empty" && scenario != "ready" {
+					if err == nil || roots != nil {
+						t.Fatalf("unverified layer root accepted: %+v, %v", roots, err)
+					}
+					usage := capacityDocker(t, info).StorageUsage(t.Context(), info.DockerRootDir)
+					if usage.TotalBytes != nil || usage.FreeBytes != nil || usage.UsedBytes != nil || usage.SharedFilesystem != nil {
+						t.Fatalf("unverified layers reported data-root capacity: %+v", usage)
+					}
+					return
+				}
+				want := layer
+				if scenario == "empty" {
+					want = home
+				}
+				if err != nil || len(roots) != 2 || roots[1].path != want {
+					t.Fatalf("classic layer filesystem = %+v, %v; want %s", roots, err, want)
+				}
+				if driver == "vfs" && scenario == "empty" {
+					if _, err := os.Lstat(layer); !os.IsNotExist(err) {
+						t.Fatalf("capacity discovery mutated the lazy VFS layer directory: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestDockerCapacityAcrossFilesystemsHasNoAggregate(t *testing.T) {
 	if goruntime.GOOS != "linux" {
 		t.Skip("Linux separate-filesystem fixture")
@@ -300,30 +384,65 @@ func TestDockerCapacityAcrossFilesystemsHasNoAggregate(t *testing.T) {
 	if st, err := os.Stat("/dev/shm"); err != nil || !st.IsDir() {
 		t.Skip("separate tmpfs fixture is unavailable")
 	}
-	info := localCapacityInfo(t)
-	same, err := disk.SameFilesystem(info.DockerRootDir, "/dev/shm")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if same {
-		t.Skip("temporary directory and /dev/shm share a filesystem")
-	}
-	info.Driver = "overlayfs"
-	info.DriverStatus = [][2]string{{"driver-type", "io.containerd.snapshotter.v1"}}
-	info.Containerd = &system.ContainerdInfo{Address: introspectionSocket(t, func(_ context.Context, req *introspection.PluginInfoRequest) (*introspection.PluginInfoResponse, error) {
-		root := info.DockerRootDir
-		if req.Type == "io.containerd.snapshotter.v1" {
-			root = "/dev/shm"
-		}
-		return &introspection.PluginInfoResponse{Plugin: &introspection.Plugin{Type: req.Type, ID: req.ID, Exports: map[string]string{"root": root}}}, nil
-	})}
-	d := capacityDocker(t, info)
-	got, err := d.Capacity(t.Context())
-	if err != nil || len(got.Filesystems) != 3 {
-		t.Fatalf("separate filesystems lost: %+v, %v", got, err)
-	}
-	u := d.StorageUsage(t.Context(), info.DockerRootDir)
-	if u.TotalBytes != nil || u.FreeBytes != nil || u.UsedBytes != nil || u.SharedFilesystem != nil || !strings.Contains(u.Error, "multiple filesystems") {
-		t.Fatalf("invented single filesystem total: %+v", u)
+	for _, driver := range []string{"overlay2", "vfs", "overlayfs"} {
+		t.Run(driver, func(t *testing.T) {
+			info := localCapacityInfo(t)
+			same, err := disk.SameFilesystem(info.DockerRootDir, "/dev/shm")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if same {
+				t.Skip("temporary directory and /dev/shm share a filesystem")
+			}
+			info.Driver = driver
+			wantRoots := 2
+			if driver == "overlayfs" {
+				wantRoots = 3
+				info.DriverStatus = [][2]string{{"driver-type", "io.containerd.snapshotter.v1"}}
+				info.Containerd = &system.ContainerdInfo{Address: introspectionSocket(t, func(_ context.Context, req *introspection.PluginInfoRequest) (*introspection.PluginInfoResponse, error) {
+					root := info.DockerRootDir
+					if req.Type == "io.containerd.snapshotter.v1" {
+						root = "/dev/shm"
+					}
+					return &introspection.PluginInfoResponse{Plugin: &introspection.Plugin{Type: req.Type, ID: req.ID, Exports: map[string]string{"root": root}}}, nil
+				})}
+			} else {
+				layerRoot := filepath.Join(info.DockerRootDir, driver)
+				if driver == "vfs" {
+					if mkdirErr := os.Mkdir(layerRoot, 0o700); mkdirErr != nil {
+						t.Fatal(mkdirErr)
+					}
+					layerRoot = filepath.Join(layerRoot, "dir")
+				} else if removeErr := os.Remove(layerRoot); removeErr != nil {
+					t.Fatal(removeErr)
+				}
+				// Only this test's symlink is created; no shared paths or
+				// mounts are modified. Statfs must follow the layer root.
+				if linkErr := os.Symlink("/dev/shm", layerRoot); linkErr != nil {
+					t.Fatal(linkErr)
+				}
+			}
+			d := capacityDocker(t, info)
+			got, err := d.Capacity(t.Context())
+			if err != nil || len(got.Filesystems) != wantRoots {
+				t.Fatalf("separate filesystems lost: %+v, %v", got, err)
+			}
+			fs, err := disk.Filesystem("/dev/shm")
+			if err != nil {
+				t.Fatal(err)
+			}
+			layers := got.Filesystems[len(got.Filesystems)-1]
+			if layers.TotalBytes != fs.TotalBytes || layers.FreeBytes > layers.TotalBytes {
+				t.Fatalf("layer capacity did not probe its actual filesystem: %+v, want %+v", layers, fs)
+			}
+			roots, err := dockerFilesystemRoots(t.Context(), d.cli.DaemonHost(), info)
+			if err != nil || roots[len(roots)-1].path != "/dev/shm" {
+				t.Fatalf("layer root did not resolve to the separate filesystem: %+v, %v", roots, err)
+			}
+			u := d.StorageUsage(t.Context(), info.DockerRootDir)
+			if u.TotalBytes != nil || u.FreeBytes != nil || u.UsedBytes != nil || u.SharedFilesystem != nil || !strings.Contains(u.Error, "multiple filesystems") {
+				t.Fatalf("invented single filesystem total: %+v", u)
+			}
+		})
 	}
 }

@@ -112,7 +112,31 @@ func dockerFilesystemRoots(ctx context.Context, host string, info system.Info) (
 		if info.Driver != "overlay2" && info.Driver != "vfs" {
 			return nil, errors.New("image-store filesystem layout is not verified; supported classic drivers are overlay2 and vfs")
 		}
-		return roots, nil
+		// Moby initializes each classic driver at data-root/<driver>.
+		// Its layer store can be a separate mount or a symlink, so probing
+		// only data-root does not establish layer-store capacity.
+		layerRoot, layerErr := verifiedStorageDirectory(filepath.Join(root, info.Driver))
+		if layerErr != nil {
+			return nil, fmt.Errorf("%s layer root: %w", info.Driver, layerErr)
+		}
+		layerName := "Docker overlay2 layers"
+		if info.Driver == "vfs" {
+			layerName = "Docker vfs layers"
+			// VFS Init creates its home, but creates dir/ only with the first
+			// layer. Until then new layers allocate on the verified home FS.
+			// Lstat distinguishes an absent dir from a broken symlink; never
+			// substitute the parent for an existing but unverifiable store.
+			dir := filepath.Join(layerRoot, "dir")
+			if _, statErr := os.Lstat(dir); statErr == nil {
+				layerRoot, layerErr = verifiedStorageDirectory(dir)
+				if layerErr != nil {
+					return nil, fmt.Errorf("vfs layer directory: %w", layerErr)
+				}
+			} else if !os.IsNotExist(statErr) {
+				return nil, fmt.Errorf("vfs layer directory: %w", statErr)
+			}
+		}
+		return append(roots, dockerStorageRoot{name: layerName, path: layerRoot}), nil
 	}
 	// These built-in snapshotters store layer data beneath their exported root.
 	// Block-device, remote, and proxy snapshotters need different measurements.

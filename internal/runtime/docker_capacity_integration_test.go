@@ -55,7 +55,7 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 	if err := os.WriteFile(containerdConfig, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	startCapacityDaemon(t, base, "containerd", "--config", containerdConfig, "--root", contentRoot, "--state", filepath.Join(base, "containerd-state"), "--address", containerdSocket)
+	containerdDone := startCapacityDaemon(t, base, "containerd", "--config", containerdConfig, "--root", contentRoot, "--state", filepath.Join(base, "containerd-state"), "--address", containerdSocket)
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	for {
@@ -63,6 +63,8 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 			break
 		}
 		select {
+		case <-containerdDone:
+			t.Fatal("isolated containerd exited before creating its socket; see owned daemon log")
 		case <-ctx.Done():
 			t.Fatal("isolated containerd did not create its socket")
 		case <-time.After(50 * time.Millisecond):
@@ -72,16 +74,15 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 	dockerSocket := filepath.Join(base, "docker.sock")
 	dockerConfig := filepath.Join(base, "daemon.json")
 	cfg := map[string]any{
-		"hosts":                       []string{"unix://" + dockerSocket},
-		"data-root":                   dockerRoot,
-		"exec-root":                   filepath.Join(base, "docker-exec"),
-		"pidfile":                     filepath.Join(base, "dockerd.pid"),
-		"containerd":                  containerdSocket,
-		"containerd-namespace":        "aether-capacity",
-		"containerd-plugin-namespace": "aether-capacity-plugins",
-		"features":                    map[string]bool{"containerd-snapshotter": true},
-		"storage-driver":              "overlayfs",
-		"bridge":                      "none", "iptables": false, "ip6tables": false,
+		"hosts":                []string{"unix://" + dockerSocket},
+		"data-root":            dockerRoot,
+		"exec-root":            filepath.Join(base, "docker-exec"),
+		"pidfile":              filepath.Join(base, "dockerd.pid"),
+		"containerd":           containerdSocket,
+		"containerd-namespace": "aether-capacity",
+		"features":             map[string]bool{"containerd-snapshotter": true},
+		"storage-driver":       "overlayfs",
+		"bridge":               "none", "iptables": false, "ip6tables": false,
 		"ip-forward": false, "ip-masq": false, "userland-proxy": false,
 	}
 	data, err := json.Marshal(cfg)
@@ -91,7 +92,9 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 	if err := os.WriteFile(dockerConfig, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	startCapacityDaemon(t, base, "dockerd", "--config-file", dockerConfig)
+	// Docker 28/29 register the plural CLI flag but use a singular JSON tag;
+	// the singular JSON key fails validation and the plural key is ignored.
+	dockerDone := startCapacityDaemon(t, base, "dockerd", "--config-file", dockerConfig, "--containerd-plugins-namespace", "aether-capacity-plugins")
 	cli, err := client.New(client.WithHost("unix://" + dockerSocket))
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +109,10 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 			break
 		}
 		select {
+		case <-containerdDone:
+			t.Fatal("isolated containerd exited while waiting for Docker; see owned daemon log")
+		case <-dockerDone:
+			t.Fatal("isolated dockerd exited before readiness; see owned daemon log")
 		case <-ctx.Done():
 			t.Fatalf("isolated Docker did not become ready: %v", err)
 		case <-time.After(50 * time.Millisecond):
@@ -115,8 +122,14 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Info.Driver != "overlayfs" || info.Info.Containerd == nil || info.Info.Containerd.Address != containerdSocket {
+	if info.Info.Containerd == nil || info.Info.Containerd.Address == "" {
+		t.Fatalf("Docker %s API %s does not expose Containerd.Address; the isolated capacity proof requires Docker info API >= 1.46 with a configured containerd address", info.Info.ServerVersion, cli.ClientVersion())
+	}
+	if info.Info.Driver != "overlayfs" || info.Info.Containerd.Address != containerdSocket {
 		t.Fatalf("not using isolated containerd image store: %+v", info.Info)
+	}
+	if info.Info.Containerd.Namespaces.Containers != "aether-capacity" || info.Info.Containerd.Namespaces.Plugins != "aether-capacity-plugins" {
+		t.Fatalf("not using isolated containerd namespaces: %+v", info.Info.Containerd.Namespaces)
 	}
 	roots, err := dockerFilesystemRoots(ctx, cli.DaemonHost(), info.Info)
 	if err != nil {
@@ -155,7 +168,7 @@ disabled_plugins = ["io.containerd.grpc.v1.cri", "io.containerd.cri.v1.images", 
 	}
 }
 
-func startCapacityDaemon(t *testing.T, base, binary string, args ...string) {
+func startCapacityDaemon(t *testing.T, base, binary string, args ...string) <-chan struct{} {
 	t.Helper()
 	logPath := filepath.Join(base, binary+".log")
 	log, err := os.Create(logPath)
@@ -182,16 +195,18 @@ func startCapacityDaemon(t *testing.T, base, binary string, args ...string) {
 	t.Cleanup(func() {
 		select {
 		case <-done:
-			if waitErr != nil {
-				t.Errorf("isolated %s exited unexpectedly: %v", binary, waitErr)
-			}
+			t.Errorf("isolated %s exited unexpectedly: %v", binary, waitErr)
 		default:
 			_ = cmd.Process.Signal(syscall.SIGTERM)
 			select {
 			case <-done:
 			case <-time.After(10 * time.Second):
 				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-				<-done
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Errorf("isolated %s did not exit after SIGKILL", binary)
+				}
 				t.Errorf("isolated %s needed forced shutdown", binary)
 			}
 		}
@@ -202,4 +217,5 @@ func startCapacityDaemon(t *testing.T, base, binary string, args ...string) {
 			}
 		}
 	})
+	return done
 }

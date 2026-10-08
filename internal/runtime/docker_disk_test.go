@@ -96,8 +96,12 @@ func TestDockerFilesystemRequiresVerifiedLocalLayerStore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "engine-id"), []byte("local-engine\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	layers := filepath.Join(root, "overlay2")
+	if err := os.Mkdir(layers, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	info := system.Info{ID: "local-engine", DockerRootDir: root, Driver: "overlay2"}
-	if got, err := dockerFilesystemRoots(t.Context(), "unix:///daemon.sock", info); err != nil || len(got) != 1 || got[0].path != root {
+	if got, err := dockerFilesystemRoots(t.Context(), "unix:///daemon.sock", info); err != nil || len(got) != 2 || got[0].path != root || got[1].path != layers {
 		t.Fatalf("verified classic store: %v, %v", got, err)
 	}
 	for _, tc := range []struct {
