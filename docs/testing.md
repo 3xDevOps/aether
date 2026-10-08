@@ -369,10 +369,13 @@ The image contains the scripts, Playwright, Chromium, OS dependencies and
 fonts; no source or member-home bind participates. The smoke reads Linux
 `/proc/<pid>/status` to verify nested renderer PID namespaces, no-new-privileges
 and Chromium seccomp filters beyond Docker's filters. It interacts with a
-loopback app, captures a browser PNG and a
-bounded JPEG frame, exercises a popup and console report, renders a terminal
-PNG with screen metadata, and resets the browser context. The companion's
-additional behavior checks run in the same image. A Docker spec or requested
+loopback app, captures a browser PNG and a bounded JPEG frame, resizes while
+an observer remains attached, and checks that a new observer receives the
+new-size frame. It also exercises a popup and console report, renders a
+terminal PNG with screen metadata, and resets the browser context. The
+companion's additional behavior checks force a resize frame to arrive before
+the resize operation returns and cover unchanged-size viewport requests.
+These checks run in the same image. A Docker spec or requested
 launch flag alone is not proof of a working Chromium sandbox.
 
 The runtime integration command separately exercises real namespace sharing,

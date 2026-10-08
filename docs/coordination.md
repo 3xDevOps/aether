@@ -616,7 +616,10 @@ the recorded owned companion; another `open` never silently recreates it.
 
 Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image
-history. On controller release, revocation or disconnect, the server clears
+history. Resizing to the current width and height preserves the viewport
+identity and cached frame. A changed viewport fences out old-geometry frames
+before Chromium renders its replacement. On controller release, revocation or
+disconnect, the server clears
 held browser keys, buttons and touches before admitting another controller.
 If cleanup cannot be confirmed, new control remains fenced.
 

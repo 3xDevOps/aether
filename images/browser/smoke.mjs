@@ -38,6 +38,40 @@ export async function smoke() {
     request.on('error', reject);
     request.end(value === undefined ? undefined : JSON.stringify(value));
   });
+  const watch = (target) => {
+    let stream;
+    let captured = false;
+    const first = new Promise((resolve, reject) => {
+      stream = http.request({ socketPath, path: '/stream', method: 'POST', headers: { 'Content-Type': 'application/json' } }, (response) => {
+        let buffered = Buffer.alloc(0);
+        response.on('error', reject);
+        response.on('data', (chunk) => {
+          if (captured) return;
+          buffered = Buffer.concat([buffered, chunk]);
+          try {
+            assert.equal(response.statusCode, 200);
+            assert.ok(buffered.length <= 3 * 1024 * 1024);
+            if (buffered.length < 8) return;
+            const metadataSize = buffered.readUInt32BE(0);
+            const imageSize = buffered.readUInt32BE(4);
+            assert.ok(metadataSize > 0 && metadataSize <= 16384 && imageSize > 0 && imageSize <= 2 * 1024 * 1024);
+            if (buffered.length < 8 + metadataSize + imageSize) return;
+            const metadata = JSON.parse(buffered.subarray(8, 8 + metadataSize));
+            assert.equal(metadata.viewport_id, target.viewport_id);
+            assert.equal(metadata.page_id, target.page_id);
+            assert.equal(metadata.content_type, 'image/jpeg');
+            captured = true;
+            stream.setTimeout(0);
+            resolve({ metadata, imageSize });
+          } catch (error) { reject(error); response.destroy(); }
+        });
+      });
+      stream.on('error', reject);
+      stream.setTimeout(10000, () => stream.destroy(new Error('Screencast frame timed out')));
+      stream.end(JSON.stringify(target));
+    });
+    return { first, close: () => stream.destroy() };
+  };
   try {
     companion = await startServer({ socketPath, creationKey: 'smoke', launch: async () => { session = await BrowserSession.launch(); return session; } });
     await companion.ready;
@@ -72,33 +106,15 @@ export async function smoke() {
     const capture = await call('/capture', page);
     assert.equal(capture.bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.equal(capture.metadata.page_id, page.page_id);
-    const frame = await new Promise((resolve, reject) => {
-      const stream = http.request({ socketPath, path: '/stream', method: 'POST', headers: { 'Content-Type': 'application/json' } }, (response) => {
-        let buffered = Buffer.alloc(0);
-        response.on('error', reject);
-        response.on('data', (chunk) => {
-          buffered = Buffer.concat([buffered, chunk]);
-          try {
-            assert.equal(response.statusCode, 200);
-            assert.ok(buffered.length <= 3 * 1024 * 1024);
-            if (buffered.length < 8) return;
-            const metadataSize = buffered.readUInt32BE(0);
-            const imageSize = buffered.readUInt32BE(4);
-            assert.ok(metadataSize > 0 && metadataSize <= 16384 && imageSize > 0 && imageSize <= 2 * 1024 * 1024);
-            if (buffered.length < 8 + metadataSize + imageSize) return;
-            const metadata = JSON.parse(buffered.subarray(8, 8 + metadataSize));
-            assert.equal(metadata.viewport_id, page.viewport_id);
-            assert.equal(metadata.page_id, page.page_id);
-            assert.equal(metadata.content_type, 'image/jpeg');
-            resolve({ metadata, imageSize });
-            response.destroy();
-          } catch (error) { reject(error); response.destroy(); }
-        });
-      });
-      stream.on('error', reject);
-      stream.setTimeout(10000, () => stream.destroy(new Error('Screencast frame timed out')));
-      stream.end(JSON.stringify(page));
-    });
+    const viewer = watch(page);
+    const frame = await viewer.first;
+    ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
+    const resizedViewer = watch(page);
+    const resizedFrame = await resizedViewer.first;
+    assert.deepEqual([resizedFrame.metadata.width, resizedFrame.metadata.height], [640, 480]);
+    assert.ok(resizedFrame.metadata.sequence > frame.metadata.sequence);
+    viewer.close();
+    resizedViewer.close();
     const fresh = await call('/command', { ...page, operation: 'snapshot' });
     const popup = fresh.snapshot.nodes.find((node) => node.role === 'button' && node.name === 'Popup');
     await call('/command', { ...page, operation: 'click', node_id: popup.node_id });
@@ -180,7 +196,7 @@ export async function smoke() {
     const after = await call('/health');
     assert.equal(after.process_id, health.process_id);
     assert.equal(after.session_id, reset.session_id);
-    console.log(JSON.stringify({ sandbox: 'namespace+seccomp', localhost: origin, click: 'Count: 1', popup: true, browser_png: capture.bytes.length, screencast_jpeg: frame.imageSize, terminal_png: terminal.bytes.length, terminal_buffer: terminal.metadata.active_buffer, terminal_abort: 'context-closed', reset: 'clean-context' }));
+    console.log(JSON.stringify({ sandbox: 'namespace+seccomp', localhost: origin, click: 'Count: 1', popup: true, browser_png: capture.bytes.length, screencast_jpeg: frame.imageSize, resized_viewport: [resizedFrame.metadata.width, resizedFrame.metadata.height], terminal_png: terminal.bytes.length, terminal_buffer: terminal.metadata.active_buffer, terminal_abort: 'context-closed', reset: 'clean-context' }));
   } finally {
     if (companion) await companion.close();
     else if (session) await session.close();
