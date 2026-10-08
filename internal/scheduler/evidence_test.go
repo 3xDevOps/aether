@@ -180,7 +180,7 @@ func (h *recordingSlogHandler) hasMessage(want string) bool {
 	return false
 }
 
-func TestFinalizeLogsRetainedSidecarFailure(t *testing.T) {
+func TestFinalizeKeepsOwnerAfterCleanupPersistenceFailure(t *testing.T) {
 	e := newTestEnv(t, nil)
 	destroyErr := errors.New("test: destroy unavailable")
 	e.sched.cfg.Runtime = &destroyFailureRuntime{Runtime: e.rt, destroyErr: destroyErr}
@@ -192,24 +192,17 @@ func TestFinalizeLogsRetainedSidecarFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := &recordingSlogHandler{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
 	container.exitNow(1)
-	e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	waitFor(t, "retained sidecar failure log", func() bool {
-		return handler.hasMessage("scheduler: persist retained sidecar after destroy failure")
+	failed := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	waitFor(t, "retained cleanup ownership after persistence failure", func() bool {
+		info, err := e.sched.Retention(failed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.CleanupPending && info.RetainedUntil != nil && info.CleanupError == cleanupRuntimeError
 	})
-	e.sched.mu.Lock()
-	retained := e.sched.runs[run.ID] != nil && e.sched.runs[run.ID].retained
-	e.sched.mu.Unlock()
-	if !retained {
-		t.Fatal("destroy failure did not retain the run owner")
-	}
-	if !handler.hasMessage("scheduler: destroy container") {
-		t.Fatal("primary destroy failure was not logged")
+	if e.rt.byName(string(run.ID)) != container {
+		t.Fatal("failed cleanup released the run's exact container ownership")
 	}
 }
 
